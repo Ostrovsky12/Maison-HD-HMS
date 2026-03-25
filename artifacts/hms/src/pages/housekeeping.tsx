@@ -3,6 +3,18 @@ import { useListUnitStatuses, useListHousekeepingTasks, useUpdateUnitHousekeepin
 import { Card, CardContent, Badge, Button } from "@/components/ui/shared";
 import { Sparkles, XCircle, Clock, CheckSquare } from "lucide-react";
 
+const STATUS_UA: Record<string, string> = {
+  clean: "Чисто",
+  dirty: "Брудно",
+  in_progress: "В процесі",
+};
+
+const PRIORITY_UA: Record<string, string> = {
+  high: "Терміново",
+  medium: "Середній",
+  low: "Низький",
+};
+
 export default function Housekeeping() {
   const { data: statuses = [], refetch: refetchStatuses } = useListUnitStatuses();
   const { data: tasks = [] } = useListHousekeepingTasks();
@@ -29,28 +41,36 @@ export default function Housekeeping() {
       case 'clean': return "border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10";
       case 'dirty': return "border-red-500/30 bg-red-500/5 hover:bg-red-500/10";
       case 'in_progress': return "border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10";
+      default: return "border-border";
     }
   };
+
+  const cleanCount = statuses.filter(s => s.housekeepingStatus === 'clean').length;
+  const inProgressCount = statuses.filter(s => s.housekeepingStatus === 'in_progress').length;
+  const dirtyCount = statuses.filter(s => s.housekeepingStatus === 'dirty').length;
 
   return (
     <AppLayout>
       <div className="p-8 max-w-7xl mx-auto space-y-8">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-3xl font-display font-bold">Housekeeping</h1>
-            <p className="text-muted-foreground mt-1">Manage cleaning statuses and staff tasks.</p>
+            <h1 className="text-3xl font-display font-bold">Прибирання</h1>
+            <p className="text-muted-foreground mt-1">Статуси прибирання та завдання персоналу.</p>
           </div>
           <div className="flex gap-2">
-            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">Clean ({statuses.filter(s => s.housekeepingStatus === 'clean').length})</Badge>
-            <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/20">In Progress ({statuses.filter(s => s.housekeepingStatus === 'in_progress').length})</Badge>
-            <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">Dirty ({statuses.filter(s => s.housekeepingStatus === 'dirty').length})</Badge>
+            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">Чисто ({cleanCount})</Badge>
+            <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/20">В процесі ({inProgressCount})</Badge>
+            <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">Брудно ({dirtyCount})</Badge>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Unit Status Grid */}
           <div className="lg:col-span-2 space-y-4">
-            <h2 className="text-lg font-semibold flex items-center"><BedDoubleIcon className="w-5 h-5 mr-2 text-primary" /> Unit Statuses</h2>
+            <h2 className="text-lg font-semibold flex items-center">
+              <BedDoubleIcon className="w-5 h-5 mr-2 text-primary" /> Статуси юнітів
+            </h2>
+            <p className="text-sm text-muted-foreground">Натисніть на юніт, щоб змінити статус.</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {statuses.map(unit => (
                 <button
@@ -59,8 +79,10 @@ export default function Housekeeping() {
                   className={`flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all duration-200 active:scale-95 ${getStatusColor(unit.housekeepingStatus)}`}
                 >
                   {getStatusIcon(unit.housekeepingStatus)}
-                  <span className="font-display font-bold text-lg">{unit.unitName}</span>
-                  <span className="text-xs uppercase tracking-wider font-semibold opacity-70 mt-1">{unit.housekeepingStatus.replace('_', ' ')}</span>
+                  <span className="font-display font-bold text-base text-center leading-tight">{unit.unitName}</span>
+                  <span className="text-xs uppercase tracking-wider font-semibold opacity-70 mt-1">
+                    {STATUS_UA[unit.housekeepingStatus] || unit.housekeepingStatus}
+                  </span>
                 </button>
               ))}
             </div>
@@ -69,23 +91,29 @@ export default function Housekeeping() {
           {/* Task List */}
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <h2 className="text-lg font-semibold flex items-center"><CheckSquare className="w-5 h-5 mr-2 text-primary" /> Today's Tasks</h2>
-              <Button size="sm" variant="outline">Add Task</Button>
+              <h2 className="text-lg font-semibold flex items-center">
+                <CheckSquare className="w-5 h-5 mr-2 text-primary" /> Завдання на сьогодні
+              </h2>
+              <Button size="sm" variant="outline">Додати</Button>
             </div>
             
             <div className="space-y-3">
               {tasks.length === 0 ? (
-                <Card className="bg-muted/30 border-dashed text-center p-8 text-muted-foreground">No pending tasks</Card>
+                <Card className="bg-muted/30 border-dashed text-center p-8 text-muted-foreground">
+                  Завдань немає
+                </Card>
               ) : tasks.map(task => (
                 <Card key={task.id} className="hover:border-primary/50 transition-colors">
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start mb-2">
                       <h4 className="font-semibold">{task.title}</h4>
                       <Badge variant={task.priority === 'high' ? 'destructive' : task.priority === 'medium' ? 'warning' : 'secondary'} className="text-[10px] uppercase">
-                        {task.priority}
+                        {PRIORITY_UA[task.priority] || task.priority}
                       </Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground mb-3">{task.unitName} • Assigned to: {task.assignedToName || 'Unassigned'}</p>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      {task.unitName} • {task.assignedToName ? `Виконавець: ${task.assignedToName}` : 'Не призначено'}
+                    </p>
                     
                     {task.checklist && task.checklist.length > 0 && (
                       <div className="space-y-2 mt-3 pt-3 border-t border-border/50">
@@ -108,7 +136,6 @@ export default function Housekeeping() {
   );
 }
 
-// Simple local component replacement for missing icon import
 function BedDoubleIcon(props: any) {
   return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M2 20v-8a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v8"/><path d="M4 10V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/><path d="M12 4v6"/><path d="M2 18h20"/></svg>
 }

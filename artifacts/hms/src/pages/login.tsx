@@ -17,7 +17,7 @@ export default function Login() {
     try {
       await login(email, password);
     } catch (err: any) {
-      setError(err.message || "Failed to login");
+      setError(err.message || "Помилка входу. Перевірте дані.");
     } finally {
       setLoading(false);
     }
@@ -25,7 +25,6 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex bg-background relative overflow-hidden">
-      {/* Decorative background elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/20 rounded-full blur-[120px] pointer-events-none" />
 
@@ -40,12 +39,12 @@ export default function Login() {
 
           <Card className="border-border/50 shadow-2xl bg-card/80 backdrop-blur-xl">
             <CardContent className="pt-8">
-              <h1 className="text-2xl font-bold tracking-tight mb-2">Welcome back</h1>
-              <p className="text-sm text-muted-foreground mb-8">Sign in to your property management dashboard.</p>
+              <h1 className="text-2xl font-bold tracking-tight mb-2">Вітаємо!</h1>
+              <p className="text-sm text-muted-foreground mb-8">Увійдіть до системи управління готелем.</p>
 
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
-                  <Label htmlFor="email">Email address</Label>
+                  <Label htmlFor="email">Електронна пошта</Label>
                   <Input 
                     id="email" 
                     type="email" 
@@ -58,7 +57,7 @@ export default function Login() {
                 </div>
 
                 <div>
-                  <Label htmlFor="password">Password</Label>
+                  <Label htmlFor="password">Пароль</Label>
                   <Input 
                     id="password" 
                     type="password" 
@@ -73,7 +72,7 @@ export default function Login() {
                 {error && <div className="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">{error}</div>}
 
                 <Button type="submit" className="w-full text-base h-11" disabled={loading}>
-                  {loading ? "Signing in..." : "Sign in to Dashboard"}
+                  {loading ? "Вхід..." : "Увійти до системи"}
                 </Button>
               </form>
             </CardContent>
@@ -85,7 +84,7 @@ export default function Login() {
         <img
           className="absolute inset-0 h-full w-full object-cover"
           src={`${import.meta.env.BASE_URL}images/login-bg.png`}
-          alt="Hotel exterior"
+          alt="Готель Dogoda"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-background via-background/50 to-transparent" />
       </div>

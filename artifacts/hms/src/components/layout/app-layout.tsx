@@ -8,15 +8,23 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+const ROLES_UA: Record<string, string> = {
+  super_admin: "Супер адмін",
+  owner: "Власник",
+  manager: "Менеджер",
+  reception: "Рецепція",
+  housekeeping: "Прибирання",
+};
+
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/chess", label: "Chessboard", icon: CalendarDays },
-  { href: "/bookings", label: "Bookings", icon: ClipboardList },
-  { href: "/guests", label: "Guests", icon: Users },
-  { href: "/housekeeping", label: "Housekeeping", icon: Sparkles },
-  { href: "/units", label: "Units", icon: Bed },
-  { href: "/rates", label: "Rates", icon: Wallet },
-  { href: "/settings/organization", label: "Settings", icon: Settings },
+  { href: "/dashboard", label: "Дашборд", icon: LayoutDashboard },
+  { href: "/chess", label: "Шахматка", icon: CalendarDays },
+  { href: "/bookings", label: "Бронювання", icon: ClipboardList },
+  { href: "/guests", label: "Гості", icon: Users },
+  { href: "/housekeeping", label: "Прибирання", icon: Sparkles },
+  { href: "/units", label: "Юніти", icon: Bed },
+  { href: "/rates", label: "Тарифи", icon: Wallet },
+  { href: "/settings/organization", label: "Налаштування", icon: Settings },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -41,7 +49,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
         
         <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1">
-          <div className="px-2 mb-2 text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider">Menu</div>
+          <div className="px-2 mb-2 text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider">Меню</div>
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = location === item.href || location.startsWith(item.href + "/");
@@ -63,11 +71,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center justify-between mb-4 px-2">
             <div className="flex items-center space-x-3">
               <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-accent flex items-center justify-center text-white font-bold text-sm shadow-inner">
-                {user?.name?.charAt(0) || 'U'}
+                {user?.name?.charAt(0) || 'К'}
               </div>
               <div className="text-sm">
-                <div className="font-medium text-sidebar-foreground">{user?.name || 'User'}</div>
-                <div className="text-xs text-sidebar-foreground/50 capitalize">{user?.role?.replace('_', ' ')}</div>
+                <div className="font-medium text-sidebar-foreground">{user?.name || 'Користувач'}</div>
+                <div className="text-xs text-sidebar-foreground/50">{ROLES_UA[user?.role || ''] || user?.role}</div>
               </div>
             </div>
           </div>
@@ -75,12 +83,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex space-x-2">
             <button 
               onClick={() => setIsDark(!isDark)}
+              title={isDark ? "Світла тема" : "Темна тема"}
               className="flex-1 flex items-center justify-center py-2 rounded-lg bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80 transition-colors"
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             <button 
               onClick={logout}
+              title="Вийти"
               className="flex-1 flex items-center justify-center py-2 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
             >
               <LogOut className="w-4 h-4" />

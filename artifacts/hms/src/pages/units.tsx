@@ -4,6 +4,21 @@ import { Card, Button, Badge } from "@/components/ui/shared";
 import { Plus, Bed, Users } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 
+const STATUS_UA: Record<string, string> = {
+  active: "Активний",
+  maintenance: "Ремонт",
+  inactive: "Неактивний",
+};
+
+const CATEGORY_UA: Record<string, string> = {
+  room: "Номер",
+  house: "Будинок",
+  bungalow: "Бунгало",
+  sunbed: "Шезлонг",
+  spa: "SPA",
+  other: "Інше",
+};
+
 export default function Units() {
   const { data: units = [], isLoading } = useListUnits();
 
@@ -12,10 +27,10 @@ export default function Units() {
       <div className="p-8 max-w-7xl mx-auto space-y-6">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-3xl font-display font-bold">Units</h1>
-            <p className="text-muted-foreground mt-1">Manage your rooms, houses, and resources.</p>
+            <h1 className="text-3xl font-display font-bold">Юніти</h1>
+            <p className="text-muted-foreground mt-1">Управління номерами, будинками та ресурсами.</p>
           </div>
-          <Button><Plus className="w-4 h-4 mr-2" /> Add Unit</Button>
+          <Button><Plus className="w-4 h-4 mr-2" /> Додати юніт</Button>
         </div>
 
         {isLoading ? (
@@ -32,27 +47,29 @@ export default function Units() {
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <h3 className="text-xl font-bold font-display">{unit.name}</h3>
-                      <p className="text-sm text-muted-foreground uppercase tracking-wider font-semibold mt-0.5">{unit.category}</p>
+                      <p className="text-sm text-muted-foreground uppercase tracking-wider font-semibold mt-0.5">
+                        {CATEGORY_UA[unit.category] || unit.category}
+                      </p>
                     </div>
                     <Badge variant={unit.status === 'active' ? 'success' : unit.status === 'maintenance' ? 'warning' : 'destructive'} className="text-[10px]">
-                      {unit.status}
+                      {STATUS_UA[unit.status] || unit.status}
                     </Badge>
                   </div>
                   
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="flex items-center text-muted-foreground"><Users className="w-4 h-4 mr-2"/> Capacity</span>
-                      <span className="font-medium">{unit.capacity} persons</span>
+                      <span className="flex items-center text-muted-foreground"><Users className="w-4 h-4 mr-2"/> Місткість</span>
+                      <span className="font-medium">{unit.capacity} ос.</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="flex items-center text-muted-foreground"><Bed className="w-4 h-4 mr-2"/> Base Price</span>
-                      <span className="font-medium text-emerald-500">{unit.basePrice ? formatCurrency(unit.basePrice) : 'N/A'}/night</span>
+                      <span className="flex items-center text-muted-foreground"><Bed className="w-4 h-4 mr-2"/> Базова ціна</span>
+                      <span className="font-medium text-emerald-500">{unit.basePrice ? formatCurrency(unit.basePrice) : 'N/A'}/ніч</span>
                     </div>
                   </div>
 
                   <div className="mt-5 pt-4 border-t border-border flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Floor: {unit.floor || '-'}</span>
-                    <Button variant="outline" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity h-8">Edit</Button>
+                    <span className="text-xs text-muted-foreground">Поверх: {unit.floor || '-'}</span>
+                    <Button variant="outline" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity h-8">Редагувати</Button>
                   </div>
                 </div>
               </Card>
