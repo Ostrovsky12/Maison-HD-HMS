@@ -1,0 +1,81 @@
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import NotFound from "@/pages/not-found";
+import { AuthProvider, useAuth } from "./hooks/use-auth";
+
+import Login from "@/pages/login";
+import Dashboard from "@/pages/dashboard";
+import Chessboard from "@/pages/chess";
+import Bookings from "@/pages/bookings";
+import Housekeeping from "@/pages/housekeeping";
+import Guests from "@/pages/guests";
+import Units from "@/pages/units";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+function ProtectedRoute({ component: Component }: { component: React.ComponentType<any> }) {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-muted-foreground">Завантаження...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Redirect to="/login" />;
+  }
+
+  return <Component />;
+}
+
+function HomeRedirect() {
+  const { user, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (user) return <Redirect to="/dashboard" />;
+  return <Redirect to="/login" />;
+}
+
+function Router() {
+  return (
+    <Switch>
+      <Route path="/login" component={Login} />
+      <Route path="/dashboard"><ProtectedRoute component={Dashboard} /></Route>
+      <Route path="/chess"><ProtectedRoute component={Chessboard} /></Route>
+      <Route path="/bookings"><ProtectedRoute component={Bookings} /></Route>
+      <Route path="/housekeeping"><ProtectedRoute component={Housekeeping} /></Route>
+      <Route path="/guests"><ProtectedRoute component={Guests} /></Route>
+      <Route path="/units"><ProtectedRoute component={Units} /></Route>
+      <Route path="/"><HomeRedirect /></Route>
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <AuthProvider>
+            <Router />
+          </AuthProvider>
+        </WouterRouter>
+        <Toaster />
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+}
+
+export default App;

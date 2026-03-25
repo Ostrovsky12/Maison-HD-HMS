@@ -1,8 +1,32 @@
 import { Router, type IRouter } from "express";
-import healthRouter from "./health";
+import healthRouter from "./health.js";
+import authRouter from "./auth.js";
+import organizationsRouter from "./organizations.js";
+import propertiesRouter from "./properties.js";
+import unitsRouter from "./units.js";
+import guestsRouter from "./guests.js";
+import bookingsRouter from "./bookings.js";
+import housekeepingRouter from "./housekeeping.js";
+import ratesRouter from "./rates.js";
+import addonsRouter from "./addons.js";
+import paymentsRouter from "./payments.js";
+import analyticsRouter from "./analytics.js";
+import usersRouter from "./users.js";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/auth", authRouter);
+router.use("/organizations", organizationsRouter);
+router.use("/properties", propertiesRouter);
+router.use("/units", unitsRouter);
+router.use("/guests", guestsRouter);
+router.use("/bookings", bookingsRouter);
+router.use("/housekeeping", housekeepingRouter);
+router.use("/rates", ratesRouter);
+router.use("/addons", addonsRouter);
+router.use("/payments", paymentsRouter);
+router.use("/analytics", analyticsRouter);
+router.use("/users", usersRouter);
 
 export default router;

@@ -1,0 +1,15 @@
+packages:
+  "date-fns": "Essential for chessboard date grid calculations and booking date math"
+  "recharts": "Required for dashboard analytics visualizations (occupancy, revenue charts)"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility to safely merge Tailwind CSS classes"
+  "lucide-react": "Beautiful, consistent iconography across the dashboard"
+
+images:
+  - path: "artifacts/hms/public/images/login-bg.png"
+    description: "Architectural detail of a modern luxury hotel exterior at dusk, warm interior lights glowing through expansive glass windows, moody atmospheric lighting, professional architectural photography"
+    aspect_ratio: "16:9"
+
+notes:
+  - Global fetch interceptor handles JWT attaching to all /api calls automatically.
+  - Orval generated hooks are imported from @workspace/api-client-react.
