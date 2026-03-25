@@ -1,0 +1,193 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  PROPERTY_ADMIN
+  MANAGER
+  RECEPTION
+  GUEST
+}
+
+enum BookingStatus {
+  PENDING
+  PAID
+  CONFIRMED
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELLED
+}
+
+enum RoomStatus {
+  AVAILABLE
+  BOOKED
+  OCCUPIED
+  CLEANING
+  MAINTENANCE
+}
+
+// Користувачі
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  password     String
+  name         String
+  phone        String?
+  telegramId   String?   @unique
+  role         UserRole  @default(GUEST)
+  propertyId   String?
+  property     Property? @relation(fields: [propertyId], references: [id])
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  bookings     Booking[] @relation("GuestBookings")
+  @@map("users")
+}
+
+// Об'єкти (готелі, спа, ресторани)
+model Property {
+  id          String   @id @default(cuid())
+  name        String
+  address     String
+  phone       String
+  email       String
+  logo        String?
+  website     String?
+  checkInTime String   @default("14:00")
+  checkOutTime String  @default("12:00")
+  description String?
+  settings    Json?    // додаткові налаштування JSON
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  roomTypes   RoomType[]
+  bookings    Booking[]
+  menuCategories MenuCategory[]
+  expenses    Expense[]
+  @@map("properties")
+}
+
+// Типи номерів
+model RoomType {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  name        String
+  description String?
+  capacity    Int      @default(2)
+  amenities   Json?    // ["Wi-Fi", "TV", "Кондиціонер"]
+  images      Json?    // масив URL фото
+  basePrice   Float    // базова ціна за ніч
+  createdAt   DateTime @default(now())
+
+  rooms       Room[]
+  @@map("room_types")
+}
+
+// Конкретні номери
+model Room {
+  id          String     @id @default(cuid())
+  roomTypeId  String
+  roomType    RoomType   @relation(fields: [roomTypeId], references: [id])
+  number      String
+  floor       Int?
+  status      RoomStatus @default(AVAILABLE)
+  description String?
+  createdAt   DateTime   @default(now())
+
+  bookings    Booking[]
+  @@map("rooms")
+}
+
+// Бронювання
+model Booking {
+  id               String        @id @default(cuid())
+  propertyId       String
+  property         Property      @relation(fields: [propertyId], references: [id])
+  roomId           String
+  room             Room          @relation(fields: [roomId], references: [id])
+  guestId          String?
+  guest            User?         @relation("GuestBookings", fields: [guestId], references: [id])
+  guestName        String
+  guestEmail       String
+  guestPhone       String
+  guestTelegramId  String?
+  checkIn          DateTime
+  checkOut         DateTime
+  guestsCount      Int           @default(1)
+  totalAmount      Float
+  paidAmount       Float         @default(0)
+  status           BookingStatus @default(PENDING)
+  paymentUrl       String?
+  qrCode           String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  items            BookingItem[]
+  @@map("bookings")
+}
+
+// Додаткові послуги до бронювання
+model BookingItem {
+  id          String   @id @default(cuid())
+  bookingId   String
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  type        String   // "meal", "spa", "extra"
+  name        String
+  description String?
+  quantity    Int      @default(1)
+  price       Float
+  createdAt   DateTime @default(now())
+
+  @@map("booking_items")
+}
+
+// Меню (ресторанний модуль)
+model MenuCategory {
+  id         String     @id @default(cuid())
+  propertyId String
+  property   Property   @relation(fields: [propertyId], references: [id])
+  name       String
+  sortOrder  Int        @default(0)
+  createdAt  DateTime   @default(now())
+
+  items      MenuItem[]
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id          String       @id @default(cuid())
+  categoryId  String
+  category    MenuCategory @relation(fields: [categoryId], references: [id])
+  name        String
+  description String?
+  price       Float
+  image       String?
+  available   Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+
+  @@map("menu_items")
+}
+
+// Фінансові витрати
+model Expense {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  category   String   // "utilities", "salary", "repair", "supplies"
+  amount     Float
+  description String?
+  date       DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@map("expenses")
+}

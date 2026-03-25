@@ -1,0 +1,122 @@
+import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import { prisma } from '../index';
+import { generateToken } from '../utils/jwt';
+
+export const register = async (req: Request, res: Response) => {
+  try {
+    const { email, password, name, phone } = req.body;
+    
+    // Перевірка чи існує користувач
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      res.status(400).json({ error: 'Користувач з таким email вже існує' });
+      return;
+    }
+    
+    // Хешування пароля
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Створення користувача
+    const user = await prisma.user.create({
+      data: {
+        email,
+        password: hashedPassword,
+        name,
+        phone,
+        role: 'GUEST',
+      },
+    });
+    
+    // Генерація токена
+    const token = generateToken({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+    
+    res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'Помилка сервера' });
+  }
+};
+
+export const login = async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Пошук користувача
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      res.status(401).json({ error: 'Невірний email або пароль' });
+      return;
+    }
+    
+    // Перевірка пароля
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      res.status(401).json({ error: 'Невірний email або пароль' });
+      return;
+    }
+    
+    // Генерація токена
+    const token = generateToken({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      propertyId: user.propertyId || undefined,
+    });
+    
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        role: user.role,
+        propertyId: user.propertyId,
+      },
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Помилка сервера' });
+  }
+};
+
+export const getMe = async (req: Request, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user?.id },
+      include: { property: true },
+    });
+    
+    if (!user) {
+      res.status(404).json({ error: 'Користувача не знайдено' });
+      return;
+    }
+    
+    res.json({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      phone: user.phone,
+      role: user.role,
+      propertyId: user.propertyId,
+      property: user.property,
+    });
+  } catch (error) {
+    console.error('GetMe error:', error);
+    res.status(500).json({ error: 'Помилка сервера' });
+  }
+};
