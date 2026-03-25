@@ -4,18 +4,19 @@ import { useListUnits, useListBookings } from "@workspace/api-client-react";
 import { addDays, format, differenceInDays, startOfDay, isBefore, isAfter } from "date-fns";
 import { uk } from "date-fns/locale";
 import { Button } from "@/components/ui/shared";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, ChevronDown, ChevronRight as ChevronRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const CELL_WIDTH = 64;
-const ROW_HEIGHT = 56;
+const CELL_WIDTH = 40;
+const ROW_HEIGHT = 44;
+const UNIT_COL_WIDTH = 200;
 
 const STATUS_COLORS: Record<string, string> = {
   confirmed: "bg-blue-500 border-blue-600 text-white",
   pending: "bg-amber-500 border-amber-600 text-white",
   checked_in: "bg-emerald-500 border-emerald-600 text-white",
-  checked_out: "bg-slate-500 border-slate-600 text-white",
-  cancelled: "bg-red-500 border-red-600 text-white",
+  checked_out: "bg-slate-400 border-slate-500 text-white",
+  cancelled: "bg-red-400 border-red-500 text-white",
 };
 
 const STATUS_UA: Record<string, string> = {
@@ -26,150 +27,252 @@ const STATUS_UA: Record<string, string> = {
   cancelled: "Скасовано",
 };
 
-const DAYS_UA = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+const DAYS_UA_SHORT = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
+// Categories that are collapsible by default
+const COLLAPSIBLE_CATEGORIES = new Set(["Шезлонг", "Термальна зона", "Outdoor Jacuzzi", "Бунгало"]);
+// Categories collapsed by default
+const COLLAPSED_BY_DEFAULT = new Set(["Шезлонг", "Термальна зона", "Outdoor Jacuzzi"]);
 
 export default function Chessboard() {
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(COLLAPSED_BY_DEFAULT);
   const daysToShow = 30;
 
   const endDate = addDays(startDate, daysToShow);
-  
+
   const { data: units = [] } = useListUnits();
   const { data: bookings = [] } = useListBookings({
     dateFrom: format(startDate, 'yyyy-MM-dd'),
-    dateTo: format(endDate, 'yyyy-MM-dd')
+    dateTo: format(endDate, 'yyyy-MM-dd'),
   });
 
-  const dates = useMemo(() => {
-    return Array.from({ length: daysToShow }).map((_, i) => addDays(startDate, i));
-  }, [startDate, daysToShow]);
+  const dates = useMemo(() =>
+    Array.from({ length: daysToShow }, (_, i) => addDays(startDate, i)),
+    [startDate]
+  );
 
+  // Group units by property name (use property category or name)
   const groupedUnits = useMemo(() => {
     const groups: Record<string, typeof units> = {};
     units.forEach(u => {
-      if (!groups[u.category]) groups[u.category] = [];
-      groups[u.category].push(u);
+      const key = u.category;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(u);
     });
     return groups;
   }, [units]);
 
+  const toggleGroup = (category: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
+
+  const today = format(new Date(), 'yyyy-MM-dd');
+
   const formatDateRange = () => {
-    const start = format(startDate, 'd MMM yyyy', { locale: uk });
-    const end = format(endDate, 'd MMM yyyy', { locale: uk });
-    return `${start} — ${end}`;
+    const s = format(startDate, 'd MMM', { locale: uk });
+    const e = format(endDate, 'd MMM yyyy', { locale: uk });
+    return `${s} — ${e}`;
   };
 
   return (
     <AppLayout>
       <div className="flex flex-col h-full bg-background">
         {/* Toolbar */}
-        <div className="flex items-center justify-between p-4 border-b border-border bg-card z-20">
-          <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-display font-bold">Шахматка</h1>
-            <div className="flex items-center bg-secondary rounded-lg p-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setStartDate(s => addDays(s, -7))}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card z-20 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-display font-bold">Шахматка</h1>
+            <div className="flex items-center bg-muted rounded-lg overflow-hidden">
+              <button
+                className="p-1.5 hover:bg-muted-foreground/10 transition-colors"
+                onClick={() => setStartDate(s => addDays(s, -7))}
+              >
                 <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <div className="px-4 text-sm font-medium">
-                {formatDateRange()}
-              </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setStartDate(s => addDays(s, 7))}>
+              </button>
+              <span className="px-3 text-sm font-medium">{formatDateRange()}</span>
+              <button
+                className="p-1.5 hover:bg-muted-foreground/10 transition-colors"
+                onClick={() => setStartDate(s => addDays(s, 7))}
+              >
                 <ChevronRight className="w-4 h-4" />
-              </Button>
+              </button>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setStartDate(startOfDay(new Date()))}>Сьогодні</Button>
+            <Button variant="outline" size="sm" onClick={() => setStartDate(startOfDay(new Date()))}>
+              Сьогодні
+            </Button>
           </div>
-          <Button><Plus className="w-4 h-4 mr-2" /> Нове бронювання</Button>
+          <Button size="sm"><Plus className="w-4 h-4 mr-1.5" /> Бронювання</Button>
+        </div>
+
+        {/* Legend */}
+        <div className="flex items-center gap-4 px-4 py-1.5 border-b border-border bg-card/50 flex-shrink-0 text-xs text-muted-foreground">
+          {Object.entries(STATUS_COLORS).map(([k, v]) => (
+            <span key={k} className="flex items-center gap-1">
+              <span className={`w-3 h-3 rounded-sm ${v.split(' ')[0]}`}/>
+              {STATUS_UA[k]}
+            </span>
+          ))}
         </div>
 
         {/* Grid Container */}
-        <div className="flex-1 overflow-auto relative custom-scrollbar">
-          <div className="inline-flex flex-col min-w-full">
-            
-            {/* Header Row (Dates) */}
-            <div className="flex sticky top-0 z-10 bg-card border-b border-border shadow-sm">
-              <div className="w-64 flex-shrink-0 border-r border-border p-3 flex items-center font-medium sticky left-0 bg-card z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                Юніти
+        <div className="flex-1 overflow-auto">
+          <div style={{ minWidth: UNIT_COL_WIDTH + CELL_WIDTH * daysToShow }}>
+
+            {/* Sticky Date Header */}
+            <div className="flex sticky top-0 z-20 bg-card border-b border-border shadow-sm">
+              <div
+                className="flex-shrink-0 border-r border-border flex items-center px-3 font-semibold text-xs text-muted-foreground sticky left-0 bg-card z-30"
+                style={{ width: UNIT_COL_WIDTH, height: ROW_HEIGHT }}
+              >
+                Юніт
               </div>
               <div className="flex">
-                {dates.map((date, i) => (
-                  <div key={i} className="flex flex-col items-center justify-center border-r border-border bg-card" style={{ width: CELL_WIDTH }}>
-                    <span className="text-xs text-muted-foreground uppercase">{DAYS_UA[date.getDay()]}</span>
-                    <span className={cn(
-                      "text-sm font-bold w-7 h-7 flex items-center justify-center rounded-full mt-1",
-                      format(date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd') ? "bg-primary text-primary-foreground" : "text-foreground"
-                    )}>
-                      {format(date, 'd')}
-                    </span>
-                  </div>
-                ))}
+                {dates.map((date, i) => {
+                  const isToday = format(date, 'yyyy-MM-dd') === today;
+                  const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "flex flex-col items-center justify-center border-r border-border flex-shrink-0",
+                        isWeekend && "bg-primary/5",
+                      )}
+                      style={{ width: CELL_WIDTH, height: ROW_HEIGHT }}
+                    >
+                      <span className="text-[10px] text-muted-foreground leading-none">
+                        {DAYS_UA_SHORT[date.getDay()]}
+                      </span>
+                      <span className={cn(
+                        "text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full mt-0.5",
+                        isToday ? "bg-primary text-primary-foreground" : "text-foreground"
+                      )}>
+                        {format(date, 'd')}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
             {/* Grid Body */}
-            <div className="flex flex-col">
-              {Object.entries(groupedUnits).map(([category, catUnits]) => (
+            {Object.entries(groupedUnits).map(([category, catUnits]) => {
+              const isCollapsed = collapsedGroups.has(category);
+              const isCollapsible = COLLAPSIBLE_CATEGORIES.has(category);
+
+              return (
                 <div key={category}>
-                  {/* Category Header */}
-                  <div className="flex bg-secondary/50 sticky left-0 z-10 border-b border-border border-t border-t-transparent">
-                    <div className="w-64 p-2 text-xs font-bold uppercase tracking-wider text-muted-foreground sticky left-0 bg-secondary/90 backdrop-blur border-r border-border">
-                      {category}
+                  {/* Category Header Row */}
+                  <div className="flex sticky left-0 z-10 border-b border-border bg-secondary/60">
+                    <div
+                      className="flex-shrink-0 flex items-center gap-2 px-3 sticky left-0 bg-secondary/90 backdrop-blur border-r border-border"
+                      style={{ width: UNIT_COL_WIDTH }}
+                    >
+                      <button
+                        onClick={() => isCollapsible && toggleGroup(category)}
+                        className={cn(
+                          "flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground w-full py-2",
+                          isCollapsible && "hover:text-foreground cursor-pointer transition-colors"
+                        )}
+                      >
+                        {isCollapsible ? (
+                          isCollapsed
+                            ? <ChevronRightIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                            : <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
+                        ) : (
+                          <span className="w-3.5" />
+                        )}
+                        <span>{category}</span>
+                        <span className="ml-auto font-normal opacity-60">({catUnits.length})</span>
+                      </button>
+                    </div>
+                    {/* Category header spans across dates */}
+                    <div className="flex flex-1">
+                      {dates.map((_, i) => (
+                        <div key={i} className="flex-shrink-0 border-r border-border/30"
+                          style={{ width: CELL_WIDTH }} />
+                      ))}
                     </div>
                   </div>
-                  
-                  {/* Units Rows */}
-                  {catUnits.map(unit => {
+
+                  {/* Unit Rows — hidden when collapsed */}
+                  {!isCollapsed && catUnits.map(unit => {
                     const unitBookings = bookings.filter(b => b.unitId === unit.id);
-                    
                     return (
-                      <div key={unit.id} className="flex border-b border-border hover:bg-muted/30 transition-colors group">
+                      <div key={unit.id} className="flex border-b border-border/50 hover:bg-muted/20 transition-colors group" style={{ height: ROW_HEIGHT }}>
                         {/* Left fixed column */}
-                        <div className="w-64 flex-shrink-0 border-r border-border p-3 flex flex-col justify-center sticky left-0 bg-card group-hover:bg-muted/80 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                          <span className="font-semibold text-sm">{unit.name}</span>
-                          <span className="text-xs text-muted-foreground flex items-center mt-0.5">
-                            <span className={cn("w-2 h-2 rounded-full mr-1.5", 
-                              unit.housekeepingStatus === 'clean' ? 'bg-emerald-500' : 
+                        <div
+                          className="flex-shrink-0 border-r border-border flex flex-col justify-center px-3 sticky left-0 bg-card group-hover:bg-muted/40 z-10"
+                          style={{ width: UNIT_COL_WIDTH }}
+                        >
+                          <span className="text-xs font-semibold truncate">{unit.name}</span>
+                          <span className="flex items-center gap-1 mt-0.5">
+                            <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0",
+                              unit.housekeepingStatus === 'clean' ? 'bg-emerald-500' :
                               unit.housekeepingStatus === 'dirty' ? 'bg-red-500' : 'bg-amber-500'
                             )} />
-                            {unit.capacity} ос.
+                            <span className="text-[10px] text-muted-foreground">{unit.capacity} ос.</span>
                           </span>
                         </div>
 
-                        {/* Cells / Bookings row container */}
-                        <div className="flex relative" style={{ height: ROW_HEIGHT }}>
-                          {/* Background Grid Cells */}
-                          {dates.map((_, i) => (
-                            <div key={i} className="border-r border-border/50 hover:bg-primary/5 transition-colors cursor-pointer" style={{ width: CELL_WIDTH, height: '100%' }} />
-                          ))}
+                        {/* Booking cells */}
+                        <div className="flex relative flex-1">
+                          {/* Grid cells */}
+                          {dates.map((date, i) => {
+                            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                            return (
+                              <div
+                                key={i}
+                                className={cn(
+                                  "flex-shrink-0 border-r border-border/40 cursor-pointer hover:bg-primary/8 transition-colors",
+                                  isWeekend && "bg-primary/3",
+                                )}
+                                style={{ width: CELL_WIDTH, height: '100%' }}
+                              />
+                            );
+                          })}
 
-                          {/* Render Booking Blocks */}
+                          {/* Booking blocks */}
                           {unitBookings.map(booking => {
                             const bStart = new Date(booking.checkIn);
                             const bEnd = new Date(booking.checkOut);
-                            
+
                             const visibleStart = isBefore(bStart, startDate) ? startDate : bStart;
                             const visibleEnd = isAfter(bEnd, endDate) ? endDate : bEnd;
-                            
+
                             if (isBefore(visibleEnd, startDate) || isAfter(visibleStart, endDate)) return null;
 
-                            const startIndex = differenceInDays(visibleStart, startDate);
+                            const startIdx = differenceInDays(visibleStart, startDate);
                             const duration = differenceInDays(visibleEnd, visibleStart);
-                            
-                            const leftOffset = startIndex * CELL_WIDTH + (isBefore(bStart, startDate) ? 0 : CELL_WIDTH / 2);
-                            const blockWidth = duration * CELL_WIDTH - (isBefore(bStart, startDate) ? 0 : CELL_WIDTH / 2) + (isAfter(bEnd, endDate) ? CELL_WIDTH / 2 : 0);
+
+                            const clippedLeft = isBefore(bStart, startDate);
+                            const clippedRight = isAfter(bEnd, endDate);
+
+                            const leftOffset = startIdx * CELL_WIDTH + (clippedLeft ? 0 : CELL_WIDTH / 2);
+                            const blockWidth = duration * CELL_WIDTH
+                              - (clippedLeft ? 0 : CELL_WIDTH / 2)
+                              + (clippedRight ? CELL_WIDTH / 2 : 0);
+
+                            if (blockWidth <= 0) return null;
 
                             return (
                               <div
                                 key={booking.id}
-                                className={cn(
-                                  "absolute top-2 bottom-2 rounded-md shadow-sm border flex flex-col justify-center px-2 overflow-hidden cursor-pointer hover:shadow-md hover:brightness-110 transition-all active:scale-[0.98]",
-                                  STATUS_COLORS[booking.status] || "bg-primary border-primary text-white"
-                                )}
-                                style={{ left: leftOffset, width: Math.max(blockWidth, CELL_WIDTH * 0.8) }}
                                 title={`${booking.guestName} — ${STATUS_UA[booking.status] || booking.status}`}
+                                className={cn(
+                                  "absolute top-1.5 bottom-1.5 rounded border flex flex-col justify-center px-1.5 overflow-hidden cursor-pointer hover:brightness-110 transition-all active:scale-[0.98] shadow-sm",
+                                  STATUS_COLORS[booking.status] || "bg-primary border-primary/50 text-white"
+                                )}
+                                style={{ left: leftOffset, width: Math.max(blockWidth, 8) }}
                               >
-                                <span className="text-xs font-bold truncate">{booking.guestName || "Гість"}</span>
-                                <span className="text-[10px] opacity-80 truncate">{STATUS_UA[booking.status] || booking.status}</span>
+                                <span className="text-[10px] font-semibold truncate leading-tight">{booking.guestName || "Гість"}</span>
+                                {blockWidth > 60 && (
+                                  <span className="text-[9px] opacity-75 truncate leading-tight">{STATUS_UA[booking.status]}</span>
+                                )}
                               </div>
                             );
                           })}
@@ -178,8 +281,8 @@ export default function Chessboard() {
                     );
                   })}
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </div>
       </div>

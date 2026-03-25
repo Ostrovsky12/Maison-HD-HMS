@@ -6,17 +6,19 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('uk-UA', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'UAH',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   }).format(amount);
 }
 
 export function formatDate(dateString: string) {
   const date = new Date(dateString);
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
+  return new Intl.DateTimeFormat('uk-UA', {
     day: 'numeric',
-    year: 'numeric'
+    month: 'short',
+    year: 'numeric',
   }).format(date);
 }

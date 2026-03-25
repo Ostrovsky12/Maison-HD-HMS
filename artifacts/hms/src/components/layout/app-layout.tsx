@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { 
   LayoutDashboard, CalendarDays, Users, Bed, 
   Settings, LogOut, Moon, Sun, Wallet, 
-  Sparkles, Hotel, ClipboardList
+  Sparkles, Hotel, ClipboardList, Download
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { href: "/housekeeping", label: "Прибирання", icon: Sparkles },
   { href: "/units", label: "Юніти", icon: Bed },
   { href: "/rates", label: "Тарифи", icon: Wallet },
+  { href: "/import", label: "Імпорт даних", icon: Download },
   { href: "/settings/organization", label: "Налаштування", icon: Settings },
 ];
 

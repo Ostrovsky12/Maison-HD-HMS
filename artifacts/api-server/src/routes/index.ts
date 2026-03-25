@@ -12,6 +12,7 @@ import addonsRouter from "./addons.js";
 import paymentsRouter from "./payments.js";
 import analyticsRouter from "./analytics.js";
 import usersRouter from "./users.js";
+import importRouter from "./import.js";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use("/addons", addonsRouter);
 router.use("/payments", paymentsRouter);
 router.use("/analytics", analyticsRouter);
 router.use("/users", usersRouter);
+router.use("/import", importRouter);
 
 export default router;
