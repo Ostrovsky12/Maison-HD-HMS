@@ -183,18 +183,55 @@ export const UnitHousekeepingStatusProperty = {
   in_progress: "in_progress",
 } as const;
 
+export type UnitHasView = (typeof UnitHasView)[keyof typeof UnitHasView] | null;
+
+export const UnitHasView = {
+  park: "park",
+  sea: "sea",
+  city: "city",
+  garden: "garden",
+  mountain: "mountain",
+  pool: "pool",
+} as const;
+
 export interface Unit {
   id: number;
   propertyId: number;
   name: string;
   category: string;
   capacity: number;
+  maxCapacity?: number | null;
   status: UnitStatus;
   floor?: number | null;
   description?: string | null;
   basePrice?: number | null;
   housekeepingStatus: UnitHousekeepingStatusProperty;
+  hasView?: UnitHasView;
+  hasBalcony?: boolean | null;
+  squareMeters?: number | null;
   createdAt: string;
+}
+
+export interface UnitAvailability {
+  unit: Unit;
+  isAvailable: boolean;
+  blockingBookingId?: number | null;
+}
+
+export interface UnitAvailabilityResponse {
+  checkIn: string;
+  checkOut: string;
+  nights: number;
+  results: UnitAvailability[];
+  availableCount: number;
+  totalCount: number;
+}
+
+export interface UnitCategorySummary {
+  category: string;
+  total: number;
+  available: number;
+  basePrice?: number | null;
 }
 
 export interface CreateUnitRequest {
@@ -202,9 +239,13 @@ export interface CreateUnitRequest {
   name: string;
   category: string;
   capacity: number;
+  maxCapacity?: number | null;
   floor?: number | null;
   description?: string | null;
   basePrice?: number | null;
+  hasView?: string | null;
+  hasBalcony?: boolean | null;
+  squareMeters?: number | null;
 }
 
 export type UpdateUnitRequestStatus =
@@ -220,22 +261,49 @@ export interface UpdateUnitRequest {
   name?: string;
   category?: string;
   capacity?: number;
+  maxCapacity?: number | null;
   status?: UpdateUnitRequestStatus;
   floor?: number | null;
   description?: string | null;
   basePrice?: number | null;
+  hasView?: string | null;
+  hasBalcony?: boolean | null;
+  squareMeters?: number | null;
 }
+
+export type GuestLoyaltyLevel =
+  | (typeof GuestLoyaltyLevel)[keyof typeof GuestLoyaltyLevel]
+  | null;
+
+export const GuestLoyaltyLevel = {
+  bronze: "bronze",
+  silver: "silver",
+  gold: "gold",
+  platinum: "platinum",
+} as const;
 
 export interface Guest {
   id: number;
   organizationId: number;
   firstName: string;
   lastName: string;
+  middleName?: string | null;
   email?: string | null;
   phone?: string | null;
+  passportNumber?: string | null;
+  nationality?: string | null;
+  birthDate?: string | null;
+  address?: string | null;
   notes?: string | null;
   ltv: number;
   bookingCount: number;
+  loyaltyLevel?: GuestLoyaltyLevel;
+  loyaltyPoints?: number | null;
+  totalNights?: number | null;
+  totalSpent?: number | null;
+  preferences?: string[] | null;
+  tags?: string[] | null;
+  lastVisit?: string | null;
   createdAt: string;
 }
 
@@ -297,12 +365,31 @@ export interface GuestListResponse {
   limit: number;
 }
 
+export type CreateGuestRequestLoyaltyLevel =
+  | (typeof CreateGuestRequestLoyaltyLevel)[keyof typeof CreateGuestRequestLoyaltyLevel]
+  | null;
+
+export const CreateGuestRequestLoyaltyLevel = {
+  bronze: "bronze",
+  silver: "silver",
+  gold: "gold",
+  platinum: "platinum",
+} as const;
+
 export interface CreateGuestRequest {
   firstName: string;
   lastName: string;
+  middleName?: string | null;
   email?: string | null;
   phone?: string | null;
+  passportNumber?: string | null;
+  nationality?: string | null;
+  birthDate?: string | null;
+  address?: string | null;
   notes?: string | null;
+  loyaltyLevel?: CreateGuestRequestLoyaltyLevel;
+  preferences?: string[] | null;
+  tags?: string[] | null;
 }
 
 export interface BookingAddon {
@@ -660,6 +747,17 @@ export interface OccupancyData {
   occupancyRate: number;
   revenue: number;
 }
+
+export type GetUnitsAvailabilityParams = {
+  checkIn: string;
+  checkOut: string;
+  propertyId?: number;
+  category?: string;
+};
+
+export type ListUnitCategoriesParams = {
+  propertyId?: number;
+};
 
 export type ListUnitsParams = {
   propertyId?: number;

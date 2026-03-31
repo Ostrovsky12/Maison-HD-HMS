@@ -163,6 +163,66 @@ export const GetPropertyResponse = zod.object({
 });
 
 /**
+ * @summary Check units availability for a date range
+ */
+export const GetUnitsAvailabilityQueryParams = zod.object({
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  propertyId: zod.coerce.number().optional(),
+  category: zod.coerce.string().optional(),
+});
+
+export const GetUnitsAvailabilityResponse = zod.object({
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  nights: zod.number(),
+  results: zod.array(
+    zod.object({
+      unit: zod.object({
+        id: zod.number(),
+        propertyId: zod.number(),
+        name: zod.string(),
+        category: zod.string(),
+        capacity: zod.number(),
+        maxCapacity: zod.number().nullish(),
+        status: zod.enum(["active", "inactive", "maintenance"]),
+        floor: zod.number().nullish(),
+        description: zod.string().nullish(),
+        basePrice: zod.number().nullish(),
+        housekeepingStatus: zod.enum(["clean", "dirty", "in_progress"]),
+        hasView: zod
+          .enum(["park", "sea", "city", "garden", "mountain", "pool"])
+          .nullish(),
+        hasBalcony: zod.boolean().nullish(),
+        squareMeters: zod.number().nullish(),
+        createdAt: zod.date(),
+      }),
+      isAvailable: zod.boolean(),
+      blockingBookingId: zod.number().nullish(),
+    }),
+  ),
+  availableCount: zod.number(),
+  totalCount: zod.number(),
+});
+
+/**
+ * @summary List unit categories with counts
+ */
+export const ListUnitCategoriesQueryParams = zod.object({
+  propertyId: zod.coerce.number().optional(),
+});
+
+export const ListUnitCategoriesResponseItem = zod.object({
+  category: zod.string(),
+  total: zod.number(),
+  available: zod.number(),
+  basePrice: zod.number().nullish(),
+});
+export const ListUnitCategoriesResponse = zod.array(
+  ListUnitCategoriesResponseItem,
+);
+
+/**
  * @summary List units
  */
 export const ListUnitsQueryParams = zod.object({
@@ -177,11 +237,17 @@ export const ListUnitsResponseItem = zod.object({
   name: zod.string(),
   category: zod.string(),
   capacity: zod.number(),
+  maxCapacity: zod.number().nullish(),
   status: zod.enum(["active", "inactive", "maintenance"]),
   floor: zod.number().nullish(),
   description: zod.string().nullish(),
   basePrice: zod.number().nullish(),
   housekeepingStatus: zod.enum(["clean", "dirty", "in_progress"]),
+  hasView: zod
+    .enum(["park", "sea", "city", "garden", "mountain", "pool"])
+    .nullish(),
+  hasBalcony: zod.boolean().nullish(),
+  squareMeters: zod.number().nullish(),
   createdAt: zod.date(),
 });
 export const ListUnitsResponse = zod.array(ListUnitsResponseItem);
@@ -194,9 +260,13 @@ export const CreateUnitBody = zod.object({
   name: zod.string(),
   category: zod.string(),
   capacity: zod.number(),
+  maxCapacity: zod.number().nullish(),
   floor: zod.number().nullish(),
   description: zod.string().nullish(),
   basePrice: zod.number().nullish(),
+  hasView: zod.string().nullish(),
+  hasBalcony: zod.boolean().nullish(),
+  squareMeters: zod.number().nullish(),
 });
 
 /**
@@ -212,11 +282,17 @@ export const GetUnitResponse = zod.object({
   name: zod.string(),
   category: zod.string(),
   capacity: zod.number(),
+  maxCapacity: zod.number().nullish(),
   status: zod.enum(["active", "inactive", "maintenance"]),
   floor: zod.number().nullish(),
   description: zod.string().nullish(),
   basePrice: zod.number().nullish(),
   housekeepingStatus: zod.enum(["clean", "dirty", "in_progress"]),
+  hasView: zod
+    .enum(["park", "sea", "city", "garden", "mountain", "pool"])
+    .nullish(),
+  hasBalcony: zod.boolean().nullish(),
+  squareMeters: zod.number().nullish(),
   createdAt: zod.date(),
 });
 
@@ -231,10 +307,14 @@ export const UpdateUnitBody = zod.object({
   name: zod.string().optional(),
   category: zod.string().optional(),
   capacity: zod.number().optional(),
+  maxCapacity: zod.number().nullish(),
   status: zod.enum(["active", "inactive", "maintenance"]).optional(),
   floor: zod.number().nullish(),
   description: zod.string().nullish(),
   basePrice: zod.number().nullish(),
+  hasView: zod.string().nullish(),
+  hasBalcony: zod.boolean().nullish(),
+  squareMeters: zod.number().nullish(),
 });
 
 export const UpdateUnitResponse = zod.object({
@@ -243,11 +323,17 @@ export const UpdateUnitResponse = zod.object({
   name: zod.string(),
   category: zod.string(),
   capacity: zod.number(),
+  maxCapacity: zod.number().nullish(),
   status: zod.enum(["active", "inactive", "maintenance"]),
   floor: zod.number().nullish(),
   description: zod.string().nullish(),
   basePrice: zod.number().nullish(),
   housekeepingStatus: zod.enum(["clean", "dirty", "in_progress"]),
+  hasView: zod
+    .enum(["park", "sea", "city", "garden", "mountain", "pool"])
+    .nullish(),
+  hasBalcony: zod.boolean().nullish(),
+  squareMeters: zod.number().nullish(),
   createdAt: zod.date(),
 });
 
@@ -267,11 +353,25 @@ export const ListGuestsResponse = zod.object({
       organizationId: zod.number(),
       firstName: zod.string(),
       lastName: zod.string(),
+      middleName: zod.string().nullish(),
       email: zod.string().nullish(),
       phone: zod.string().nullish(),
+      passportNumber: zod.string().nullish(),
+      nationality: zod.string().nullish(),
+      birthDate: zod.date().nullish(),
+      address: zod.string().nullish(),
       notes: zod.string().nullish(),
       ltv: zod.number(),
       bookingCount: zod.number(),
+      loyaltyLevel: zod
+        .enum(["bronze", "silver", "gold", "platinum"])
+        .nullish(),
+      loyaltyPoints: zod.number().nullish(),
+      totalNights: zod.number().nullish(),
+      totalSpent: zod.number().nullish(),
+      preferences: zod.array(zod.string()).nullish(),
+      tags: zod.array(zod.string()).nullish(),
+      lastVisit: zod.date().nullish(),
       createdAt: zod.date(),
     }),
   ),
@@ -286,9 +386,17 @@ export const ListGuestsResponse = zod.object({
 export const CreateGuestBody = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
+  middleName: zod.string().nullish(),
   email: zod.string().email().nullish(),
   phone: zod.string().nullish(),
+  passportNumber: zod.string().nullish(),
+  nationality: zod.string().nullish(),
+  birthDate: zod.date().nullish(),
+  address: zod.string().nullish(),
   notes: zod.string().nullish(),
+  loyaltyLevel: zod.enum(["bronze", "silver", "gold", "platinum"]).nullish(),
+  preferences: zod.array(zod.string()).nullish(),
+  tags: zod.array(zod.string()).nullish(),
 });
 
 /**
@@ -304,11 +412,23 @@ export const GetGuestResponse = zod
     organizationId: zod.number(),
     firstName: zod.string(),
     lastName: zod.string(),
+    middleName: zod.string().nullish(),
     email: zod.string().nullish(),
     phone: zod.string().nullish(),
+    passportNumber: zod.string().nullish(),
+    nationality: zod.string().nullish(),
+    birthDate: zod.date().nullish(),
+    address: zod.string().nullish(),
     notes: zod.string().nullish(),
     ltv: zod.number(),
     bookingCount: zod.number(),
+    loyaltyLevel: zod.enum(["bronze", "silver", "gold", "platinum"]).nullish(),
+    loyaltyPoints: zod.number().nullish(),
+    totalNights: zod.number().nullish(),
+    totalSpent: zod.number().nullish(),
+    preferences: zod.array(zod.string()).nullish(),
+    tags: zod.array(zod.string()).nullish(),
+    lastVisit: zod.date().nullish(),
     createdAt: zod.date(),
   })
   .and(
@@ -354,9 +474,17 @@ export const UpdateGuestParams = zod.object({
 export const UpdateGuestBody = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
+  middleName: zod.string().nullish(),
   email: zod.string().email().nullish(),
   phone: zod.string().nullish(),
+  passportNumber: zod.string().nullish(),
+  nationality: zod.string().nullish(),
+  birthDate: zod.date().nullish(),
+  address: zod.string().nullish(),
   notes: zod.string().nullish(),
+  loyaltyLevel: zod.enum(["bronze", "silver", "gold", "platinum"]).nullish(),
+  preferences: zod.array(zod.string()).nullish(),
+  tags: zod.array(zod.string()).nullish(),
 });
 
 export const UpdateGuestResponse = zod.object({
@@ -364,11 +492,23 @@ export const UpdateGuestResponse = zod.object({
   organizationId: zod.number(),
   firstName: zod.string(),
   lastName: zod.string(),
+  middleName: zod.string().nullish(),
   email: zod.string().nullish(),
   phone: zod.string().nullish(),
+  passportNumber: zod.string().nullish(),
+  nationality: zod.string().nullish(),
+  birthDate: zod.date().nullish(),
+  address: zod.string().nullish(),
   notes: zod.string().nullish(),
   ltv: zod.number(),
   bookingCount: zod.number(),
+  loyaltyLevel: zod.enum(["bronze", "silver", "gold", "platinum"]).nullish(),
+  loyaltyPoints: zod.number().nullish(),
+  totalNights: zod.number().nullish(),
+  totalSpent: zod.number().nullish(),
+  preferences: zod.array(zod.string()).nullish(),
+  tags: zod.array(zod.string()).nullish(),
+  lastVisit: zod.date().nullish(),
   createdAt: zod.date(),
 });
 
@@ -467,11 +607,25 @@ export const GetBookingResponse = zod
           organizationId: zod.number(),
           firstName: zod.string(),
           lastName: zod.string(),
+          middleName: zod.string().nullish(),
           email: zod.string().nullish(),
           phone: zod.string().nullish(),
+          passportNumber: zod.string().nullish(),
+          nationality: zod.string().nullish(),
+          birthDate: zod.date().nullish(),
+          address: zod.string().nullish(),
           notes: zod.string().nullish(),
           ltv: zod.number(),
           bookingCount: zod.number(),
+          loyaltyLevel: zod
+            .enum(["bronze", "silver", "gold", "platinum"])
+            .nullish(),
+          loyaltyPoints: zod.number().nullish(),
+          totalNights: zod.number().nullish(),
+          totalSpent: zod.number().nullish(),
+          preferences: zod.array(zod.string()).nullish(),
+          tags: zod.array(zod.string()).nullish(),
+          lastVisit: zod.date().nullish(),
           createdAt: zod.date(),
         })
         .optional(),
@@ -482,11 +636,17 @@ export const GetBookingResponse = zod
           name: zod.string(),
           category: zod.string(),
           capacity: zod.number(),
+          maxCapacity: zod.number().nullish(),
           status: zod.enum(["active", "inactive", "maintenance"]),
           floor: zod.number().nullish(),
           description: zod.string().nullish(),
           basePrice: zod.number().nullish(),
           housekeepingStatus: zod.enum(["clean", "dirty", "in_progress"]),
+          hasView: zod
+            .enum(["park", "sea", "city", "garden", "mountain", "pool"])
+            .nullish(),
+          hasBalcony: zod.boolean().nullish(),
+          squareMeters: zod.number().nullish(),
           createdAt: zod.date(),
         })
         .optional(),

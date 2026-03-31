@@ -1,10 +1,130 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { unitsTable, propertiesTable } from "@workspace/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { unitsTable, propertiesTable, bookingsTable } from "@workspace/db/schema";
+import { eq, and, inArray, or, lt, gt, notInArray, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
+
+router.get("/availability", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const { checkIn, checkOut, propertyId, category } = req.query;
+
+  if (!checkIn || !checkOut) {
+    res.status(400).json({ error: "Bad Request", message: "checkIn and checkOut are required" });
+    return;
+  }
+
+  const checkInDate = new Date(checkIn as string);
+  const checkOutDate = new Date(checkOut as string);
+
+  if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime())) {
+    res.status(400).json({ error: "Bad Request", message: "Invalid date format. Use YYYY-MM-DD" });
+    return;
+  }
+
+  if (checkOutDate <= checkInDate) {
+    res.status(400).json({ error: "Bad Request", message: "checkOut must be after checkIn" });
+    return;
+  }
+
+  let propIds: number[] = [];
+  if (propertyId) {
+    propIds = [parseInt(propertyId as string)];
+  } else if (user.role !== "super_admin" && user.organizationId) {
+    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    propIds = props.map(p => p.id);
+  }
+
+  const unitConditions: any[] = [];
+  if (propIds.length > 0) unitConditions.push(inArray(unitsTable.propertyId, propIds));
+  if (category) unitConditions.push(eq(unitsTable.category, category as string));
+  unitConditions.push(eq(unitsTable.status, "active"));
+
+  const units = unitConditions.length > 0
+    ? await db.select().from(unitsTable).where(and(...unitConditions))
+    : await db.select().from(unitsTable);
+
+  const blockedBookings = await db
+    .select({ unitId: bookingsTable.unitId, id: bookingsTable.id })
+    .from(bookingsTable)
+    .where(
+      and(
+        inArray(bookingsTable.unitId, units.map(u => u.id)),
+        or(
+          and(
+            lt(bookingsTable.checkIn, checkOut as string),
+            gt(bookingsTable.checkOut, checkIn as string),
+          )
+        )!,
+        or(
+          eq(bookingsTable.status, "confirmed"),
+          eq(bookingsTable.status, "checked_in"),
+        )!
+      )
+    );
+
+  const blockedMap = new Map<number, number>();
+  for (const b of blockedBookings) {
+    blockedMap.set(b.unitId, b.id);
+  }
+
+  const results = units.map(u => ({
+    unit: { ...u, basePrice: u.basePrice ? Number(u.basePrice) : null, squareMeters: u.squareMeters ? Number(u.squareMeters) : null },
+    isAvailable: !blockedMap.has(u.id),
+    blockingBookingId: blockedMap.get(u.id) ?? null,
+  }));
+
+  const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  res.json({
+    checkIn: checkIn,
+    checkOut: checkOut,
+    nights,
+    results,
+    availableCount: results.filter(r => r.isAvailable).length,
+    totalCount: results.length,
+  });
+});
+
+router.get("/categories", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const { propertyId } = req.query;
+
+  let propIds: number[] = [];
+  if (propertyId) {
+    propIds = [parseInt(propertyId as string)];
+  } else if (user.role !== "super_admin" && user.organizationId) {
+    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    propIds = props.map(p => p.id);
+  }
+
+  const conditions: any[] = [eq(unitsTable.status, "active")];
+  if (propIds.length > 0) conditions.push(inArray(unitsTable.propertyId, propIds));
+
+  const units = await db.select({
+    category: unitsTable.category,
+    basePrice: unitsTable.basePrice,
+    housekeepingStatus: unitsTable.housekeepingStatus,
+  }).from(unitsTable).where(and(...conditions));
+
+  const categoryMap = new Map<string, { total: number; available: number; basePrice: number | null }>();
+  for (const u of units) {
+    const existing = categoryMap.get(u.category) || { total: 0, available: 0, basePrice: u.basePrice ? Number(u.basePrice) : null };
+    existing.total++;
+    if (u.housekeepingStatus === "clean") existing.available++;
+    categoryMap.set(u.category, existing);
+  }
+
+  const result = Array.from(categoryMap.entries()).map(([category, stats]) => ({
+    category,
+    ...stats,
+  }));
+
+  res.json(result);
+});
 
 router.get("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
@@ -32,21 +152,26 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(units.map(u => ({
     ...u,
     basePrice: u.basePrice ? Number(u.basePrice) : null,
+    squareMeters: u.squareMeters ? Number(u.squareMeters) : null,
   })));
 });
 
 router.post("/", requireAuth, async (req, res) => {
-  const { propertyId, name, category, capacity, floor, description, basePrice } = req.body;
+  const { propertyId, name, category, capacity, maxCapacity, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
   const [unit] = await db.insert(unitsTable).values({
     propertyId,
     name,
     category,
     capacity: capacity || 2,
+    maxCapacity: maxCapacity || null,
     floor,
     description,
     basePrice: basePrice ? String(basePrice) : null,
+    hasView: hasView || null,
+    hasBalcony: hasBalcony ?? false,
+    squareMeters: squareMeters ? String(squareMeters) : null,
   }).returning();
-  res.status(201).json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null });
+  res.status(201).json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
 
 router.get("/:unitId", requireAuth, async (req, res) => {
@@ -56,27 +181,31 @@ router.get("/:unitId", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Not Found", message: "Unit not found" });
     return;
   }
-  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null });
+  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
 
 router.put("/:unitId", requireAuth, async (req, res) => {
   const unitId = parseInt(req.params.unitId);
-  const { name, category, capacity, status, floor, description, basePrice } = req.body;
+  const { name, category, capacity, maxCapacity, status, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
   const [unit] = await db.update(unitsTable).set({
     ...(name !== undefined && { name }),
     ...(category !== undefined && { category }),
     ...(capacity !== undefined && { capacity }),
+    ...(maxCapacity !== undefined && { maxCapacity }),
     ...(status !== undefined && { status }),
     ...(floor !== undefined && { floor }),
     ...(description !== undefined && { description }),
     ...(basePrice !== undefined && { basePrice: String(basePrice) }),
+    ...(hasView !== undefined && { hasView }),
+    ...(hasBalcony !== undefined && { hasBalcony }),
+    ...(squareMeters !== undefined && { squareMeters: squareMeters ? String(squareMeters) : null }),
     updatedAt: new Date(),
   }).where(eq(unitsTable.id, unitId)).returning();
   if (!unit) {
     res.status(404).json({ error: "Not Found", message: "Unit not found" });
     return;
   }
-  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null });
+  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
 
 export default router;

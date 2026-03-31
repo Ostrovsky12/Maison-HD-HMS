@@ -5,6 +5,7 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+import type { UnitHasView } from "./unitHasView";
 import type { UnitHousekeepingStatusProperty } from "./unitHousekeepingStatusProperty";
 import type { UnitStatus } from "./unitStatus";
 
@@ -14,10 +15,14 @@ export interface Unit {
   name: string;
   category: string;
   capacity: number;
+  maxCapacity?: number | null;
   status: UnitStatus;
   floor?: number | null;
   description?: string | null;
   basePrice?: number | null;
   housekeepingStatus: UnitHousekeepingStatusProperty;
+  hasView?: UnitHasView;
+  hasBalcony?: boolean | null;
+  squareMeters?: number | null;
   createdAt: Date;
 }

@@ -6,6 +6,12 @@ import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
 
+const formatGuest = (g: any) => ({
+  ...g,
+  ltv: Number(g.ltv),
+  totalSpent: g.totalSpent ? Number(g.totalSpent) : 0,
+});
+
 router.get("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const orgId = user.organizationId;
@@ -22,6 +28,7 @@ router.get("/", requireAuth, async (req, res) => {
       ilike(guestsTable.lastName, `%${search}%`),
       ilike(guestsTable.email, `%${search}%`),
       ilike(guestsTable.phone, `%${search}%`),
+      ilike(guestsTable.passportNumber, `%${search}%`),
     )!);
   }
 
@@ -33,7 +40,7 @@ router.get("/", requireAuth, async (req, res) => {
     .orderBy(desc(guestsTable.createdAt));
 
   res.json({
-    guests: guests.map(g => ({ ...g, ltv: Number(g.ltv) })),
+    guests: guests.map(formatGuest),
     total: Number(countRow?.count || 0),
     page,
     limit,
@@ -47,16 +54,29 @@ router.post("/", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Bad Request", message: "No organization" });
     return;
   }
-  const { firstName, lastName, email, phone, notes } = req.body;
+  const {
+    firstName, lastName, middleName,
+    email, phone, passportNumber, nationality, birthDate, address, notes,
+    loyaltyLevel, preferences, tags,
+  } = req.body;
+
   const [guest] = await db.insert(guestsTable).values({
     organizationId: orgId,
     firstName,
     lastName,
+    middleName: middleName || null,
     email,
     phone,
+    passportNumber: passportNumber || null,
+    nationality: nationality || null,
+    birthDate: birthDate || null,
+    address: address || null,
     notes,
+    loyaltyLevel: loyaltyLevel || "bronze",
+    preferences: preferences || [],
+    tags: tags || [],
   }).returning();
-  res.status(201).json({ ...guest, ltv: Number(guest.ltv) });
+  res.status(201).json(formatGuest(guest));
 });
 
 router.get("/:guestId", requireAuth, async (req, res) => {
@@ -87,8 +107,7 @@ router.get("/:guestId", requireAuth, async (req, res) => {
     .orderBy(desc(bookingsTable.checkIn));
 
   res.json({
-    ...guest,
-    ltv: Number(guest.ltv),
+    ...formatGuest(guest),
     bookings: bookings.map(b => ({
       ...b,
       totalAmount: Number(b.totalAmount),
@@ -100,20 +119,36 @@ router.get("/:guestId", requireAuth, async (req, res) => {
 
 router.put("/:guestId", requireAuth, async (req, res) => {
   const guestId = parseInt(req.params.guestId);
-  const { firstName, lastName, email, phone, notes } = req.body;
+  const {
+    firstName, lastName, middleName,
+    email, phone, passportNumber, nationality, birthDate, address, notes,
+    loyaltyLevel, loyaltyPoints, totalNights, totalSpent, preferences, tags,
+  } = req.body;
+
   const [guest] = await db.update(guestsTable).set({
     ...(firstName !== undefined && { firstName }),
     ...(lastName !== undefined && { lastName }),
+    ...(middleName !== undefined && { middleName }),
     ...(email !== undefined && { email }),
     ...(phone !== undefined && { phone }),
+    ...(passportNumber !== undefined && { passportNumber }),
+    ...(nationality !== undefined && { nationality }),
+    ...(birthDate !== undefined && { birthDate }),
+    ...(address !== undefined && { address }),
     ...(notes !== undefined && { notes }),
+    ...(loyaltyLevel !== undefined && { loyaltyLevel }),
+    ...(loyaltyPoints !== undefined && { loyaltyPoints }),
+    ...(totalNights !== undefined && { totalNights }),
+    ...(totalSpent !== undefined && { totalSpent: String(totalSpent) }),
+    ...(preferences !== undefined && { preferences }),
+    ...(tags !== undefined && { tags }),
     updatedAt: new Date(),
   }).where(eq(guestsTable.id, guestId)).returning();
   if (!guest) {
     res.status(404).json({ error: "Not Found", message: "Guest not found" });
     return;
   }
-  res.json({ ...guest, ltv: Number(guest.ltv) });
+  res.json(formatGuest(guest));
 });
 
 export default router;

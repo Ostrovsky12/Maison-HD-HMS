@@ -5,11 +5,20 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+import type { CreateGuestRequestLoyaltyLevel } from "./createGuestRequestLoyaltyLevel";
 
 export interface CreateGuestRequest {
   firstName: string;
   lastName: string;
+  middleName?: string | null;
   email?: string | null;
   phone?: string | null;
+  passportNumber?: string | null;
+  nationality?: string | null;
+  birthDate?: Date | null;
+  address?: string | null;
   notes?: string | null;
+  loyaltyLevel?: CreateGuestRequestLoyaltyLevel;
+  preferences?: string[] | null;
+  tags?: string[] | null;
 }

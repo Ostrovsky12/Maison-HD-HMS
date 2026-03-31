@@ -85,14 +85,19 @@ export async function autoSeedIfEmpty() {
       organizationId: org.id, name: "Бунгало", type: "bungalow", description: "Бунгало біля басейну",
     }).returning();
 
+    const views = ["garden", "park", "pool", null, null, "garden", "park", null, "garden"];
     const houseUnits = [
       ...Array.from({ length: 9 }, (_, i) => ({
         propertyId: houseProp.id, name: `Будинок ${i + 1} (1 спальня)`,
         category: "Будинок 1 спальня", capacity: 3, basePrice: "2500",
+        hasBalcony: i % 2 === 0, hasView: views[i] as any || null,
+        squareMeters: String(42 + i * 2),
       })),
       ...Array.from({ length: 5 }, (_, i) => ({
         propertyId: houseProp.id, name: `Будинок ${i + 10} (2 спальні)`,
         category: "Будинок 2 спальні", capacity: 6, basePrice: "3800",
+        hasBalcony: true, hasView: ["garden", "park", "pool", "garden", "park"][i] as any,
+        squareMeters: String(68 + i * 4),
       })),
     ];
     await db.insert(unitsTable).values(houseUnits);
@@ -102,8 +107,10 @@ export async function autoSeedIfEmpty() {
         propertyId: hotelProp.id, name: `Номер ${101 + i}`,
         category: "Стандарт", capacity: 2,
         floor: Math.floor(i / 6) + 1, basePrice: "1500",
+        hasBalcony: i % 3 === 0, squareMeters: "24",
+        hasView: (i % 4 === 0 ? "city" : i % 4 === 1 ? "garden" : null) as any,
       })),
-      { propertyId: hotelProp.id, name: "Люкс 201", category: "Люкс", capacity: 4, floor: 2, basePrice: "4500" },
+      { propertyId: hotelProp.id, name: "Люкс 201", category: "Люкс", capacity: 4, floor: 2, basePrice: "4500", hasBalcony: true, hasView: "city" as any, squareMeters: "62" },
     ];
     await db.insert(unitsTable).values(hotelUnits);
 

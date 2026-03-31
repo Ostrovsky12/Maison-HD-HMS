@@ -37,6 +37,7 @@ import type {
   ErrorResponse,
   GetDashboardAnalyticsParams,
   GetOccupancyAnalyticsParams,
+  GetUnitsAvailabilityParams,
   Guest,
   GuestDetail,
   GuestListResponse,
@@ -47,6 +48,7 @@ import type {
   ListHousekeepingTasksParams,
   ListPaymentsParams,
   ListRatesParams,
+  ListUnitCategoriesParams,
   ListUnitsParams,
   LoginRequest,
   OccupancyData,
@@ -56,6 +58,8 @@ import type {
   Rate,
   SuccessResponse,
   Unit,
+  UnitAvailabilityResponse,
+  UnitCategorySummary,
   UnitHousekeepingStatus,
   UpdateBookingRequest,
   UpdateHousekeepingTaskRequest,
@@ -869,6 +873,206 @@ export function useGetProperty<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetPropertyQueryOptions(propertyId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Check units availability for a date range
+ */
+export const getGetUnitsAvailabilityUrl = (
+  params: GetUnitsAvailabilityParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/units/availability?${stringifiedParams}`
+    : `/api/units/availability`;
+};
+
+export const getUnitsAvailability = async (
+  params: GetUnitsAvailabilityParams,
+  options?: RequestInit,
+): Promise<UnitAvailabilityResponse> => {
+  return customFetch<UnitAvailabilityResponse>(
+    getGetUnitsAvailabilityUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetUnitsAvailabilityQueryKey = (
+  params?: GetUnitsAvailabilityParams,
+) => {
+  return [`/api/units/availability`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetUnitsAvailabilityQueryOptions = <
+  TData = Awaited<ReturnType<typeof getUnitsAvailability>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetUnitsAvailabilityParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getUnitsAvailability>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetUnitsAvailabilityQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getUnitsAvailability>>
+  > = ({ signal }) =>
+    getUnitsAvailability(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getUnitsAvailability>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetUnitsAvailabilityQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getUnitsAvailability>>
+>;
+export type GetUnitsAvailabilityQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Check units availability for a date range
+ */
+
+export function useGetUnitsAvailability<
+  TData = Awaited<ReturnType<typeof getUnitsAvailability>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetUnitsAvailabilityParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getUnitsAvailability>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetUnitsAvailabilityQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List unit categories with counts
+ */
+export const getListUnitCategoriesUrl = (params?: ListUnitCategoriesParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/units/categories?${stringifiedParams}`
+    : `/api/units/categories`;
+};
+
+export const listUnitCategories = async (
+  params?: ListUnitCategoriesParams,
+  options?: RequestInit,
+): Promise<UnitCategorySummary[]> => {
+  return customFetch<UnitCategorySummary[]>(getListUnitCategoriesUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListUnitCategoriesQueryKey = (
+  params?: ListUnitCategoriesParams,
+) => {
+  return [`/api/units/categories`, ...(params ? [params] : [])] as const;
+};
+
+export const getListUnitCategoriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listUnitCategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListUnitCategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listUnitCategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListUnitCategoriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listUnitCategories>>
+  > = ({ signal }) => listUnitCategories(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listUnitCategories>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListUnitCategoriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listUnitCategories>>
+>;
+export type ListUnitCategoriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List unit categories with counts
+ */
+
+export function useListUnitCategories<
+  TData = Awaited<ReturnType<typeof listUnitCategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListUnitCategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listUnitCategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListUnitCategoriesQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

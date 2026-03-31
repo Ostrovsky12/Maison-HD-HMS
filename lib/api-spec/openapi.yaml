@@ -217,6 +217,64 @@ paths:
               schema:
                 $ref: "#/components/schemas/Property"
 
+  /units/availability:
+    get:
+      operationId: getUnitsAvailability
+      tags: [units]
+      summary: Check units availability for a date range
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: checkIn
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: checkOut
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: propertyId
+          in: query
+          schema:
+            type: integer
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Availability results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitAvailabilityResponse"
+
+  /units/categories:
+    get:
+      operationId: listUnitCategories
+      tags: [units]
+      summary: List unit categories with counts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UnitCategorySummary"
+
   /units:
     get:
       operationId: listUnits
@@ -1280,6 +1338,9 @@ components:
           type: string
         capacity:
           type: integer
+        maxCapacity:
+          type: integer
+          nullable: true
         status:
           type: string
           enum: [active, inactive, maintenance]
@@ -1295,6 +1356,16 @@ components:
         housekeepingStatus:
           type: string
           enum: [clean, dirty, in_progress]
+        hasView:
+          type: string
+          enum: [park, sea, city, garden, mountain, pool]
+          nullable: true
+        hasBalcony:
+          type: boolean
+          nullable: true
+        squareMeters:
+          type: number
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -1308,6 +1379,64 @@ components:
         - housekeepingStatus
         - createdAt
 
+    UnitAvailability:
+      type: object
+      properties:
+        unit:
+          $ref: "#/components/schemas/Unit"
+        isAvailable:
+          type: boolean
+        blockingBookingId:
+          type: integer
+          nullable: true
+      required:
+        - unit
+        - isAvailable
+
+    UnitAvailabilityResponse:
+      type: object
+      properties:
+        checkIn:
+          type: string
+          format: date
+        checkOut:
+          type: string
+          format: date
+        nights:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnitAvailability"
+        availableCount:
+          type: integer
+        totalCount:
+          type: integer
+      required:
+        - checkIn
+        - checkOut
+        - nights
+        - results
+        - availableCount
+        - totalCount
+
+    UnitCategorySummary:
+      type: object
+      properties:
+        category:
+          type: string
+        total:
+          type: integer
+        available:
+          type: integer
+        basePrice:
+          type: number
+          nullable: true
+      required:
+        - category
+        - total
+        - available
+
     CreateUnitRequest:
       type: object
       properties:
@@ -1319,6 +1448,9 @@ components:
           type: string
         capacity:
           type: integer
+        maxCapacity:
+          type: integer
+          nullable: true
         floor:
           type: integer
           nullable: true
@@ -1326,6 +1458,15 @@ components:
           type: string
           nullable: true
         basePrice:
+          type: number
+          nullable: true
+        hasView:
+          type: string
+          nullable: true
+        hasBalcony:
+          type: boolean
+          nullable: true
+        squareMeters:
           type: number
           nullable: true
       required:
@@ -1343,6 +1484,9 @@ components:
           type: string
         capacity:
           type: integer
+        maxCapacity:
+          type: integer
+          nullable: true
         status:
           type: string
           enum: [active, inactive, maintenance]
@@ -1353,6 +1497,15 @@ components:
           type: string
           nullable: true
         basePrice:
+          type: number
+          nullable: true
+        hasView:
+          type: string
+          nullable: true
+        hasBalcony:
+          type: boolean
+          nullable: true
+        squareMeters:
           type: number
           nullable: true
 
@@ -1367,10 +1520,26 @@ components:
           type: string
         lastName:
           type: string
+        middleName:
+          type: string
+          nullable: true
         email:
           type: string
           nullable: true
         phone:
+          type: string
+          nullable: true
+        passportNumber:
+          type: string
+          nullable: true
+        nationality:
+          type: string
+          nullable: true
+        birthDate:
+          type: string
+          format: date
+          nullable: true
+        address:
           type: string
           nullable: true
         notes:
@@ -1380,6 +1549,33 @@ components:
           type: number
         bookingCount:
           type: integer
+        loyaltyLevel:
+          type: string
+          enum: [bronze, silver, gold, platinum]
+          nullable: true
+        loyaltyPoints:
+          type: integer
+          nullable: true
+        totalNights:
+          type: integer
+          nullable: true
+        totalSpent:
+          type: number
+          nullable: true
+        preferences:
+          type: array
+          items:
+            type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+          nullable: true
+        lastVisit:
+          type: string
+          format: date-time
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -1428,6 +1624,9 @@ components:
           type: string
         lastName:
           type: string
+        middleName:
+          type: string
+          nullable: true
         email:
           type: string
           format: email
@@ -1435,8 +1634,35 @@ components:
         phone:
           type: string
           nullable: true
+        passportNumber:
+          type: string
+          nullable: true
+        nationality:
+          type: string
+          nullable: true
+        birthDate:
+          type: string
+          format: date
+          nullable: true
+        address:
+          type: string
+          nullable: true
         notes:
           type: string
+          nullable: true
+        loyaltyLevel:
+          type: string
+          enum: [bronze, silver, gold, platinum]
+          nullable: true
+        preferences:
+          type: array
+          items:
+            type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
           nullable: true
       required:
         - firstName

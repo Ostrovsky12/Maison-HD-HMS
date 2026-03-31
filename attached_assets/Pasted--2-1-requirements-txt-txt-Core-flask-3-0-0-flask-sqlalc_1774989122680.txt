@@ -1,0 +1,1247 @@
+Крок 2.1: Оновлення requirements.txt
+txt
+# Core
+flask==3.0.0
+flask-sqlalchemy==3.1.1
+flask-migrate==4.0.5
+flask-cors==4.0.0
+flask-jwt-extended==4.5.3
+flask-bcrypt==1.0.1
+
+# Database
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+alembic==1.12.1
+
+# Utils
+python-dotenv==1.0.0
+python-dateutil==2.8.2
+pytz==2023.3
+
+# API & Integrations
+requests==2.31.0
+marshmallow==3.20.1          # НОВО: для серіалізації
+marshmallow-sqlalchemy==0.30.0
+
+# Monitoring & Logging
+loguru==0.7.2
+
+# Development
+black==23.11.0
+pytest==7.4.3
+Крок 2.2: Файл конфігурації config.py
+python
+"""
+Maison HD - Configuration
+"""
+
+import os
+from datetime import timedelta
+
+class Config:
+    """Базова конфігурація"""
+    
+    # Flask
+    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
+    
+    # Database
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///maison.db')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 10,
+        'pool_recycle': 3600,
+        'pool_pre_ping': True,
+    }
+    
+    # JWT
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'jwt-dev-key')
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=8)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
+    
+    # CORS
+    CORS_ORIGINS = os.getenv('CORS_ORIGINS', '*').split(',')
+    
+    # Telegram
+    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+    
+    # Logging
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    LOG_FILE = 'logs/maison.log'
+    
+    # Business rules
+    DEFAULT_CURRENCY = 'UAH'
+    DEFAULT_TAX_RATE = 20.0
+    CHECKIN_TIME = '14:00'
+    CHECKOUT_TIME = '12:00'
+    
+    # API Rate Limiting
+    RATELIMIT_ENABLED = os.getenv('RATELIMIT_ENABLED', 'False') == 'True'
+    RATELIMIT_DEFAULT = '100/hour'
+
+
+class DevelopmentConfig(Config):
+    """Конфігурація для розробки"""
+    DEBUG = True
+    SQLALCHEMY_ECHO = True
+
+
+class ProductionConfig(Config):
+    """Конфігурація для продакшну"""
+    DEBUG = False
+    SQLALCHEMY_ECHO = False
+    
+    # В продакшні використовуємо PostgreSQL
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
+
+
+class TestingConfig(Config):
+    """Конфігурація для тестування"""
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    WTF_CSRF_ENABLED = False
+
+
+# Словник конфігурацій
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'testing': TestingConfig,
+    'default': DevelopmentConfig
+}
+Крок 2.3: Моделі даних
+models/__init__.py
+python
+"""
+Maison HD - Data Models
+"""
+
+from models.hotel import Hotel
+from models.user import User, Role
+from models.room import RoomCategory, Room
+from models.guest import Guest, Company
+from models.reservation import Reservation
+
+# Для зручного імпорту
+__all__ = [
+    'Hotel',
+    'User', 
+    'Role',
+    'RoomCategory',
+    'Room',
+    'Guest',
+    'Company',
+    'Reservation'
+]
+models/hotel.py
+python
+"""
+Hotel model - головний об'єкт системи
+"""
+
+from datetime import datetime
+from app import db
+
+class Hotel(db.Model):
+    """Модель готелю / об'єкта"""
+    __tablename__ = 'hotels'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    code = db.Column(db.String(20), unique=True, nullable=False)
+    
+    # Контактна інформація
+    address = db.Column(db.Text)
+    phone = db.Column(db.String(50))
+    email = db.Column(db.String(100))
+    website = db.Column(db.String(200))
+    
+    # Фінансові налаштування
+    currency = db.Column(db.String(3), default='UAH')
+    tax_rate = db.Column(db.Float, default=20.0)
+    
+    # Системні поля
+    timezone = db.Column(db.String(50), default='Europe/Kiev')
+    checkin_time = db.Column(db.String(5), default='14:00')
+    checkout_time = db.Column(db.String(5), default='12:00')
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True)
+    
+    # Зв'язки
+    rooms = db.relationship('Room', backref='hotel', lazy='dynamic')
+    users = db.relationship('User', backref='hotel', lazy='dynamic')
+    room_categories = db.relationship('RoomCategory', backref='hotel', lazy='dynamic')
+    
+    def __repr__(self):
+        return f'<Hotel {self.code}: {self.name}>'
+    
+    def to_dict(self):
+        """Конвертація в словник для API"""
+        return {
+            'id': self.id,
+            'name': self.name,
+            'code': self.code,
+            'address': self.address,
+            'phone': self.phone,
+            'email': self.email,
+            'currency': self.currency,
+            'tax_rate': self.tax_rate,
+            'checkin_time': self.checkin_time,
+            'checkout_time': self.checkout_time,
+            'is_active': self.is_active
+        }
+models/room.py
+python
+"""
+Room models - категорії та конкретні номери
+"""
+
+from datetime import datetime
+from app import db
+
+class RoomCategory(db.Model):
+    """Категорія номерів (стандарт, люкс, апартаменти тощо)"""
+    __tablename__ = 'room_categories'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    code = db.Column(db.String(20), unique=True)
+    description = db.Column(db.Text)
+    
+    # Характеристики
+    capacity = db.Column(db.Integer, default=2)           # базова місткість
+    max_capacity = db.Column(db.Integer, default=3)       # максимум з доп. місцями
+    extra_bed_allowed = db.Column(db.Boolean, default=True)
+    extra_bed_price = db.Column(db.Float, default=0)
+    
+    # Зручності (JSON)
+    amenities = db.Column(db.JSON, default=list)  # ['wifi', 'tv', 'ac', 'minibar', 'safe']
+    
+    # Зображення
+    images = db.Column(db.JSON, default=list)    # масив URL
+    thumbnail = db.Column(db.String(500))
+    
+    # Ціни
+    base_price = db.Column(db.Float, nullable=False)
+    
+    # Системні поля
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Зв'язки
+    rooms = db.relationship('Room', backref='category', lazy='dynamic')
+    
+    def __repr__(self):
+        return f'<RoomCategory {self.code}: {self.name}>'
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'code': self.code,
+            'description': self.description,
+            'capacity': self.capacity,
+            'max_capacity': self.max_capacity,
+            'extra_bed_allowed': self.extra_bed_allowed,
+            'extra_bed_price': self.extra_bed_price,
+            'amenities': self.amenities,
+            'images': self.images,
+            'thumbnail': self.thumbnail,
+            'base_price': self.base_price,
+            'hotel_id': self.hotel_id,
+            'is_active': self.is_active,
+            'rooms_count': self.rooms.count()
+        }
+
+
+class Room(db.Model):
+    """Конкретний номер в готелі"""
+    __tablename__ = 'rooms'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    number = db.Column(db.String(10), nullable=False)   # "101", "202A"
+    floor = db.Column(db.Integer)
+    name = db.Column(db.String(100))                    # "Президентський люкс"
+    
+    # Статуси: clean, dirty, repair, blocked, occupied
+    status = db.Column(db.String(20), default='clean')
+    
+    # Додаткові характеристики
+    has_view = db.Column(db.String(50))   # park, sea, city, garden
+    has_balcony = db.Column(db.Boolean, default=False)
+    square_meters = db.Column(db.Float)
+    notes = db.Column(db.Text)
+    
+    # Зв'язки
+    category_id = db.Column(db.Integer, db.ForeignKey('room_categories.id'), nullable=False)
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'), nullable=False)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<Room {self.number}>'
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'number': self.number,
+            'floor': self.floor,
+            'name': self.name,
+            'status': self.status,
+            'has_view': self.has_view,
+            'has_balcony': self.has_balcony,
+            'square_meters': self.square_meters,
+            'notes': self.notes,
+            'category_id': self.category_id,
+            'category_name': self.category.name if self.category else None,
+            'hotel_id': self.hotel_id,
+            'capacity': self.category.capacity if self.category else 2
+        }
+models/user.py
+python
+"""
+User model - користувачі системи з ролями
+"""
+
+from datetime import datetime
+from flask_bcrypt import generate_password_hash, check_password_hash
+from app import db
+
+class Role(db.Model):
+    """Ролі користувачів"""
+    __tablename__ = 'roles'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    description = db.Column(db.String(200))
+    permissions = db.Column(db.JSON, default=list)  # список дозволів
+    
+    def __repr__(self):
+        return f'<Role {self.name}>'
+
+
+class User(db.Model):
+    """Модель користувача"""
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    
+    full_name = db.Column(db.String(200))
+    phone = db.Column(db.String(50))
+    avatar = db.Column(db.String(500))
+    
+    # Роль
+    role_id = db.Column(db.Integer, db.ForeignKey('roles.id'))
+    role = db.relationship('Role', backref='users')
+    
+    # Прив'язка до готелю
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'))
+    
+    # Системні поля
+    is_active = db.Column(db.Boolean, default=True)
+    last_login = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Налаштування сповіщень
+    notification_settings = db.Column(db.JSON, default=dict)  # {telegram: chat_id, email: bool}
+    
+    def set_password(self, password):
+        """Хешування пароля"""
+        self.password_hash = generate_password_hash(password).decode('utf-8')
+    
+    def check_password(self, password):
+        """Перевірка пароля"""
+        return check_password_hash(self.password_hash, password)
+    
+    def __repr__(self):
+        return f'<User {self.username}>'
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'email': self.email,
+            'full_name': self.full_name,
+            'phone': self.phone,
+            'role': self.role.name if self.role else None,
+            'hotel_id': self.hotel_id,
+            'is_active': self.is_active
+        }
+models/guest.py
+python
+"""
+Guest and Company models - CRM
+"""
+
+from datetime import datetime
+from app import db
+
+class Company(db.Model):
+    """Компанія-контрагент"""
+    __tablename__ = 'companies'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    edrpou = db.Column(db.String(20))           # код ЄДРПОУ
+    tax_id = db.Column(db.String(50))
+    address = db.Column(db.Text)
+    phone = db.Column(db.String(50))
+    email = db.Column(db.String(100))
+    contact_person = db.Column(db.String(200))
+    
+    # Договірні умови
+    contract_number = db.Column(db.String(50))
+    contract_date = db.Column(db.Date)
+    discount_rate = db.Column(db.Float, default=0)
+    credit_limit = db.Column(db.Float, default=0)
+    payment_terms = db.Column(db.Integer, default=14)  # днів відстрочки
+    
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Зв'язки
+    guests = db.relationship('Guest', backref='company', lazy='dynamic')
+    
+    def __repr__(self):
+        return f'<Company {self.name}>'
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'edrpou': self.edrpou,
+            'phone': self.phone,
+            'email': self.email,
+            'contact_person': self.contact_person,
+            'discount_rate': self.discount_rate,
+            'credit_limit': self.credit_limit
+        }
+
+
+class Guest(db.Model):
+    """Модель гостя з історією"""
+    __tablename__ = 'guests'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    first_name = db.Column(db.String(100), nullable=False)
+    last_name = db.Column(db.String(100), nullable=False)
+    middle_name = db.Column(db.String(100))
+    
+    # Контакти
+    email = db.Column(db.String(100))
+    phone = db.Column(db.String(50), nullable=False)
+    
+    # Документи
+    passport_number = db.Column(db.String(50))
+    passport_issued = db.Column(db.String(200))
+    birth_date = db.Column(db.Date)
+    nationality = db.Column(db.String(50))
+    address = db.Column(db.Text)
+    
+    # Програма лояльності
+    loyalty_level = db.Column(db.String(20), default='bronze')  # bronze, silver, gold, platinum
+    loyalty_points = db.Column(db.Integer, default=0)
+    total_nights = db.Column(db.Integer, default=0)
+    total_spent = db.Column(db.Float, default=0)
+    
+    # Компанія
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'))
+    
+    # Додаткові поля
+    preferences = db.Column(db.JSON, default=list)  # ['non_smoking', 'high_floor', 'extra_pillow']
+    tags = db.Column(db.JSON, default=list)         # ['vip', 'frequent', 'problematic']
+    notes = db.Column(db.Text)
+    
+    # Системні поля
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    last_visit = db.Column(db.DateTime)
+    
+    # Зв'язки
+    reservations = db.relationship('Reservation', backref='guest', lazy='dynamic')
+    
+    def __repr__(self):
+        return f'<Guest {self.last_name} {self.first_name}>'
+    
+    @property
+    def full_name(self):
+        """Повне ім'я"""
+        return f"{self.last_name} {self.first_name} {self.middle_name or ''}".strip()
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'middle_name': self.middle_name,
+            'full_name': self.full_name,
+            'email': self.email,
+            'phone': self.phone,
+            'passport_number': self.passport_number,
+            'birth_date': self.birth_date.isoformat() if self.birth_date else None,
+            'nationality': self.nationality,
+            'loyalty_level': self.loyalty_level,
+            'loyalty_points': self.loyalty_points,
+            'total_nights': self.total_nights,
+            'total_spent': self.total_spent,
+            'company_id': self.company_id,
+            'company_name': self.company.name if self.company else None,
+            'preferences': self.preferences,
+            'tags': self.tags,
+            'last_visit': self.last_visit.isoformat() if self.last_visit else None
+        }
+    
+    def add_loyalty_points(self, points, nights, amount):
+        """Додавання бонусів після проживання"""
+        self.loyalty_points += points
+        self.total_nights += nights
+        self.total_spent += amount
+        self.last_visit = datetime.utcnow()
+        
+        # Підвищення рівня лояльності
+        if self.total_nights >= 100 or self.total_spent >= 50000:
+            self.loyalty_level = 'platinum'
+        elif self.total_nights >= 50 or self.total_spent >= 25000:
+            self.loyalty_level = 'gold'
+        elif self.total_nights >= 20 or self.total_spent >= 10000:
+            self.loyalty_level = 'silver'
+models/reservation.py
+python
+"""
+Reservation model - бронювання номерів
+"""
+
+from datetime import datetime
+from app import db
+
+class Reservation(db.Model):
+    """Модель бронювання"""
+    __tablename__ = 'reservations'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    reservation_number = db.Column(db.String(20), unique=True, nullable=False)
+    
+    # Статуси: confirmed, checked_in, checked_out, cancelled, no_show
+    status = db.Column(db.String(20), default='confirmed')
+    
+    # Дати
+    check_in = db.Column(db.DateTime, nullable=False)
+    check_out = db.Column(db.DateTime, nullable=False)
+    actual_check_in = db.Column(db.DateTime)
+    actual_check_out = db.Column(db.DateTime)
+    
+    # Гості
+    guest_id = db.Column(db.Integer, db.ForeignKey('guests.id'), nullable=False)
+    adults = db.Column(db.Integer, default=1)
+    children = db.Column(db.Integer, default=0)
+    extra_beds = db.Column(db.Integer, default=0)
+    
+    # Номери
+    room_id = db.Column(db.Integer, db.ForeignKey('rooms.id'))
+    room_category_id = db.Column(db.Integer, db.ForeignKey('room_categories.id'), nullable=False)
+    
+    # Фінанси
+    total_amount = db.Column(db.Float, default=0)
+    paid_amount = db.Column(db.Float, default=0)
+    deposit_amount = db.Column(db.Float, default=0)
+    discount = db.Column(db.Float, default=0)
+    tax = db.Column(db.Float, default=0)
+    
+    # Джерело
+    source = db.Column(db.String(50), default='direct')  # direct, booking, expedia, call
+    source_id = db.Column(db.String(100))  # ID зовнішньої системи
+    
+    # Додатково
+    special_requests = db.Column(db.Text)
+    notes = db.Column(db.Text)
+    
+    # Системні поля
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    
+    # Зв'язки
+    room = db.relationship('Room', backref='reservations')
+    room_category = db.relationship('RoomCategory', backref='reservations')
+    creator = db.relationship('User', backref='created_reservations')
+    
+    def __repr__(self):
+        return f'<Reservation {self.reservation_number}>'
+    
+    @property
+    def nights(self):
+        """Кількість ночей"""
+        return (self.check_out - self.check_in).days
+    
+    @property
+    def balance(self):
+        """Залишок до оплати"""
+        return self.total_amount - self.paid_amount
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'reservation_number': self.reservation_number,
+            'status': self.status,
+            'check_in': self.check_in.isoformat(),
+            'check_out': self.check_out.isoformat(),
+            'actual_check_in': self.actual_check_in.isoformat() if self.actual_check_in else None,
+            'actual_check_out': self.actual_check_out.isoformat() if self.actual_check_out else None,
+            'guest': self.guest.to_dict() if self.guest else None,
+            'adults': self.adults,
+            'children': self.children,
+            'extra_beds': self.extra_beds,
+            'room': self.room.to_dict() if self.room else None,
+            'room_category': self.room_category.to_dict() if self.room_category else None,
+            'total_amount': self.total_amount,
+            'paid_amount': self.paid_amount,
+            'balance': self.balance,
+            'deposit_amount': self.deposit_amount,
+            'discount': self.discount,
+            'source': self.source,
+            'nights': self.nights,
+            'special_requests': self.special_requests,
+            'notes': self.notes,
+            'created_at': self.created_at.isoformat()
+        }
+Крок 2.4: API ендпоінти
+api/__init__.py
+python
+"""
+API Blueprints
+"""
+
+from flask import Blueprint
+
+# Створення blueprint для API
+api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+# Імпортуємо ендпоінти (після створення blueprint)
+from api import auth, rooms
+api/auth.py
+python
+"""
+Authentication API
+"""
+
+from flask import request, jsonify
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from datetime import timedelta
+
+from app import db, bcrypt
+from api import api_bp
+from models.user import User
+
+
+@api_bp.route('/auth/register', methods=['POST'])
+def register():
+    """Реєстрація нового користувача"""
+    data = request.get_json()
+    
+    # Перевірка наявності користувача
+    if User.query.filter_by(username=data.get('username')).first():
+        return jsonify({'error': 'Username already exists'}), 400
+    
+    if User.query.filter_by(email=data.get('email')).first():
+        return jsonify({'error': 'Email already exists'}), 400
+    
+    # Створення користувача
+    user = User(
+        username=data['username'],
+        email=data['email'],
+        full_name=data.get('full_name')
+    )
+    user.set_password(data['password'])
+    
+    db.session.add(user)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'User created successfully',
+        'user': user.to_dict()
+    }), 201
+
+
+@api_bp.route('/auth/login', methods=['POST'])
+def login():
+    """Вхід в систему"""
+    data = request.get_json()
+    
+    # Пошук користувача за username або email
+    user = User.query.filter(
+        (User.username == data.get('username')) | 
+        (User.email == data.get('username'))
+    ).first()
+    
+    if not user or not user.check_password(data.get('password')):
+        return jsonify({'error': 'Invalid credentials'}), 401
+    
+    if not user.is_active:
+        return jsonify({'error': 'Account is disabled'}), 401
+    
+    # Оновлення часу останнього входу
+    from datetime import datetime
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+    
+    # Створення токену
+    access_token = create_access_token(
+        identity=user.id,
+        expires_delta=timedelta(hours=8)
+    )
+    
+    return jsonify({
+        'access_token': access_token,
+        'user': user.to_dict()
+    }), 200
+
+
+@api_bp.route('/auth/me', methods=['GET'])
+@jwt_required()
+def get_current_user():
+    """Отримання інформації про поточного користувача"""
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify(user.to_dict()), 200
+api/rooms.py
+python
+"""
+Rooms API - управління номерами та категоріями
+"""
+
+from flask import request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from datetime import datetime, timedelta
+
+from app import db
+from api import api_bp
+from models.room import Room, RoomCategory
+from models.reservation import Reservation
+
+
+@api_bp.route('/rooms/categories', methods=['GET'])
+def get_categories():
+    """Отримання списку категорій номерів"""
+    hotel_id = request.args.get('hotel_id', type=int)
+    
+    query = RoomCategory.query.filter_by(is_active=True)
+    if hotel_id:
+        query = query.filter_by(hotel_id=hotel_id)
+    
+    categories = query.order_by(RoomCategory.sort_order).all()
+    
+    return jsonify({
+        'categories': [c.to_dict() for c in categories],
+        'total': len(categories)
+    }), 200
+
+
+@api_bp.route('/rooms/categories', methods=['POST'])
+@jwt_required()
+def create_category():
+    """Створення нової категорії номерів"""
+    data = request.get_json()
+    
+    # Перевірка обов'язкових полів
+    required = ['name', 'code', 'base_price', 'hotel_id']
+    for field in required:
+        if field not in data:
+            return jsonify({'error': f'Missing field: {field}'}), 400
+    
+    category = RoomCategory(
+        name=data['name'],
+        code=data['code'],
+        description=data.get('description'),
+        capacity=data.get('capacity', 2),
+        max_capacity=data.get('max_capacity', 3),
+        extra_bed_allowed=data.get('extra_bed_allowed', True),
+        extra_bed_price=data.get('extra_bed_price', 0),
+        amenities=data.get('amenities', []),
+        images=data.get('images', []),
+        base_price=data['base_price'],
+        hotel_id=data['hotel_id']
+    )
+    
+    db.session.add(category)
+    db.session.commit()
+    
+    return jsonify(category.to_dict()), 201
+
+
+@api_bp.route('/rooms', methods=['GET'])
+def get_rooms():
+    """Отримання списку номерів з фільтрами"""
+    hotel_id = request.args.get('hotel_id', type=int)
+    category_id = request.args.get('category_id', type=int)
+    status = request.args.get('status')
+    
+    query = Room.query
+    
+    if hotel_id:
+        query = query.filter_by(hotel_id=hotel_id)
+    if category_id:
+        query = query.filter_by(category_id=category_id)
+    if status:
+        query = query.filter_by(status=status)
+    
+    rooms = query.all()
+    
+    return jsonify({
+        'rooms': [r.to_dict() for r in rooms],
+        'total': len(rooms)
+    }), 200
+
+
+@api_bp.route('/rooms/availability', methods=['GET'])
+def check_availability():
+    """
+    Перевірка доступності номерів на задані дати
+    GET /api/rooms/availability?hotel_id=1&check_in=2024-01-15&check_out=2024-01-17
+    """
+    hotel_id = request.args.get('hotel_id', type=int, required=True)
+    check_in_str = request.args.get('check_in')
+    check_out_str = request.args.get('check_out')
+    
+    if not check_in_str or not check_out_str:
+        return jsonify({'error': 'check_in and check_out are required'}), 400
+    
+    try:
+        check_in = datetime.strptime(check_in_str, '%Y-%m-%d')
+        check_out = datetime.strptime(check_out_str, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+    
+    # Отримуємо всі категорії готелю
+    categories = RoomCategory.query.filter_by(hotel_id=hotel_id, is_active=True).all()
+    
+    # Отримуємо всі бронювання на ці дати
+    reservations = Reservation.query.filter(
+        Reservation.hotel_id == hotel_id,
+        Reservation.status.in_(['confirmed', 'checked_in']),
+        Reservation.check_in < check_out,
+        Reservation.check_out > check_in
+    ).all()
+    
+    # Рахуємо зайняті номери по категоріях
+    occupied_counts = {}
+    for r in reservations:
+        if r.room_id:
+            room = Room.query.get(r.room_id)
+            if room:
+                cat_id = room.category_id
+                occupied_counts[cat_id] = occupied_counts.get(cat_id, 0) + 1
+    
+    # Формуємо результат
+    availability = []
+    for category in categories:
+        total_rooms = Room.query.filter_by(category_id=category.id).count()
+        occupied = occupied_counts.get(category.id, 0)
+        
+        availability.append({
+            'category_id': category.id,
+            'category_name': category.name,
+            'total_rooms': total_rooms,
+            'occupied': occupied,
+            'available': total_rooms - occupied,
+            'base_price': category.base_price
+        })
+    
+    return jsonify({
+        'check_in': check_in_str,
+        'check_out': check_out_str,
+        'nights': (check_out - check_in).days,
+        'availability': availability
+    }), 200
+
+
+@api_bp.route('/rooms/<int:room_id>', methods=['GET'])
+def get_room(room_id):
+    """Отримання інформації про конкретний номер"""
+    room = Room.query.get_or_404(room_id)
+    return jsonify(room.to_dict()), 200
+
+
+@api_bp.route('/rooms/<int:room_id>/status', methods=['PUT'])
+@jwt_required()
+def update_room_status(room_id):
+    """Оновлення статусу номера"""
+    room = Room.query.get_or_404(room_id)
+    data = request.get_json()
+    
+    new_status = data.get('status')
+    valid_statuses = ['clean', 'dirty', 'repair', 'blocked', 'occupied']
+    
+    if new_status not in valid_statuses:
+        return jsonify({'error': f'Invalid status. Must be one of: {valid_statuses}'}), 400
+    
+    room.status = new_status
+    room.updated_at = datetime.utcnow()
+    
+    db.session.commit()
+    
+    return jsonify({
+        'message': f'Room {room.number} status updated to {new_status}',
+        'room': room.to_dict()
+    }), 200
+
+
+@api_bp.route('/rooms/dashboard/stats', methods=['GET'])
+def get_dashboard_stats():
+    """Статистика для головного дашборду"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    
+    # Загальна кількість номерів
+    total_rooms = Room.query.filter_by(hotel_id=hotel_id).count()
+    
+    # Статуси номерів
+    clean_rooms = Room.query.filter_by(hotel_id=hotel_id, status='clean').count()
+    dirty_rooms = Room.query.filter_by(hotel_id=hotel_id, status='dirty').count()
+    occupied_rooms = Room.query.filter_by(hotel_id=hotel_id, status='occupied').count()
+    
+    # Сьогоднішні заїзди/виїзди
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today + timedelta(days=1)
+    
+    checkins_today = Reservation.query.filter(
+        Reservation.hotel_id == hotel_id,
+        Reservation.check_in >= today,
+        Reservation.check_in < tomorrow,
+        Reservation.status == 'confirmed'
+    ).count()
+    
+    checkouts_today = Reservation.query.filter(
+        Reservation.hotel_id == hotel_id,
+        Reservation.check_out >= today,
+        Reservation.check_out < tomorrow,
+        Reservation.status == 'checked_in'
+    ).count()
+    
+    # Заповненість
+    occupancy_rate = (occupied_rooms / total_rooms * 100) if total_rooms > 0 else 0
+    
+    return jsonify({
+        'total_rooms': total_rooms,
+        'clean_rooms': clean_rooms,
+        'dirty_rooms': dirty_rooms,
+        'occupied_rooms': occupied_rooms,
+        'occupancy_rate': round(occupancy_rate, 1),
+        'checkins_today': checkins_today,
+        'checkouts_today': checkouts_today,
+        'timestamp': datetime.now().isoformat()
+    }), 200
+Крок 2.5: Оновлення app.py
+python
+"""
+Maison HD - Hotel Management System
+Modern, Fast, Scalable
+"""
+
+import os
+from datetime import datetime, timedelta
+from contextlib import contextmanager
+
+from flask import Flask, jsonify, request, render_template
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from flask_cors import CORS
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_bcrypt import Bcrypt
+from dotenv import load_dotenv
+from loguru import logger
+
+# Завантаження змінних середовища
+load_dotenv()
+
+# Ініціалізація розширень
+db = SQLAlchemy()
+migrate = Migrate()
+jwt = JWTManager()
+bcrypt = Bcrypt()
+cors = CORS()
+
+def create_app(config_name='default'):
+    """Фабрика додатку"""
+    app = Flask(__name__, 
+                template_folder='dashboard/templates',
+                static_folder='dashboard/static')
+    
+    # Завантаження конфігурації
+    from config import config
+    app.config.from_object(config.get(config_name, config['default']))
+    
+    # Ініціалізація розширень з додатком
+    db.init_app(app)
+    migrate.init_app(app, db)
+    jwt.init_app(app)
+    bcrypt.init_app(app)
+    cors.init_app(app, origins=app.config['CORS_ORIGINS'])
+    
+    # Налаштування логування
+    logger.add(app.config['LOG_FILE'], rotation="1 day", retention="30 days", level=app.config['LOG_LEVEL'])
+    
+    # Реєстрація blueprints
+    from api import api_bp
+    app.register_blueprint(api_bp)
+    
+    # Головна сторінка
+    @app.route('/')
+    def index():
+        return render_template('index.html')
+    
+    @app.route('/api/health')
+    def health():
+        return jsonify({
+            'status': 'ok',
+            'service': 'Maison HD',
+            'version': '0.2.0',
+            'timestamp': datetime.utcnow().isoformat()
+        })
+    
+    # Обробники помилок
+    @app.errorhandler(404)
+    def not_found(error):
+        return jsonify({'error': 'Resource not found'}), 404
+    
+    @app.errorhandler(500)
+    def internal_error(error):
+        logger.error(f"Internal server error: {error}")
+        return jsonify({'error': 'Internal server error'}), 500
+    
+    # CLI команди
+    @app.cli.command("init-db")
+    def init_db():
+        """Ініціалізація бази даних"""
+        with app.app_context():
+            db.create_all()
+            logger.info("Database initialized successfully")
+            print("✅ Database initialized!")
+    
+    @app.cli.command("create-admin")
+    def create_admin():
+        """Створення адміністратора"""
+        from models.user import User
+        
+        username = input("Username: ")
+        email = input("Email: ")
+        password = input("Password: ")
+        
+        with app.app_context():
+            if User.query.filter_by(username=username).first():
+                print("❌ Username already exists")
+                return
+            
+            user = User(username=username, email=email, full_name="Administrator")
+            user.set_password(password)
+            
+            db.session.add(user)
+            db.session.commit()
+            print(f"✅ Admin user '{username}' created successfully!")
+    
+    return app
+
+# Створення додатку
+app = create_app(os.getenv('FLASK_ENV', 'development'))
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+Крок 2.6: Міграція бази даних
+У терміналі Replit виконайте:
+
+bash
+# Встановлення оновлених залежностей
+pip install -r requirements.txt
+
+# Ініціалізація міграцій (перший раз)
+flask db init
+
+# Створення міграції
+flask db migrate -m "Initial migration with all models"
+
+# Застосування міграції
+flask db upgrade
+
+# Створення адміністратора
+flask create-admin
+Крок 2.7: Оновлення фронтенду для API
+Оновіть dashboard/static/js/main.js:
+
+javascript
+// Maison HD - Main JavaScript
+
+// API Client
+const API = {
+    baseURL: '/api',
+    
+    async request(endpoint, options = {}) {
+        const token = localStorage.getItem('access_token');
+        const headers = {
+            'Content-Type': 'application/json',
+            ...options.headers
+        };
+        
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        try {
+            const response = await fetch(`${this.baseURL}${endpoint}`, {
+                ...options,
+                headers
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'API request failed');
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('API Error:', error);
+            throw error;
+        }
+    },
+    
+    get(endpoint) {
+        return this.request(endpoint, { method: 'GET' });
+    },
+    
+    post(endpoint, data) {
+        return this.request(endpoint, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    
+    put(endpoint, data) {
+        return this.request(endpoint, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+};
+
+// Dashboard Functions
+async function loadDashboardStats() {
+    try {
+        const stats = await API.get('/rooms/dashboard/stats');
+        updateDashboardUI(stats);
+        return stats;
+    } catch (error) {
+        console.error('Failed to load dashboard stats:', error);
+        showNotification('Помилка завантаження даних', 'error');
+    }
+}
+
+function updateDashboardUI(stats) {
+    // Оновлення KPI карток
+    document.getElementById('occupancy').innerHTML = `${stats.occupancy_rate}<span class="text-lg">%</span>`;
+    document.getElementById('checkins').innerHTML = stats.checkins_today;
+    document.getElementById('checkouts').innerHTML = stats.checkouts_today;
+    
+    // Оновлення прогрес-бару заповненості
+    const progressBar = document.querySelector('#occupancy + div .bg-indigo-600');
+    if (progressBar) {
+        progressBar.style.width = `${stats.occupancy_rate}%`;
+    }
+}
+
+async function loadAvailability() {
+    const today = new Date().toISOString().split('T')[0];
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    
+    try {
+        const data = await API.get(`/rooms/availability?hotel_id=1&check_in=${today}&check_out=${tomorrow}`);
+        console.log('Availability:', data);
+        return data;
+    } catch (error) {
+        console.error('Failed to load availability:', error);
+    }
+}
+
+function showNotification(message, type = 'info') {
+    // Створення елементу сповіщення
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 ${
+        type === 'error' ? 'bg-red-500' : 
+        type === 'success' ? 'bg-green-500' : 
+        'bg-blue-500'
+    } text-white`;
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
+
+// WebSocket for real-time updates (for future)
+let ws = null;
+
+function connectWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    
+    ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => {
+        console.log('WebSocket connected');
+    };
+    
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        handleRealtimeUpdate(data);
+    };
+    
+    ws.onclose = () => {
+        console.log('WebSocket disconnected, reconnecting...');
+        setTimeout(connectWebSocket, 5000);
+    };
+}
+
+function handleRealtimeUpdate(data) {
+    switch (data.type) {
+        case 'new_reservation':
+            showNotification(`Нове бронювання: ${data.guest_name}`, 'success');
+            break;
+        case 'checkin':
+            showNotification(`Заселення: ${data.guest_name} в номер ${data.room_number}`, 'info');
+            break;
+        case 'checkout':
+            showNotification(`Виселення: ${data.guest_name} з номеру ${data.room_number}`, 'info');
+            break;
+        case 'alert':
+            showNotification(data.message, 'error');
+            break;
+    }
+}
+
+// Ініціалізація при завантаженні сторінки
+document.addEventListener('DOMContentLoaded', () => {
+    // Завантаження даних
+    if (window.location.pathname === '/') {
+        loadDashboardStats();
+        
+        // Автооновлення кожні 60 секунд
+        setInterval(loadDashboardStats, 60000);
+    }
+    
+    // Підключення WebSocket для реального часу (для майбутніх функцій)
+    // connectWebSocket();
+});
+
+// Експорт для використання в інших скриптах
+window.API = API;
+window.showNotification = showNotification;

@@ -62,8 +62,8 @@ artifacts-monorepo/
 - **organizations** — Multi-tenant organizations (SaaS model)
 - **users** — Users with roles: super_admin, owner, manager, reception, housekeeping
 - **properties** — Properties per org (hotel, house, spa, pool, bungalow, other)
-- **units** — Rentable units within properties
-- **guests** — Guest CRM
+- **units** — Rentable units: `hasView` (park/sea/city/garden/mountain/pool), `hasBalcony`, `squareMeters`, `maxCapacity`
+- **guests** — Guest CRM: `middleName`, `passportNumber`, `nationality`, `birthDate`, `address`, `loyaltyLevel` (bronze/silver/gold/platinum), `loyaltyPoints`, `totalNights`, `totalSpent`, `preferences[]`, `tags[]`, `lastVisit`
 - **bookings** — Bookings with status and payment tracking
 - **housekeeping_tasks** — Task management for housekeeping staff
 - **rates** — Rate plans with seasonality and promo codes
@@ -77,7 +77,9 @@ All routes at `/api/*`:
 - `POST /api/auth/login` — Login with email/password
 - `GET /api/auth/me` — Get current user (bearer token)
 - `GET /api/properties` — List properties
-- `GET /api/units` — List units (with filters)
+- `GET /api/units` — List units (with filters: propertyId, category, status)
+- `GET /api/units/availability?checkIn=&checkOut=` — Availability check per date range
+- `GET /api/units/categories` — Category summary with counts
 - `GET /api/bookings` — List bookings (with date/status filters)
 - `POST /api/bookings` — Create booking
 - `GET /api/guests` — Guest list with search/pagination

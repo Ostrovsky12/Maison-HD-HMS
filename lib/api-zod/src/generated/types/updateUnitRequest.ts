@@ -11,8 +11,12 @@ export interface UpdateUnitRequest {
   name?: string;
   category?: string;
   capacity?: number;
+  maxCapacity?: number | null;
   status?: UpdateUnitRequestStatus;
   floor?: number | null;
   description?: string | null;
   basePrice?: number | null;
+  hasView?: string | null;
+  hasBalcony?: boolean | null;
+  squareMeters?: number | null;
 }
