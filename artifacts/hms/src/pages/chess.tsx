@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useListUnits, useListBookings } from "@workspace/api-client-react";
 import { addDays, format, differenceInDays, startOfDay, isBefore, isAfter } from "date-fns";
@@ -29,14 +29,65 @@ const STATUS_UA: Record<string, string> = {
 
 const DAYS_UA_SHORT = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
-// Categories that are collapsible by default
-const COLLAPSIBLE_CATEGORIES = new Set(["Шезлонг", "Термальна зона", "Outdoor Jacuzzi", "Бунгало"]);
-// Categories collapsed by default
-const COLLAPSED_BY_DEFAULT = new Set(["Шезлонг", "Термальна зона", "Outdoor Jacuzzi"]);
+// ─── Group tabs: display name → DB categories ────────────────────────────────
+
+type GroupTab = {
+  id: string;
+  label: string;
+  shortLabel: string;
+  categories: string[];  // matches unit.category in DB
+};
+
+const GROUP_TABS: GroupTab[] = [
+  {
+    id: "all",
+    label: "Всі",
+    shortLabel: "Всі",
+    categories: [],  // empty = show all
+  },
+  {
+    id: "b1",
+    label: "Будинки з 1 спальнею",
+    shortLabel: "Будинки 1сп",
+    categories: ["Будинок 1 спальня"],
+  },
+  {
+    id: "b2",
+    label: "Будинок з 2 спальнями",
+    shortLabel: "Будинки 2сп",
+    categories: ["Будинок 2 спальні"],
+  },
+  {
+    id: "rooms",
+    label: "Номери",
+    shortLabel: "Номери",
+    categories: ["Стандарт", "Люкс", "Бунгало"],
+  },
+  {
+    id: "thermal",
+    label: "Термальна Зона",
+    shortLabel: "Термальна",
+    categories: ["Термальна зона"],
+  },
+  {
+    id: "jacuzzi",
+    label: "Джакузі",
+    shortLabel: "Джакузі",
+    categories: ["Outdoor Jacuzzi"],
+  },
+  {
+    id: "massage",
+    label: "Масаж",
+    shortLabel: "Масаж",
+    categories: ["Масаж", "Шезлонг"],
+  },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Chessboard() {
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(COLLAPSED_BY_DEFAULT);
+  const [activeGroupId, setActiveGroupId] = useState<string>("all");
   const daysToShow = 30;
 
   const endDate = addDays(startDate, daysToShow);
@@ -52,25 +103,24 @@ export default function Chessboard() {
     [startDate]
   );
 
-  // Group units by property name (use property category or name)
-  const groupedUnits = useMemo(() => {
-    const groups: Record<string, typeof units> = {};
-    units.forEach(u => {
-      const key = u.category;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(u);
-    });
-    return groups;
-  }, [units]);
+  const activeTab = GROUP_TABS.find(t => t.id === activeGroupId) ?? GROUP_TABS[0];
 
-  const toggleGroup = (category: string) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(category)) next.delete(category);
-      else next.add(category);
-      return next;
-    });
-  };
+  // Build groups: if a specific tab is selected, show only those categories merged into one group;
+  // if "all", show all categories each as their own group.
+  const groupedUnits = useMemo(() => {
+    if (activeGroupId === "all") {
+      const groups: Record<string, typeof units> = {};
+      units.forEach(u => {
+        if (!groups[u.category]) groups[u.category] = [];
+        groups[u.category].push(u);
+      });
+      return groups;
+    }
+    // Single group: merge all matching categories
+    const matching = units.filter(u => activeTab.categories.includes(u.category));
+    if (matching.length === 0) return {};
+    return { [activeTab.label]: matching };
+  }, [units, activeGroupId, activeTab]);
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
@@ -80,11 +130,21 @@ export default function Chessboard() {
     return `${s} — ${e}`;
   };
 
+  // Count units per group tab for badge display
+  const groupCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: units.length };
+    GROUP_TABS.slice(1).forEach(tab => {
+      counts[tab.id] = units.filter(u => tab.categories.includes(u.category)).length;
+    });
+    return counts;
+  }, [units]);
+
   return (
     <AppLayout>
       <div className="flex flex-col h-full bg-background">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card z-20 flex-shrink-0">
+
+        {/* ── Toolbar ──────────────────────────────── */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card z-20 flex-shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-display font-bold">Шахматка</h1>
             <div className="flex items-center bg-muted rounded-lg overflow-hidden">
@@ -109,28 +169,68 @@ export default function Chessboard() {
           <Button size="sm"><Plus className="w-4 h-4 mr-1.5" /> Бронювання</Button>
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center gap-4 px-4 py-1.5 border-b border-border bg-card/50 flex-shrink-0 text-xs text-muted-foreground">
-          {Object.entries(STATUS_COLORS).map(([k, v]) => (
-            <span key={k} className="flex items-center gap-1">
-              <span className={`w-3 h-3 rounded-sm ${v.split(' ')[0]}`}/>
-              {STATUS_UA[k]}
-            </span>
-          ))}
+        {/* ── Group Tab Bar ─────────────────────────── */}
+        <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card/80 flex-shrink-0 overflow-x-auto">
+          {GROUP_TABS.map(tab => {
+            const count = groupCounts[tab.id] ?? 0;
+            const isActive = tab.id === activeGroupId;
+            // Skip tabs with 0 units (except "all")
+            if (tab.id !== "all" && count === 0) return null;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveGroupId(tab.id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150 flex-shrink-0",
+                  isActive
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                <span>{tab.label}</span>
+                {tab.id !== "all" && (
+                  <span className={cn(
+                    "text-[10px] font-bold px-1.5 py-0.5 rounded-full",
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : "bg-muted-foreground/15 text-muted-foreground"
+                  )}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+          {/* Status legend — pushed to right */}
+          <div className="ml-auto flex items-center gap-3 pl-3 border-l border-border/50 flex-shrink-0">
+            {Object.entries(STATUS_COLORS).map(([k, v]) => (
+              <span key={k} className="flex items-center gap-1 text-[10px] text-muted-foreground whitespace-nowrap">
+                <span className={`w-2.5 h-2.5 rounded-sm ${v.split(' ')[0]}`} />
+                {STATUS_UA[k]}
+              </span>
+            ))}
+          </div>
         </div>
 
-        {/* Grid Container */}
+        {/* ── Grid Container ────────────────────────── */}
         <div className="flex-1 overflow-auto">
           <div style={{ minWidth: UNIT_COL_WIDTH + CELL_WIDTH * daysToShow }}>
 
             {/* Sticky Date Header */}
             <div className="flex sticky top-0 z-20 bg-card border-b border-border shadow-sm">
+              {/* Left header cell — shows active group name */}
               <div
-                className="flex-shrink-0 border-r border-border flex items-center px-3 font-semibold text-xs text-muted-foreground sticky left-0 bg-card z-30"
+                className="flex-shrink-0 border-r border-border flex flex-col justify-center px-3 sticky left-0 bg-card z-30 gap-0.5"
                 style={{ width: UNIT_COL_WIDTH, height: ROW_HEIGHT }}
               >
-                Юніт
+                <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wider">Група</span>
+                <span className="text-xs font-semibold text-foreground truncate">
+                  {activeTab.id === "all" ? "Всі юніти" : activeTab.label}
+                </span>
               </div>
+
+              {/* Date columns */}
               <div className="flex">
                 {dates.map((date, i) => {
                   const isToday = format(date, 'yyyy-MM-dd') === today;
@@ -160,11 +260,12 @@ export default function Chessboard() {
             </div>
 
             {/* Grid Body */}
-            {Object.entries(groupedUnits).map(([category, catUnits]) => {
-              const isCollapsed = collapsedGroups.has(category);
-              const isCollapsible = COLLAPSIBLE_CATEGORIES.has(category);
-
-              return (
+            {Object.keys(groupedUnits).length === 0 ? (
+              <div className="flex items-center justify-center py-20 text-muted-foreground text-sm">
+                Немає юнітів у категорії «{activeTab.label}»
+              </div>
+            ) : (
+              Object.entries(groupedUnits).map(([category, catUnits]) => (
                 <div key={category}>
                   {/* Category Header Row */}
                   <div className="flex sticky left-0 z-10 border-b border-border bg-secondary/60">
@@ -172,25 +273,13 @@ export default function Chessboard() {
                       className="flex-shrink-0 flex items-center gap-2 px-3 sticky left-0 bg-secondary/90 backdrop-blur border-r border-border"
                       style={{ width: UNIT_COL_WIDTH }}
                     >
-                      <button
-                        onClick={() => isCollapsible && toggleGroup(category)}
-                        className={cn(
-                          "flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground w-full py-2",
-                          isCollapsible && "hover:text-foreground cursor-pointer transition-colors"
-                        )}
-                      >
-                        {isCollapsible ? (
-                          isCollapsed
-                            ? <ChevronRightIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                            : <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
-                        ) : (
-                          <span className="w-3.5" />
-                        )}
-                        <span>{category}</span>
-                        <span className="ml-auto font-normal opacity-60">({catUnits.length})</span>
-                      </button>
+                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground py-2 flex-1 truncate">
+                        {category}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/60 font-normal">
+                        ({catUnits.length})
+                      </span>
                     </div>
-                    {/* Category header spans across dates */}
                     <div className="flex flex-1">
                       {dates.map((_, i) => (
                         <div key={i} className="flex-shrink-0 border-r border-border/30"
@@ -199,11 +288,15 @@ export default function Chessboard() {
                     </div>
                   </div>
 
-                  {/* Unit Rows — hidden when collapsed */}
-                  {!isCollapsed && catUnits.map(unit => {
+                  {/* Unit Rows */}
+                  {catUnits.map(unit => {
                     const unitBookings = bookings.filter(b => b.unitId === unit.id);
                     return (
-                      <div key={unit.id} className="flex border-b border-border/50 hover:bg-muted/20 transition-colors group" style={{ height: ROW_HEIGHT }}>
+                      <div
+                        key={unit.id}
+                        className="flex border-b border-border/50 hover:bg-muted/20 transition-colors group"
+                        style={{ height: ROW_HEIGHT }}
+                      >
                         {/* Left fixed column */}
                         <div
                           className="flex-shrink-0 border-r border-border flex flex-col justify-center px-3 sticky left-0 bg-card group-hover:bg-muted/40 z-10"
@@ -221,7 +314,6 @@ export default function Chessboard() {
 
                         {/* Booking cells */}
                         <div className="flex relative flex-1">
-                          {/* Grid cells */}
                           {dates.map((date, i) => {
                             const isWeekend = date.getDay() === 0 || date.getDay() === 6;
                             return (
@@ -269,9 +361,13 @@ export default function Chessboard() {
                                 )}
                                 style={{ left: leftOffset, width: Math.max(blockWidth, 8) }}
                               >
-                                <span className="text-[10px] font-semibold truncate leading-tight">{booking.guestName || "Гість"}</span>
+                                <span className="text-[10px] font-semibold truncate leading-tight">
+                                  {booking.guestName || "Гість"}
+                                </span>
                                 {blockWidth > 60 && (
-                                  <span className="text-[9px] opacity-75 truncate leading-tight">{STATUS_UA[booking.status]}</span>
+                                  <span className="text-[9px] opacity-75 truncate leading-tight">
+                                    {STATUS_UA[booking.status]}
+                                  </span>
                                 )}
                               </div>
                             );
@@ -281,8 +377,8 @@ export default function Chessboard() {
                     );
                   })}
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
         </div>
       </div>
