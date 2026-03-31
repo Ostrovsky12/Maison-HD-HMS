@@ -748,6 +748,112 @@ export interface OccupancyData {
   revenue: number;
 }
 
+export type NotificationType =
+  (typeof NotificationType)[keyof typeof NotificationType];
+
+export const NotificationType = {
+  booking_created: "booking_created",
+  checkin: "checkin",
+  checkout: "checkout",
+  cancellation: "cancellation",
+  alert: "alert",
+  report: "report",
+  housekeeping: "housekeeping",
+} as const;
+
+export type NotificationPriority =
+  (typeof NotificationPriority)[keyof typeof NotificationPriority];
+
+export const NotificationPriority = {
+  low: "low",
+  normal: "normal",
+  high: "high",
+  critical: "critical",
+} as const;
+
+export interface Notification {
+  id: number;
+  userId?: number | null;
+  bookingId?: number | null;
+  type: NotificationType;
+  title: string;
+  message: string;
+  isRead: boolean;
+  priority: NotificationPriority;
+  createdAt: string;
+}
+
+export interface NotificationListResponse {
+  notifications: Notification[];
+  unreadCount: number;
+}
+
+export interface BookingCalendarUnit {
+  id: number;
+  name: string;
+  category: string;
+  propertyId: number;
+  propertyName: string;
+  hasView: boolean;
+  hasBalcony: boolean;
+  squareMeters?: number | null;
+  maxCapacity?: number | null;
+}
+
+export interface BookingCalendarEntry {
+  id: number;
+  unitId: number;
+  guestName: string;
+  checkIn: string;
+  checkOut: string;
+  status: string;
+  nights: number;
+  guestsCount: number;
+  totalAmount: number;
+  color: string;
+}
+
+export interface BookingCalendarResponse {
+  units: BookingCalendarUnit[];
+  bookings: BookingCalendarEntry[];
+  dates: string[];
+  startDate: string;
+  days: number;
+}
+
+export interface PricingNightDetail {
+  date: string;
+  basePrice: number;
+  seasonFactor: number;
+  weekendFactor: number;
+  earlyBookingFactor: number;
+  finalPrice: number;
+  label: string;
+}
+
+export interface PricingPreview {
+  unitId: number;
+  unitName: string;
+  basePrice: number;
+  checkIn: string;
+  checkOut: string;
+  nights: number;
+  totalAmount: number;
+  avgNightPrice: number;
+  breakdown: PricingNightDetail[];
+}
+
+export interface GuestSearchResult {
+  id: number;
+  firstName: string;
+  lastName: string;
+  middleName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  loyaltyLevel?: string | null;
+  totalNights: number;
+}
+
 export type GetUnitsAvailabilityParams = {
   checkIn: string;
   checkOut: string;
@@ -765,10 +871,32 @@ export type ListUnitsParams = {
   status?: string;
 };
 
+export type SearchGuestsParams = {
+  q: string;
+  limit?: number;
+};
+
+export type SearchGuests200 = {
+  guests: GuestSearchResult[];
+};
+
 export type ListGuestsParams = {
   search?: string;
   page?: number;
   limit?: number;
+};
+
+export type GetBookingsCalendarParams = {
+  startDate: string;
+  days?: number;
+  propertyId?: number;
+  category?: string;
+};
+
+export type GetPricingPreviewParams = {
+  checkIn: string;
+  checkOut: string;
+  unitId: number;
 };
 
 export type ListBookingsParams = {
@@ -778,6 +906,10 @@ export type ListBookingsParams = {
   dateFrom?: string;
   dateTo?: string;
   propertyId?: number;
+};
+
+export type CancelBookingBody = {
+  reason?: string;
 };
 
 export type ListHousekeepingTasksParams = {
@@ -804,4 +936,9 @@ export type GetOccupancyAnalyticsParams = {
   propertyId?: number;
   dateFrom?: string;
   dateTo?: string;
+};
+
+export type ListNotificationsParams = {
+  unreadOnly?: boolean;
+  limit?: number;
 };

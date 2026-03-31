@@ -79,6 +79,45 @@ router.post("/", requireAuth, async (req, res) => {
   res.status(201).json(formatGuest(guest));
 });
 
+// GET /api/guests/search?q= — quick autocomplete search
+router.get("/search", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const q = (req.query.q as string || "").trim();
+  const limit = Math.min(parseInt(req.query.limit as string || "10"), 30);
+
+  if (q.length < 1) {
+    res.json({ guests: [] });
+    return;
+  }
+
+  const conditions: any[] = [];
+  if (user.organizationId) conditions.push(eq(guestsTable.organizationId, user.organizationId));
+  conditions.push(
+    or(
+      ilike(guestsTable.firstName, `%${q}%`),
+      ilike(guestsTable.lastName, `%${q}%`),
+      ilike(guestsTable.email, `%${q}%`),
+      ilike(guestsTable.phone, `%${q}%`),
+    )
+  );
+
+  const guests = await db.select({
+    id: guestsTable.id,
+    firstName: guestsTable.firstName,
+    lastName: guestsTable.lastName,
+    middleName: guestsTable.middleName,
+    phone: guestsTable.phone,
+    email: guestsTable.email,
+    loyaltyLevel: guestsTable.loyaltyLevel,
+    totalNights: guestsTable.totalNights,
+  }).from(guestsTable)
+    .where(and(...conditions))
+    .orderBy(desc(guestsTable.totalNights))
+    .limit(limit);
+
+  res.json({ guests });
+});
+
 router.get("/:guestId", requireAuth, async (req, res) => {
   const guestId = parseInt(req.params.guestId);
   const [guest] = await db.select().from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1);

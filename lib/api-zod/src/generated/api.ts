@@ -338,6 +338,31 @@ export const UpdateUnitResponse = zod.object({
 });
 
 /**
+ * @summary Quick search guests for autocomplete
+ */
+export const searchGuestsQueryLimitDefault = 10;
+
+export const SearchGuestsQueryParams = zod.object({
+  q: zod.coerce.string(),
+  limit: zod.coerce.number().default(searchGuestsQueryLimitDefault),
+});
+
+export const SearchGuestsResponse = zod.object({
+  guests: zod.array(
+    zod.object({
+      id: zod.number(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      middleName: zod.string().nullish(),
+      phone: zod.string().nullish(),
+      email: zod.string().nullish(),
+      loyaltyLevel: zod.string().nullish(),
+      totalNights: zod.number(),
+    }),
+  ),
+});
+
+/**
  * @summary List guests
  */
 export const ListGuestsQueryParams = zod.object({
@@ -510,6 +535,82 @@ export const UpdateGuestResponse = zod.object({
   tags: zod.array(zod.string()).nullish(),
   lastVisit: zod.date().nullish(),
   createdAt: zod.date(),
+});
+
+/**
+ * @summary Get chessboard calendar data
+ */
+export const getBookingsCalendarQueryDaysDefault = 30;
+
+export const GetBookingsCalendarQueryParams = zod.object({
+  startDate: zod.date(),
+  days: zod.coerce.number().default(getBookingsCalendarQueryDaysDefault),
+  propertyId: zod.coerce.number().optional(),
+  category: zod.coerce.string().optional(),
+});
+
+export const GetBookingsCalendarResponse = zod.object({
+  units: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      category: zod.string(),
+      propertyId: zod.number(),
+      propertyName: zod.string(),
+      hasView: zod.boolean(),
+      hasBalcony: zod.boolean(),
+      squareMeters: zod.number().nullish(),
+      maxCapacity: zod.number().nullish(),
+    }),
+  ),
+  bookings: zod.array(
+    zod.object({
+      id: zod.number(),
+      unitId: zod.number(),
+      guestName: zod.string(),
+      checkIn: zod.date(),
+      checkOut: zod.date(),
+      status: zod.string(),
+      nights: zod.number(),
+      guestsCount: zod.number(),
+      totalAmount: zod.number(),
+      color: zod.string(),
+    }),
+  ),
+  dates: zod.array(zod.date()),
+  startDate: zod.date(),
+  days: zod.number(),
+});
+
+/**
+ * @summary Preview pricing for a date range
+ */
+export const GetPricingPreviewQueryParams = zod.object({
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  unitId: zod.coerce.number(),
+});
+
+export const GetPricingPreviewResponse = zod.object({
+  unitId: zod.number(),
+  unitName: zod.string(),
+  basePrice: zod.number(),
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  nights: zod.number(),
+  totalAmount: zod.number(),
+  avgNightPrice: zod.number(),
+  breakdown: zod.array(
+    zod.object({
+      date: zod.date(),
+      basePrice: zod.number(),
+      seasonFactor: zod.number(),
+      weekendFactor: zod.number(),
+      earlyBookingFactor: zod.number(),
+      finalPrice: zod.number(),
+      label: zod.string(),
+    }),
+  ),
 });
 
 /**
@@ -741,6 +842,106 @@ export const DeleteBookingParams = zod.object({
 export const DeleteBookingResponse = zod.object({
   success: zod.boolean(),
   message: zod.string().optional(),
+});
+
+/**
+ * @summary Check in a guest
+ */
+export const CheckinBookingParams = zod.object({
+  bookingId: zod.coerce.number(),
+});
+
+export const CheckinBookingResponse = zod.object({
+  id: zod.number(),
+  unitId: zod.number(),
+  guestId: zod.number(),
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  status: zod.enum([
+    "pending",
+    "confirmed",
+    "checked_in",
+    "checked_out",
+    "cancelled",
+  ]),
+  paymentStatus: zod.enum(["unpaid", "partial", "paid"]),
+  source: zod.enum(["direct", "booking", "airbnb", "other"]),
+  guestsCount: zod.number(),
+  totalAmount: zod.number(),
+  paidAmount: zod.number(),
+  notes: zod.string().nullish(),
+  guestName: zod.string().nullish(),
+  unitName: zod.string().nullish(),
+  propertyName: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Check out a guest
+ */
+export const CheckoutBookingParams = zod.object({
+  bookingId: zod.coerce.number(),
+});
+
+export const CheckoutBookingResponse = zod.object({
+  id: zod.number(),
+  unitId: zod.number(),
+  guestId: zod.number(),
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  status: zod.enum([
+    "pending",
+    "confirmed",
+    "checked_in",
+    "checked_out",
+    "cancelled",
+  ]),
+  paymentStatus: zod.enum(["unpaid", "partial", "paid"]),
+  source: zod.enum(["direct", "booking", "airbnb", "other"]),
+  guestsCount: zod.number(),
+  totalAmount: zod.number(),
+  paidAmount: zod.number(),
+  notes: zod.string().nullish(),
+  guestName: zod.string().nullish(),
+  unitName: zod.string().nullish(),
+  propertyName: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Cancel a booking
+ */
+export const CancelBookingParams = zod.object({
+  bookingId: zod.coerce.number(),
+});
+
+export const CancelBookingBody = zod.object({
+  reason: zod.string().optional(),
+});
+
+export const CancelBookingResponse = zod.object({
+  id: zod.number(),
+  unitId: zod.number(),
+  guestId: zod.number(),
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  status: zod.enum([
+    "pending",
+    "confirmed",
+    "checked_in",
+    "checked_out",
+    "cancelled",
+  ]),
+  paymentStatus: zod.enum(["unpaid", "partial", "paid"]),
+  source: zod.enum(["direct", "booking", "airbnb", "other"]),
+  guestsCount: zod.number(),
+  totalAmount: zod.number(),
+  paidAmount: zod.number(),
+  notes: zod.string().nullish(),
+  guestName: zod.string().nullish(),
+  unitName: zod.string().nullish(),
+  propertyName: zod.string().nullish(),
+  createdAt: zod.date(),
 });
 
 /**
@@ -1238,4 +1439,74 @@ export const DeleteUserParams = zod.object({
 export const DeleteUserResponse = zod.object({
   success: zod.boolean(),
   message: zod.string().optional(),
+});
+
+/**
+ * @summary List notifications for current user
+ */
+export const listNotificationsQueryLimitDefault = 50;
+
+export const ListNotificationsQueryParams = zod.object({
+  unreadOnly: zod.coerce.boolean().optional(),
+  limit: zod.coerce.number().default(listNotificationsQueryLimitDefault),
+});
+
+export const ListNotificationsResponse = zod.object({
+  notifications: zod.array(
+    zod.object({
+      id: zod.number(),
+      userId: zod.number().nullish(),
+      bookingId: zod.number().nullish(),
+      type: zod.enum([
+        "booking_created",
+        "checkin",
+        "checkout",
+        "cancellation",
+        "alert",
+        "report",
+        "housekeeping",
+      ]),
+      title: zod.string(),
+      message: zod.string(),
+      isRead: zod.boolean(),
+      priority: zod.enum(["low", "normal", "high", "critical"]),
+      createdAt: zod.date(),
+    }),
+  ),
+  unreadCount: zod.number(),
+});
+
+/**
+ * @summary Mark all notifications as read
+ */
+export const MarkAllNotificationsReadResponse = zod.object({
+  success: zod.boolean(),
+  message: zod.string().optional(),
+});
+
+/**
+ * @summary Mark a notification as read
+ */
+export const MarkNotificationReadParams = zod.object({
+  notificationId: zod.coerce.number(),
+});
+
+export const MarkNotificationReadResponse = zod.object({
+  id: zod.number(),
+  userId: zod.number().nullish(),
+  bookingId: zod.number().nullish(),
+  type: zod.enum([
+    "booking_created",
+    "checkin",
+    "checkout",
+    "cancellation",
+    "alert",
+    "report",
+    "housekeeping",
+  ]),
+  title: zod.string(),
+  message: zod.string(),
+  isRead: zod.boolean(),
+  priority: zod.enum(["low", "normal", "high", "critical"]),
+  createdAt: zod.date(),
 });

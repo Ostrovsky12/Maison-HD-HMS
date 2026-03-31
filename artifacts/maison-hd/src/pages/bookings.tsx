@@ -9,12 +9,18 @@ import {
   FileEdit,
   Trash2,
   Calendar as CalendarIcon,
-  Loader2
+  Loader2,
+  CalendarCheck,
+  CalendarX,
+  X,
 } from "lucide-react";
 import { 
   useListBookings, 
   useDeleteBooking, 
   useUpdateBookingStatus,
+  useCheckinBooking,
+  useCheckoutBooking,
+  useCancelBooking,
   getListBookingsQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -58,6 +64,10 @@ export default function BookingsPage() {
   const updateStatusMutation = useUpdateBookingStatus();
   const deleteMutation = useDeleteBooking();
 
+  const checkinMutation = useCheckinBooking();
+  const checkoutMutation = useCheckoutBooking();
+  const cancelMutation = useCancelBooking();
+
   const handleUpdateStatus = (id: number, status: BookingStatus) => {
     updateStatusMutation.mutate(
       { bookingId: id, data: { status } },
@@ -67,6 +77,46 @@ export default function BookingsPage() {
           toast({ title: "Статус оновлено" });
         },
         onError: () => toast({ title: "Помилка", variant: "destructive" })
+      }
+    );
+  };
+
+  const handleCheckIn = (id: number) => {
+    checkinMutation.mutate(
+      { bookingId: id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+          toast({ title: "Check-in виконано", description: "Гість заселений" });
+        },
+        onError: (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" })
+      }
+    );
+  };
+
+  const handleCheckOut = (id: number) => {
+    checkoutMutation.mutate(
+      { bookingId: id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+          toast({ title: "Check-out виконано", description: "Гість виселений" });
+        },
+        onError: (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" })
+      }
+    );
+  };
+
+  const handleCancel = (id: number) => {
+    if (!window.confirm("Скасувати бронювання?")) return;
+    cancelMutation.mutate(
+      { bookingId: id, data: {} },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+          toast({ title: "Бронювання скасовано", variant: "destructive" });
+        },
+        onError: (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" })
       }
     );
   };
@@ -196,16 +246,30 @@ export default function BookingsPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuLabel>Дії</DropdownMenuLabel>
-                              <DropdownMenuItem className="cursor-pointer gap-2">
-                                <FileEdit className="w-4 h-4" /> Деталі
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleUpdateStatus(booking.id, BookingStatus.checked_in)}>
-                                Змінити на "Проживає"
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleUpdateStatus(booking.id, BookingStatus.checked_out)}>
-                                Змінити на "Виїхав"
-                              </DropdownMenuItem>
+                              {(booking.status === "confirmed" || booking.status === "pending") && (
+                                <DropdownMenuItem
+                                  className="cursor-pointer gap-2 text-green-700 focus:text-green-700"
+                                  onClick={() => handleCheckIn(booking.id)}
+                                >
+                                  <CalendarCheck className="w-4 h-4" /> Check-in
+                                </DropdownMenuItem>
+                              )}
+                              {booking.status === "checked_in" && (
+                                <DropdownMenuItem
+                                  className="cursor-pointer gap-2 text-amber-700 focus:text-amber-700"
+                                  onClick={() => handleCheckOut(booking.id)}
+                                >
+                                  <CalendarX className="w-4 h-4" /> Check-out
+                                </DropdownMenuItem>
+                              )}
+                              {(booking.status === "confirmed" || booking.status === "pending") && (
+                                <DropdownMenuItem
+                                  className="cursor-pointer gap-2 text-destructive focus:text-destructive"
+                                  onClick={() => handleCancel(booking.id)}
+                                >
+                                  <X className="w-4 h-4" /> Скасувати
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem 
                                 className="text-destructive focus:text-destructive cursor-pointer gap-2"
