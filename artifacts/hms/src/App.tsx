@@ -13,6 +13,7 @@ import Housekeeping from "@/pages/housekeeping";
 import Guests from "@/pages/guests";
 import Units from "@/pages/units";
 import ImportPage from "@/pages/import";
+import LivingGuests from "@/pages/living-guests";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -59,6 +60,7 @@ function Router() {
       <Route path="/guests"><ProtectedRoute component={Guests} /></Route>
       <Route path="/units"><ProtectedRoute component={Units} /></Route>
       <Route path="/import"><ProtectedRoute component={ImportPage} /></Route>
+      <Route path="/living"><ProtectedRoute component={LivingGuests} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>

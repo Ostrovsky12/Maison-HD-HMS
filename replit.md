@@ -4,7 +4,26 @@
 
 pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
 
-HMS (Hotel Management System) — повноцінна SaaS PMS платформа для управління готельно-ресторанним комплексом.
+HMS (Hotel Management System) — повноцінна SaaS PMS платформа для управління готельно-ресторанним комплексом "Dogoda Resort".
+
+## Pages / Routes
+
+- `/dashboard` — аналітика, KPI карти, Revenue, Occupancy
+- `/chess` — шахматка (booking chessboard calendar), collapsible groups
+- `/bookings` — всі бронювання, click-to-open detail modal з QR та LiqPay
+- `/living` — **Мешкаючі гості** (LivingGuests), поточні заселені гості з балансом, ночами, виїздом
+- `/guests` — CRM гостей
+- `/housekeeping` — прибирання
+- `/units` — юніти (номери, будинки, шезлонги і т.д.)
+- `/rates` — тарифи
+- `/import` — імпорт даних з dogoda.me або JSON файлу
+
+## Features
+
+- **LiqPay** — `POST /api/bookings/:id/liqpay` генерує URL оплати; `POST /api/bookings/liqpay/callback` вебхук
+- **QR-коди** — `GET /api/bookings/:id/qr` повертає data:image/png QR з даними бронювання
+- **Import** — `GET /api/import/fetch` намагається отримати дані з dogoda.me; `POST /api/import/data` — масовий імпорт
+- **Living Guests** — розширений вигляд: nights left, balance, checkout warnings, quick checkout action
 
 ## Stack
 

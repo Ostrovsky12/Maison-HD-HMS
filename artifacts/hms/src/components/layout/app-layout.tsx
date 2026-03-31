@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { 
   LayoutDashboard, CalendarDays, Users, Bed, 
   Settings, LogOut, Moon, Sun, Wallet, 
-  Sparkles, Hotel, ClipboardList, Download
+  Sparkles, Hotel, ClipboardList, Download, BedDouble
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Дашборд", icon: LayoutDashboard },
   { href: "/chess", label: "Шахматка", icon: CalendarDays },
   { href: "/bookings", label: "Бронювання", icon: ClipboardList },
+  { href: "/living", label: "Мешкаючі гості", icon: BedDouble },
   { href: "/guests", label: "Гості", icon: Users },
   { href: "/housekeeping", label: "Прибирання", icon: Sparkles },
   { href: "/units", label: "Юніти", icon: Bed },
