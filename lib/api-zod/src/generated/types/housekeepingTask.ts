@@ -8,6 +8,7 @@
 import type { ChecklistItem } from "./checklistItem";
 import type { HousekeepingTaskPriority } from "./housekeepingTaskPriority";
 import type { HousekeepingTaskStatus } from "./housekeepingTaskStatus";
+import type { HousekeepingTaskTaskType } from "./housekeepingTaskTaskType";
 
 export interface HousekeepingTask {
   id: number;
@@ -17,9 +18,17 @@ export interface HousekeepingTask {
   assignedToName?: string | null;
   title: string;
   description?: string | null;
+  taskType: HousekeepingTaskTaskType;
   status: HousekeepingTaskStatus;
   priority: HousekeepingTaskPriority;
   dueDate?: Date | null;
   checklist: ChecklistItem[];
+  estimatedMinutes?: number | null;
+  startTime?: Date | null;
+  endTime?: Date | null;
+  verifiedById?: number | null;
+  verifiedAt?: Date | null;
+  verificationNotes?: string | null;
+  notes?: string | null;
   createdAt: Date;
 }

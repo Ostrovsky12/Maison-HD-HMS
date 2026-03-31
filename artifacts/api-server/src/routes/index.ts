@@ -14,6 +14,8 @@ import analyticsRouter from "./analytics.js";
 import usersRouter from "./users.js";
 import importRouter from "./import.js";
 import notificationsRouter from "./notifications.js";
+import invoicesRouter from "./invoices.js";
+import nightAuditRouter from "./night-audit.js";
 
 const router: IRouter = Router();
 
@@ -32,5 +34,7 @@ router.use("/analytics", analyticsRouter);
 router.use("/users", usersRouter);
 router.use("/import", importRouter);
 router.use("/notifications", notificationsRouter);
+router.use("/invoices", invoicesRouter);
+router.use("/audit", nightAuditRouter);
 
 export default router;

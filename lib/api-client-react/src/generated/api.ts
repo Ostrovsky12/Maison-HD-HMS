@@ -19,16 +19,19 @@ import type {
 import type {
   AddBookingAddonRequest,
   Addon,
+  AuditLog,
   AuthResponse,
   Booking,
   BookingAddon,
   BookingCalendarResponse,
   BookingDetail,
   CancelBookingBody,
+  CompleteHousekeepingTaskBody,
   CreateAddonRequest,
   CreateBookingRequest,
   CreateGuestRequest,
   CreateHousekeepingTaskRequest,
+  CreateInvoiceRequest,
   CreateOrganizationRequest,
   CreatePaymentRequest,
   CreatePropertyRequest,
@@ -46,24 +49,32 @@ import type {
   GuestDetail,
   GuestListResponse,
   HealthStatus,
+  HousekeepingDashboard,
   HousekeepingTask,
+  Invoice,
+  ListAuditLogsParams,
   ListBookingsParams,
   ListGuestsParams,
   ListHousekeepingTasksParams,
+  ListInvoicesParams,
+  ListNightAuditsParams,
   ListNotificationsParams,
   ListPaymentsParams,
   ListRatesParams,
   ListUnitCategoriesParams,
   ListUnitsParams,
   LoginRequest,
+  NightAudit,
   Notification,
   NotificationListResponse,
   OccupancyData,
   Organization,
+  PayInvoiceRequest,
   Payment,
   PricingPreview,
   Property,
   Rate,
+  RunNightAuditBody,
   SearchGuests200,
   SearchGuestsParams,
   SuccessResponse,
@@ -73,11 +84,13 @@ import type {
   UnitHousekeepingStatus,
   UpdateBookingRequest,
   UpdateHousekeepingTaskRequest,
+  UpdateInvoiceRequest,
   UpdateStatusRequest,
   UpdateUnitHousekeepingStatusRequest,
   UpdateUnitRequest,
   UpdateUserRequest,
   User,
+  VerifyHousekeepingTaskBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -3303,6 +3316,1057 @@ export const useUpdateUnitHousekeepingStatus = <
 > => {
   return useMutation(getUpdateUnitHousekeepingStatusMutationOptions(options));
 };
+
+/**
+ * @summary Get housekeeping dashboard stats
+ */
+export const getGetHousekeepingDashboardUrl = () => {
+  return `/api/housekeeping/dashboard`;
+};
+
+export const getHousekeepingDashboard = async (
+  options?: RequestInit,
+): Promise<HousekeepingDashboard> => {
+  return customFetch<HousekeepingDashboard>(getGetHousekeepingDashboardUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetHousekeepingDashboardQueryKey = () => {
+  return [`/api/housekeeping/dashboard`] as const;
+};
+
+export const getGetHousekeepingDashboardQueryOptions = <
+  TData = Awaited<ReturnType<typeof getHousekeepingDashboard>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getHousekeepingDashboard>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetHousekeepingDashboardQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getHousekeepingDashboard>>
+  > = ({ signal }) => getHousekeepingDashboard({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getHousekeepingDashboard>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetHousekeepingDashboardQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getHousekeepingDashboard>>
+>;
+export type GetHousekeepingDashboardQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get housekeeping dashboard stats
+ */
+
+export function useGetHousekeepingDashboard<
+  TData = Awaited<ReturnType<typeof getHousekeepingDashboard>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getHousekeepingDashboard>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetHousekeepingDashboardQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Mark task as in_progress
+ */
+export const getStartHousekeepingTaskUrl = (taskId: number) => {
+  return `/api/housekeeping/tasks/${taskId}/start`;
+};
+
+export const startHousekeepingTask = async (
+  taskId: number,
+  options?: RequestInit,
+): Promise<HousekeepingTask> => {
+  return customFetch<HousekeepingTask>(getStartHousekeepingTaskUrl(taskId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getStartHousekeepingTaskMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startHousekeepingTask>>,
+    TError,
+    { taskId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startHousekeepingTask>>,
+  TError,
+  { taskId: number },
+  TContext
+> => {
+  const mutationKey = ["startHousekeepingTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startHousekeepingTask>>,
+    { taskId: number }
+  > = (props) => {
+    const { taskId } = props ?? {};
+
+    return startHousekeepingTask(taskId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartHousekeepingTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startHousekeepingTask>>
+>;
+
+export type StartHousekeepingTaskMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mark task as in_progress
+ */
+export const useStartHousekeepingTask = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startHousekeepingTask>>,
+    TError,
+    { taskId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startHousekeepingTask>>,
+  TError,
+  { taskId: number },
+  TContext
+> => {
+  return useMutation(getStartHousekeepingTaskMutationOptions(options));
+};
+
+/**
+ * @summary Mark task as completed
+ */
+export const getCompleteHousekeepingTaskUrl = (taskId: number) => {
+  return `/api/housekeeping/tasks/${taskId}/complete`;
+};
+
+export const completeHousekeepingTask = async (
+  taskId: number,
+  completeHousekeepingTaskBody: CompleteHousekeepingTaskBody,
+  options?: RequestInit,
+): Promise<HousekeepingTask> => {
+  return customFetch<HousekeepingTask>(getCompleteHousekeepingTaskUrl(taskId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(completeHousekeepingTaskBody),
+  });
+};
+
+export const getCompleteHousekeepingTaskMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof completeHousekeepingTask>>,
+    TError,
+    { taskId: number; data: BodyType<CompleteHousekeepingTaskBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof completeHousekeepingTask>>,
+  TError,
+  { taskId: number; data: BodyType<CompleteHousekeepingTaskBody> },
+  TContext
+> => {
+  const mutationKey = ["completeHousekeepingTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof completeHousekeepingTask>>,
+    { taskId: number; data: BodyType<CompleteHousekeepingTaskBody> }
+  > = (props) => {
+    const { taskId, data } = props ?? {};
+
+    return completeHousekeepingTask(taskId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CompleteHousekeepingTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof completeHousekeepingTask>>
+>;
+export type CompleteHousekeepingTaskMutationBody =
+  BodyType<CompleteHousekeepingTaskBody>;
+export type CompleteHousekeepingTaskMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mark task as completed
+ */
+export const useCompleteHousekeepingTask = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof completeHousekeepingTask>>,
+    TError,
+    { taskId: number; data: BodyType<CompleteHousekeepingTaskBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof completeHousekeepingTask>>,
+  TError,
+  { taskId: number; data: BodyType<CompleteHousekeepingTaskBody> },
+  TContext
+> => {
+  return useMutation(getCompleteHousekeepingTaskMutationOptions(options));
+};
+
+/**
+ * @summary Mark task as verified
+ */
+export const getVerifyHousekeepingTaskUrl = (taskId: number) => {
+  return `/api/housekeeping/tasks/${taskId}/verify`;
+};
+
+export const verifyHousekeepingTask = async (
+  taskId: number,
+  verifyHousekeepingTaskBody: VerifyHousekeepingTaskBody,
+  options?: RequestInit,
+): Promise<HousekeepingTask> => {
+  return customFetch<HousekeepingTask>(getVerifyHousekeepingTaskUrl(taskId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(verifyHousekeepingTaskBody),
+  });
+};
+
+export const getVerifyHousekeepingTaskMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyHousekeepingTask>>,
+    TError,
+    { taskId: number; data: BodyType<VerifyHousekeepingTaskBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyHousekeepingTask>>,
+  TError,
+  { taskId: number; data: BodyType<VerifyHousekeepingTaskBody> },
+  TContext
+> => {
+  const mutationKey = ["verifyHousekeepingTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyHousekeepingTask>>,
+    { taskId: number; data: BodyType<VerifyHousekeepingTaskBody> }
+  > = (props) => {
+    const { taskId, data } = props ?? {};
+
+    return verifyHousekeepingTask(taskId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VerifyHousekeepingTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof verifyHousekeepingTask>>
+>;
+export type VerifyHousekeepingTaskMutationBody =
+  BodyType<VerifyHousekeepingTaskBody>;
+export type VerifyHousekeepingTaskMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mark task as verified
+ */
+export const useVerifyHousekeepingTask = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyHousekeepingTask>>,
+    TError,
+    { taskId: number; data: BodyType<VerifyHousekeepingTaskBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof verifyHousekeepingTask>>,
+  TError,
+  { taskId: number; data: BodyType<VerifyHousekeepingTaskBody> },
+  TContext
+> => {
+  return useMutation(getVerifyHousekeepingTaskMutationOptions(options));
+};
+
+/**
+ * @summary List invoices
+ */
+export const getListInvoicesUrl = (params?: ListInvoicesParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/invoices?${stringifiedParams}`
+    : `/api/invoices`;
+};
+
+export const listInvoices = async (
+  params?: ListInvoicesParams,
+  options?: RequestInit,
+): Promise<Invoice[]> => {
+  return customFetch<Invoice[]>(getListInvoicesUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListInvoicesQueryKey = (params?: ListInvoicesParams) => {
+  return [`/api/invoices`, ...(params ? [params] : [])] as const;
+};
+
+export const getListInvoicesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listInvoices>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListInvoicesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listInvoices>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListInvoicesQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listInvoices>>> = ({
+    signal,
+  }) => listInvoices(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listInvoices>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListInvoicesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listInvoices>>
+>;
+export type ListInvoicesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List invoices
+ */
+
+export function useListInvoices<
+  TData = Awaited<ReturnType<typeof listInvoices>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListInvoicesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listInvoices>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListInvoicesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create invoice
+ */
+export const getCreateInvoiceUrl = () => {
+  return `/api/invoices`;
+};
+
+export const createInvoice = async (
+  createInvoiceRequest: CreateInvoiceRequest,
+  options?: RequestInit,
+): Promise<Invoice> => {
+  return customFetch<Invoice>(getCreateInvoiceUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createInvoiceRequest),
+  });
+};
+
+export const getCreateInvoiceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createInvoice>>,
+    TError,
+    { data: BodyType<CreateInvoiceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createInvoice>>,
+  TError,
+  { data: BodyType<CreateInvoiceRequest> },
+  TContext
+> => {
+  const mutationKey = ["createInvoice"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createInvoice>>,
+    { data: BodyType<CreateInvoiceRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createInvoice(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateInvoiceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createInvoice>>
+>;
+export type CreateInvoiceMutationBody = BodyType<CreateInvoiceRequest>;
+export type CreateInvoiceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create invoice
+ */
+export const useCreateInvoice = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createInvoice>>,
+    TError,
+    { data: BodyType<CreateInvoiceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createInvoice>>,
+  TError,
+  { data: BodyType<CreateInvoiceRequest> },
+  TContext
+> => {
+  return useMutation(getCreateInvoiceMutationOptions(options));
+};
+
+/**
+ * @summary Get invoice by ID
+ */
+export const getGetInvoiceUrl = (invoiceId: number) => {
+  return `/api/invoices/${invoiceId}`;
+};
+
+export const getInvoice = async (
+  invoiceId: number,
+  options?: RequestInit,
+): Promise<Invoice> => {
+  return customFetch<Invoice>(getGetInvoiceUrl(invoiceId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetInvoiceQueryKey = (invoiceId: number) => {
+  return [`/api/invoices/${invoiceId}`] as const;
+};
+
+export const getGetInvoiceQueryOptions = <
+  TData = Awaited<ReturnType<typeof getInvoice>>,
+  TError = ErrorType<unknown>,
+>(
+  invoiceId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInvoice>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetInvoiceQueryKey(invoiceId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getInvoice>>> = ({
+    signal,
+  }) => getInvoice(invoiceId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!invoiceId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getInvoice>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetInvoiceQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getInvoice>>
+>;
+export type GetInvoiceQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get invoice by ID
+ */
+
+export function useGetInvoice<
+  TData = Awaited<ReturnType<typeof getInvoice>>,
+  TError = ErrorType<unknown>,
+>(
+  invoiceId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInvoice>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetInvoiceQueryOptions(invoiceId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update invoice
+ */
+export const getUpdateInvoiceUrl = (invoiceId: number) => {
+  return `/api/invoices/${invoiceId}`;
+};
+
+export const updateInvoice = async (
+  invoiceId: number,
+  updateInvoiceRequest: UpdateInvoiceRequest,
+  options?: RequestInit,
+): Promise<Invoice> => {
+  return customFetch<Invoice>(getUpdateInvoiceUrl(invoiceId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateInvoiceRequest),
+  });
+};
+
+export const getUpdateInvoiceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateInvoice>>,
+    TError,
+    { invoiceId: number; data: BodyType<UpdateInvoiceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateInvoice>>,
+  TError,
+  { invoiceId: number; data: BodyType<UpdateInvoiceRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateInvoice"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateInvoice>>,
+    { invoiceId: number; data: BodyType<UpdateInvoiceRequest> }
+  > = (props) => {
+    const { invoiceId, data } = props ?? {};
+
+    return updateInvoice(invoiceId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateInvoiceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateInvoice>>
+>;
+export type UpdateInvoiceMutationBody = BodyType<UpdateInvoiceRequest>;
+export type UpdateInvoiceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update invoice
+ */
+export const useUpdateInvoice = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateInvoice>>,
+    TError,
+    { invoiceId: number; data: BodyType<UpdateInvoiceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateInvoice>>,
+  TError,
+  { invoiceId: number; data: BodyType<UpdateInvoiceRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateInvoiceMutationOptions(options));
+};
+
+/**
+ * @summary Mark invoice as paid
+ */
+export const getPayInvoiceUrl = (invoiceId: number) => {
+  return `/api/invoices/${invoiceId}/pay`;
+};
+
+export const payInvoice = async (
+  invoiceId: number,
+  payInvoiceRequest: PayInvoiceRequest,
+  options?: RequestInit,
+): Promise<Invoice> => {
+  return customFetch<Invoice>(getPayInvoiceUrl(invoiceId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(payInvoiceRequest),
+  });
+};
+
+export const getPayInvoiceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof payInvoice>>,
+    TError,
+    { invoiceId: number; data: BodyType<PayInvoiceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof payInvoice>>,
+  TError,
+  { invoiceId: number; data: BodyType<PayInvoiceRequest> },
+  TContext
+> => {
+  const mutationKey = ["payInvoice"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof payInvoice>>,
+    { invoiceId: number; data: BodyType<PayInvoiceRequest> }
+  > = (props) => {
+    const { invoiceId, data } = props ?? {};
+
+    return payInvoice(invoiceId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PayInvoiceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof payInvoice>>
+>;
+export type PayInvoiceMutationBody = BodyType<PayInvoiceRequest>;
+export type PayInvoiceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mark invoice as paid
+ */
+export const usePayInvoice = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof payInvoice>>,
+    TError,
+    { invoiceId: number; data: BodyType<PayInvoiceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof payInvoice>>,
+  TError,
+  { invoiceId: number; data: BodyType<PayInvoiceRequest> },
+  TContext
+> => {
+  return useMutation(getPayInvoiceMutationOptions(options));
+};
+
+/**
+ * @summary List night audit records
+ */
+export const getListNightAuditsUrl = (params?: ListNightAuditsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/audit/night?${stringifiedParams}`
+    : `/api/audit/night`;
+};
+
+export const listNightAudits = async (
+  params?: ListNightAuditsParams,
+  options?: RequestInit,
+): Promise<NightAudit[]> => {
+  return customFetch<NightAudit[]>(getListNightAuditsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListNightAuditsQueryKey = (params?: ListNightAuditsParams) => {
+  return [`/api/audit/night`, ...(params ? [params] : [])] as const;
+};
+
+export const getListNightAuditsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listNightAudits>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListNightAuditsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listNightAudits>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListNightAuditsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listNightAudits>>> = ({
+    signal,
+  }) => listNightAudits(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listNightAudits>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListNightAuditsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listNightAudits>>
+>;
+export type ListNightAuditsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List night audit records
+ */
+
+export function useListNightAudits<
+  TData = Awaited<ReturnType<typeof listNightAudits>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListNightAuditsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listNightAudits>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListNightAuditsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Run night audit for a date
+ */
+export const getRunNightAuditUrl = () => {
+  return `/api/audit/night`;
+};
+
+export const runNightAudit = async (
+  runNightAuditBody: RunNightAuditBody,
+  options?: RequestInit,
+): Promise<NightAudit> => {
+  return customFetch<NightAudit>(getRunNightAuditUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(runNightAuditBody),
+  });
+};
+
+export const getRunNightAuditMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runNightAudit>>,
+    TError,
+    { data: BodyType<RunNightAuditBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof runNightAudit>>,
+  TError,
+  { data: BodyType<RunNightAuditBody> },
+  TContext
+> => {
+  const mutationKey = ["runNightAudit"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof runNightAudit>>,
+    { data: BodyType<RunNightAuditBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return runNightAudit(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RunNightAuditMutationResult = NonNullable<
+  Awaited<ReturnType<typeof runNightAudit>>
+>;
+export type RunNightAuditMutationBody = BodyType<RunNightAuditBody>;
+export type RunNightAuditMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run night audit for a date
+ */
+export const useRunNightAudit = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runNightAudit>>,
+    TError,
+    { data: BodyType<RunNightAuditBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof runNightAudit>>,
+  TError,
+  { data: BodyType<RunNightAuditBody> },
+  TContext
+> => {
+  return useMutation(getRunNightAuditMutationOptions(options));
+};
+
+/**
+ * @summary List audit logs
+ */
+export const getListAuditLogsUrl = (params?: ListAuditLogsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/audit/logs?${stringifiedParams}`
+    : `/api/audit/logs`;
+};
+
+export const listAuditLogs = async (
+  params?: ListAuditLogsParams,
+  options?: RequestInit,
+): Promise<AuditLog[]> => {
+  return customFetch<AuditLog[]>(getListAuditLogsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAuditLogsQueryKey = (params?: ListAuditLogsParams) => {
+  return [`/api/audit/logs`, ...(params ? [params] : [])] as const;
+};
+
+export const getListAuditLogsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAuditLogs>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAuditLogsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAuditLogs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAuditLogsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAuditLogs>>> = ({
+    signal,
+  }) => listAuditLogs(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAuditLogs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAuditLogsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAuditLogs>>
+>;
+export type ListAuditLogsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List audit logs
+ */
+
+export function useListAuditLogs<
+  TData = Awaited<ReturnType<typeof listAuditLogs>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAuditLogsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAuditLogs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAuditLogsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary List rates

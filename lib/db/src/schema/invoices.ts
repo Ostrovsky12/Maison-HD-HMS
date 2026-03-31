@@ -1,0 +1,34 @@
+import { pgTable, serial, integer, text, timestamp, numeric, pgEnum } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod/v4";
+import { bookingsTable } from "./bookings";
+import { guestsTable } from "./guests";
+import { usersTable } from "./users";
+
+export const invoiceStatusEnum = pgEnum("invoice_status", ["draft", "pending", "paid", "overdue", "cancelled"]);
+export const invoiceTypeEnum = pgEnum("invoice_type", ["accommodation", "service", "addon", "deposit", "other"]);
+export const invoicePaymentMethodEnum = pgEnum("invoice_payment_method", ["cash", "card", "bank_transfer", "liqpay", "other"]);
+
+export const invoicesTable = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  invoiceNumber: text("invoice_number").notNull(),
+  bookingId: integer("booking_id").references(() => bookingsTable.id),
+  guestId: integer("guest_id").references(() => guestsTable.id),
+  invoiceType: invoiceTypeEnum("invoice_type").notNull().default("accommodation"),
+  status: invoiceStatusEnum("status").notNull().default("pending"),
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  taxAmount: numeric("tax_amount", { precision: 10, scale: 2 }).default("0"),
+  paidAmount: numeric("paid_amount", { precision: 10, scale: 2 }).default("0"),
+  currency: text("currency").notNull().default("UAH"),
+  paymentMethod: invoicePaymentMethodEnum("payment_method"),
+  description: text("description"),
+  dueDate: timestamp("due_date"),
+  paidAt: timestamp("paid_at"),
+  createdById: integer("created_by_id").references(() => usersTable.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertInvoiceSchema = createInsertSchema(invoicesTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type Invoice = typeof invoicesTable.$inferSelect;

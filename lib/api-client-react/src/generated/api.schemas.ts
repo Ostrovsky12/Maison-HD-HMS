@@ -528,6 +528,18 @@ export interface UpdateStatusRequest {
   status: UpdateStatusRequestStatus;
 }
 
+export type HousekeepingTaskTaskType =
+  (typeof HousekeepingTaskTaskType)[keyof typeof HousekeepingTaskTaskType];
+
+export const HousekeepingTaskTaskType = {
+  cleaning: "cleaning",
+  deep_cleaning: "deep_cleaning",
+  linen_change: "linen_change",
+  maintenance: "maintenance",
+  check: "check",
+  other: "other",
+} as const;
+
 export type HousekeepingTaskStatus =
   (typeof HousekeepingTaskStatus)[keyof typeof HousekeepingTaskStatus];
 
@@ -535,6 +547,8 @@ export const HousekeepingTaskStatus = {
   pending: "pending",
   in_progress: "in_progress",
   completed: "completed",
+  verified: "verified",
+  cancelled: "cancelled",
 } as const;
 
 export type HousekeepingTaskPriority =
@@ -560,12 +574,32 @@ export interface HousekeepingTask {
   assignedToName?: string | null;
   title: string;
   description?: string | null;
+  taskType: HousekeepingTaskTaskType;
   status: HousekeepingTaskStatus;
   priority: HousekeepingTaskPriority;
   dueDate?: string | null;
   checklist: ChecklistItem[];
+  estimatedMinutes?: number | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  verifiedById?: number | null;
+  verifiedAt?: string | null;
+  verificationNotes?: string | null;
+  notes?: string | null;
   createdAt: string;
 }
+
+export type CreateHousekeepingTaskRequestTaskType =
+  (typeof CreateHousekeepingTaskRequestTaskType)[keyof typeof CreateHousekeepingTaskRequestTaskType];
+
+export const CreateHousekeepingTaskRequestTaskType = {
+  cleaning: "cleaning",
+  deep_cleaning: "deep_cleaning",
+  linen_change: "linen_change",
+  maintenance: "maintenance",
+  check: "check",
+  other: "other",
+} as const;
 
 export type CreateHousekeepingTaskRequestPriority =
   (typeof CreateHousekeepingTaskRequestPriority)[keyof typeof CreateHousekeepingTaskRequestPriority];
@@ -581,10 +615,25 @@ export interface CreateHousekeepingTaskRequest {
   assignedToId?: number | null;
   title: string;
   description?: string | null;
+  taskType?: CreateHousekeepingTaskRequestTaskType;
   priority: CreateHousekeepingTaskRequestPriority;
   dueDate?: string | null;
   checklist?: ChecklistItem[];
+  estimatedMinutes?: number | null;
+  notes?: string | null;
 }
+
+export type UpdateHousekeepingTaskRequestTaskType =
+  (typeof UpdateHousekeepingTaskRequestTaskType)[keyof typeof UpdateHousekeepingTaskRequestTaskType];
+
+export const UpdateHousekeepingTaskRequestTaskType = {
+  cleaning: "cleaning",
+  deep_cleaning: "deep_cleaning",
+  linen_change: "linen_change",
+  maintenance: "maintenance",
+  check: "check",
+  other: "other",
+} as const;
 
 export type UpdateHousekeepingTaskRequestStatus =
   (typeof UpdateHousekeepingTaskRequestStatus)[keyof typeof UpdateHousekeepingTaskRequestStatus];
@@ -593,6 +642,8 @@ export const UpdateHousekeepingTaskRequestStatus = {
   pending: "pending",
   in_progress: "in_progress",
   completed: "completed",
+  verified: "verified",
+  cancelled: "cancelled",
 } as const;
 
 export type UpdateHousekeepingTaskRequestPriority =
@@ -608,10 +659,13 @@ export interface UpdateHousekeepingTaskRequest {
   assignedToId?: number | null;
   title?: string;
   description?: string | null;
+  taskType?: UpdateHousekeepingTaskRequestTaskType;
   status?: UpdateHousekeepingTaskRequestStatus;
   priority?: UpdateHousekeepingTaskRequestPriority;
   dueDate?: string | null;
   checklist?: ChecklistItem[];
+  estimatedMinutes?: number | null;
+  notes?: string | null;
 }
 
 export type UnitHousekeepingStatusHousekeepingStatus =
@@ -854,6 +908,179 @@ export interface GuestSearchResult {
   totalNights: number;
 }
 
+export interface HousekeepingDashboard {
+  totalTasks: number;
+  pendingTasks: number;
+  inProgressTasks: number;
+  completedTasks: number;
+  verifiedTasks: number;
+  cancelledTasks: number;
+  overdueCount: number;
+  staffAvailableCount: number;
+}
+
+export type InvoiceInvoiceType =
+  (typeof InvoiceInvoiceType)[keyof typeof InvoiceInvoiceType];
+
+export const InvoiceInvoiceType = {
+  accommodation: "accommodation",
+  service: "service",
+  addon: "addon",
+  deposit: "deposit",
+  other: "other",
+} as const;
+
+export type InvoiceStatus = (typeof InvoiceStatus)[keyof typeof InvoiceStatus];
+
+export const InvoiceStatus = {
+  draft: "draft",
+  pending: "pending",
+  paid: "paid",
+  overdue: "overdue",
+  cancelled: "cancelled",
+} as const;
+
+export type InvoicePaymentMethod =
+  | (typeof InvoicePaymentMethod)[keyof typeof InvoicePaymentMethod]
+  | null;
+
+export const InvoicePaymentMethod = {
+  cash: "cash",
+  card: "card",
+  bank_transfer: "bank_transfer",
+  liqpay: "liqpay",
+  other: "other",
+} as const;
+
+export interface Invoice {
+  id: number;
+  invoiceNumber: string;
+  bookingId?: number | null;
+  guestId?: number | null;
+  guestName?: string | null;
+  invoiceType: InvoiceInvoiceType;
+  status: InvoiceStatus;
+  amount: number;
+  taxAmount: number;
+  paidAmount: number;
+  currency: string;
+  paymentMethod?: InvoicePaymentMethod;
+  description?: string | null;
+  dueDate?: string | null;
+  paidAt?: string | null;
+  createdAt: string;
+}
+
+export type CreateInvoiceRequestInvoiceType =
+  (typeof CreateInvoiceRequestInvoiceType)[keyof typeof CreateInvoiceRequestInvoiceType];
+
+export const CreateInvoiceRequestInvoiceType = {
+  accommodation: "accommodation",
+  service: "service",
+  addon: "addon",
+  deposit: "deposit",
+  other: "other",
+} as const;
+
+export interface CreateInvoiceRequest {
+  bookingId?: number | null;
+  guestId?: number | null;
+  invoiceType?: CreateInvoiceRequestInvoiceType;
+  amount: number;
+  taxAmount?: number | null;
+  currency?: string | null;
+  description?: string | null;
+  dueDate?: string | null;
+}
+
+export type UpdateInvoiceRequestInvoiceType =
+  (typeof UpdateInvoiceRequestInvoiceType)[keyof typeof UpdateInvoiceRequestInvoiceType];
+
+export const UpdateInvoiceRequestInvoiceType = {
+  accommodation: "accommodation",
+  service: "service",
+  addon: "addon",
+  deposit: "deposit",
+  other: "other",
+} as const;
+
+export type UpdateInvoiceRequestStatus =
+  (typeof UpdateInvoiceRequestStatus)[keyof typeof UpdateInvoiceRequestStatus];
+
+export const UpdateInvoiceRequestStatus = {
+  draft: "draft",
+  pending: "pending",
+  paid: "paid",
+  overdue: "overdue",
+  cancelled: "cancelled",
+} as const;
+
+export interface UpdateInvoiceRequest {
+  invoiceType?: UpdateInvoiceRequestInvoiceType;
+  status?: UpdateInvoiceRequestStatus;
+  amount?: number;
+  description?: string | null;
+  dueDate?: string | null;
+}
+
+export type PayInvoiceRequestPaymentMethod =
+  (typeof PayInvoiceRequestPaymentMethod)[keyof typeof PayInvoiceRequestPaymentMethod];
+
+export const PayInvoiceRequestPaymentMethod = {
+  cash: "cash",
+  card: "card",
+  bank_transfer: "bank_transfer",
+  liqpay: "liqpay",
+  other: "other",
+} as const;
+
+export interface PayInvoiceRequest {
+  paymentMethod: PayInvoiceRequestPaymentMethod;
+  paidAmount?: number | null;
+}
+
+export type NightAuditStatus =
+  (typeof NightAuditStatus)[keyof typeof NightAuditStatus];
+
+export const NightAuditStatus = {
+  pending: "pending",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+export interface NightAudit {
+  id: number;
+  auditDate: string;
+  totalUnits: number;
+  occupiedUnits: number;
+  occupancyRate: number;
+  totalRevenue: number;
+  accommodationRevenue: number;
+  servicesRevenue: number;
+  totalGuests: number;
+  newCheckins: number;
+  checkouts: number;
+  newBookings: number;
+  cancellations: number;
+  status: NightAuditStatus;
+  performedAt?: string | null;
+  errors: string[];
+  warnings: string[];
+  createdAt: string;
+}
+
+export interface AuditLog {
+  id: number;
+  action: string;
+  entityType: string;
+  entityId?: number | null;
+  oldData?: unknown | null;
+  newData?: unknown | null;
+  userId?: number | null;
+  ipAddress?: string | null;
+  createdAt: string;
+}
+
 export type GetUnitsAvailabilityParams = {
   checkIn: string;
   checkOut: string;
@@ -916,6 +1143,34 @@ export type ListHousekeepingTasksParams = {
   unitId?: number;
   status?: string;
   date?: string;
+};
+
+export type CompleteHousekeepingTaskBody = {
+  notes?: string | null;
+};
+
+export type VerifyHousekeepingTaskBody = {
+  verificationNotes?: string | null;
+};
+
+export type ListInvoicesParams = {
+  bookingId?: number;
+  status?: string;
+  guestId?: number;
+};
+
+export type ListNightAuditsParams = {
+  limit?: number;
+};
+
+export type RunNightAuditBody = {
+  auditDate?: string;
+};
+
+export type ListAuditLogsParams = {
+  entityType?: string;
+  entityId?: number;
+  limit?: number;
 };
 
 export type ListRatesParams = {

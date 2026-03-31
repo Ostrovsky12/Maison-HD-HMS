@@ -8,13 +8,17 @@
 import type { ChecklistItem } from "./checklistItem";
 import type { UpdateHousekeepingTaskRequestPriority } from "./updateHousekeepingTaskRequestPriority";
 import type { UpdateHousekeepingTaskRequestStatus } from "./updateHousekeepingTaskRequestStatus";
+import type { UpdateHousekeepingTaskRequestTaskType } from "./updateHousekeepingTaskRequestTaskType";
 
 export interface UpdateHousekeepingTaskRequest {
   assignedToId?: number | null;
   title?: string;
   description?: string | null;
+  taskType?: UpdateHousekeepingTaskRequestTaskType;
   status?: UpdateHousekeepingTaskRequestStatus;
   priority?: UpdateHousekeepingTaskRequestPriority;
   dueDate?: Date | null;
   checklist?: ChecklistItem[];
+  estimatedMinutes?: number | null;
+  notes?: string | null;
 }

@@ -35,6 +35,10 @@ tags:
     description: Analytics & reports
   - name: users
     description: User management
+  - name: invoices
+    description: Invoice management
+  - name: audit
+    description: Night audit & audit logs
 
 paths:
   /healthz:
@@ -904,6 +908,298 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UnitHousekeepingStatus"
+
+  /housekeeping/dashboard:
+    get:
+      operationId: getHousekeepingDashboard
+      tags: [housekeeping]
+      summary: Get housekeeping dashboard stats
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HousekeepingDashboard"
+
+  /housekeeping/tasks/{taskId}/start:
+    post:
+      operationId: startHousekeepingTask
+      tags: [housekeeping]
+      summary: Mark task as in_progress
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Task started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HousekeepingTask"
+
+  /housekeeping/tasks/{taskId}/complete:
+    post:
+      operationId: completeHousekeepingTask
+      tags: [housekeeping]
+      summary: Mark task as completed
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Task completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HousekeepingTask"
+
+  /housekeeping/tasks/{taskId}/verify:
+    post:
+      operationId: verifyHousekeepingTask
+      tags: [housekeeping]
+      summary: Mark task as verified
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                verificationNotes:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Task verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HousekeepingTask"
+
+  /invoices:
+    get:
+      operationId: listInvoices
+      tags: [invoices]
+      summary: List invoices
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: bookingId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: guestId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Invoice"
+    post:
+      operationId: createInvoice
+      tags: [invoices]
+      summary: Create invoice
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvoiceRequest"
+      responses:
+        "201":
+          description: Invoice created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /invoices/{invoiceId}:
+    get:
+      operationId: getInvoice
+      tags: [invoices]
+      summary: Get invoice by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Invoice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+    put:
+      operationId: updateInvoice
+      tags: [invoices]
+      summary: Update invoice
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateInvoiceRequest"
+      responses:
+        "200":
+          description: Invoice updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /invoices/{invoiceId}/pay:
+    post:
+      operationId: payInvoice
+      tags: [invoices]
+      summary: Mark invoice as paid
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PayInvoiceRequest"
+      responses:
+        "200":
+          description: Invoice paid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /audit/night:
+    get:
+      operationId: listNightAudits
+      tags: [audit]
+      summary: List night audit records
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of night audits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NightAudit"
+    post:
+      operationId: runNightAudit
+      tags: [audit]
+      summary: Run night audit for a date
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                auditDate:
+                  type: string
+                  format: date
+      responses:
+        "201":
+          description: Night audit completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NightAudit"
+
+  /audit/logs:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      summary: List audit logs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: entityType
+          in: query
+          schema:
+            type: string
+        - name: entityId
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
 
   /rates:
     get:
@@ -2071,9 +2367,12 @@ components:
         description:
           type: string
           nullable: true
+        taskType:
+          type: string
+          enum: [cleaning, deep_cleaning, linen_change, maintenance, check, other]
         status:
           type: string
-          enum: [pending, in_progress, completed]
+          enum: [pending, in_progress, completed, verified, cancelled]
         priority:
           type: string
           enum: [low, medium, high]
@@ -2085,6 +2384,30 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChecklistItem"
+        estimatedMinutes:
+          type: integer
+          nullable: true
+        startTime:
+          type: string
+          format: date-time
+          nullable: true
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+        verifiedById:
+          type: integer
+          nullable: true
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        verificationNotes:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -2092,6 +2415,7 @@ components:
         - id
         - unitId
         - title
+        - taskType
         - status
         - priority
         - checklist
@@ -2124,6 +2448,9 @@ components:
         description:
           type: string
           nullable: true
+        taskType:
+          type: string
+          enum: [cleaning, deep_cleaning, linen_change, maintenance, check, other]
         priority:
           type: string
           enum: [low, medium, high]
@@ -2135,6 +2462,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChecklistItem"
+        estimatedMinutes:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
       required:
         - unitId
         - title
@@ -2151,9 +2484,12 @@ components:
         description:
           type: string
           nullable: true
+        taskType:
+          type: string
+          enum: [cleaning, deep_cleaning, linen_change, maintenance, check, other]
         status:
           type: string
-          enum: [pending, in_progress, completed]
+          enum: [pending, in_progress, completed, verified, cancelled]
         priority:
           type: string
           enum: [low, medium, high]
@@ -2165,6 +2501,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChecklistItem"
+        estimatedMinutes:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
 
     UnitHousekeepingStatus:
       type: object
@@ -2742,3 +3084,250 @@ components:
         - firstName
         - lastName
         - totalNights
+
+    HousekeepingDashboard:
+      type: object
+      properties:
+        totalTasks:
+          type: integer
+        pendingTasks:
+          type: integer
+        inProgressTasks:
+          type: integer
+        completedTasks:
+          type: integer
+        verifiedTasks:
+          type: integer
+        cancelledTasks:
+          type: integer
+        overdueCount:
+          type: integer
+        staffAvailableCount:
+          type: integer
+      required:
+        - totalTasks
+        - pendingTasks
+        - inProgressTasks
+        - completedTasks
+        - verifiedTasks
+        - cancelledTasks
+        - overdueCount
+        - staffAvailableCount
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: integer
+        invoiceNumber:
+          type: string
+        bookingId:
+          type: integer
+          nullable: true
+        guestId:
+          type: integer
+          nullable: true
+        guestName:
+          type: string
+          nullable: true
+        invoiceType:
+          type: string
+          enum: [accommodation, service, addon, deposit, other]
+        status:
+          type: string
+          enum: [draft, pending, paid, overdue, cancelled]
+        amount:
+          type: number
+        taxAmount:
+          type: number
+        paidAmount:
+          type: number
+        currency:
+          type: string
+        paymentMethod:
+          type: string
+          enum: [cash, card, bank_transfer, liqpay, other]
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - invoiceNumber
+        - invoiceType
+        - status
+        - amount
+        - taxAmount
+        - paidAmount
+        - currency
+        - createdAt
+
+    CreateInvoiceRequest:
+      type: object
+      properties:
+        bookingId:
+          type: integer
+          nullable: true
+        guestId:
+          type: integer
+          nullable: true
+        invoiceType:
+          type: string
+          enum: [accommodation, service, addon, deposit, other]
+        amount:
+          type: number
+        taxAmount:
+          type: number
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - amount
+
+    UpdateInvoiceRequest:
+      type: object
+      properties:
+        invoiceType:
+          type: string
+          enum: [accommodation, service, addon, deposit, other]
+        status:
+          type: string
+          enum: [draft, pending, paid, overdue, cancelled]
+        amount:
+          type: number
+        description:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+
+    PayInvoiceRequest:
+      type: object
+      properties:
+        paymentMethod:
+          type: string
+          enum: [cash, card, bank_transfer, liqpay, other]
+        paidAmount:
+          type: number
+          nullable: true
+      required:
+        - paymentMethod
+
+    NightAudit:
+      type: object
+      properties:
+        id:
+          type: integer
+        auditDate:
+          type: string
+          format: date
+        totalUnits:
+          type: integer
+        occupiedUnits:
+          type: integer
+        occupancyRate:
+          type: number
+        totalRevenue:
+          type: number
+        accommodationRevenue:
+          type: number
+        servicesRevenue:
+          type: number
+        totalGuests:
+          type: integer
+        newCheckins:
+          type: integer
+        checkouts:
+          type: integer
+        newBookings:
+          type: integer
+        cancellations:
+          type: integer
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        performedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errors:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - auditDate
+        - totalUnits
+        - occupiedUnits
+        - occupancyRate
+        - totalRevenue
+        - accommodationRevenue
+        - servicesRevenue
+        - totalGuests
+        - newCheckins
+        - checkouts
+        - newBookings
+        - cancellations
+        - status
+        - errors
+        - warnings
+        - createdAt
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        action:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: integer
+          nullable: true
+        oldData:
+          nullable: true
+        newData:
+          nullable: true
+        userId:
+          type: integer
+          nullable: true
+        ipAddress:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - action
+        - entityType
+        - createdAt

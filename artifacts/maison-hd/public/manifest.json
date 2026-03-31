@@ -1,0 +1,20 @@
+{
+  "name": "Maison HD — Hotel Management",
+  "short_name": "Maison HD",
+  "description": "Premium Hotel Management System",
+  "start_url": "/maison-hd/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/maison-hd/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "lang": "uk"
+}

@@ -1003,7 +1003,21 @@ export const ListHousekeepingTasksResponseItem = zod.object({
   assignedToName: zod.string().nullish(),
   title: zod.string(),
   description: zod.string().nullish(),
-  status: zod.enum(["pending", "in_progress", "completed"]),
+  taskType: zod.enum([
+    "cleaning",
+    "deep_cleaning",
+    "linen_change",
+    "maintenance",
+    "check",
+    "other",
+  ]),
+  status: zod.enum([
+    "pending",
+    "in_progress",
+    "completed",
+    "verified",
+    "cancelled",
+  ]),
   priority: zod.enum(["low", "medium", "high"]),
   dueDate: zod.date().nullish(),
   checklist: zod.array(
@@ -1013,6 +1027,13 @@ export const ListHousekeepingTasksResponseItem = zod.object({
       checked: zod.boolean(),
     }),
   ),
+  estimatedMinutes: zod.number().nullish(),
+  startTime: zod.date().nullish(),
+  endTime: zod.date().nullish(),
+  verifiedById: zod.number().nullish(),
+  verifiedAt: zod.date().nullish(),
+  verificationNotes: zod.string().nullish(),
+  notes: zod.string().nullish(),
   createdAt: zod.date(),
 });
 export const ListHousekeepingTasksResponse = zod.array(
@@ -1027,6 +1048,16 @@ export const CreateHousekeepingTaskBody = zod.object({
   assignedToId: zod.number().nullish(),
   title: zod.string(),
   description: zod.string().nullish(),
+  taskType: zod
+    .enum([
+      "cleaning",
+      "deep_cleaning",
+      "linen_change",
+      "maintenance",
+      "check",
+      "other",
+    ])
+    .optional(),
   priority: zod.enum(["low", "medium", "high"]),
   dueDate: zod.date().nullish(),
   checklist: zod
@@ -1038,6 +1069,8 @@ export const CreateHousekeepingTaskBody = zod.object({
       }),
     )
     .optional(),
+  estimatedMinutes: zod.number().nullish(),
+  notes: zod.string().nullish(),
 });
 
 /**
@@ -1051,7 +1084,19 @@ export const UpdateHousekeepingTaskBody = zod.object({
   assignedToId: zod.number().nullish(),
   title: zod.string().optional(),
   description: zod.string().nullish(),
-  status: zod.enum(["pending", "in_progress", "completed"]).optional(),
+  taskType: zod
+    .enum([
+      "cleaning",
+      "deep_cleaning",
+      "linen_change",
+      "maintenance",
+      "check",
+      "other",
+    ])
+    .optional(),
+  status: zod
+    .enum(["pending", "in_progress", "completed", "verified", "cancelled"])
+    .optional(),
   priority: zod.enum(["low", "medium", "high"]).optional(),
   dueDate: zod.date().nullish(),
   checklist: zod
@@ -1063,6 +1108,8 @@ export const UpdateHousekeepingTaskBody = zod.object({
       }),
     )
     .optional(),
+  estimatedMinutes: zod.number().nullish(),
+  notes: zod.string().nullish(),
 });
 
 export const UpdateHousekeepingTaskResponse = zod.object({
@@ -1073,7 +1120,21 @@ export const UpdateHousekeepingTaskResponse = zod.object({
   assignedToName: zod.string().nullish(),
   title: zod.string(),
   description: zod.string().nullish(),
-  status: zod.enum(["pending", "in_progress", "completed"]),
+  taskType: zod.enum([
+    "cleaning",
+    "deep_cleaning",
+    "linen_change",
+    "maintenance",
+    "check",
+    "other",
+  ]),
+  status: zod.enum([
+    "pending",
+    "in_progress",
+    "completed",
+    "verified",
+    "cancelled",
+  ]),
   priority: zod.enum(["low", "medium", "high"]),
   dueDate: zod.date().nullish(),
   checklist: zod.array(
@@ -1083,6 +1144,13 @@ export const UpdateHousekeepingTaskResponse = zod.object({
       checked: zod.boolean(),
     }),
   ),
+  estimatedMinutes: zod.number().nullish(),
+  startTime: zod.date().nullish(),
+  endTime: zod.date().nullish(),
+  verifiedById: zod.number().nullish(),
+  verifiedAt: zod.date().nullish(),
+  verificationNotes: zod.string().nullish(),
+  notes: zod.string().nullish(),
   createdAt: zod.date(),
 });
 
@@ -1111,6 +1179,405 @@ export const UpdateUnitHousekeepingStatusResponse = zod.object({
   housekeepingStatus: zod.enum(["clean", "dirty", "in_progress"]),
   propertyName: zod.string().nullish(),
 });
+
+/**
+ * @summary Get housekeeping dashboard stats
+ */
+export const GetHousekeepingDashboardResponse = zod.object({
+  totalTasks: zod.number(),
+  pendingTasks: zod.number(),
+  inProgressTasks: zod.number(),
+  completedTasks: zod.number(),
+  verifiedTasks: zod.number(),
+  cancelledTasks: zod.number(),
+  overdueCount: zod.number(),
+  staffAvailableCount: zod.number(),
+});
+
+/**
+ * @summary Mark task as in_progress
+ */
+export const StartHousekeepingTaskParams = zod.object({
+  taskId: zod.coerce.number(),
+});
+
+export const StartHousekeepingTaskResponse = zod.object({
+  id: zod.number(),
+  unitId: zod.number(),
+  unitName: zod.string().nullish(),
+  assignedToId: zod.number().nullish(),
+  assignedToName: zod.string().nullish(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  taskType: zod.enum([
+    "cleaning",
+    "deep_cleaning",
+    "linen_change",
+    "maintenance",
+    "check",
+    "other",
+  ]),
+  status: zod.enum([
+    "pending",
+    "in_progress",
+    "completed",
+    "verified",
+    "cancelled",
+  ]),
+  priority: zod.enum(["low", "medium", "high"]),
+  dueDate: zod.date().nullish(),
+  checklist: zod.array(
+    zod.object({
+      id: zod.string(),
+      text: zod.string(),
+      checked: zod.boolean(),
+    }),
+  ),
+  estimatedMinutes: zod.number().nullish(),
+  startTime: zod.date().nullish(),
+  endTime: zod.date().nullish(),
+  verifiedById: zod.number().nullish(),
+  verifiedAt: zod.date().nullish(),
+  verificationNotes: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Mark task as completed
+ */
+export const CompleteHousekeepingTaskParams = zod.object({
+  taskId: zod.coerce.number(),
+});
+
+export const CompleteHousekeepingTaskBody = zod.object({
+  notes: zod.string().nullish(),
+});
+
+export const CompleteHousekeepingTaskResponse = zod.object({
+  id: zod.number(),
+  unitId: zod.number(),
+  unitName: zod.string().nullish(),
+  assignedToId: zod.number().nullish(),
+  assignedToName: zod.string().nullish(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  taskType: zod.enum([
+    "cleaning",
+    "deep_cleaning",
+    "linen_change",
+    "maintenance",
+    "check",
+    "other",
+  ]),
+  status: zod.enum([
+    "pending",
+    "in_progress",
+    "completed",
+    "verified",
+    "cancelled",
+  ]),
+  priority: zod.enum(["low", "medium", "high"]),
+  dueDate: zod.date().nullish(),
+  checklist: zod.array(
+    zod.object({
+      id: zod.string(),
+      text: zod.string(),
+      checked: zod.boolean(),
+    }),
+  ),
+  estimatedMinutes: zod.number().nullish(),
+  startTime: zod.date().nullish(),
+  endTime: zod.date().nullish(),
+  verifiedById: zod.number().nullish(),
+  verifiedAt: zod.date().nullish(),
+  verificationNotes: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Mark task as verified
+ */
+export const VerifyHousekeepingTaskParams = zod.object({
+  taskId: zod.coerce.number(),
+});
+
+export const VerifyHousekeepingTaskBody = zod.object({
+  verificationNotes: zod.string().nullish(),
+});
+
+export const VerifyHousekeepingTaskResponse = zod.object({
+  id: zod.number(),
+  unitId: zod.number(),
+  unitName: zod.string().nullish(),
+  assignedToId: zod.number().nullish(),
+  assignedToName: zod.string().nullish(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  taskType: zod.enum([
+    "cleaning",
+    "deep_cleaning",
+    "linen_change",
+    "maintenance",
+    "check",
+    "other",
+  ]),
+  status: zod.enum([
+    "pending",
+    "in_progress",
+    "completed",
+    "verified",
+    "cancelled",
+  ]),
+  priority: zod.enum(["low", "medium", "high"]),
+  dueDate: zod.date().nullish(),
+  checklist: zod.array(
+    zod.object({
+      id: zod.string(),
+      text: zod.string(),
+      checked: zod.boolean(),
+    }),
+  ),
+  estimatedMinutes: zod.number().nullish(),
+  startTime: zod.date().nullish(),
+  endTime: zod.date().nullish(),
+  verifiedById: zod.number().nullish(),
+  verifiedAt: zod.date().nullish(),
+  verificationNotes: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary List invoices
+ */
+export const ListInvoicesQueryParams = zod.object({
+  bookingId: zod.coerce.number().optional(),
+  status: zod.coerce.string().optional(),
+  guestId: zod.coerce.number().optional(),
+});
+
+export const ListInvoicesResponseItem = zod.object({
+  id: zod.number(),
+  invoiceNumber: zod.string(),
+  bookingId: zod.number().nullish(),
+  guestId: zod.number().nullish(),
+  guestName: zod.string().nullish(),
+  invoiceType: zod.enum([
+    "accommodation",
+    "service",
+    "addon",
+    "deposit",
+    "other",
+  ]),
+  status: zod.enum(["draft", "pending", "paid", "overdue", "cancelled"]),
+  amount: zod.number(),
+  taxAmount: zod.number(),
+  paidAmount: zod.number(),
+  currency: zod.string(),
+  paymentMethod: zod
+    .enum(["cash", "card", "bank_transfer", "liqpay", "other"])
+    .nullish(),
+  description: zod.string().nullish(),
+  dueDate: zod.date().nullish(),
+  paidAt: zod.date().nullish(),
+  createdAt: zod.date(),
+});
+export const ListInvoicesResponse = zod.array(ListInvoicesResponseItem);
+
+/**
+ * @summary Create invoice
+ */
+export const CreateInvoiceBody = zod.object({
+  bookingId: zod.number().nullish(),
+  guestId: zod.number().nullish(),
+  invoiceType: zod
+    .enum(["accommodation", "service", "addon", "deposit", "other"])
+    .optional(),
+  amount: zod.number(),
+  taxAmount: zod.number().nullish(),
+  currency: zod.string().nullish(),
+  description: zod.string().nullish(),
+  dueDate: zod.date().nullish(),
+});
+
+/**
+ * @summary Get invoice by ID
+ */
+export const GetInvoiceParams = zod.object({
+  invoiceId: zod.coerce.number(),
+});
+
+export const GetInvoiceResponse = zod.object({
+  id: zod.number(),
+  invoiceNumber: zod.string(),
+  bookingId: zod.number().nullish(),
+  guestId: zod.number().nullish(),
+  guestName: zod.string().nullish(),
+  invoiceType: zod.enum([
+    "accommodation",
+    "service",
+    "addon",
+    "deposit",
+    "other",
+  ]),
+  status: zod.enum(["draft", "pending", "paid", "overdue", "cancelled"]),
+  amount: zod.number(),
+  taxAmount: zod.number(),
+  paidAmount: zod.number(),
+  currency: zod.string(),
+  paymentMethod: zod
+    .enum(["cash", "card", "bank_transfer", "liqpay", "other"])
+    .nullish(),
+  description: zod.string().nullish(),
+  dueDate: zod.date().nullish(),
+  paidAt: zod.date().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Update invoice
+ */
+export const UpdateInvoiceParams = zod.object({
+  invoiceId: zod.coerce.number(),
+});
+
+export const UpdateInvoiceBody = zod.object({
+  invoiceType: zod
+    .enum(["accommodation", "service", "addon", "deposit", "other"])
+    .optional(),
+  status: zod
+    .enum(["draft", "pending", "paid", "overdue", "cancelled"])
+    .optional(),
+  amount: zod.number().optional(),
+  description: zod.string().nullish(),
+  dueDate: zod.date().nullish(),
+});
+
+export const UpdateInvoiceResponse = zod.object({
+  id: zod.number(),
+  invoiceNumber: zod.string(),
+  bookingId: zod.number().nullish(),
+  guestId: zod.number().nullish(),
+  guestName: zod.string().nullish(),
+  invoiceType: zod.enum([
+    "accommodation",
+    "service",
+    "addon",
+    "deposit",
+    "other",
+  ]),
+  status: zod.enum(["draft", "pending", "paid", "overdue", "cancelled"]),
+  amount: zod.number(),
+  taxAmount: zod.number(),
+  paidAmount: zod.number(),
+  currency: zod.string(),
+  paymentMethod: zod
+    .enum(["cash", "card", "bank_transfer", "liqpay", "other"])
+    .nullish(),
+  description: zod.string().nullish(),
+  dueDate: zod.date().nullish(),
+  paidAt: zod.date().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Mark invoice as paid
+ */
+export const PayInvoiceParams = zod.object({
+  invoiceId: zod.coerce.number(),
+});
+
+export const PayInvoiceBody = zod.object({
+  paymentMethod: zod.enum(["cash", "card", "bank_transfer", "liqpay", "other"]),
+  paidAmount: zod.number().nullish(),
+});
+
+export const PayInvoiceResponse = zod.object({
+  id: zod.number(),
+  invoiceNumber: zod.string(),
+  bookingId: zod.number().nullish(),
+  guestId: zod.number().nullish(),
+  guestName: zod.string().nullish(),
+  invoiceType: zod.enum([
+    "accommodation",
+    "service",
+    "addon",
+    "deposit",
+    "other",
+  ]),
+  status: zod.enum(["draft", "pending", "paid", "overdue", "cancelled"]),
+  amount: zod.number(),
+  taxAmount: zod.number(),
+  paidAmount: zod.number(),
+  currency: zod.string(),
+  paymentMethod: zod
+    .enum(["cash", "card", "bank_transfer", "liqpay", "other"])
+    .nullish(),
+  description: zod.string().nullish(),
+  dueDate: zod.date().nullish(),
+  paidAt: zod.date().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary List night audit records
+ */
+export const ListNightAuditsQueryParams = zod.object({
+  limit: zod.coerce.number().optional(),
+});
+
+export const ListNightAuditsResponseItem = zod.object({
+  id: zod.number(),
+  auditDate: zod.date(),
+  totalUnits: zod.number(),
+  occupiedUnits: zod.number(),
+  occupancyRate: zod.number(),
+  totalRevenue: zod.number(),
+  accommodationRevenue: zod.number(),
+  servicesRevenue: zod.number(),
+  totalGuests: zod.number(),
+  newCheckins: zod.number(),
+  checkouts: zod.number(),
+  newBookings: zod.number(),
+  cancellations: zod.number(),
+  status: zod.enum(["pending", "completed", "failed"]),
+  performedAt: zod.date().nullish(),
+  errors: zod.array(zod.string()),
+  warnings: zod.array(zod.string()),
+  createdAt: zod.date(),
+});
+export const ListNightAuditsResponse = zod.array(ListNightAuditsResponseItem);
+
+/**
+ * @summary Run night audit for a date
+ */
+export const RunNightAuditBody = zod.object({
+  auditDate: zod.date().optional(),
+});
+
+/**
+ * @summary List audit logs
+ */
+export const ListAuditLogsQueryParams = zod.object({
+  entityType: zod.coerce.string().optional(),
+  entityId: zod.coerce.number().optional(),
+  limit: zod.coerce.number().optional(),
+});
+
+export const ListAuditLogsResponseItem = zod.object({
+  id: zod.number(),
+  action: zod.string(),
+  entityType: zod.string(),
+  entityId: zod.number().nullish(),
+  oldData: zod.unknown().nullish(),
+  newData: zod.unknown().nullish(),
+  userId: zod.number().nullish(),
+  ipAddress: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+export const ListAuditLogsResponse = zod.array(ListAuditLogsResponseItem);
 
 /**
  * @summary List rates

@@ -13,6 +13,7 @@ import {
   Bell,
   CheckCheck,
   X,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ const navItems = [
   { name: "Номери", path: "/units", icon: KeyRound },
   { name: "Гості", path: "/guests", icon: Users },
   { name: "Прибирання", path: "/housekeeping", icon: Sparkles },
+  { name: "Рахунки", path: "/invoices", icon: FileText },
   { name: "Звіти", path: "/reports", icon: BarChart3 },
 ];
 

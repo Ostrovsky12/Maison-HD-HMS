@@ -13,4 +13,6 @@ export const UpdateHousekeepingTaskRequestStatus = {
   pending: "pending",
   in_progress: "in_progress",
   completed: "completed",
+  verified: "verified",
+  cancelled: "cancelled",
 } as const;

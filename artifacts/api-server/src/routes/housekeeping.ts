@@ -1,10 +1,80 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { housekeepingTasksTable, unitsTable, usersTable, propertiesTable } from "@workspace/db/schema";
-import { eq, and, inArray, gte, lte } from "drizzle-orm";
+import { eq, and, inArray, count, lt } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
+
+async function fetchTaskWithJoins(taskId: number) {
+  const [task] = await db.select({
+    id: housekeepingTasksTable.id,
+    unitId: housekeepingTasksTable.unitId,
+    assignedToId: housekeepingTasksTable.assignedToId,
+    title: housekeepingTasksTable.title,
+    description: housekeepingTasksTable.description,
+    taskType: housekeepingTasksTable.taskType,
+    status: housekeepingTasksTable.status,
+    priority: housekeepingTasksTable.priority,
+    dueDate: housekeepingTasksTable.dueDate,
+    checklist: housekeepingTasksTable.checklist,
+    estimatedMinutes: housekeepingTasksTable.estimatedMinutes,
+    startTime: housekeepingTasksTable.startTime,
+    endTime: housekeepingTasksTable.endTime,
+    verifiedById: housekeepingTasksTable.verifiedById,
+    verifiedAt: housekeepingTasksTable.verifiedAt,
+    verificationNotes: housekeepingTasksTable.verificationNotes,
+    notes: housekeepingTasksTable.notes,
+    createdAt: housekeepingTasksTable.createdAt,
+    unitName: unitsTable.name,
+    assignedToName: usersTable.name,
+  }).from(housekeepingTasksTable)
+    .leftJoin(unitsTable, eq(housekeepingTasksTable.unitId, unitsTable.id))
+    .leftJoin(usersTable, eq(housekeepingTasksTable.assignedToId, usersTable.id))
+    .where(eq(housekeepingTasksTable.id, taskId))
+    .limit(1);
+  return task || null;
+}
+
+router.get("/dashboard", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  let unitIds: number[] = [];
+  if (user.organizationId) {
+    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    const propIds = props.map(p => p.id);
+    if (propIds.length > 0) {
+      const units = await db.select({ id: unitsTable.id }).from(unitsTable)
+        .where(inArray(unitsTable.propertyId, propIds));
+      unitIds = units.map(u => u.id);
+    }
+  }
+
+  const baseCondition = unitIds.length > 0 ? inArray(housekeepingTasksTable.unitId, unitIds) : undefined;
+
+  const allTasks = await db.select({
+    status: housekeepingTasksTable.status,
+    dueDate: housekeepingTasksTable.dueDate,
+  }).from(housekeepingTasksTable)
+    .where(baseCondition);
+
+  const today = new Date().toISOString().split("T")[0];
+
+  const stats = {
+    totalTasks: allTasks.length,
+    pendingTasks: allTasks.filter(t => t.status === "pending").length,
+    inProgressTasks: allTasks.filter(t => t.status === "in_progress").length,
+    completedTasks: allTasks.filter(t => t.status === "completed").length,
+    verifiedTasks: allTasks.filter(t => t.status === "verified").length,
+    cancelledTasks: allTasks.filter(t => t.status === "cancelled").length,
+    overdueCount: allTasks.filter(t =>
+      t.dueDate && t.dueDate < today && !["completed", "verified", "cancelled"].includes(t.status)
+    ).length,
+    staffAvailableCount: 0,
+  };
+
+  res.json(stats);
+});
 
 router.get("/tasks", requireAuth, async (req, res) => {
   const user = (req as any).user;
@@ -35,10 +105,18 @@ router.get("/tasks", requireAuth, async (req, res) => {
     assignedToId: housekeepingTasksTable.assignedToId,
     title: housekeepingTasksTable.title,
     description: housekeepingTasksTable.description,
+    taskType: housekeepingTasksTable.taskType,
     status: housekeepingTasksTable.status,
     priority: housekeepingTasksTable.priority,
     dueDate: housekeepingTasksTable.dueDate,
     checklist: housekeepingTasksTable.checklist,
+    estimatedMinutes: housekeepingTasksTable.estimatedMinutes,
+    startTime: housekeepingTasksTable.startTime,
+    endTime: housekeepingTasksTable.endTime,
+    verifiedById: housekeepingTasksTable.verifiedById,
+    verifiedAt: housekeepingTasksTable.verifiedAt,
+    verificationNotes: housekeepingTasksTable.verificationNotes,
+    notes: housekeepingTasksTable.notes,
     createdAt: housekeepingTasksTable.createdAt,
     unitName: unitsTable.name,
     assignedToName: usersTable.name,
@@ -51,15 +129,18 @@ router.get("/tasks", requireAuth, async (req, res) => {
 });
 
 router.post("/tasks", requireAuth, async (req, res) => {
-  const { unitId, assignedToId, title, description, priority, dueDate, checklist } = req.body;
+  const { unitId, assignedToId, title, description, taskType, priority, dueDate, checklist, estimatedMinutes, notes } = req.body;
   const [task] = await db.insert(housekeepingTasksTable).values({
     unitId,
     assignedToId,
     title,
     description,
+    taskType: taskType || "cleaning",
     priority: priority || "medium",
     dueDate,
     checklist: checklist || [],
+    estimatedMinutes: estimatedMinutes || 30,
+    notes,
   }).returning();
 
   const [unit] = await db.select({ name: unitsTable.name }).from(unitsTable).where(eq(unitsTable.id, unitId)).limit(1);
@@ -74,23 +155,77 @@ router.post("/tasks", requireAuth, async (req, res) => {
 
 router.put("/tasks/:taskId", requireAuth, async (req, res) => {
   const taskId = parseInt(req.params.taskId);
-  const { assignedToId, title, description, status, priority, dueDate, checklist } = req.body;
+  const { assignedToId, title, description, taskType, status, priority, dueDate, checklist, estimatedMinutes, notes } = req.body;
   const [task] = await db.update(housekeepingTasksTable).set({
     ...(assignedToId !== undefined && { assignedToId }),
     ...(title !== undefined && { title }),
     ...(description !== undefined && { description }),
+    ...(taskType !== undefined && { taskType }),
     ...(status !== undefined && { status }),
     ...(priority !== undefined && { priority }),
     ...(dueDate !== undefined && { dueDate }),
     ...(checklist !== undefined && { checklist }),
+    ...(estimatedMinutes !== undefined && { estimatedMinutes }),
+    ...(notes !== undefined && { notes }),
     updatedAt: new Date(),
   }).where(eq(housekeepingTasksTable.id, taskId)).returning();
   if (!task) {
     res.status(404).json({ error: "Not Found", message: "Task not found" });
     return;
   }
-  const [unit] = await db.select({ name: unitsTable.name }).from(unitsTable).where(eq(unitsTable.id, task.unitId)).limit(1);
-  res.json({ ...task, unitName: unit?.name || null, assignedToName: null });
+  const result = await fetchTaskWithJoins(taskId);
+  res.json(result || task);
+});
+
+router.post("/tasks/:taskId/start", requireAuth, async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const [task] = await db.update(housekeepingTasksTable).set({
+    status: "in_progress",
+    startTime: new Date(),
+    updatedAt: new Date(),
+  }).where(eq(housekeepingTasksTable.id, taskId)).returning();
+  if (!task) {
+    res.status(404).json({ error: "Not Found", message: "Task not found" });
+    return;
+  }
+  const result = await fetchTaskWithJoins(taskId);
+  res.json(result || task);
+});
+
+router.post("/tasks/:taskId/complete", requireAuth, async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const { notes } = req.body || {};
+  const [task] = await db.update(housekeepingTasksTable).set({
+    status: "completed",
+    endTime: new Date(),
+    ...(notes !== undefined && { notes }),
+    updatedAt: new Date(),
+  }).where(eq(housekeepingTasksTable.id, taskId)).returning();
+  if (!task) {
+    res.status(404).json({ error: "Not Found", message: "Task not found" });
+    return;
+  }
+  const result = await fetchTaskWithJoins(taskId);
+  res.json(result || task);
+});
+
+router.post("/tasks/:taskId/verify", requireAuth, async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const user = (req as any).user;
+  const { verificationNotes } = req.body || {};
+  const [task] = await db.update(housekeepingTasksTable).set({
+    status: "verified",
+    verifiedById: user.id,
+    verifiedAt: new Date(),
+    ...(verificationNotes !== undefined && { verificationNotes }),
+    updatedAt: new Date(),
+  }).where(eq(housekeepingTasksTable.id, taskId)).returning();
+  if (!task) {
+    res.status(404).json({ error: "Not Found", message: "Task not found" });
+    return;
+  }
+  const result = await fetchTaskWithJoins(taskId);
+  res.json(result || task);
 });
 
 router.get("/unit-statuses", requireAuth, async (req, res) => {

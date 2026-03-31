@@ -15,6 +15,7 @@ import HousekeepingPage from "@/pages/housekeeping";
 import ReportsPage from "@/pages/reports";
 import SettingsPage from "@/pages/settings";
 import ChessPage from "@/pages/chess";
+import InvoicesPage from "@/pages/invoices";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +54,7 @@ function Router() {
       <Route path="/guests"><ProtectedRoute component={GuestsPage} /></Route>
       <Route path="/chess"><ProtectedRoute component={ChessPage} /></Route>
       <Route path="/housekeeping"><ProtectedRoute component={HousekeepingPage} /></Route>
+      <Route path="/invoices"><ProtectedRoute component={InvoicesPage} /></Route>
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
       <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
       

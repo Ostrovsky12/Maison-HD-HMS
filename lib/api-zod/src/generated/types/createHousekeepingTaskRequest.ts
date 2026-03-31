@@ -7,13 +7,17 @@
  */
 import type { ChecklistItem } from "./checklistItem";
 import type { CreateHousekeepingTaskRequestPriority } from "./createHousekeepingTaskRequestPriority";
+import type { CreateHousekeepingTaskRequestTaskType } from "./createHousekeepingTaskRequestTaskType";
 
 export interface CreateHousekeepingTaskRequest {
   unitId: number;
   assignedToId?: number | null;
   title: string;
   description?: string | null;
+  taskType?: CreateHousekeepingTaskRequestTaskType;
   priority: CreateHousekeepingTaskRequestPriority;
   dueDate?: Date | null;
   checklist?: ChecklistItem[];
+  estimatedMinutes?: number | null;
+  notes?: string | null;
 }
