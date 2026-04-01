@@ -1,18 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
+import { BookingDialog } from "@/components/booking/booking-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import {
   useGetBookingsCalendar,
-  useGetPricingPreview,
-  useSearchGuests,
-  useCreateBooking,
   useCheckoutBooking,
   useCheckinBooking,
   useCancelBooking,
@@ -29,8 +25,6 @@ import {
   CalendarX,
   X,
   Loader2,
-  Search,
-  Info,
 } from "lucide-react";
 import { format, addDays, subDays, parseISO, differenceInDays } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -663,265 +657,20 @@ export default function ChessPage() {
         </Dialog>
       )}
 
-      {/* New Booking Dialog – always mounted, open controlled via prop */}
-      <NewBookingDialog
+      {/* New Booking Dialog */}
+      <BookingDialog
         open={newBooking.open}
-        units={units}
-        initialUnitId={newBooking.unitId}
-        initialCheckIn={newBooking.checkIn}
-        initialCheckOut={newBooking.checkOut}
+        unitId={newBooking.unitId}
+        unitName={units.find(u => u.id === newBooking.unitId)?.name}
+        checkIn={newBooking.checkIn}
+        checkOut={newBooking.checkOut}
         onClose={() => setNewBooking({ open: false })}
-        onCreated={() => {
+        onSuccess={() => {
           setNewBooking({ open: false });
           refetch();
-          toast({ title: "Бронювання створено" });
         }}
       />
     </AppLayout>
   );
 }
 
-function NewBookingDialog({
-  open,
-  units,
-  initialUnitId,
-  initialCheckIn,
-  initialCheckOut,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  units: CalendarUnit[];
-  initialUnitId?: number;
-  initialCheckIn?: string;
-  initialCheckOut?: string;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const { toast } = useToast();
-  const [guestSearch, setGuestSearch] = useState("");
-  const [selectedGuestId, setSelectedGuestId] = useState<number | null>(null);
-  const [selectedGuestName, setSelectedGuestName] = useState("");
-  const [unitId, setUnitId] = useState(initialUnitId ? String(initialUnitId) : "");
-  const [checkIn, setCheckIn] = useState(initialCheckIn || dateStr(new Date()));
-  const [checkOut, setCheckOut] = useState(initialCheckOut || dateStr(addDays(new Date(), 1)));
-  const [notes, setNotes] = useState("");
-  const [source, setSource] = useState("direct");
-  const [showGuestDropdown, setShowGuestDropdown] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setGuestSearch("");
-      setSelectedGuestId(null);
-      setSelectedGuestName("");
-      setUnitId(initialUnitId ? String(initialUnitId) : "");
-      setCheckIn(initialCheckIn || dateStr(new Date()));
-      setCheckOut(initialCheckOut || dateStr(addDays(new Date(), 1)));
-      setNotes("");
-      setSource("direct");
-      setShowGuestDropdown(false);
-    }
-  }, [open]);
-
-  const { data: guestResults } = useSearchGuests(
-    { q: guestSearch, limit: 8 },
-    { query: { enabled: guestSearch.length >= 2 } }
-  );
-
-  const { data: pricing } = useGetPricingPreview(
-    { checkIn, checkOut, unitId: parseInt(unitId) || 0 },
-    { query: { enabled: !!unitId && !!checkIn && !!checkOut && checkIn < checkOut } }
-  );
-
-  const createBooking = useCreateBooking();
-
-  const handleCreate = () => {
-    if (!selectedGuestId || !unitId || !checkIn || !checkOut) {
-      toast({ title: "Заповніть усі поля", variant: "destructive" });
-      return;
-    }
-    if (checkIn >= checkOut) {
-      toast({ title: "Дата виїзду має бути після дати заїзду", variant: "destructive" });
-      return;
-    }
-    createBooking.mutate(
-      {
-        data: {
-          guestId: selectedGuestId,
-          unitId: parseInt(unitId),
-          checkIn,
-          checkOut,
-          guestsCount: 2,
-          source: source as any,
-          totalAmount: pricing?.totalAmount || 0,
-          notes: notes || undefined,
-        },
-      },
-      {
-        onSuccess: () => onCreated(),
-        onError: (e: any) => {
-          toast({ title: "Помилка", description: e.message, variant: "destructive" });
-        },
-      }
-    );
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Нове бронювання</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          {/* Guest Search */}
-          <div className="space-y-1.5 relative">
-            <Label>Гість</Label>
-            {selectedGuestId ? (
-              <div className="flex items-center justify-between border rounded-md px-3 py-2 bg-muted/30">
-                <span className="text-sm font-medium">{selectedGuestName}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => { setSelectedGuestId(null); setSelectedGuestName(""); setGuestSearch(""); }}
-                >
-                  <X className="w-3 h-3" />
-                </Button>
-              </div>
-            ) : (
-              <>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                  <Input
-                    className="pl-9"
-                    placeholder="Пошук за іменем, телефоном..."
-                    value={guestSearch}
-                    onChange={(e) => {
-                      setGuestSearch(e.target.value);
-                      setShowGuestDropdown(true);
-                    }}
-                    onFocus={() => setShowGuestDropdown(true)}
-                  />
-                </div>
-                {showGuestDropdown && guestResults?.guests && guestResults.guests.length > 0 && (
-                  <div className="absolute z-50 w-full bg-popover border border-border rounded-md shadow-lg mt-1 max-h-52 overflow-y-auto">
-                    {guestResults.guests.map((g) => (
-                      <div
-                        key={g.id}
-                        className="px-3 py-2 hover:bg-accent cursor-pointer flex items-center justify-between"
-                        onClick={() => {
-                          setSelectedGuestId(g.id);
-                          setSelectedGuestName(`${g.firstName} ${g.lastName}`);
-                          setShowGuestDropdown(false);
-                          setGuestSearch("");
-                        }}
-                      >
-                        <div>
-                          <p className="text-sm font-medium">{g.firstName} {g.lastName}</p>
-                          <p className="text-xs text-muted-foreground">{g.phone || g.email || "—"}</p>
-                        </div>
-                        {g.loyaltyLevel && (
-                          <Badge variant="outline" className="text-xs capitalize">{g.loyaltyLevel}</Badge>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Unit */}
-          <div className="space-y-1.5">
-            <Label>Об'єкт</Label>
-            <Select value={unitId} onValueChange={setUnitId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Оберіть номер/будинок" />
-              </SelectTrigger>
-              <SelectContent>
-                {units.map((u) => (
-                  <SelectItem key={u.id} value={String(u.id)}>
-                    {u.name} · {u.category}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Dates */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Заїзд</Label>
-              <Input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Виїзд</Label>
-              <Input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
-            </div>
-          </div>
-
-          {/* Source */}
-          <div className="space-y-1.5">
-            <Label>Джерело</Label>
-            <Select value={source} onValueChange={setSource}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="direct">Пряме бронювання</SelectItem>
-                <SelectItem value="phone">Телефон</SelectItem>
-                <SelectItem value="booking.com">Booking.com</SelectItem>
-                <SelectItem value="airbnb">Airbnb</SelectItem>
-                <SelectItem value="other">Інше</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <Label>Нотатки</Label>
-            <Input
-              placeholder="Побажання, особливості..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </div>
-
-          {/* Pricing Preview */}
-          {pricing && (
-            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-              <div className="flex items-center gap-1.5 text-sm font-medium">
-                <Info className="w-4 h-4 text-primary" />
-                Розрахунок вартості
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div>
-                  <p className="text-muted-foreground">Ночей</p>
-                  <p className="font-semibold">{pricing.nights}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Середня ціна</p>
-                  <p className="font-semibold">{formatUAH(pricing.avgNightPrice)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Всього</p>
-                  <p className="font-semibold text-primary">{formatUAH(pricing.totalAmount)}</p>
-                </div>
-              </div>
-              {pricing.breakdown.length > 0 && pricing.breakdown[0].seasonFactor !== 1 && (
-                <p className="text-xs text-muted-foreground">{pricing.breakdown[0].label}</p>
-              )}
-            </div>
-          )}
-        </div>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onClose}>Скасувати</Button>
-          <Button onClick={handleCreate} disabled={createBooking.isPending}>
-            {createBooking.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            Створити
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}

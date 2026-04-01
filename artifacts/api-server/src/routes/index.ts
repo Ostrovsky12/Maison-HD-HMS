@@ -20,6 +20,8 @@ import integrationsRouter from "./integrations.js";
 import subscriptionsRouter from "./subscriptions.js";
 import webhooksRouter from "./webhooks.js";
 import demoRequestsRouter from "./demo-requests.js";
+import legalEntitiesRouter from "./legal-entities.js";
+import discountTypesRouter from "./discount-types.js";
 
 const router: IRouter = Router();
 
@@ -44,5 +46,7 @@ router.use("/integrations", integrationsRouter);
 router.use("/subscriptions", subscriptionsRouter);
 router.use("/webhooks", webhooksRouter);
 router.use("/demo-requests", demoRequestsRouter);
+router.use("/legal-entities", legalEntitiesRouter);
+router.use("/discount-types", discountTypesRouter);
 
 export default router;

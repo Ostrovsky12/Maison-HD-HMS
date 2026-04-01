@@ -15,3 +15,5 @@ export * from "./integrations";
 export * from "./analytics-kpi";
 export * from "./subscriptions";
 export * from "./demo-requests";
+export * from "./legal-entities";
+export * from "./discount-types";

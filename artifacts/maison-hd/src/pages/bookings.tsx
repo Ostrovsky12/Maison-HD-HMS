@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
+import { BookingDialog } from "@/components/booking/booking-dialog";
 import { 
   Search, 
   Plus, 
@@ -59,6 +60,7 @@ export default function BookingsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
+  const [bookingDialog, setBookingDialog] = useState<{ open: boolean; booking?: any }>({ open: false });
   
   const { data: bookings, isLoading } = useListBookings({});
   const updateStatusMutation = useUpdateBookingStatus();
@@ -154,7 +156,7 @@ export default function BookingsPage() {
             <h1 className="text-3xl font-bold tracking-tight">Бронювання</h1>
             <p className="text-muted-foreground mt-1">Управління всіма бронюваннями та заїздами.</p>
           </div>
-          <Button className="gap-2">
+          <Button className="gap-2" onClick={() => setBookingDialog({ open: true })}>
             <Plus className="w-4 h-4" />
             Створити бронювання
           </Button>
@@ -271,6 +273,12 @@ export default function BookingsPage() {
                                 </DropdownMenuItem>
                               )}
                               <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="cursor-pointer gap-2"
+                                onClick={() => setBookingDialog({ open: true, booking })}
+                              >
+                                <FileEdit className="w-4 h-4" /> Редагувати
+                              </DropdownMenuItem>
                               <DropdownMenuItem 
                                 className="text-destructive focus:text-destructive cursor-pointer gap-2"
                                 onClick={() => handleDelete(booking.id)}
@@ -289,6 +297,15 @@ export default function BookingsPage() {
           </div>
         </div>
       </div>
+      <BookingDialog
+        open={bookingDialog.open}
+        booking={bookingDialog.booking}
+        onClose={() => setBookingDialog({ open: false })}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+          setBookingDialog({ open: false });
+        }}
+      />
     </AppLayout>
   );
 }

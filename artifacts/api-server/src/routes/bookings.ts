@@ -112,33 +112,88 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 router.post("/", requireAuth, async (req, res) => {
-  const { unitId, guestId, checkIn, checkOut, status, source, guestsCount, totalAmount, notes } = req.body;
+  const user = (req as any).user;
+  const {
+    unitId, checkIn, checkOut, status, source, totalAmount, notes,
+    checkinTime, checkoutTime, rateId, rateName,
+    adults, childrenUnder6, childrenOver6, extraBeds,
+    firstName, lastName, middleName, phone,
+    discountId, discountValue, discountType,
+    selectedAddons, legalEntityId,
+  } = req.body;
+
+  let { guestId } = req.body;
+
+  // Auto-find or create guest from phone/name
+  if (!guestId && (phone || firstName)) {
+    if (phone) {
+      const existing = await db.select().from(guestsTable)
+        .where(and(eq(guestsTable.phone, phone), eq(guestsTable.organizationId, user.organizationId || 0)))
+        .limit(1);
+      if (existing.length > 0) guestId = existing[0].id;
+    }
+    if (!guestId && firstName) {
+      const [newGuest] = await db.insert(guestsTable).values({
+        organizationId: user.organizationId || 0,
+        firstName: firstName || "Гість",
+        lastName: lastName || "",
+        middleName: middleName || null,
+        phone: phone || null,
+      }).returning();
+      guestId = newGuest.id;
+    }
+  }
+
+  const isDraft = status === "draft";
+  const draftExpiresAt = isDraft ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null;
+  const guestsCount = (adults || 1) + (childrenUnder6 || 0) + (childrenOver6 || 0);
+
   const [booking] = await db.insert(bookingsTable).values({
     unitId,
-    guestId,
+    guestId: guestId || null,
     checkIn,
     checkOut,
+    checkinTime: checkinTime || "14:00",
+    checkoutTime: checkoutTime || "12:00",
     status: status || "confirmed",
     source: source || "direct",
-    guestsCount: guestsCount || 1,
+    rateId: rateId || null,
+    rateName: rateName || null,
+    adults: adults || 1,
+    childrenUnder6: childrenUnder6 || 0,
+    childrenOver6: childrenOver6 || 0,
+    extraBeds: extraBeds || 0,
+    guestsCount,
+    firstName: firstName || null,
+    lastName: lastName || null,
+    middleName: middleName || null,
+    phone: phone || null,
     totalAmount: String(totalAmount || 0),
+    discountId: discountId || null,
+    discountValue: discountValue ? String(discountValue) : null,
+    discountType: discountType || null,
+    selectedAddons: selectedAddons || {},
+    legalEntityId: legalEntityId || null,
     notes,
+    draftExpiresAt,
   }).returning();
 
-  await db.update(guestsTable).set({
-    bookingCount: sql`${guestsTable.bookingCount} + 1`,
-    ltv: sql`${guestsTable.ltv} + ${String(totalAmount || 0)}`,
-    updatedAt: new Date(),
-  }).where(eq(guestsTable.id, guestId));
+  if (guestId && !isDraft) {
+    await db.update(guestsTable).set({
+      bookingCount: sql`${guestsTable.bookingCount} + 1`,
+      ltv: sql`${guestsTable.ltv} + ${String(totalAmount || 0)}`,
+      updatedAt: new Date(),
+    }).where(eq(guestsTable.id, guestId));
+  }
 
-  const [g] = await db.select().from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1);
+  const [g] = guestId ? await db.select().from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1) : [null];
   const [u] = await db.select().from(unitsTable).where(eq(unitsTable.id, unitId)).limit(1);
 
   res.status(201).json({
     ...booking,
     totalAmount: Number(booking.totalAmount),
     paidAmount: Number(booking.paidAmount),
-    guestName: g ? `${g.firstName} ${g.lastName}` : null,
+    guestName: g ? `${g.firstName} ${g.lastName}` : (lastName ? `${lastName} ${firstName || ""}`.trim() : "Гість"),
     unitName: u?.name || null,
   });
 });
@@ -210,6 +265,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
   const startStr = start.toISOString().split("T")[0];
   const endStr = end.toISOString().split("T")[0];
 
+  const now = new Date();
   const bookingRows = await db.select({
     id: bookingsTable.id,
     unitId: bookingsTable.unitId,
@@ -219,12 +275,23 @@ router.get("/calendar", requireAuth, async (req, res) => {
     status: bookingsTable.status,
     guestsCount: bookingsTable.guestsCount,
     totalAmount: bookingsTable.totalAmount,
+    firstName: bookingsTable.firstName,
+    lastName: bookingsTable.lastName,
+    phone: bookingsTable.phone,
+    draftExpiresAt: bookingsTable.draftExpiresAt,
+    adults: bookingsTable.adults,
+    checkinTime: bookingsTable.checkinTime,
+    checkoutTime: bookingsTable.checkoutTime,
   }).from(bookingsTable).where(
     and(
       inArray(bookingsTable.unitId, unitIds),
       ne(bookingsTable.status, "cancelled"),
       lte(bookingsTable.checkIn, endStr),
       gte(bookingsTable.checkOut, startStr),
+      or(
+        ne(bookingsTable.status, "draft" as any),
+        gte(bookingsTable.draftExpiresAt, now),
+      ),
     )
   );
 
@@ -239,17 +306,22 @@ router.get("/calendar", requireAuth, async (req, res) => {
     const ci = new Date(b.checkIn);
     const co = new Date(b.checkOut);
     const nights = Math.round((co.getTime() - ci.getTime()) / 86400000);
+    const isDraft = b.status === "draft";
+    const guestFromMap = guestMap.get(b.guestId);
+    const guestFromBooking = b.lastName ? `${b.lastName} ${b.firstName || ""}`.trim() : null;
     return {
       id: b.id,
       unitId: b.unitId,
-      guestName: guestMap.get(b.guestId) || "Гість",
+      guestName: guestFromMap || guestFromBooking || "Гість",
       checkIn: b.checkIn,
       checkOut: b.checkOut,
       status: b.status,
       nights,
       guestsCount: b.guestsCount || 1,
       totalAmount: Number(b.totalAmount || 0),
-      color: bookingColor(b.id),
+      color: isDraft ? "#a0aec0" : bookingColor(b.id),
+      isDraft,
+      draftExpiresAt: b.draftExpiresAt,
     };
   });
 
@@ -306,6 +378,37 @@ router.get("/pricing-preview", requireAuth, async (req, res) => {
   });
 });
 
+// GET /api/bookings/check-draft (MUST be before /:bookingId)
+router.get("/check-draft", requireAuth, async (req, res) => {
+  try {
+    const { unitId, checkIn, checkOut } = req.query;
+    if (!unitId || !checkIn || !checkOut) return res.json({ hasDraft: false });
+    const now = new Date();
+    const drafts = await db.select({
+      id: bookingsTable.id, checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
+      firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
+      phone: bookingsTable.phone, draftExpiresAt: bookingsTable.draftExpiresAt, guestId: bookingsTable.guestId,
+    }).from(bookingsTable).where(
+      and(
+        eq(bookingsTable.unitId, parseInt(unitId as string)),
+        eq(bookingsTable.status, "draft" as any),
+        gte(bookingsTable.draftExpiresAt, now),
+        lte(bookingsTable.checkIn, checkOut as string),
+        gte(bookingsTable.checkOut, checkIn as string),
+      )
+    ).limit(1);
+    if (drafts.length === 0) return res.json({ hasDraft: false });
+    const draft = drafts[0];
+    let guestName = draft.lastName ? `${draft.lastName} ${draft.firstName || ""}`.trim() : null;
+    if (!guestName && draft.guestId) {
+      const [g] = await db.select({ firstName: guestsTable.firstName, lastName: guestsTable.lastName })
+        .from(guestsTable).where(eq(guestsTable.id, draft.guestId)).limit(1);
+      if (g) guestName = `${g.firstName} ${g.lastName}`;
+    }
+    res.json({ hasDraft: true, draft: { id: draft.id, checkIn: draft.checkIn, checkOut: draft.checkOut, guestName: guestName || "Гість", phone: draft.phone, draftExpiresAt: draft.draftExpiresAt } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.get("/:bookingId", requireAuth, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
@@ -349,16 +452,49 @@ router.get("/:bookingId", requireAuth, async (req, res) => {
 
 router.put("/:bookingId", requireAuth, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
-  const { checkIn, checkOut, status, paymentStatus, source, guestsCount, totalAmount, notes } = req.body;
+  const {
+    checkIn, checkOut, status, paymentStatus, source, totalAmount, notes,
+    checkinTime, checkoutTime, rateId, rateName,
+    adults, childrenUnder6, childrenOver6, extraBeds,
+    firstName, lastName, middleName, phone,
+    discountId, discountValue, discountType,
+    selectedAddons, legalEntityId,
+  } = req.body;
+
+  const guestsCount = (adults ?? undefined) !== undefined
+    ? (adults || 1) + (childrenUnder6 || 0) + (childrenOver6 || 0)
+    : undefined;
+
+  const isDraft = status === "draft";
+  const draftExpiresAt = isDraft ? new Date(Date.now() + 6 * 60 * 60 * 1000) : undefined;
+
   const [booking] = await db.update(bookingsTable).set({
     ...(checkIn !== undefined && { checkIn }),
     ...(checkOut !== undefined && { checkOut }),
+    ...(checkinTime !== undefined && { checkinTime }),
+    ...(checkoutTime !== undefined && { checkoutTime }),
     ...(status !== undefined && { status }),
     ...(paymentStatus !== undefined && { paymentStatus }),
     ...(source !== undefined && { source }),
+    ...(rateId !== undefined && { rateId }),
+    ...(rateName !== undefined && { rateName }),
+    ...(adults !== undefined && { adults }),
+    ...(childrenUnder6 !== undefined && { childrenUnder6 }),
+    ...(childrenOver6 !== undefined && { childrenOver6 }),
+    ...(extraBeds !== undefined && { extraBeds }),
     ...(guestsCount !== undefined && { guestsCount }),
+    ...(firstName !== undefined && { firstName }),
+    ...(lastName !== undefined && { lastName }),
+    ...(middleName !== undefined && { middleName }),
+    ...(phone !== undefined && { phone }),
     ...(totalAmount !== undefined && { totalAmount: String(totalAmount) }),
+    ...(discountId !== undefined && { discountId }),
+    ...(discountValue !== undefined && { discountValue: String(discountValue) }),
+    ...(discountType !== undefined && { discountType }),
+    ...(selectedAddons !== undefined && { selectedAddons }),
+    ...(legalEntityId !== undefined && { legalEntityId }),
     ...(notes !== undefined && { notes }),
+    ...(draftExpiresAt && { draftExpiresAt }),
     updatedAt: new Date(),
   }).where(eq(bookingsTable.id, bookingId)).returning();
   if (!booking) {
@@ -622,6 +758,113 @@ router.post("/liqpay/callback", async (req, res) => {
   } catch (err) {
     logger.error({ err }, "LiqPay callback error");
     res.status(500).json({ error: "callback_error" });
+  }
+});
+
+// POST /api/bookings/:bookingId/payment-link
+router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
+  try {
+    const bookingId = parseInt(req.params.bookingId);
+    const { legalEntityId } = req.body;
+
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    const [unit] = await db.select().from(unitsTable).where(eq(unitsTable.id, booking.unitId)).limit(1);
+
+    let publicKey = process.env.LIQPAY_PUBLIC_KEY || "sandbox_public_key";
+    let privateKey = process.env.LIQPAY_PRIVATE_KEY || "sandbox_private_key";
+    let entityName = "Maison HD";
+    const isSandbox = !process.env.LIQPAY_PUBLIC_KEY;
+
+    if (legalEntityId) {
+      const { legalEntitiesTable } = await import("@workspace/db/schema");
+      const [entity] = await db.select().from(legalEntitiesTable).where(eq(legalEntitiesTable.id, legalEntityId)).limit(1);
+      if (entity) {
+        if (entity.liqpayPublicKey) publicKey = entity.liqpayPublicKey;
+        if (entity.liqpayPrivateKey) privateKey = entity.liqpayPrivateKey;
+        entityName = entity.name;
+      }
+    }
+
+    const amount = Number(booking.totalAmount) - Number(booking.paidAmount);
+    const orderId = `booking-${bookingId}-${Date.now()}`;
+    const description = `Бронювання #${bookingId} — ${unit?.name || "Номер"}`;
+
+    const liqpayData = generateLiqPayForm({
+      publicKey,
+      privateKey,
+      amount,
+      currency: "UAH",
+      description,
+      orderId,
+      serverUrl: `${process.env.APP_URL || ""}/api/bookings/liqpay-callback`,
+      resultUrl: `${process.env.APP_URL || ""}/maison-hd/bookings/${bookingId}`,
+    });
+
+    const paymentLink = `https://www.liqpay.ua/api/3/checkout?data=${encodeURIComponent(liqpayData.data)}&signature=${encodeURIComponent(liqpayData.signature)}`;
+
+    await db.update(bookingsTable).set({ paymentLink, legalEntityId: legalEntityId || null, updatedAt: new Date() })
+      .where(eq(bookingsTable.id, bookingId));
+
+    res.json({ paymentLink, isSandbox, entityName, amount, orderId });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/bookings/:bookingId/invoice
+router.get("/:bookingId/invoice", requireAuth, async (req, res) => {
+  try {
+    const bookingId = parseInt(req.params.bookingId);
+    const { legalEntityId, payerDetails } = req.query;
+
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    const [unit] = await db.select().from(unitsTable).where(eq(unitsTable.id, booking.unitId)).limit(1);
+    let guestName = booking.lastName ? `${booking.lastName} ${booking.firstName || ""}`.trim() : null;
+    if (!guestName && booking.guestId) {
+      const [g] = await db.select({ firstName: guestsTable.firstName, lastName: guestsTable.lastName })
+        .from(guestsTable).where(eq(guestsTable.id, booking.guestId)).limit(1);
+      if (g) guestName = `${g.firstName} ${g.lastName}`;
+    }
+
+    let seller: any = { name: "Maison HD", address: "", edrpou: "", iban: "", bank: "" };
+    if (legalEntityId) {
+      const { legalEntitiesTable } = await import("@workspace/db/schema");
+      const [entity] = await db.select().from(legalEntitiesTable).where(eq(legalEntitiesTable.id, parseInt(legalEntityId as string))).limit(1);
+      if (entity) seller = entity;
+    }
+
+    const total = Number(booking.totalAmount);
+    const paid = Number(booking.paidAmount);
+    const due = total - paid;
+    const nights = Math.round((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / 86400000);
+
+    res.json({
+      invoiceNumber: `INV-${bookingId}-${Date.now().toString(36).toUpperCase()}`,
+      date: new Date().toISOString().split("T")[0],
+      booking: {
+        id: bookingId,
+        checkIn: booking.checkIn,
+        checkOut: booking.checkOut,
+        checkinTime: booking.checkinTime,
+        checkoutTime: booking.checkoutTime,
+        nights,
+        unitName: unit?.name || `Номер ${booking.unitId}`,
+        guestName: guestName || "Гість",
+        phone: booking.phone,
+        adults: booking.adults,
+        totalAmount: total,
+        paidAmount: paid,
+        dueAmount: due,
+      },
+      seller,
+      buyer: payerDetails ? JSON.parse(payerDetails as string) : null,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

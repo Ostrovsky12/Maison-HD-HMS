@@ -164,7 +164,35 @@ Stage 6 Sidebar role-based nav:
 - `owner/manager` → sees "Підписка", Analytics, Integrations + all core
 - `reception/housekeeper` → core only
 
-## Stage 7 (Current)
+## Stage 8 (Current)
+
+### BookingDialog (Comprehensive Booking Creation/Edit)
+- `artifacts/maison-hd/src/components/booking/booking-dialog.tsx` — shared dialog used in both `/bookings` and `/chess`
+- Sections: Unit selector, Dates+Time pickers, Rate/Channel, Guest count steppers (adults/children/extra beds), Standard addons with pricing, Guest ПІБ+phone, Collapsible discounts, Price summary
+- Footer: Чернетка (Draft, 6h hold) | Посилання на оплату (LiqPay) | Рахунок (invoice+print) | Скасувати | Підтвердити
+- Draft conflict detection via `GET /api/bookings/check-draft`
+- Payment link sub-dialog with Copy+Telegram share buttons
+- Invoice sub-dialog with print support
+
+### Stage 8 DB Tables
+- `legal_entities` — org's legal entities (name, type TOV/FOP, EDRPOU, IBAN, bank, MFO, address, liqpayPublicKey/PrivateKey, isDefault)
+- `discount_types` — org's discount catalog (name, code, value, valueType percent/fixed)
+- `bookings` extended: checkinTime, checkoutTime, rateId, adults, childrenUnder6, childrenOver6, extraBeds, firstName, lastName, middleName, phone, discountId, discountValue, discountType, selectedAddons (jsonb), draftExpiresAt, paymentLink, legalEntityId, plus 'draft' status
+
+### Stage 8 API Routes
+- `GET /api/bookings/check-draft?unitId=&checkIn=&checkOut=` — check for existing draft on dates (MUST be before /:bookingId in route order)
+- `POST /api/bookings/:id/payment-link` — generate LiqPay payment link
+- `GET /api/bookings/:id/invoice` — get invoice data for rendering/printing
+- `GET/POST /api/legal-entities` — CRUD
+- `PATCH/DELETE /api/legal-entities/:id` — update/delete
+- `GET/POST /api/discount-types` — CRUD with auto-seed 3 defaults (День народження 10%, УБД 10%, Постійний гість 5%)
+- `PATCH/DELETE /api/discount-types/:id` — update/delete
+
+### Stage 8 Settings Tabs (New)
+- `/maison-hd/settings` → "Юр. особи" tab — full CRUD for legal entities (set-as-default, LiqPay key status indicator)
+- `/maison-hd/settings` → "Знижки" tab — full CRUD for discount types (percent/fixed, code)
+
+## Stage 7
 
 ### New Pages
 - `/maison-hd/demo` — Public marketing landing page with demo request form (no auth required)
