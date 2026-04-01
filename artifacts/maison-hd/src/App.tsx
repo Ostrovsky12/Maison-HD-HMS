@@ -21,6 +21,8 @@ import IntegrationsPage from "@/pages/integrations";
 import AdminPage from "@/pages/admin";
 import OnboardingPage from "@/pages/onboarding";
 import SubscriptionPage from "@/pages/subscription";
+import DemoPage from "@/pages/demo";
+import DemoRequestsPage from "@/pages/demo-requests";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -71,6 +73,8 @@ function Router() {
       <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
       <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} /></Route>
       <Route path="/admin"><ProtectedRoute component={AdminPage} roles={["super_admin"]} /></Route>
+      <Route path="/demo-requests"><ProtectedRoute component={DemoRequestsPage} roles={["super_admin"]} /></Route>
+      <Route path="/demo" component={DemoPage} />
 
       <Route path="/">
         <Redirect to="/dashboard" />

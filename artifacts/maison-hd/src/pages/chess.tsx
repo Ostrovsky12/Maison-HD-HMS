@@ -102,6 +102,14 @@ export default function ChessPage() {
   const [days, setDays] = useState(30);
   const [startDate, setStartDate] = useState(() => dateStr(new Date()));
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [showOnlyFree, setShowOnlyFree] = useState(false);
+
+  const [dragState, setDragState] = useState<{
+    unitId: number;
+    startDate: string;
+    endDate: string;
+  } | null>(null);
+  const isDragging = useRef(false);
 
   const { data: calData, isLoading, refetch } = useGetBookingsCalendar({
     startDate,
@@ -157,6 +165,37 @@ export default function ChessPage() {
   const handleCellClick = (unitId: number, date: string) => {
     const checkOut = dateStr(addDays(parseISO(date), 1));
     setNewBooking({ open: true, unitId, checkIn: date, checkOut });
+  };
+
+  const handleCellMouseDown = (unitId: number, date: string) => {
+    isDragging.current = true;
+    setDragState({ unitId, startDate: date, endDate: date });
+  };
+
+  const handleCellMouseEnter = (unitId: number, date: string) => {
+    if (!isDragging.current || !dragState || dragState.unitId !== unitId) return;
+    setDragState((prev) => prev ? { ...prev, endDate: date } : prev);
+  };
+
+  const handleCellMouseUp = (unitId: number, date: string) => {
+    if (!isDragging.current || !dragState || dragState.unitId !== unitId) {
+      isDragging.current = false;
+      setDragState(null);
+      return;
+    }
+    isDragging.current = false;
+    const a = dragState.startDate <= dragState.endDate ? dragState.startDate : dragState.endDate;
+    const b = dragState.startDate <= dragState.endDate ? dragState.endDate : dragState.startDate;
+    const checkOut = dateStr(addDays(parseISO(b), 1));
+    setDragState(null);
+    setNewBooking({ open: true, unitId: dragState.unitId, checkIn: a, checkOut });
+  };
+
+  const isCellInDrag = (unitId: number, date: string): boolean => {
+    if (!dragState || dragState.unitId !== unitId) return false;
+    const a = dragState.startDate <= dragState.endDate ? dragState.startDate : dragState.endDate;
+    const b = dragState.startDate <= dragState.endDate ? dragState.endDate : dragState.startDate;
+    return date >= a && date <= b;
   };
 
   const handleCheckIn = useMemo(
@@ -263,48 +302,88 @@ export default function ChessPage() {
 
   return (
     <AppLayout>
-      <div className="flex flex-col h-full">
+      <div
+        className="flex flex-col h-full"
+        onMouseUp={() => {
+          if (isDragging.current) {
+            isDragging.current = false;
+            setDragState(null);
+          }
+        }}
+      >
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-card/50 backdrop-blur-sm flex-shrink-0 gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold">Шахматка</h1>
-            {isLoading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-44 h-8 text-sm">
-                <SelectValue placeholder="Всі категорії" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Всі категорії</SelectItem>
-                {categories.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={String(days)} onValueChange={(v) => setDays(parseInt(v))}>
-              <SelectTrigger className="w-32 h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="14">14 днів</SelectItem>
-                <SelectItem value="30">30 днів</SelectItem>
-                <SelectItem value="45">45 днів</SelectItem>
-                <SelectItem value="60">60 днів</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(-7)}>
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={goToday}>Сьогодні</Button>
-              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(7)}>
-                <ChevronRight className="w-4 h-4" />
+        <div className="border-b bg-card/50 backdrop-blur-sm flex-shrink-0">
+          <div className="flex items-center justify-between px-6 py-3 gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-bold">Шахматка</h1>
+              {isLoading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select value={String(days)} onValueChange={(v) => setDays(parseInt(v))}>
+                <SelectTrigger className="w-32 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="14">14 днів</SelectItem>
+                  <SelectItem value="30">30 днів</SelectItem>
+                  <SelectItem value="45">45 днів</SelectItem>
+                  <SelectItem value="60">60 днів</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(-7)}>
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={goToday}>Сьогодні</Button>
+                <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(7)}>
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+              <Button size="sm" className="h-8 gap-1.5" onClick={() => setNewBooking({ open: true })}>
+                <Plus className="w-4 h-4" /> Бронювання
               </Button>
             </div>
-            <Button size="sm" className="h-8 gap-1.5" onClick={() => setNewBooking({ open: true })}>
-              <Plus className="w-4 h-4" /> Бронювання
-            </Button>
+          </div>
+
+          {/* Filter row: category badges + legend */}
+          <div className="px-6 pb-3 flex flex-wrap items-center gap-3">
+            <span className="text-xs text-muted-foreground font-medium">Категорія:</span>
+            <button
+              onClick={() => setCategoryFilter("")}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                !categoryFilter ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              Всі ({units.length})
+            </button>
+            {categories.map((c) => {
+              const count = units.filter((u) => u.category === c).length;
+              return (
+                <button
+                  key={c}
+                  onClick={() => setCategoryFilter(categoryFilter === c ? "" : c)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    categoryFilter === c ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                >
+                  {c} ({count})
+                </button>
+              );
+            })}
+            <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-primary/25 border border-primary/30 inline-block" />
+                Drag → бронювання
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-orange-50/60 border border-orange-100 inline-block" />
+                Вихідний
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-primary/5 border border-primary/20 inline-block" />
+                Сьогодні
+              </span>
+            </div>
           </div>
         </div>
 
@@ -433,14 +512,26 @@ export default function ChessPage() {
                           const dt = parseISO(d);
                           const isToday = d === today;
                           const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
+                          const inDrag = isCellInDrag(row.unit.id, d);
                           return (
                             <div
                               key={d}
-                              className={`flex-shrink-0 border-r border-border cursor-pointer hover:bg-primary/5 transition-colors ${
-                                isToday ? "bg-primary/5" : isWeekend ? "bg-orange-50/30" : ""
+                              className={`flex-shrink-0 border-r border-border cursor-pointer transition-colors select-none ${
+                                inDrag
+                                  ? "bg-primary/25 border-primary/30"
+                                  : isToday
+                                  ? "bg-primary/5 hover:bg-primary/10"
+                                  : isWeekend
+                                  ? "bg-orange-50/30 hover:bg-orange-50/60"
+                                  : "hover:bg-primary/5"
                               }`}
                               style={{ width: DAY_WIDTH, height: h }}
-                              onClick={() => handleCellClick(row.unit.id, d)}
+                              onMouseDown={() => handleCellMouseDown(row.unit.id, d)}
+                              onMouseEnter={() => handleCellMouseEnter(row.unit.id, d)}
+                              onMouseUp={() => handleCellMouseUp(row.unit.id, d)}
+                              onClick={() => {
+                                if (!isDragging.current) handleCellClick(row.unit.id, d);
+                              }}
                             />
                           );
                         })}

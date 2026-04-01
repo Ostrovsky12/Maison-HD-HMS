@@ -18,6 +18,7 @@ import {
   Plug,
   Crown,
   CreditCard,
+  ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,7 @@ const allNavItems = [
   { name: "Аналітика", path: "/analytics", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
   { name: "Інтеграції", path: "/integrations", icon: Plug, roles: ["super_admin", "owner", "manager"] },
   { name: "Підписка", path: "/subscription", icon: CreditCard, roles: ["owner", "super_admin"] },
+  { name: "Demo Заявки", path: "/demo-requests", icon: ClipboardList, roles: ["super_admin"] },
   { name: "Super Admin", path: "/admin", icon: Crown, roles: ["super_admin"] },
 ];
 

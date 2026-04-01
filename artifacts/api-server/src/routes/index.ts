@@ -17,6 +17,9 @@ import notificationsRouter from "./notifications.js";
 import invoicesRouter from "./invoices.js";
 import nightAuditRouter from "./night-audit.js";
 import integrationsRouter from "./integrations.js";
+import subscriptionsRouter from "./subscriptions.js";
+import webhooksRouter from "./webhooks.js";
+import demoRequestsRouter from "./demo-requests.js";
 
 const router: IRouter = Router();
 
@@ -38,5 +41,8 @@ router.use("/notifications", notificationsRouter);
 router.use("/invoices", invoicesRouter);
 router.use("/audit", nightAuditRouter);
 router.use("/integrations", integrationsRouter);
+router.use("/subscriptions", subscriptionsRouter);
+router.use("/webhooks", webhooksRouter);
+router.use("/demo-requests", demoRequestsRouter);
 
 export default router;

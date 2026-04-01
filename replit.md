@@ -160,9 +160,38 @@ Stage 6 API routes:
 - `DELETE /api/organizations/:id/members/:userId` — remove member
 
 Stage 6 Sidebar role-based nav:
-- `super_admin` → sees "Super Admin" (amber), "Підписка", Analytics, Integrations + all core
+- `super_admin` → sees "Super Admin" (amber), "Підписка", "Demo Заявки", Analytics, Integrations + all core
 - `owner/manager` → sees "Підписка", Analytics, Integrations + all core
 - `reception/housekeeper` → core only
+
+## Stage 7 (Current)
+
+### New Pages
+- `/maison-hd/demo` — Public marketing landing page with demo request form (no auth required)
+- `/maison-hd/demo-requests` — Super Admin panel for managing demo requests (super_admin only)
+- `/maison-hd/subscription` — Full payment flow: monthly/yearly toggle, LiqPay form, sandbox simulate, invoice history
+
+### Stage 7 DB Tables
+- `subscriptions` — active subscription per org (tier, period, status, currentPeriodEnd)
+- `subscription_invoices` — payment invoices (invoiceNumber, amount, tax, total, status, paidAt)
+- `subscription_payments` — payment records (liqpay/fondy, externalPaymentId, status)
+- `demo_requests` — incoming demo request leads (name, email, company, status, notes)
+
+### Stage 7 API Routes
+- `GET /api/subscriptions` — current subscription + recent invoices (requireAuth)
+- `POST /api/subscriptions/create-invoice` — create invoice + LiqPay form data (requireAuth)
+- `GET /api/subscriptions/invoices` — full invoice history (requireAuth)
+- `POST /api/subscriptions/cancel` — cancel subscription at period end (requireAuth)
+- `POST /api/webhooks/liqpay` — LiqPay payment webhook (public)
+- `POST /api/webhooks/fondy` — Fondy payment webhook (public)
+- `POST /api/webhooks/simulate-payment` — sandbox simulate payment (requireAuth)
+- `POST /api/demo-requests` — submit demo request (public, no auth)
+- `GET /api/demo-requests` — list all demo requests (super_admin)
+- `PATCH /api/demo-requests/:id` — update status/notes (super_admin)
+
+### Chess Enhancements (Stage 7)
+- Category badge-pill filters (Всі + dynamic categories with counts)
+- Drag-to-select cells for new booking creation
 
 ## Running the App
 
