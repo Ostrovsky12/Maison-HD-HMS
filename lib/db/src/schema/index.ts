@@ -20,3 +20,4 @@ export * from "./discount-types";
 export * from "./migration";
 export * from "./guest-orders";
 export * from "./inbox";
+export * from "./spa";

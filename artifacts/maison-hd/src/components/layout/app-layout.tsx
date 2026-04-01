@@ -21,6 +21,7 @@ import {
   ClipboardList,
   ArrowRightLeft,
   MessageSquare,
+  Waves,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,7 @@ const allNavItems = [
   { name: "Номери", path: "/units", icon: KeyRound, roles: null },
   { name: "Гості", path: "/guests", icon: Users, roles: null },
   { name: "Прибирання", path: "/housekeeping", icon: Sparkles, roles: null },
+  { name: "SPA & Wellness", path: "/spa", icon: Waves, roles: null },
   { name: "Inbox", path: "/inbox", icon: MessageSquare, roles: null },
   { name: "Рахунки", path: "/invoices", icon: FileText, roles: null },
   { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },

@@ -25,6 +25,7 @@ import discountTypesRouter from "./discount-types.js";
 import migrationRouter from "./migration.js";
 import guestPortalRouter from "./guest-portal.js";
 import inboxRouter from "./inbox.js";
+import spaRouter from "./spa.js";
 
 const router: IRouter = Router();
 
@@ -54,5 +55,6 @@ router.use("/discount-types", discountTypesRouter);
 router.use("/migration", migrationRouter);
 router.use("/guest", guestPortalRouter);
 router.use("/inbox", inboxRouter);
+router.use("/spa", spaRouter);
 
 export default router;

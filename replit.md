@@ -272,6 +272,50 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 41 — SPA & Wellness Module
+
+### New DB Tables (lib/db/src/schema/spa.ts)
+- `spa_services` — catalog: name, category (8 types), duration, price, maxGuests, requiresSpecialist, tags, isActive, sortOrder
+- `spa_resources` — cabinets/equipment: name, resourceType (room/jacuzzi/sauna), capacity, isActive
+- `spa_specialists` — therapists: firstName, lastName, phone, bio, specializations[], workDays[] (0-6), workStart/workEnd, slotMinutes, color (for calendar)
+- `spa_appointments` — bookings: serviceId FK, specialistId FK, resourceId FK, guestId FK, bookingId FK, guestName/phone, appointmentDate (DATE), startTime/endTime (HH:MM), durationMinutes, price, paidAmount, status (6 values), isHotelGuest, isDayPass, membershipId, notes, staffNotes
+- `spa_memberships` — subscriptions: guestName/phone, membershipType (sessions/monthly/annual/day_pass_bundle), sessionsTotal/Used, pricePaid, startsAt, expiresAt, status (active/paused/expired/cancelled), services[]
+- `spa_day_passes` — day access: guestName/phone, guestCount, passDate, price, includes[], bookingId, isActive
+- 4 Enums: spa_appointment_status, spa_membership_status, spa_membership_type, spa_service_category
+
+### SPA API Routes (`/api/spa/*`) — requireAuth
+- `GET /api/spa/stats` — today's summary: total/confirmed/pending/completed appts, revenue, dayPasses; memberships: active/total
+- `GET /api/spa/services` — services list ordered by sortOrder
+- `POST /api/spa/services` — create service
+- `PATCH /api/spa/services/:id` — update service
+- `GET /api/spa/services/:id/slots?date=&specialistId=` — available time slots for service on date (checks existing appointments for conflicts)
+- `GET /api/spa/specialists` — therapists list
+- `POST /api/spa/specialists` — create therapist
+- `PATCH /api/spa/specialists/:id` — update therapist
+- `GET /api/spa/resources` — rooms/equipment list
+- `GET /api/spa/appointments?date=&status=&from=&to=` — appointments list with JOINs (serviceName, specialistName, resourceName, specialistColor)
+- `POST /api/spa/appointments` — book (auto-calculates endTime)
+- `PATCH /api/spa/appointments/:id` — update status/staffNotes/paidAmount
+- `GET /api/spa/memberships?status=` — memberships list
+- `POST /api/spa/memberships` — create membership
+- `POST /api/spa/memberships/:id/use` — use one session (auto-expires when sessionsTotal reached)
+- `PATCH /api/spa/memberships/:id` — update membership
+- `GET /api/spa/day-passes?date=` — day passes list for date
+- `POST /api/spa/day-passes` — issue day pass
+- Demo data: 8 services, 3 specialists, 6 resources, 6 appointments (today+tomorrow), 3 memberships, 2 day passes (auto-seed on first request)
+
+### SPA UI (`/maison-hd/spa`)
+6-tab management page (Розклад / Записи / Послуги / Спеціалісти / Абонементи / Day Pass):
+- **Stats row**: 4 cards — сьогодні записів, завершено, виручка, активні абонементи
+- **Розклад**: date navigation (← date →), list of appointments for selected day; each card: color stripe (specialist color), time, service, guest, phone, resource, price, status badge
+- **Записи**: search + status filter; all appointments across all dates; detail dialog with status change actions
+- **Послуги**: grid of service cards — icon (by category), name, category badge, duration, price, tags, maxGuests
+- **Спеціалісти**: grid of specialist cards — colored avatar initials, name, phone, bio, specializations badges, working days row (Нд/Пн/Вт..), work hours
+- **Абонементи**: list with progress bar (sessionsUsed/sessionsTotal), status badge, "Списати сеанс" button
+- **Day Pass**: date-filtered list with Ticket icon, guestName, guestCount, includes badges, price
+- **5 Create Dialogs**: NewAppointment (service→auto-fills price/duration, specialist, resource, guest, date/time, price, isHotelGuest), NewMembership, NewDayPass (includes as comma-separated), NewService, NewSpecialist (workDays toggles + color picker)
+- Sidebar nav: "SPA & Wellness" (Waves icon), all roles
+
 ## Stage 40 — Unified Inbox
 
 ### New DB Tables (lib/db/src/schema/inbox.ts)
