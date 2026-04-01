@@ -272,6 +272,39 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 39 — Guest Cabinet & Online Check-in
+
+### New DB Fields/Tables
+- `bookings.guestAccessCode` varchar(20) UNIQUE — 10-char hex code for secure public access
+- `bookings.checkinFormSubmitted` boolean — tracks whether guest submitted online check-in
+- `bookings.checkinFormData` jsonb — stores check-in form data (name, passport, arrival time, requests)
+- `guest_service_orders` table — all guest-ordered services per booking (type, qty, price, status, notes)
+- Enums: `guest_order_status` (pending/confirmed/preparing/delivered/cancelled), `guest_order_type` (service/food/rental/spa/activity/other)
+
+### Guest Portal API Routes (`/api/guest/*`) — all public except generate
+- `POST /api/guest/generate/:bookingId` — (staff, auth) generate/get access code for booking
+- `GET /api/guest/:code` — full booking info (unit, property, org, dates, payment, addons, orders)
+- `POST /api/guest/:code/checkin` — submit online check-in form (name, passport, arrival time, requests)
+- `GET /api/guest/:code/services` — service catalog (13 items: spa, rental, activity, food, service)
+- `POST /api/guest/:code/service-order` — order a service
+- `POST /api/guest/:code/checkout-request` — request checkout + feedback
+- `GET /api/guest/:code/orders` — list guest's service orders
+
+### Guest Portal UI (`/maison-hd/guest/:code`) — fully public, no auth required
+- Beautiful mobile-first design (390px viewport), warm amber/stone palette
+- **Tab 1 — Бронювання**: Hero with hotel name, dates, night count; booking details; addons; quick actions
+- **Tab 2 — Заїзд**: Online check-in form (name, passport, nationality, arrival time, special requests); submitted state shows confirmation summary
+- **Tab 3 — Послуги**: Service catalog by category; order modal (qty + time slot + notes); active orders list; checkout request form with rating + feedback
+- **Tab 4 — Оплата**: Payment status, progress bar, pay online button, service orders total
+- Sticky header with org/property name; bottom "Powered by Maison HD" bar
+
+### Staff Integration (Booking Dialog)
+- "Посилання гостя" button (amber styling) in booking dialog footer — appears for existing bookings
+- Click 1: generates code via API, shows URL inline with copy/open/Telegram share buttons
+- Click 2 (if already generated): copies to clipboard immediately with ✅ indicator
+- Inline amber bar shows truncated URL + 3 action icons (copy, open, Telegram)
+- Access code persists across sessions (stored in bookings.guestAccessCode)
+
 ## Running the App
 
 The API server and HMS frontend run automatically via Replit workflows.

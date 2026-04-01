@@ -41,6 +41,9 @@ export const bookingsTable = pgTable("bookings", {
   draftExpiresAt: timestamp("draft_expires_at"),
   paymentLink: text("payment_link"),
   legalEntityId: integer("legal_entity_id"),
+  guestAccessCode: varchar("guest_access_code", { length: 20 }).unique(),
+  checkinFormSubmitted: boolean("checkin_form_submitted").default(false),
+  checkinFormData: jsonb("checkin_form_data").$type<Record<string, string>>().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -23,6 +23,7 @@ import demoRequestsRouter from "./demo-requests.js";
 import legalEntitiesRouter from "./legal-entities.js";
 import discountTypesRouter from "./discount-types.js";
 import migrationRouter from "./migration.js";
+import guestPortalRouter from "./guest-portal.js";
 
 const router: IRouter = Router();
 
@@ -50,5 +51,6 @@ router.use("/demo-requests", demoRequestsRouter);
 router.use("/legal-entities", legalEntitiesRouter);
 router.use("/discount-types", discountTypesRouter);
 router.use("/migration", migrationRouter);
+router.use("/guest", guestPortalRouter);
 
 export default router;

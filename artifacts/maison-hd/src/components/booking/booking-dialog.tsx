@@ -16,7 +16,7 @@ import { toast } from "@/hooks/use-toast";
 import {
   CalendarDays, Clock, Users, PawPrint, FileText, Link2, Copy,
   Send, Printer, AlertCircle, ChevronDown, ChevronUp, Percent, X, Tag,
-  Minus, Plus,
+  Minus, Plus, Smartphone, ExternalLink, CheckCheck,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -160,6 +160,9 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const [selectedLegalEntity, setSelectedLegalEntity] = useState<string>("");
   const [payerDetails, setPayerDetails] = useState("");
   const [saving, setSaving] = useState(false);
+  const [guestLink, setGuestLink] = useState<string | null>(booking?.guestAccessCode ? `${window.location.origin}${BASE}/guest/${booking.guestAccessCode}` : null);
+  const [guestLinkLoading, setGuestLinkLoading] = useState(false);
+  const [guestLinkCopied, setGuestLinkCopied] = useState(false);
   const invoicePrintRef = useRef<HTMLDivElement>(null);
 
   const f = (field: keyof BookingForm, value: any) => setForm(prev => ({ ...prev, [field]: value }));
@@ -333,6 +336,34 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleGenerateGuestLink = async () => {
+    if (!isEdit || !booking?.id) {
+      toast({ title: "Спочатку збережіть бронювання", variant: "destructive" });
+      return;
+    }
+    setGuestLinkLoading(true);
+    try {
+      const r = await authFetch(`${API}/guest/generate/${booking.id}`, { method: "POST" });
+      if (!r.ok) throw new Error("Помилка генерації посилання");
+      const data = await r.json();
+      const fullUrl = `${window.location.origin}${BASE}/guest/${data.code}`;
+      setGuestLink(fullUrl);
+    } catch (e: any) {
+      toast({ title: "Помилка", description: e.message, variant: "destructive" });
+    } finally {
+      setGuestLinkLoading(false);
+    }
+  };
+
+  const handleCopyGuestLink = () => {
+    if (!guestLink) return;
+    navigator.clipboard.writeText(guestLink).then(() => {
+      setGuestLinkCopied(true);
+      setTimeout(() => setGuestLinkCopied(false), 2000);
+      toast({ title: "✅ Скопійовано!", description: "Посилання скопійовано в буфер обміну" });
+    });
   };
 
   const handleGeneratePaymentLink = async (legalEntityId: string) => {
@@ -747,6 +778,40 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
               >
                 <FileText className="h-3.5 w-3.5" /> Рахунок
               </Button>
+
+              {/* Guest Link */}
+              {isEdit && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
+                  disabled={guestLinkLoading}
+                  onClick={guestLink ? handleCopyGuestLink : handleGenerateGuestLink}
+                >
+                  {guestLinkLoading ? (
+                    <><span className="h-3.5 w-3.5 animate-spin border border-current border-t-transparent rounded-full inline-block" /> Генерація…</>
+                  ) : guestLink ? (
+                    guestLinkCopied ? <><CheckCheck className="h-3.5 w-3.5 text-green-600" /> Скопійовано!</> : <><Copy className="h-3.5 w-3.5" /> Посилання гостя</>
+                  ) : (
+                    <><Smartphone className="h-3.5 w-3.5" /> Посилання гостя</>
+                  )}
+                </Button>
+              )}
+              {isEdit && guestLink && (
+                <div className="w-full flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 text-xs">
+                  <span className="flex-1 truncate text-amber-800 font-mono">{guestLink}</span>
+                  <button type="button" onClick={handleCopyGuestLink} className="text-amber-600 hover:text-amber-800 flex-shrink-0" title="Копіювати">
+                    {guestLinkCopied ? <CheckCheck className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                  <a href={guestLink} target="_blank" rel="noreferrer" className="text-amber-600 hover:text-amber-800 flex-shrink-0" title="Відкрити">
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                  <a href={`https://t.me/share/url?url=${encodeURIComponent(guestLink)}&text=${encodeURIComponent("Ваше бронювання 🏨 Управляйте онлайн:")}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-600 flex-shrink-0" title="Telegram">
+                    <Send className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">
