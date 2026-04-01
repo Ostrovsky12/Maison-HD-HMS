@@ -23,6 +23,7 @@ import OnboardingPage from "@/pages/onboarding";
 import SubscriptionPage from "@/pages/subscription";
 import DemoPage from "@/pages/demo";
 import DemoRequestsPage from "@/pages/demo-requests";
+import MigrationPage from "@/pages/migration";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -92,6 +93,7 @@ function Router() {
       <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} /></Route>
       <Route path="/admin"><ProtectedRoute component={AdminPage} roles={["super_admin"]} /></Route>
       <Route path="/demo-requests"><ProtectedRoute component={DemoRequestsPage} roles={["super_admin"]} /></Route>
+      <Route path="/migration"><ProtectedRoute component={MigrationPage} roles={["super_admin", "owner", "manager"]} /></Route>
       <Route path="/demo" component={DemoPage} />
 
       <Route path="/" component={HomeRoute} />

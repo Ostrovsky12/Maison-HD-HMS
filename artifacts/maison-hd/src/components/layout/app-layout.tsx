@@ -19,6 +19,7 @@ import {
   Crown,
   CreditCard,
   ClipboardList,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,7 @@ const allNavItems = [
   { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },
   { name: "Аналітика", path: "/analytics", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
   { name: "Інтеграції", path: "/integrations", icon: Plug, roles: ["super_admin", "owner", "manager"] },
+  { name: "Міграція", path: "/migration", icon: ArrowRightLeft, roles: ["super_admin", "owner", "manager"] },
   { name: "Підписка", path: "/subscription", icon: CreditCard, roles: ["owner", "super_admin"] },
   { name: "Demo Заявки", path: "/demo-requests", icon: ClipboardList, roles: ["super_admin"] },
   { name: "Super Admin", path: "/admin", icon: Crown, roles: ["super_admin"] },

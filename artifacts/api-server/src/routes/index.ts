@@ -22,6 +22,7 @@ import webhooksRouter from "./webhooks.js";
 import demoRequestsRouter from "./demo-requests.js";
 import legalEntitiesRouter from "./legal-entities.js";
 import discountTypesRouter from "./discount-types.js";
+import migrationRouter from "./migration.js";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,6 @@ router.use("/webhooks", webhooksRouter);
 router.use("/demo-requests", demoRequestsRouter);
 router.use("/legal-entities", legalEntitiesRouter);
 router.use("/discount-types", discountTypesRouter);
+router.use("/migration", migrationRouter);
 
 export default router;

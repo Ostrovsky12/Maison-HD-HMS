@@ -17,3 +17,4 @@ export * from "./subscriptions";
 export * from "./demo-requests";
 export * from "./legal-entities";
 export * from "./discount-types";
+export * from "./migration";

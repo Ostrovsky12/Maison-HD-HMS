@@ -221,6 +221,57 @@ Stage 6 Sidebar role-based nav:
 - Category badge-pill filters (Всі + dynamic categories with counts)
 - Drag-to-select cells for new booking creation
 
+## Stage 38 — Servio Migration & Integration Layer
+
+### New DB Tables (lib/db/src/schema/migration.ts)
+- `external_connections` — tenant connections to external HMS (Servio, etc.): baseUrl, apiKey, hotelCode, status, isCutoverMode
+- `import_batches` — each import operation: entityTypes[], status, progress counters, deduplicationMode, conflictMode
+- `import_batch_items` — individual items per batch: entityType, externalId, externalData (jsonb), internalId, status, action
+- `sync_conflicts` — conflicts needing human review: conflictType, externalData, internalData, resolution, resolvedBy
+- `external_entity_mappings` — permanent map: externalSystem+entityType+externalId ↔ internalId, syncStatus, mappingConfidence
+
+### Servio Adapter (artifacts/api-server/src/lib/adapters/servio.ts)
+- `ServioAdapter` class with `testConnection()`, `previewData()`, `fetchGuests()`, `fetchBookings()`, `fetchRooms()`, `fetchRatePlans()`, `fetchCompanies()`
+- Demo mode: generates realistic Ukrainian hotel data (Ukrainian names, phones, booking history) for onboarding without real Servio access
+- Live mode: ready for real Servio API connection via HTTP
+- Mapping functions: `mapServioGuestToInternal()`, `mapServioBookingToInternal()`, `mapServioRoomToUnit()`
+
+### Stage 38 API Routes (/api/migration/*)
+- `GET /api/migration/connections` — list external connections
+- `POST /api/migration/connections` — create connection (Servio credentials)
+- `PATCH /api/migration/connections/:id` — update (including isCutoverMode switch)
+- `POST /api/migration/connections/:id/test` — test connection, returns hotel info + data counts
+- `POST /api/migration/connections/:id/preview` — preview data (samples of guests, bookings, rooms)
+- `GET /api/migration/batches` — list import batches
+- `POST /api/migration/batches` — create batch (entityTypes, date range, dedup/conflict mode)
+- `GET /api/migration/batches/:id` — batch status + itemStats
+- `POST /api/migration/batches/:id/start` — start async import job
+- `POST /api/migration/batches/:id/cancel` — cancel
+- `GET /api/migration/batches/:id/items` — paginated item list (filter by status/entityType)
+- `GET /api/migration/conflicts` — list unresolved conflicts
+- `PATCH /api/migration/conflicts/:id/resolve` — resolve single conflict
+- `POST /api/migration/conflicts/bulk-resolve` — bulk resolve
+- `GET /api/migration/mappings` — entity mappings (filter by entityType)
+- `GET /api/migration/stats` — overall stats: connections, totals, unresolvedConflicts
+
+### Import Job (runImportBatch)
+- Async background job: imports rooms → guests → bookings in order
+- Deduplication: checks by phone/email before creating guests
+- Conflict handling: "flag" (human review) | "prefer_external" | "prefer_internal"
+- Progress tracking: real-time updates to import_batches counters
+- External entity mappings: created for every imported object
+
+### Migration Dashboard UI (/maison-hd/migration)
+- **Overview page**: stats cards, connections list, recent batches
+- **Step 1 — Connect**: Servio credentials form (URL, API key, hotel code), test connection button
+- **Step 2 — Preview**: data counts + expandable sample tables (guests, bookings, rooms)
+- **Step 3 — Configure**: entity type checkboxes, date range, dedup mode, conflict mode
+- **Step 4 — Import**: real-time progress bars, auto-poll for status
+- **Step 5 — Conflicts**: conflict review table, bulk resolve (use_external/use_internal)
+- **Step 6 — Summary**: final stats report
+- **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
+- Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
+
 ## Running the App
 
 The API server and HMS frontend run automatically via Replit workflows.
