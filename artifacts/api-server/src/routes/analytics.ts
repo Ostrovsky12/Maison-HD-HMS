@@ -385,4 +385,50 @@ router.get("/summary", requireAuth, async (req, res) => {
   });
 });
 
+router.get("/reports/monthly", requireAuth, async (req, res) => {
+  const year = parseInt(req.query.year as string) || new Date().getFullYear();
+  const month = parseInt(req.query.month as string) || (new Date().getMonth() + 1);
+
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const endDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
+
+  const data = await db.select().from(kpiHistoryTable)
+    .where(and(gte(kpiHistoryTable.date, startDate), lte(kpiHistoryTable.date, endDate)))
+    .orderBy(asc(kpiHistoryTable.date));
+
+  const totalRevenue = data.reduce((s, d) => s + d.totalRevenue, 0);
+  const avgOccupancy = data.length > 0 ? data.reduce((s, d) => s + d.occupancyRate, 0) / data.length : 0;
+  const avgAdr = data.length > 0 ? data.reduce((s, d) => s + d.adr, 0) / data.length : 0;
+  const avgRevpar = data.length > 0 ? data.reduce((s, d) => s + d.revpar, 0) / data.length : 0;
+  const totalCheckins = data.reduce((s, d) => s + (d.checkins || 0), 0);
+  const totalCheckouts = data.reduce((s, d) => s + (d.checkouts || 0), 0);
+  const avgCancellationRate = data.length > 0 ? data.reduce((s, d) => s + (d.cancellationRate || 0), 0) / data.length : 0;
+  const avgStay = data.length > 0 ? data.reduce((s, d) => s + (d.avgStay || 0), 0) / data.length : 0;
+  const totalDirectBookings = data.reduce((s, d) => s + (d.directBookings || 0), 0);
+  const totalOtaBookings = data.reduce((s, d) => s + (d.otaBookings || 0), 0);
+  const totalNewBookings = data.reduce((s, d) => s + (d.newBookings || 0), 0);
+
+  res.json({
+    year,
+    month,
+    period: `${startDate} – ${endDate}`,
+    summary: {
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      avgOccupancy: Math.round(avgOccupancy * 10) / 10,
+      avgAdr: Math.round(avgAdr * 100) / 100,
+      avgRevpar: Math.round(avgRevpar * 100) / 100,
+      totalCheckins,
+      totalCheckouts,
+      avgCancellationRate: Math.round(avgCancellationRate * 10) / 10,
+      avgStay: Math.round(avgStay * 10) / 10,
+      totalDirectBookings,
+      totalOtaBookings,
+      totalNewBookings,
+      days: data.length,
+    },
+    daily: data,
+  });
+});
+
 export default router;

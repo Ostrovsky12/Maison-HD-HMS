@@ -2060,6 +2060,31 @@ export const DeleteOtaChannelParams = zod.object({
 });
 
 /**
+ * @summary Toggle OTA channel sync enabled/disabled
+ */
+export const ToggleOtaChannelSyncParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ToggleOtaChannelSyncResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  channelType: zod.string(),
+  apiKey: zod.string().nullish(),
+  apiSecret: zod.string().nullish(),
+  apiUrl: zod.string().nullish(),
+  commissionRate: zod.number(),
+  syncEnabled: zod.boolean(),
+  syncInterval: zod.number(),
+  lastSync: zod.date().nullish(),
+  totalBookings: zod.number(),
+  totalRevenue: zod.number(),
+  isActive: zod.boolean(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
  * @summary Sync OTA channel
  */
 export const SyncOtaChannelParams = zod.object({
@@ -2252,6 +2277,79 @@ export const GenerateForecastResponse = zod.object({
       seasonFactor: zod.number(),
       eventsFactor: zod.number(),
       generatedAt: zod.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary List integration logs
+ */
+export const listIntegrationLogsQueryLimitDefault = 50;
+
+export const ListIntegrationLogsQueryParams = zod.object({
+  limit: zod.coerce.number().default(listIntegrationLogsQueryLimitDefault),
+  channelId: zod.coerce.number().optional(),
+});
+
+export const ListIntegrationLogsResponseItem = zod.object({
+  id: zod.number(),
+  channelId: zod.number().nullish(),
+  type: zod.string(),
+  status: zod.string(),
+  message: zod.string().nullish(),
+  requestData: zod.unknown().nullish(),
+  responseData: zod.unknown().nullish(),
+  createdAt: zod.date(),
+});
+export const ListIntegrationLogsResponse = zod.array(
+  ListIntegrationLogsResponseItem,
+);
+
+/**
+ * @summary Get monthly analytics report
+ */
+export const GetMonthlyReportQueryParams = zod.object({
+  year: zod.coerce.number().optional(),
+  month: zod.coerce.number().optional(),
+});
+
+export const GetMonthlyReportResponse = zod.object({
+  year: zod.number(),
+  month: zod.number(),
+  period: zod.string(),
+  summary: zod.object({
+    totalRevenue: zod.number(),
+    avgOccupancy: zod.number(),
+    avgAdr: zod.number(),
+    avgRevpar: zod.number(),
+    totalCheckins: zod.number(),
+    totalCheckouts: zod.number(),
+    avgCancellationRate: zod.number(),
+    avgStay: zod.number(),
+    totalDirectBookings: zod.number(),
+    totalOtaBookings: zod.number(),
+    totalNewBookings: zod.number(),
+    days: zod.number(),
+  }),
+  daily: zod.array(
+    zod.object({
+      id: zod.number(),
+      date: zod.date(),
+      occupancyRate: zod.number(),
+      adr: zod.number(),
+      revpar: zod.number(),
+      totalRevenue: zod.number(),
+      accommodationRevenue: zod.number(),
+      checkins: zod.number(),
+      checkouts: zod.number(),
+      avgStay: zod.number(),
+      cancellationRate: zod.number(),
+      newBookings: zod.number(),
+      directBookings: zod.number(),
+      otaBookings: zod.number(),
+      totalUnits: zod.number(),
+      totalGuests: zod.number(),
+      createdAt: zod.date(),
     }),
   ),
 });

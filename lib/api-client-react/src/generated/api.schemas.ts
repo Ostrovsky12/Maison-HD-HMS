@@ -1186,6 +1186,40 @@ export interface AnalyticsSummary {
   recentKpi: KpiHistory[];
 }
 
+export interface IntegrationLog {
+  id: number;
+  channelId?: number | null;
+  type: string;
+  status: string;
+  message?: string | null;
+  requestData?: unknown | null;
+  responseData?: unknown | null;
+  createdAt: string;
+}
+
+export interface MonthlyReportSummary {
+  totalRevenue: number;
+  avgOccupancy: number;
+  avgAdr: number;
+  avgRevpar: number;
+  totalCheckins: number;
+  totalCheckouts: number;
+  avgCancellationRate: number;
+  avgStay: number;
+  totalDirectBookings: number;
+  totalOtaBookings: number;
+  totalNewBookings: number;
+  days: number;
+}
+
+export interface MonthlyReport {
+  year: number;
+  month: number;
+  period: string;
+  summary: MonthlyReportSummary;
+  daily: KpiHistory[];
+}
+
 export type GetUnitsAvailabilityParams = {
   checkIn: string;
   checkOut: string;
@@ -1313,4 +1347,14 @@ export type ListForecastsParams = {
 
 export type GenerateForecastParams = {
   days?: number;
+};
+
+export type ListIntegrationLogsParams = {
+  limit?: number;
+  channelId?: number;
+};
+
+export type GetMonthlyReportParams = {
+  year?: number;
+  month?: number;
 };

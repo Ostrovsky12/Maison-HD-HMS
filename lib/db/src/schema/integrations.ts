@@ -39,3 +39,18 @@ export const webhookEndpointsTable = pgTable("webhook_endpoints", {
 export const insertWebhookEndpointSchema = createInsertSchema(webhookEndpointsTable).omit({ id: true, createdAt: true });
 export type InsertWebhookEndpoint = z.infer<typeof insertWebhookEndpointSchema>;
 export type WebhookEndpoint = typeof webhookEndpointsTable.$inferSelect;
+
+export const integrationLogsTable = pgTable("integration_logs", {
+  id: serial("id").primaryKey(),
+  channelId: integer("channel_id"),
+  type: text("type").notNull(),
+  status: text("status").notNull(),
+  message: text("message"),
+  requestData: json("request_data"),
+  responseData: json("response_data"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertIntegrationLogSchema = createInsertSchema(integrationLogsTable).omit({ id: true, createdAt: true });
+export type InsertIntegrationLog = z.infer<typeof insertIntegrationLogSchema>;
+export type IntegrationLog = typeof integrationLogsTable.$inferSelect;

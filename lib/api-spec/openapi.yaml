@@ -1700,6 +1700,27 @@ paths:
         "204":
           description: Deleted
 
+  /integrations/ota/{id}/toggle:
+    patch:
+      operationId: toggleOtaChannelSync
+      tags: [integrations]
+      summary: Toggle OTA channel sync enabled/disabled
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated OTA channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtaChannel"
+
   /integrations/ota/{id}/sync:
     post:
       operationId: syncOtaChannel
@@ -1880,6 +1901,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GenerateForecastResponse"
+
+  /integrations/logs:
+    get:
+      operationId: listIntegrationLogs
+      tags: [integrations]
+      summary: List integration logs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: channelId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Integration logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IntegrationLog"
+
+  /analytics/reports/monthly:
+    get:
+      operationId: getMonthlyReport
+      tags: [analytics-advanced]
+      summary: Get monthly analytics report
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: integer
+        - name: month
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Monthly report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonthlyReport"
 
   /analytics/summary:
     get:
@@ -3900,3 +3972,94 @@ components:
         - kpiDays
         - nextForecast
         - recentKpi
+
+    IntegrationLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        channelId:
+          type: integer
+          nullable: true
+        type:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+          nullable: true
+        requestData:
+          nullable: true
+        responseData:
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - type
+        - status
+        - createdAt
+
+    MonthlyReportSummary:
+      type: object
+      properties:
+        totalRevenue:
+          type: number
+        avgOccupancy:
+          type: number
+        avgAdr:
+          type: number
+        avgRevpar:
+          type: number
+        totalCheckins:
+          type: integer
+        totalCheckouts:
+          type: integer
+        avgCancellationRate:
+          type: number
+        avgStay:
+          type: number
+        totalDirectBookings:
+          type: integer
+        totalOtaBookings:
+          type: integer
+        totalNewBookings:
+          type: integer
+        days:
+          type: integer
+      required:
+        - totalRevenue
+        - avgOccupancy
+        - avgAdr
+        - avgRevpar
+        - totalCheckins
+        - totalCheckouts
+        - avgCancellationRate
+        - avgStay
+        - totalDirectBookings
+        - totalOtaBookings
+        - totalNewBookings
+        - days
+
+    MonthlyReport:
+      type: object
+      properties:
+        year:
+          type: integer
+        month:
+          type: integer
+        period:
+          type: string
+        summary:
+          $ref: "#/components/schemas/MonthlyReportSummary"
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/KpiHistory"
+      required:
+        - year
+        - month
+        - period
+        - summary
+        - daily

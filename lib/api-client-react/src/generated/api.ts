@@ -48,6 +48,7 @@ import type {
   GenerateForecastResponse,
   GetBookingsCalendarParams,
   GetDashboardAnalyticsParams,
+  GetMonthlyReportParams,
   GetOccupancyAnalyticsParams,
   GetPricingPreviewParams,
   GetUnitsAvailabilityParams,
@@ -57,6 +58,7 @@ import type {
   HealthStatus,
   HousekeepingDashboard,
   HousekeepingTask,
+  IntegrationLog,
   Invoice,
   KpiHistory,
   ListAuditLogsParams,
@@ -64,6 +66,7 @@ import type {
   ListForecastsParams,
   ListGuestsParams,
   ListHousekeepingTasksParams,
+  ListIntegrationLogsParams,
   ListInvoicesParams,
   ListKpiHistoryParams,
   ListNightAuditsParams,
@@ -73,6 +76,7 @@ import type {
   ListUnitCategoriesParams,
   ListUnitsParams,
   LoginRequest,
+  MonthlyReport,
   NightAudit,
   Notification,
   NotificationListResponse,
@@ -6366,6 +6370,90 @@ export const useDeleteOtaChannel = <
 };
 
 /**
+ * @summary Toggle OTA channel sync enabled/disabled
+ */
+export const getToggleOtaChannelSyncUrl = (id: number) => {
+  return `/api/integrations/ota/${id}/toggle`;
+};
+
+export const toggleOtaChannelSync = async (
+  id: number,
+  options?: RequestInit,
+): Promise<OtaChannel> => {
+  return customFetch<OtaChannel>(getToggleOtaChannelSyncUrl(id), {
+    ...options,
+    method: "PATCH",
+  });
+};
+
+export const getToggleOtaChannelSyncMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof toggleOtaChannelSync>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof toggleOtaChannelSync>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["toggleOtaChannelSync"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof toggleOtaChannelSync>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return toggleOtaChannelSync(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ToggleOtaChannelSyncMutationResult = NonNullable<
+  Awaited<ReturnType<typeof toggleOtaChannelSync>>
+>;
+
+export type ToggleOtaChannelSyncMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Toggle OTA channel sync enabled/disabled
+ */
+export const useToggleOtaChannelSync = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof toggleOtaChannelSync>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof toggleOtaChannelSync>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getToggleOtaChannelSyncMutationOptions(options));
+};
+
+/**
  * @summary Sync OTA channel
  */
 export const getSyncOtaChannelUrl = (id: number) => {
@@ -7147,6 +7235,206 @@ export const useGenerateForecast = <
 > => {
   return useMutation(getGenerateForecastMutationOptions(options));
 };
+
+/**
+ * @summary List integration logs
+ */
+export const getListIntegrationLogsUrl = (
+  params?: ListIntegrationLogsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/integrations/logs?${stringifiedParams}`
+    : `/api/integrations/logs`;
+};
+
+export const listIntegrationLogs = async (
+  params?: ListIntegrationLogsParams,
+  options?: RequestInit,
+): Promise<IntegrationLog[]> => {
+  return customFetch<IntegrationLog[]>(getListIntegrationLogsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListIntegrationLogsQueryKey = (
+  params?: ListIntegrationLogsParams,
+) => {
+  return [`/api/integrations/logs`, ...(params ? [params] : [])] as const;
+};
+
+export const getListIntegrationLogsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listIntegrationLogs>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListIntegrationLogsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listIntegrationLogs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListIntegrationLogsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listIntegrationLogs>>
+  > = ({ signal }) =>
+    listIntegrationLogs(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listIntegrationLogs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListIntegrationLogsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listIntegrationLogs>>
+>;
+export type ListIntegrationLogsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List integration logs
+ */
+
+export function useListIntegrationLogs<
+  TData = Awaited<ReturnType<typeof listIntegrationLogs>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListIntegrationLogsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listIntegrationLogs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListIntegrationLogsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get monthly analytics report
+ */
+export const getGetMonthlyReportUrl = (params?: GetMonthlyReportParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/analytics/reports/monthly?${stringifiedParams}`
+    : `/api/analytics/reports/monthly`;
+};
+
+export const getMonthlyReport = async (
+  params?: GetMonthlyReportParams,
+  options?: RequestInit,
+): Promise<MonthlyReport> => {
+  return customFetch<MonthlyReport>(getGetMonthlyReportUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMonthlyReportQueryKey = (
+  params?: GetMonthlyReportParams,
+) => {
+  return [
+    `/api/analytics/reports/monthly`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetMonthlyReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMonthlyReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetMonthlyReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMonthlyReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetMonthlyReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMonthlyReport>>
+  > = ({ signal }) => getMonthlyReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMonthlyReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMonthlyReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMonthlyReport>>
+>;
+export type GetMonthlyReportQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get monthly analytics report
+ */
+
+export function useGetMonthlyReport<
+  TData = Awaited<ReturnType<typeof getMonthlyReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetMonthlyReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMonthlyReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMonthlyReportQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Get analytics summary
