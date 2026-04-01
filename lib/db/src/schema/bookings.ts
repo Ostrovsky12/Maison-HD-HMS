@@ -37,6 +37,8 @@ export const bookingsTable = pgTable("bookings", {
   discountType: varchar("discount_type", { length: 50 }),
   addonIds: jsonb("addon_ids").$type<number[]>().default([]),
   selectedAddons: jsonb("selected_addons").$type<Record<string, boolean | string>>().default({}),
+  email: varchar("email", { length: 255 }),
+  bookingRef: varchar("booking_ref", { length: 20 }).unique(),
   notes: text("notes"),
   draftExpiresAt: timestamp("draft_expires_at"),
   paymentLink: text("payment_link"),

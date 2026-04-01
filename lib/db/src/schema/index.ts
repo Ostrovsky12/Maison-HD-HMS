@@ -23,3 +23,5 @@ export * from "./inbox";
 export * from "./spa";
 export * from "./events";
 export * from "./fb";
+export * from "./automation";
+export * from "./rentals";

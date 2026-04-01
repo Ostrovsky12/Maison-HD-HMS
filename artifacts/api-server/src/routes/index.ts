@@ -29,6 +29,9 @@ import spaRouter from "./spa.js";
 import eventsRouter from "./events.js";
 import fbRouter from "./fb.js";
 import hqRouter from "./hq.js";
+import automationRouter from "./automation.js";
+import publicBookingRouter from "./public-booking.js";
+import rentalsRouter from "./rentals.js";
 
 const router: IRouter = Router();
 
@@ -62,5 +65,8 @@ router.use("/spa", spaRouter);
 router.use("/events", eventsRouter);
 router.use("/fb", fbRouter);
 router.use("/hq", hqRouter);
+router.use("/automation", automationRouter);
+router.use("/public", publicBookingRouter);
+router.use("/rentals", rentalsRouter);
 
 export default router;

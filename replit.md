@@ -272,6 +272,94 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 47 — Rentals (Оренда)
+
+### New DB Tables (lib/db/src/schema/rentals.ts)
+- `rental_contracts` — tenant info, unit FK, start/end date, monthly_rate, deposit, status enum (active/ended/upcoming/terminated), contract_number UNIQUE
+- `rental_payments` — period_year, period_month, amount, status (pending/paid/overdue/cancelled), due_date, paid_date, payment_method
+- `rental_requests` — maintenance/service requests from tenants: title, description, priority (high/medium/low), status (open/in_progress/resolved)
+
+### API Routes (`/api/rentals/*`) — requireAuth
+- `GET /stats` — totalContracts, activeContracts, upcomingContracts, monthlyRevenue, overduePayments, pendingPayments, openRequests, urgentRequests
+- `GET /contracts` — all contracts with unit JOIN (unitName, unitCategory)
+- `POST /contracts` — create contract (auto-assigns contract_number like РЕН-YYYY-NNN)
+- `PATCH /contracts/:id` — update (status, fields, etc.)
+- `GET /payments` — all payments with tenant JOIN; ?contractId= filter
+- `PATCH /payments/:id` — mark paid (sets paidDate=today, paymentMethod)
+- `GET /requests` — all maintenance requests with tenant+unit JOIN
+- `PATCH /requests/:id` — status update (open→in_progress→resolved sets resolvedAt)
+
+### UI (`/maison-hd/rentals`) — 3-tab layout
+- **Договори tab**: list all contracts with status badge + tenant info + unit + dates + monthly rate + deposit status; "Розірвати" button for active contracts
+- **Платежі tab**: payment list with status filter (all/overdue/pending/paid); colored rows (red=overdue, green=paid); "Позначити сплаченим" button
+- **Заявки tab**: maintenance requests with priority + status badges; "В роботу" / "✓ Вирішено" action buttons
+- **New Contract Dialog**: unit ID, tenant details, dates, monthly rate, deposit, notes
+- **Navigation**: "Оренда" (Building2 icon), roles: super_admin/owner/manager
+
+### Demo Data
+- 4 contracts (2 active: Петренко ₴8500/міс + Коваленко ₴6000/міс; 1 upcoming; 1 ended)
+- 7 payments (6 paid, 1 pending)
+- 4 maintenance requests (1 high/open + 1 low/resolved + 1 medium/in_progress + 1 low/open)
+
+---
+
+## Stage 46 — Online Booking Engine (Публічне бронювання)
+
+### API Routes (`/api/public/*`) — NO AUTH REQUIRED
+- `GET /properties` — list all properties with org name
+- `GET /availability?checkIn=&checkOut=&guests=&propertyId=` — available units (non-maintenance, not booked in date range, capacity >= guests); returns nights + totalPrice per unit
+- `POST /bookings` — create booking with conflict check; auto-generates bookingRef (DOG-NNNNNN); no auth needed
+- `GET /bookings/:ref` — lookup booking by bookingRef
+
+### Schema Changes
+- `bookings` table: added `email VARCHAR(255)` + `booking_ref VARCHAR(20) UNIQUE` columns
+
+### UI (`/maison-hd/book`) — 4-step public flow (no auth needed)
+- **Step 1 (Search)**: property select + checkIn/checkOut dates + guest count → "Знайти"; feature strip (instant confirm / best price / free cancellation); property preview cards
+- **Step 2 (Select)**: room grid with category, floor, capacity, m², view/balcony badges, price/ніч + total; "Обрати номер" button
+- **Step 3 (Form)**: guest details (ім'я/прізвище/email/телефон/special requests) + sticky booking summary card; payment note (оплата при заїзді)
+- **Step 4 (Confirm)**: success screen with bookingRef (DOG-NNNNNN), dates, amount; print button
+- **Navigation**: "Онлайн-бронювання" (Sparkles icon), roles: super_admin/owner/manager/reception
+
+---
+
+## Stage 45 — AI Automation
+
+### New DB Tables (lib/db/src/schema/automation.ts)
+- `automation_rules` — name, description, trigger enum, conditions JSONB, actions JSONB[], isActive, runCount, lastRunAt
+- `automation_logs` — ruleId FK, ruleName, trigger, status (success/failed/skipped), entityType, entityId, resultMessage, triggeredAt
+- `upsell_offers` — bookingId FK, offerType (spa/upgrade/fb/late_checkout), title, description, price, status (pending/accepted/declined)
+
+### Trigger Enums
+booking_created | booking_confirmed | checkin_today | checkout_today | checkout_tomorrow | guest_birthday | payment_overdue | low_occupancy | hk_task_pending | fb_order_ready | spa_appointment_today | manual
+
+### Action Enums
+send_inbox_message | create_hk_task | create_notification | upsell_spa | upsell_fb | upsell_upgrade | send_email | webhook_call
+
+### API Routes (`/api/automation/*`) — requireAuth
+- `GET /rules` — list rules with triggerLabels + actionLabels maps
+- `POST /rules` — create rule
+- `PATCH /rules/:id` — toggle isActive, update fields
+- `DELETE /rules/:id` — delete rule
+- `POST /rules/:id/run` — manual trigger (logs execution, increments runCount)
+- `GET /logs?status=&limit=` — execution history with status filter
+- `GET /stats` — totalRules, activeRules, totalRuns, logsSuccess/Failed/Skipped, upsellPending/Accepted
+- `GET /upsells` — active upsell offers
+- `PATCH /upsells/:id` — respond to offer (accepted/declined)
+
+### UI (`/maison-hd/automation`) — 3-tab layout
+- **Правила tab**: rule cards with trigger badge + action chips + run count + last run; toggle switch (active/paused); ▶ run manually button; delete button
+- **Журнал tab**: execution log with status filter + status icon (✓/✗/⏭); status color coding; timestamp
+- **Апсели tab**: upsell offer cards grouped by type (spa/upgrade/fb); price + description; "Прийняти" / "Відхилити" buttons
+- **New Rule Dialog**: name, description, trigger select, multi-action list (add/remove), save
+- **Navigation**: "AI Automation" (Bot icon), roles: super_admin/owner/manager
+
+### Demo Data (8 rules, 8 logs, 5 upsell offers)
+- Привітання при заїзді (47 runs) · Нагадування при виїзді (31) · SPA апсел (23) · Сніданок рум-сервіс (8, inactive)
+- Сповіщення при бронюванні (89) · Прибирання після виїзду (56) · Апгрейд при низькій завантаженості (3, inactive) · F&B готово (114)
+
+---
+
 ## Stage 44 — Owner/HQ Command Center Dashboard
 
 ### API Route (`/api/hq/overview`) — requireAuth

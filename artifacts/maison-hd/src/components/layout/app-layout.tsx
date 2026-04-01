@@ -25,6 +25,8 @@ import {
   PartyPopper,
   UtensilsCrossed,
   Zap,
+  Bot,
+  Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +38,9 @@ import { uk } from "date-fns/locale";
 
 const allNavItems = [
   { name: "Command Center", path: "/hq", icon: Zap, roles: ["super_admin", "owner", "manager"] },
+  { name: "AI Automation", path: "/automation", icon: Bot, roles: ["super_admin", "owner", "manager"] },
+  { name: "Онлайн-бронювання", path: "/book", icon: Sparkles, roles: ["super_admin", "owner", "manager", "reception"] },
+  { name: "Оренда", path: "/rentals", icon: Building2, roles: ["super_admin", "owner", "manager"] },
   { name: "Головна", path: "/dashboard", icon: LayoutDashboard, roles: null },
   { name: "Бронювання", path: "/bookings", icon: CalendarDays, roles: null },
   { name: "Шахматка", path: "/chess", icon: Grid3X3, roles: null },
