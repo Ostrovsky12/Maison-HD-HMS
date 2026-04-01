@@ -29,6 +29,7 @@ import InboxPage from "@/pages/inbox";
 import SpaPage from "@/pages/spa";
 import EventsPage from "@/pages/events";
 import FbPage from "@/pages/fb";
+import HqPage from "@/pages/hq";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -105,6 +106,7 @@ function Router() {
       <Route path="/spa"><ProtectedRoute component={SpaPage} /></Route>
       <Route path="/events"><ProtectedRoute component={EventsPage} /></Route>
       <Route path="/fb"><ProtectedRoute component={FbPage} /></Route>
+      <Route path="/hq"><ProtectedRoute component={HqPage} /></Route>
 
       <Route path="/" component={HomeRoute} />
 

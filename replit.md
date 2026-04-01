@@ -272,6 +272,46 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 44 — Owner/HQ Command Center Dashboard
+
+### API Route (`/api/hq/overview`) — requireAuth
+Single aggregated endpoint pulling from ALL modules in parallel (Promise.all):
+- **Bookings**: arrivals today, departures today, in-house count, occupancy %, revenue today (checkOut=today), 7-day revenue trend array
+- **Revenue**: revenueThisMonth + revenueLastMonth (for MoM trend %)
+- **Housekeeping**: hkPending + hkInProgress + hkHigh counts (non-done/non-cancelled tasks)
+- **SPA**: spaTodayCount + spaRevenueToday (completed appts); spaToday[] detail array (guestName, startTime, endTime, serviceName, totalPrice, status) — top 5
+- **Events**: eventsUpcoming[] (next 14 days, non-cancelled, max 5) with spaceName JOIN
+- **F&B**: fbOpenOrders[] (non-billed/non-cancelled) with tableNumber JOIN; fbTables {total/free/occupied}; fbRevenueToday (billed orders today)
+- **Inbox**: inbox[] (conversations with unreadCount ≥ 1, top 5 by updatedAt); totalUnread
+
+Returns: `{ kpi{…}, arrivals[], departures[], inHouse[], hk{…}, spaToday[], eventsUpcoming[], fbOpenOrders[], fbTables{…}, inbox[], sevenDayRevenue[] }`
+
+### HQ Dashboard UI (`/maison-hd/hq`)
+**Command Center** — full-width owner/manager dashboard with auto-refresh every 60 seconds:
+
+**Primary KPI row (4 cards)**:
+- Завантаженість: occupancy% + "X з Y номерів" → link to /bookings
+- Виручка сьогодні: rooms + "SPA: X · F&B: Y" sub-line
+- Виручка цього місяця: total + MoM trend arrow (+X% / -X%)
+- Відкрито замовлень: F&B open count + "Столів: X/Y зайнято" → link to /fb
+
+**Secondary KPI row (6 mini-cards)**:
+- Заїздів сьогодні (green LogIn icon) → /bookings
+- Виїздів сьогодні (red LogOut icon) → /bookings
+- SPA сьогодні (teal Waves icon) → /spa
+- Events тижня (pink PartyPopper icon) → /events
+- HK завдань (yellow Sparkles, ring when > 0) → /housekeeping
+- Непрочитаних (blue MessageSquare, ring when > 0) → /inbox
+
+**3-column main grid**:
+- Left: Arrivals card + Departures card + Housekeeping summary (3 colored boxes: Очікують/В роботі/Термінових)
+- Center: F&B live orders (status badge, table/room, amount) + SPA today schedule (time range, status, guest, service, price)
+- Right: 7-day revenue mini bar chart (blue bars, today highlighted) + Events this week (date/space/amount) + Inbox unread (clickable items with unread badge)
+
+**Bottom row**: In-house guests grid (all current bookings as compact chips with guest name + checkout date)
+
+**Navigation**: "Command Center" at TOP of sidebar with Zap icon, roles: super_admin/owner/manager
+
 ## Stage 43 — F&B / Restaurant Module
 
 ### New DB Tables (lib/db/src/schema/fb.ts)

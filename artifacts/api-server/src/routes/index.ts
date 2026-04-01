@@ -28,6 +28,7 @@ import inboxRouter from "./inbox.js";
 import spaRouter from "./spa.js";
 import eventsRouter from "./events.js";
 import fbRouter from "./fb.js";
+import hqRouter from "./hq.js";
 
 const router: IRouter = Router();
 
@@ -60,5 +61,6 @@ router.use("/inbox", inboxRouter);
 router.use("/spa", spaRouter);
 router.use("/events", eventsRouter);
 router.use("/fb", fbRouter);
+router.use("/hq", hqRouter);
 
 export default router;

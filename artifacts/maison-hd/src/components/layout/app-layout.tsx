@@ -24,6 +24,7 @@ import {
   Waves,
   PartyPopper,
   UtensilsCrossed,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,7 @@ import { formatDistanceToNow } from "date-fns";
 import { uk } from "date-fns/locale";
 
 const allNavItems = [
+  { name: "Command Center", path: "/hq", icon: Zap, roles: ["super_admin", "owner", "manager"] },
   { name: "Головна", path: "/dashboard", icon: LayoutDashboard, roles: null },
   { name: "Бронювання", path: "/bookings", icon: CalendarDays, roles: null },
   { name: "Шахматка", path: "/chess", icon: Grid3X3, roles: null },
