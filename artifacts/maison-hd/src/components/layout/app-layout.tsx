@@ -14,6 +14,8 @@ import {
   CheckCheck,
   X,
   FileText,
+  TrendingUp,
+  Plug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +34,8 @@ const navItems = [
   { name: "Прибирання", path: "/housekeeping", icon: Sparkles },
   { name: "Рахунки", path: "/invoices", icon: FileText },
   { name: "Звіти", path: "/reports", icon: BarChart3 },
+  { name: "Аналітика", path: "/analytics", icon: TrendingUp },
+  { name: "Інтеграції", path: "/integrations", icon: Plug },
 ];
 
 const NOTIF_TYPE_COLORS: Record<string, string> = {

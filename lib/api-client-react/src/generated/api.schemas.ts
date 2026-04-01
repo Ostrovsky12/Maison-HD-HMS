@@ -1081,6 +1081,111 @@ export interface AuditLog {
   createdAt: string;
 }
 
+export interface OtaChannel {
+  id: number;
+  name: string;
+  channelType: string;
+  apiKey?: string | null;
+  apiSecret?: string | null;
+  apiUrl?: string | null;
+  commissionRate: number;
+  syncEnabled: boolean;
+  syncInterval: number;
+  lastSync?: string | null;
+  totalBookings: number;
+  totalRevenue: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateOtaChannelRequest {
+  name: string;
+  channelType: string;
+  apiKey?: string | null;
+  apiSecret?: string | null;
+  apiUrl?: string | null;
+  commissionRate?: number;
+  syncEnabled?: boolean;
+  syncInterval?: number;
+  isActive?: boolean;
+}
+
+export interface OtaSyncResult {
+  message: string;
+  importedBookings: number;
+  channel?: OtaChannel;
+}
+
+export interface WebhookEndpoint {
+  id: number;
+  name: string;
+  url: string;
+  secret?: string | null;
+  events: string[];
+  isActive: boolean;
+  lastTriggered?: string | null;
+  failureCount: number;
+  createdAt: string;
+}
+
+export interface CreateWebhookEndpointRequest {
+  name: string;
+  url: string;
+  secret?: string | null;
+  events?: string[];
+  isActive?: boolean;
+}
+
+export interface KpiHistory {
+  id: number;
+  date: string;
+  occupancyRate: number;
+  adr: number;
+  revpar: number;
+  totalRevenue: number;
+  accommodationRevenue: number;
+  checkins: number;
+  checkouts: number;
+  avgStay: number;
+  cancellationRate: number;
+  newBookings: number;
+  directBookings: number;
+  otaBookings: number;
+  totalUnits: number;
+  totalGuests: number;
+  createdAt: string;
+}
+
+export interface Forecast {
+  id: number;
+  forecastDate: string;
+  predictedOccupancy: number;
+  predictedRevenue: number;
+  predictedAdr: number;
+  confidenceLower: number;
+  confidenceUpper: number;
+  seasonFactor: number;
+  eventsFactor: number;
+  generatedAt: string;
+}
+
+export interface GenerateForecastResponse {
+  message: string;
+  forecasts: Forecast[];
+}
+
+export interface AnalyticsSummary {
+  currentMonth: string;
+  avgOccupancy: number;
+  avgAdr: number;
+  avgRevpar: number;
+  totalRevenue: number;
+  kpiDays: number;
+  nextForecast: Forecast[];
+  recentKpi: KpiHistory[];
+}
+
 export type GetUnitsAvailabilityParams = {
   checkIn: string;
   checkOut: string;
@@ -1196,4 +1301,16 @@ export type GetOccupancyAnalyticsParams = {
 export type ListNotificationsParams = {
   unreadOnly?: boolean;
   limit?: number;
+};
+
+export type ListKpiHistoryParams = {
+  days?: number;
+};
+
+export type ListForecastsParams = {
+  days?: number;
+};
+
+export type GenerateForecastParams = {
+  days?: number;
 };

@@ -16,6 +16,7 @@ import importRouter from "./import.js";
 import notificationsRouter from "./notifications.js";
 import invoicesRouter from "./invoices.js";
 import nightAuditRouter from "./night-audit.js";
+import integrationsRouter from "./integrations.js";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use("/import", importRouter);
 router.use("/notifications", notificationsRouter);
 router.use("/invoices", invoicesRouter);
 router.use("/audit", nightAuditRouter);
+router.use("/integrations", integrationsRouter);
 
 export default router;

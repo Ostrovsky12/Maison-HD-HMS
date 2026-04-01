@@ -16,6 +16,8 @@ import ReportsPage from "@/pages/reports";
 import SettingsPage from "@/pages/settings";
 import ChessPage from "@/pages/chess";
 import InvoicesPage from "@/pages/invoices";
+import AnalyticsPage from "@/pages/analytics";
+import IntegrationsPage from "@/pages/integrations";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,6 +58,8 @@ function Router() {
       <Route path="/housekeeping"><ProtectedRoute component={HousekeepingPage} /></Route>
       <Route path="/invoices"><ProtectedRoute component={InvoicesPage} /></Route>
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
+      <Route path="/analytics"><ProtectedRoute component={AnalyticsPage} /></Route>
+      <Route path="/integrations"><ProtectedRoute component={IntegrationsPage} /></Route>
       <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
       
       {/* Default redirect based on auth */}

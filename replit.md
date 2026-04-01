@@ -124,12 +124,36 @@ Creates:
 6. `/housekeeping` — Housekeeping task board
 7. `/units` — Unit management
 
+## Maison HD (Second Product)
+
+Premium HMS SaaS at `/maison-hd/`. Shares the same API server. Key pages:
+- `/maison-hd/dashboard` — KPI dashboard
+- `/maison-hd/bookings` — Bookings management
+- `/maison-hd/chess` — Chessboard calendar
+- `/maison-hd/units` — Rooms management
+- `/maison-hd/guests` — CRM
+- `/maison-hd/housekeeping` — Housekeeping
+- `/maison-hd/invoices` — Invoices
+- `/maison-hd/reports` — Reports + Night audit
+- `/maison-hd/analytics` — Advanced KPI, ADR/RevPAR charts, forecast (Stage 5)
+- `/maison-hd/integrations` — OTA channels, Webhook management (Stage 5)
+
+Stage 5 DB tables: `ota_channels`, `webhook_endpoints`, `kpi_history`, `forecasts`
+
+Stage 5 API routes:
+- `GET/POST /api/integrations/ota` — OTA channel CRUD + sync
+- `GET/POST /api/integrations/webhooks` — Webhook endpoint CRUD
+- `GET/POST /api/analytics/kpi` + `/kpi/generate` — KPI history
+- `GET/POST /api/analytics/forecast` + `/forecast/generate` — Forecasting
+- `GET /api/analytics/summary` — Analytics summary
+
 ## Running the App
 
 The API server and HMS frontend run automatically via Replit workflows.
 
 - API: `pnpm --filter @workspace/api-server run dev`
-- Frontend: `pnpm --filter @workspace/hms run dev`
+- Frontend HMS: `pnpm --filter @workspace/hms run dev`
+- Frontend Maison HD: `pnpm --filter @workspace/maison-hd run dev`
 - Seed DB: `pnpm --filter @workspace/scripts run seed`
 - Push schema: `pnpm --filter @workspace/db run push`
 - Codegen: `pnpm --filter @workspace/api-spec run codegen`

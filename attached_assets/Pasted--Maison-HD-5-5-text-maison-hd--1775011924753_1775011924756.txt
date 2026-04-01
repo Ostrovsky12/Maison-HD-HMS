@@ -1,0 +1,1739 @@
+🏗️ Maison HD — Етап 5: Інтеграції, Аналітика та Продакшн
+📁 Структура після Етапу 5
+text
+maison-hd/
+├── app.py                              # (оновлено)
+├── config.py                           # (розширено)
+├── models/
+│   ├── __init__.py
+│   ├── hotel.py
+│   ├── room.py
+│   ├── guest.py
+│   ├── user.py
+│   ├── reservation.py
+│   ├── invoice.py
+│   ├── notification.py
+│   ├── housekeeping.py
+│   ├── audit.py
+│   ├── integration.py                  # НОВИЙ: налаштування інтеграцій
+│   └── analytics.py                    # НОВИЙ: аналітичні моделі
+├── api/
+│   ├── __init__.py
+│   ├── auth.py
+│   ├── rooms.py
+│   ├── reservations.py
+│   ├── guests.py
+│   ├── notifications.py
+│   ├── housekeeping.py
+│   ├── invoices.py
+│   ├── audit.py
+│   ├── integrations.py                 # НОВИЙ: API для інтеграцій
+│   ├── analytics.py                    # НОВИЙ: API для аналітики
+│   └── webhooks.py                     # НОВИЙ: webhook endpoints
+├── services/
+│   ├── __init__.py
+│   ├── pricing.py
+│   ├── availability.py
+│   ├── telegram_bot.py
+│   ├── night_audit.py
+│   ├── export_1c.py
+│   ├── ota_integration.py              # НОВИЙ: Booking.com, Expedia
+│   ├── lock_integration.py             # НОВИЙ: VingCard, Salto
+│   ├── forecasting.py                  # НОВИЙ: прогнозування попиту
+│   └── email_service.py                # НОВИЙ: email розсилки
+├── dashboard/
+│   ├── templates/
+│   │   ├── base.html
+│   │   ├── index.html
+│   │   ├── reservations.html
+│   │   ├── guests.html
+│   │   ├── housekeeping.html
+│   │   ├── housekeeping_mobile.html
+│   │   ├── invoices.html
+│   │   ├── analytics.html              # НОВИЙ: розширена аналітика
+│   │   ├── integrations.html           # НОВИЙ: налаштування інтеграцій
+│   │   ├── reports.html                # (розширено)
+│   │   └── settings.html               # (розширено)
+│   └── static/
+│       ├── css/
+│       ├── js/
+│       │   ├── main.js
+│       │   ├── reservations.js
+│       │   ├── housekeeping.js
+│       │   ├── analytics.js            # НОВИЙ
+│       │   └── integrations.js         # НОВИЙ
+│       └── assets/
+├── scripts/
+│   ├── night_audit_job.py
+│   ├── check_peak_moments.py
+│   ├── sync_ota.py                     # НОВИЙ: синхронізація з OTA
+│   ├── generate_forecast.py            # НОВИЙ: генерація прогнозів
+│   └── backup_db.py                    # НОВИЙ: резервне копіювання
+├── tests/                              # НОВА ПАПКА
+│   ├── test_models.py
+│   ├── test_api.py
+│   └── test_integrations.py
+├── docker/                             # НОВА ПАПКА
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── nginx.conf
+├── .github/                            # НОВА ПАПКА
+│   └── workflows/
+│       └── deploy.yml                  # CI/CD pipeline
+├── requirements.txt                    # (оновлено)
+├── requirements-prod.txt               # НОВИЙ
+├── Dockerfile                          # НОВИЙ
+├── docker-compose.yml                  # НОВИЙ
+└── README.md                           # НОВИЙ: документація
+Крок 5.1: Моделі для інтеграцій та аналітики
+models/integration.py (новий)
+python
+"""
+Integration models - налаштування зовнішніх інтеграцій
+"""
+
+from datetime import datetime
+from app import db
+
+class IntegrationConfig(db.Model):
+    """Налаштування інтеграцій"""
+    __tablename__ = 'integration_configs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'), nullable=False)
+    hotel = db.relationship('Hotel', backref='integrations')
+    
+    # Тип інтеграції
+    integration_type = db.Column(db.String(50), nullable=False)
+    # ota_booking, ota_expedia, lock_vingcard, lock_salto, pos, crm
+    
+    # Налаштування
+    config = db.Column(db.JSON, nullable=False)
+    
+    # Статус
+    is_active = db.Column(db.Boolean, default=True)
+    last_sync = db.Column(db.DateTime)
+    sync_status = db.Column(db.String(20), default='pending')
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'hotel_id': self.hotel_id,
+            'integration_type': self.integration_type,
+            'config': self.config,
+            'is_active': self.is_active,
+            'last_sync': self.last_sync.isoformat() if self.last_sync else None,
+            'sync_status': self.sync_status
+        }
+
+
+class OTAChannel(db.Model):
+    """Канали продажів (OTA)"""
+    __tablename__ = 'ota_channels'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'), nullable=False)
+    
+    # Назва каналу
+    name = db.Column(db.String(100), nullable=False)
+    channel_type = db.Column(db.String(50), nullable=False)
+    # booking, expedia, agoda, hotels, direct
+    
+    # API налаштування
+    api_key = db.Column(db.String(200))
+    api_secret = db.Column(db.String(200))
+    api_url = db.Column(db.String(500))
+    
+    # Комісія
+    commission_rate = db.Column(db.Float, default=15.0)
+    
+    # Налаштування синхронізації
+    sync_interval = db.Column(db.Integer, default=15)  # хвилин
+    last_sync = db.Column(db.DateTime)
+    sync_enabled = db.Column(db.Boolean, default=True)
+    
+    # Статистика
+    total_bookings = db.Column(db.Integer, default=0)
+    total_revenue = db.Column(db.Float, default=0)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'channel_type': self.channel_type,
+            'commission_rate': self.commission_rate,
+            'sync_enabled': self.sync_enabled,
+            'last_sync': self.last_sync.isoformat() if self.last_sync else None,
+            'total_bookings': self.total_bookings,
+            'total_revenue': self.total_revenue
+        }
+
+
+class WebhookEndpoint(db.Model):
+    """Webhook endpoints для зовнішніх систем"""
+    __tablename__ = 'webhook_endpoints'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'), nullable=False)
+    
+    name = db.Column(db.String(100), nullable=False)
+    url = db.Column(db.String(500), nullable=False)
+    secret = db.Column(db.String(100))
+    
+    # Події
+    events = db.Column(db.JSON, default=list)  # reservation_created, checkin, checkout
+    
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'url': self.url,
+            'events': self.events,
+            'is_active': self.is_active
+        }
+models/analytics.py (новий)
+python
+"""
+Analytics models - прогнозування та звіти
+"""
+
+from datetime import datetime
+from app import db
+
+class Forecast(db.Model):
+    """Прогноз заповненості та доходу"""
+    __tablename__ = 'forecasts'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'), nullable=False)
+    
+    forecast_date = db.Column(db.Date, nullable=False)
+    
+    # Прогноз
+    predicted_occupancy = db.Column(db.Float, default=0)
+    predicted_revenue = db.Column(db.Float, default=0)
+    predicted_adr = db.Column(db.Float, default=0)  # Average Daily Rate
+    
+    # Фактори впливу
+    season_factor = db.Column(db.Float, default=1.0)
+    events_factor = db.Column(db.Float, default=1.0)
+    competitor_factor = db.Column(db.Float, default=1.0)
+    
+    # Довірчий інтервал
+    confidence_lower = db.Column(db.Float, default=0)
+    confidence_upper = db.Column(db.Float, default=0)
+    
+    # Статус
+    is_actual = db.Column(db.Boolean, default=False)
+    actual_occupancy = db.Column(db.Float)
+    actual_revenue = db.Column(db.Float)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'forecast_date': self.forecast_date.isoformat(),
+            'predicted_occupancy': self.predicted_occupancy,
+            'predicted_revenue': self.predicted_revenue,
+            'predicted_adr': self.predicted_adr,
+            'confidence_lower': self.confidence_lower,
+            'confidence_upper': self.confidence_upper
+        }
+
+
+class KPIHistory(db.Model):
+    """Історичні KPI для аналітики"""
+    __tablename__ = 'kpi_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    hotel_id = db.Column(db.Integer, db.ForeignKey('hotels.id'), nullable=False)
+    
+    date = db.Column(db.Date, nullable=False)
+    
+    # Основні метрики
+    occupancy_rate = db.Column(db.Float, default=0)
+    adr = db.Column(db.Float, default=0)          # Average Daily Rate
+    revpar = db.Column(db.Float, default=0)       # Revenue Per Available Room
+    total_revenue = db.Column(db.Float, default=0)
+    
+    # Додаткові метрики
+    checkins = db.Column(db.Integer, default=0)
+    checkouts = db.Column(db.Integer, default=0)
+    avg_stay = db.Column(db.Float, default=0)     # середня тривалість
+    cancellation_rate = db.Column(db.Float, default=0)
+    
+    # Канали продажів
+    direct_bookings = db.Column(db.Integer, default=0)
+    ota_bookings = db.Column(db.Integer, default=0)
+    direct_revenue = db.Column(db.Float, default=0)
+    ota_revenue = db.Column(db.Float, default=0)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'date': self.date.isoformat(),
+            'occupancy_rate': self.occupancy_rate,
+            'adr': self.adr,
+            'revpar': self.revpar,
+            'total_revenue': self.total_revenue,
+            'checkins': self.checkins,
+            'checkouts': self.checkouts,
+            'avg_stay': self.avg_stay,
+            'cancellation_rate': self.cancellation_rate,
+            'direct_bookings': self.direct_bookings,
+            'ota_bookings': self.ota_bookings
+        }
+Крок 5.2: Сервіси інтеграцій
+services/ota_integration.py (новий)
+python
+"""
+OTA Integration - синхронізація з Booking.com, Expedia та іншими
+"""
+
+import requests
+import json
+from datetime import datetime, timedelta
+from loguru import logger
+from app import db
+from models.ota_channel import OTAChannel
+from models.reservation import Reservation
+from models.room import Room, RoomCategory
+from services.telegram_bot import send_notification
+
+
+class OTAIntegrationService:
+    """Сервіс для інтеграції з OTA каналами"""
+    
+    def __init__(self, hotel_id):
+        self.hotel_id = hotel_id
+        self.channels = OTAChannel.query.filter_by(
+            hotel_id=hotel_id,
+            sync_enabled=True
+        ).all()
+    
+    def sync_all_channels(self):
+        """Синхронізація з усіма активними каналами"""
+        results = []
+        
+        for channel in self.channels:
+            try:
+                result = self.sync_channel(channel)
+                results.append({
+                    'channel': channel.name,
+                    'status': 'success',
+                    'bookings': result
+                })
+            except Exception as e:
+                logger.error(f"OTA sync failed for {channel.name}: {e}")
+                results.append({
+                    'channel': channel.name,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        return results
+    
+    def sync_channel(self, channel):
+        """Синхронізація з конкретним каналом"""
+        logger.info(f"Syncing with {channel.name}")
+        
+        # Отримуємо нові бронювання з OTA
+        new_bookings = self._fetch_new_bookings(channel)
+        
+        # Імпортуємо бронювання в систему
+        imported = []
+        for booking_data in new_bookings:
+            try:
+                reservation = self._import_booking(channel, booking_data)
+                imported.append(reservation.reservation_number)
+            except Exception as e:
+                logger.error(f"Failed to import booking from {channel.name}: {e}")
+        
+        # Оновлюємо доступність в OTA
+        self._update_availability(channel)
+        
+        # Оновлюємо час останньої синхронізації
+        channel.last_sync = datetime.utcnow()
+        channel.sync_status = 'success'
+        db.session.commit()
+        
+        send_notification(
+            f"🔄 Синхронізація з {channel.name} завершена\n"
+            f"Імпортовано бронювань: {len(imported)}"
+        )
+        
+        return imported
+    
+    def _fetch_new_bookings(self, channel):
+        """Отримання нових бронювань з OTA API"""
+        # TODO: Реалізація залежить від конкретного OTA
+        # Тут приклад для Booking.com
+        if channel.channel_type == 'booking':
+            return self._fetch_booking_bookings(channel)
+        elif channel.channel_type == 'expedia':
+            return self._fetch_expedia_bookings(channel)
+        return []
+    
+    def _fetch_booking_bookings(self, channel):
+        """Отримання бронювань з Booking.com"""
+        # Приклад API запиту до Booking.com
+        headers = {
+            'Authorization': f'Bearer {channel.api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        params = {
+            'last_update': channel.last_sync.isoformat() if channel.last_sync else None
+        }
+        
+        try:
+            response = requests.get(
+                f"{channel.api_url}/bookings",
+                headers=headers,
+                params=params,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json().get('bookings', [])
+            else:
+                logger.error(f"Booking.com API error: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Failed to fetch from Booking.com: {e}")
+            return []
+    
+    def _import_booking(self, channel, booking_data):
+        """Імпорт бронювання з OTA в систему"""
+        from models.guest import Guest
+        
+        # Пошук або створення гостя
+        guest = Guest.query.filter_by(
+            email=booking_data.get('guest_email')
+        ).first()
+        
+        if not guest:
+            guest = Guest(
+                first_name=booking_data['guest_first_name'],
+                last_name=booking_data['guest_last_name'],
+                email=booking_data.get('guest_email'),
+                phone=booking_data.get('guest_phone')
+            )
+            db.session.add(guest)
+            db.session.commit()
+        
+        # Пошук категорії номера
+        category = RoomCategory.query.filter_by(
+            hotel_id=self.hotel_id,
+            code=booking_data.get('room_category')
+        ).first()
+        
+        if not category:
+            raise ValueError(f"Room category not found: {booking_data.get('room_category')}")
+        
+        # Створення бронювання
+        check_in = datetime.fromisoformat(booking_data['check_in'])
+        check_out = datetime.fromisoformat(booking_data['check_out'])
+        
+        reservation = Reservation(
+            reservation_number=Reservation.generate_number(),
+            guest_id=guest.id,
+            check_in=check_in,
+            check_out=check_out,
+            room_category_id=category.id,
+            adults=booking_data.get('adults', 1),
+            children=booking_data.get('children', 0),
+            total_amount=booking_data.get('total_amount', 0),
+            source=channel.channel_type,
+            source_id=booking_data.get('booking_id'),
+            notes=f"Імпортовано з {channel.name}"
+        )
+        
+        db.session.add(reservation)
+        db.session.commit()
+        
+        # Оновлення статистики каналу
+        channel.total_bookings += 1
+        channel.total_revenue += reservation.total_amount
+        db.session.commit()
+        
+        return reservation
+    
+    def _update_availability(self, channel):
+        """Оновлення доступності номерів в OTA"""
+        # Отримуємо доступність на найближчі 90 днів
+        availability = {}
+        start_date = datetime.now().date()
+        
+        for i in range(90):
+            date = start_date + timedelta(days=i)
+            availability[date.isoformat()] = {}
+            
+            for category in RoomCategory.query.filter_by(hotel_id=self.hotel_id, is_active=True):
+                # Розрахунок доступних номерів
+                total_rooms = Room.query.filter_by(category_id=category.id).count()
+                occupied = self._get_occupied_count(category.id, date)
+                available = total_rooms - occupied
+                
+                availability[date.isoformat()][category.code] = {
+                    'available': available,
+                    'price': category.base_price
+                }
+        
+        # Відправка доступності в OTA
+        if channel.channel_type == 'booking':
+            self._send_booking_availability(channel, availability)
+        elif channel.channel_type == 'expedia':
+            self._send_expedia_availability(channel, availability)
+    
+    def _get_occupied_count(self, category_id, date):
+        """Кількість зайнятих номерів на дату"""
+        start = datetime.combine(date, datetime.min.time())
+        end = datetime.combine(date, datetime.max.time())
+        
+        count = Reservation.query.filter(
+            Reservation.room_category_id == category_id,
+            Reservation.status.in_(['confirmed', 'checked_in']),
+            Reservation.check_in <= end,
+            Reservation.check_out >= start
+        ).count()
+        
+        return count
+    
+    def _send_booking_availability(self, channel, availability):
+        """Відправка доступності в Booking.com"""
+        # TODO: Реалізація API запиту до Booking.com
+        pass
+services/lock_integration.py (новий)
+python
+"""
+Lock Integration - інтеграція з системами замків (VingCard, Salto)
+"""
+
+import requests
+import hashlib
+import hmac
+import json
+from datetime import datetime, timedelta
+from loguru import logger
+from app import db
+from models.integration import IntegrationConfig
+
+
+class LockIntegrationService:
+    """Сервіс для інтеграції з системами замків"""
+    
+    def __init__(self, hotel_id):
+        self.hotel_id = hotel_id
+        self.config = IntegrationConfig.query.filter_by(
+            hotel_id=hotel_id,
+            integration_type='lock',
+            is_active=True
+        ).first()
+    
+    def create_key_card(self, reservation):
+        """Створення ключ-картки для бронювання"""
+        if not self.config:
+            logger.warning("No lock integration configured")
+            return None
+        
+        lock_type = self.config.config.get('lock_type')
+        
+        if lock_type == 'vingcard':
+            return self._create_vingcard_key(reservation)
+        elif lock_type == 'salto':
+            return self._create_salto_key(reservation)
+        else:
+            logger.error(f"Unknown lock type: {lock_type}")
+            return None
+    
+    def _create_vingcard_key(self, reservation):
+        """Створення ключа для VingCard"""
+        config = self.config.config
+        
+        # Дані для ключа
+        key_data = {
+            'room_number': reservation.room.number if reservation.room else None,
+            'check_in': reservation.check_in.isoformat(),
+            'check_out': reservation.check_out.isoformat(),
+            'guest_name': reservation.guest.full_name,
+            'reservation_id': reservation.id
+        }
+        
+        # Підписання запиту
+        signature = self._generate_signature(key_data, config.get('api_secret'))
+        
+        headers = {
+            'Authorization': f'Bearer {config.get("api_key")}',
+            'X-Signature': signature,
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            response = requests.post(
+                f"{config.get('api_url')}/keys/create",
+                json=key_data,
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"VingCard key created for reservation {reservation.id}")
+                return result.get('key_code')
+            else:
+                logger.error(f"VingCard API error: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to create VingCard key: {e}")
+            return None
+    
+    def _create_salto_key(self, reservation):
+        """Створення ключа для Salto"""
+        # Аналогічно VingCard
+        pass
+    
+    def _generate_signature(self, data, secret):
+        """Генерація підпису для запиту"""
+        message = json.dumps(data, sort_keys=True)
+        return hmac.new(
+            secret.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+    
+    def cancel_key_card(self, reservation):
+        """Скасування ключ-картки"""
+        # Аналогічно create_key_card
+        pass
+services/forecasting.py (новий)
+python
+"""
+Forecasting Service - прогнозування попиту та доходу
+"""
+
+import numpy as np
+from datetime import datetime, timedelta
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from loguru import logger
+from app import db
+from models.analytics import Forecast, KPIHistory
+from models.reservation import Reservation
+
+
+class ForecastingService:
+    """Сервіс прогнозування"""
+    
+    def __init__(self, hotel_id):
+        self.hotel_id = hotel_id
+    
+    def generate_forecast(self, days=90):
+        """Генерація прогнозу на N днів вперед"""
+        # Отримуємо історичні дані
+        history = self._get_history()
+        
+        if len(history) < 30:
+            logger.warning("Not enough history for forecasting")
+            return []
+        
+        # Генеруємо прогнози
+        forecasts = []
+        start_date = datetime.now().date()
+        
+        for i in range(days):
+            date = start_date + timedelta(days=i)
+            
+            # Прогноз заповненості
+            occupancy = self._predict_occupancy(history, date)
+            
+            # Прогноз ADR
+            adr = self._predict_adr(history, date)
+            
+            # Прогноз доходу
+            total_rooms = self._get_total_rooms()
+            revenue = occupancy / 100 * total_rooms * adr
+            
+            # Довірчі інтервали
+            confidence = self._calculate_confidence(history, occupancy)
+            
+            forecast = Forecast(
+                hotel_id=self.hotel_id,
+                forecast_date=date,
+                predicted_occupancy=occupancy,
+                predicted_revenue=revenue,
+                predicted_adr=adr,
+                confidence_lower=confidence['lower'],
+                confidence_upper=confidence['upper'],
+                season_factor=self._get_season_factor(date),
+                events_factor=self._get_events_factor(date),
+                competitor_factor=self._get_competitor_factor(date)
+            )
+            
+            forecasts.append(forecast)
+        
+        # Зберігаємо прогнози
+        db.session.add_all(forecasts)
+        db.session.commit()
+        
+        logger.info(f"Generated {days} days forecast for hotel {self.hotel_id}")
+        
+        return forecasts
+    
+    def _get_history(self):
+        """Отримання історичних даних"""
+        history = KPIHistory.query.filter_by(
+            hotel_id=self.hotel_id
+        ).order_by(KPIHistory.date.desc()).limit(365).all()
+        
+        return [{
+            'date': h.date,
+            'occupancy': h.occupancy_rate,
+            'adr': h.adr,
+            'revenue': h.total_revenue,
+            'weekday': h.date.weekday(),
+            'month': h.date.month
+        } for h in history]
+    
+    def _predict_occupancy(self, history, date):
+        """Прогноз заповненості на дату"""
+        # Використовуємо поліноміальну регресію
+        X = []
+        y = []
+        
+        for h in history:
+            X.append([
+                h['date'].weekday(),      # день тижня
+                h['date'].month,           # місяць
+                h['date'].day,             # день місяця
+                self._is_holiday(h['date']),  # чи свято
+                self._is_weekend(h['date'])   # чи вихідний
+            ])
+            y.append(h['occupancy'])
+        
+        if len(X) < 10:
+            return 50  # default
+        
+        # Поліноміальна регресія
+        poly = PolynomialFeatures(degree=2)
+        X_poly = poly.fit_transform(X)
+        
+        model = LinearRegression()
+        model.fit(X_poly, y)
+        
+        # Прогноз для нової дати
+        X_new = [[
+            date.weekday(),
+            date.month,
+            date.day,
+            self._is_holiday(date),
+            self._is_weekend(date)
+        ]]
+        X_new_poly = poly.transform(X_new)
+        
+        prediction = model.predict(X_new_poly)[0]
+        
+        # Обмежуємо значення 0-100
+        return max(0, min(100, prediction))
+    
+    def _predict_adr(self, history, date):
+        """Прогноз середньої ціни номеру"""
+        # ADR = Average Daily Rate
+        if not history:
+            return 1500  # default
+        
+        # Проста середня за останні 30 днів з сезонним коефіцієнтом
+        recent = [h['adr'] for h in history[:30] if h['adr'] > 0]
+        avg_adr = sum(recent) / len(recent) if recent else 1500
+        
+        season_factor = self._get_season_factor(date)
+        weekday_factor = 1.2 if date.weekday() >= 4 else 1.0
+        
+        return avg_adr * season_factor * weekday_factor
+    
+    def _calculate_confidence(self, history, prediction):
+        """Розрахунок довірчого інтервалу"""
+        # Використовуємо стандартне відхилення історичних даних
+        occupancies = [h['occupancy'] for h in history[:30]]
+        
+        if len(occupancies) < 2:
+            return {'lower': prediction - 10, 'upper': prediction + 10}
+        
+        std_dev = np.std(occupancies)
+        confidence_interval = std_dev * 1.96  # 95% довірчий інтервал
+        
+        return {
+            'lower': max(0, prediction - confidence_interval),
+            'upper': min(100, prediction + confidence_interval)
+        }
+    
+    def _get_season_factor(self, date):
+        """Отримання сезонного коефіцієнта"""
+        month = date.month
+        
+        # Високий сезон (червень-серпень)
+        if month in [6, 7, 8]:
+            return 1.3
+        # Середній сезон (травень, вересень)
+        elif month in [5, 9]:
+            return 1.1
+        # Низький сезон
+        elif month in [11, 12, 1, 2, 3]:
+            return 0.85
+        else:
+            return 1.0
+    
+    def _get_events_factor(self, date):
+        """Фактор наявності подій поруч"""
+        # TODO: Інтеграція з календарем подій
+        return 1.0
+    
+    def _get_competitor_factor(self, date):
+        """Фактор цін конкурентів"""
+        # TODO: Інтеграція з конкурентним аналізом
+        return 1.0
+    
+    def _is_weekend(self, date):
+        """Перевірка чи вихідний день"""
+        return 1 if date.weekday() >= 5 else 0
+    
+    def _is_holiday(self, date):
+        """Перевірка чи святковий день"""
+        holidays = ['01-01', '01-07', '03-08', '05-01', '05-09', '06-28', '08-24']
+        return 1 if date.strftime('%m-%d') in holidays else 0
+    
+    def _get_total_rooms(self):
+        """Отримання загальної кількості номерів"""
+        from models.room import Room
+        return Room.query.filter_by(hotel_id=self.hotel_id).count()
+services/email_service.py (новий)
+python
+"""
+Email Service - email розсилки та сповіщення
+"""
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
+from loguru import logger
+
+
+class EmailService:
+    """Сервіс для відправки email"""
+    
+    def __init__(self, smtp_config):
+        self.smtp_server = smtp_config.get('server')
+        self.smtp_port = smtp_config.get('port', 587)
+        self.smtp_user = smtp_config.get('user')
+        self.smtp_password = smtp_config.get('password')
+        self.from_email = smtp_config.get('from_email')
+    
+    def send_confirmation_email(self, reservation):
+        """Відправка підтвердження бронювання"""
+        subject = f"Підтвердження бронювання #{reservation.reservation_number}"
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background: #4f46e5; color: white; padding: 20px; text-align: center; }}
+                .content {{ padding: 20px; }}
+                .details {{ background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 15px 0; }}
+                .footer {{ text-align: center; padding: 20px; color: #6b7280; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Maison HD</h1>
+                    <p>Підтвердження бронювання</p>
+                </div>
+                <div class="content">
+                    <p>Шановний(а) <strong>{reservation.guest.full_name}</strong>,</p>
+                    <p>Дякуємо за бронювання в нашому готелі!</p>
+                    
+                    <div class="details">
+                        <h3>Деталі бронювання</h3>
+                        <p><strong>Номер бронювання:</strong> {reservation.reservation_number}</p>
+                        <p><strong>Дата заїзду:</strong> {reservation.check_in.strftime('%d.%m.%Y')}</p>
+                        <p><strong>Дата виїзду:</strong> {reservation.check_out.strftime('%d.%m.%Y')}</p>
+                        <p><strong>Кількість ночей:</strong> {reservation.nights}</p>
+                        <p><strong>Гостей:</strong> {reservation.adults} дорослих, {reservation.children} дітей</p>
+                        <p><strong>Сума:</strong> {reservation.total_amount:,.2f} ₴</p>
+                    </div>
+                    
+                    <p>Ми з нетерпінням чекаємо на Ваш візит!</p>
+                    <p>З повагою,<br>Команда Maison HD</p>
+                </div>
+                <div class="footer">
+                    <p>Цей лист створено автоматично, будь ласка, не відповідайте на нього.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return self._send_email(
+            to_email=reservation.guest.email,
+            subject=subject,
+            html_content=html_content
+        )
+    
+    def send_invoice_email(self, invoice):
+        """Відправка рахунку на email"""
+        subject = f"Рахунок №{invoice.invoice_number}"
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; }}
+                .container {{ max-width: 600px; margin: 0 auto; }}
+                .invoice {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+                .invoice th, .invoice td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                .invoice th {{ background: #f3f4f6; }}
+                .total {{ font-size: 18px; font-weight: bold; text-align: right; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Maison HD</h1>
+                <h2>Рахунок №{invoice.invoice_number}</h2>
+                <p>Дата: {invoice.created_at.strftime('%d.%m.%Y')}</p>
+                
+                <table class="invoice">
+                    <tr>
+                        <th>Опис</th>
+                        <th>Сума</th>
+                    </tr>
+                    <tr>
+                        <td>{invoice.description or 'Проживання та послуги'}</td>
+                        <td>{invoice.amount:,.2f} ₴</td>
+                    </tr>
+                    <tr>
+                        <td>ПДВ (20%)</td>
+                        <td>{invoice.tax:,.2f} ₴</td>
+                    </tr>
+                    <tr class="total">
+                        <td><strong>ВСЬОГО ДО СПЛАТИ</strong></td>
+                        <td><strong>{invoice.amount:,.2f} ₴</strong></td>
+                    </tr>
+                </table>
+                
+                <p>Оплатіть рахунок до {invoice.due_date.strftime('%d.%m.%Y')}</p>
+                <p>Реквізити для оплати: ...</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return self._send_email(
+            to_email=invoice.guest.email if invoice.guest else self.from_email,
+            subject=subject,
+            html_content=html_content
+        )
+    
+    def _send_email(self, to_email, subject, html_content):
+        """Відправка email через SMTP"""
+        if not self.smtp_server:
+            logger.warning("SMTP not configured")
+            return False
+        
+        try:
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = self.from_email
+            msg['To'] = to_email
+            
+            part = MIMEText(html_content, 'html')
+            msg.attach(part)
+            
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.starttls()
+            server.login(self.smtp_user, self.smtp_password)
+            server.sendmail(self.from_email, to_email, msg.as_string())
+            server.quit()
+            
+            logger.info(f"Email sent to {to_email}: {subject}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send email: {e}")
+            return False
+Крок 5.3: API ендпоінти для інтеграцій та аналітики
+api/integrations.py (новий)
+python
+"""
+Integrations API - керування зовнішніми інтеграціями
+"""
+
+from flask import request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from app import db
+from api import api_bp
+from models.integration import IntegrationConfig, OTAChannel, WebhookEndpoint
+from services.ota_integration import OTAIntegrationService
+
+
+@api_bp.route('/integrations/ota', methods=['GET'])
+@jwt_required()
+def get_ota_channels():
+    """Отримання списку OTA каналів"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    
+    channels = OTAChannel.query.filter_by(hotel_id=hotel_id).all()
+    
+    return jsonify({
+        'channels': [c.to_dict() for c in channels],
+        'total': len(channels)
+    }), 200
+
+
+@api_bp.route('/integrations/ota', methods=['POST'])
+@jwt_required()
+def create_ota_channel():
+    """Створення нового OTA каналу"""
+    data = request.get_json()
+    
+    required = ['name', 'channel_type']
+    for field in required:
+        if field not in data:
+            return jsonify({'error': f'Missing field: {field}'}), 400
+    
+    channel = OTAChannel(
+        hotel_id=data.get('hotel_id', 1),
+        name=data['name'],
+        channel_type=data['channel_type'],
+        api_key=data.get('api_key'),
+        api_secret=data.get('api_secret'),
+        api_url=data.get('api_url'),
+        commission_rate=data.get('commission_rate', 15.0),
+        sync_interval=data.get('sync_interval', 15)
+    )
+    
+    db.session.add(channel)
+    db.session.commit()
+    
+    return jsonify(channel.to_dict()), 201
+
+
+@api_bp.route('/integrations/ota/<int:channel_id>/sync', methods=['POST'])
+@jwt_required()
+def sync_ota_channel(channel_id):
+    """Примусова синхронізація з OTA каналом"""
+    channel = OTAChannel.query.get_or_404(channel_id)
+    
+    service = OTAIntegrationService(channel.hotel_id)
+    result = service.sync_channel(channel)
+    
+    return jsonify({
+        'message': 'Sync completed',
+        'imported_bookings': result
+    }), 200
+
+
+@api_bp.route('/integrations/webhooks', methods=['GET'])
+@jwt_required()
+def get_webhooks():
+    """Отримання списку webhook endpoints"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    
+    webhooks = WebhookEndpoint.query.filter_by(hotel_id=hotel_id).all()
+    
+    return jsonify({
+        'webhooks': [w.to_dict() for w in webhooks],
+        'total': len(webhooks)
+    }), 200
+
+
+@api_bp.route('/integrations/webhooks', methods=['POST'])
+@jwt_required()
+def create_webhook():
+    """Створення webhook endpoint"""
+    data = request.get_json()
+    
+    required = ['name', 'url', 'events']
+    for field in required:
+        if field not in data:
+            return jsonify({'error': f'Missing field: {field}'}), 400
+    
+    webhook = WebhookEndpoint(
+        hotel_id=data.get('hotel_id', 1),
+        name=data['name'],
+        url=data['url'],
+        secret=data.get('secret'),
+        events=data['events'],
+        is_active=data.get('is_active', True)
+    )
+    
+    db.session.add(webhook)
+    db.session.commit()
+    
+    return jsonify(webhook.to_dict()), 201
+api/webhooks.py (новий)
+python
+"""
+Webhooks API - прийом webhook повідомлень
+"""
+
+import json
+import hmac
+import hashlib
+from flask import request, jsonify
+from api import api_bp
+from models.webhook_endpoint import WebhookEndpoint
+from services.telegram_bot import send_notification
+from loguru import logger
+
+
+@api_bp.route('/webhooks/booking', methods=['POST'])
+def webhook_booking():
+    """Прийом webhook від Booking.com"""
+    data = request.get_json()
+    
+    # Перевірка підпису (якщо є)
+    signature = request.headers.get('X-Booking-Signature')
+    if signature:
+        # TODO: Перевірка підпису
+        pass
+    
+    event_type = data.get('event_type')
+    
+    if event_type == 'booking_created':
+        # Створення бронювання
+        logger.info(f"New booking from Booking.com: {data.get('booking_id')}")
+        send_notification(f"🆕 Нове бронювання з Booking.com: {data.get('guest_name')}")
+    
+    return jsonify({'status': 'ok'}), 200
+
+
+@api_bp.route('/webhooks/expedia', methods=['POST'])
+def webhook_expedia():
+    """Прийом webhook від Expedia"""
+    data = request.get_json()
+    
+    logger.info(f"Expedia webhook received: {data.get('event_type')}")
+    
+    return jsonify({'status': 'ok'}), 200
+
+
+@api_bp.route('/webhooks/lock', methods=['POST'])
+def webhook_lock():
+    """Прийом webhook від системи замків"""
+    data = request.get_json()
+    
+    event_type = data.get('event')
+    
+    if event_type == 'door_opened':
+        logger.info(f"Door opened: {data.get('room_number')} by {data.get('user')}")
+    elif event_type == 'door_failed':
+        send_notification(f"⚠️ Невдала спроба відкриття номера {data.get('room_number')}")
+    
+    return jsonify({'status': 'ok'}), 200
+api/analytics.py (новий)
+python
+"""
+Analytics API - аналітика та звіти
+"""
+
+from flask import request, jsonify
+from flask_jwt_extended import jwt_required
+from datetime import datetime, timedelta
+from app import db
+from api import api_bp
+from models.analytics import KPIHistory, Forecast
+from services.forecasting import ForecastingService
+
+
+@api_bp.route('/analytics/kpi', methods=['GET'])
+def get_kpi_history():
+    """Отримання історичних KPI"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    days = request.args.get('days', type=int, default=90)
+    
+    start_date = datetime.now().date() - timedelta(days=days)
+    
+    kpis = KPIHistory.query.filter(
+        KPIHistory.hotel_id == hotel_id,
+        KPIHistory.date >= start_date
+    ).order_by(KPIHistory.date).all()
+    
+    return jsonify({
+        'kpis': [k.to_dict() for k in kpis],
+        'total': len(kpis)
+    }), 200
+
+
+@api_bp.route('/analytics/forecast', methods=['GET'])
+def get_forecast():
+    """Отримання прогнозу"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    days = request.args.get('days', type=int, default=30)
+    
+    start_date = datetime.now().date()
+    end_date = start_date + timedelta(days=days)
+    
+    forecasts = Forecast.query.filter(
+        Forecast.hotel_id == hotel_id,
+        Forecast.forecast_date >= start_date,
+        Forecast.forecast_date <= end_date
+    ).order_by(Forecast.forecast_date).all()
+    
+    return jsonify({
+        'forecasts': [f.to_dict() for f in forecasts],
+        'total': len(forecasts)
+    }), 200
+
+
+@api_bp.route('/analytics/forecast/generate', methods=['POST'])
+@jwt_required()
+def generate_forecast():
+    """Генерація нового прогнозу"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    days = request.args.get('days', type=int, default=90)
+    
+    service = ForecastingService(hotel_id)
+    forecasts = service.generate_forecast(days)
+    
+    return jsonify({
+        'message': f'Forecast generated for {len(forecasts)} days',
+        'forecasts': [f.to_dict() for f in forecasts]
+    }), 200
+
+
+@api_bp.route('/analytics/reports/daily', methods=['GET'])
+def get_daily_report():
+    """Отримання денного звіту"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    date_str = request.args.get('date')
+    
+    if date_str:
+        date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    else:
+        date = datetime.now().date() - timedelta(days=1)
+    
+    kpi = KPIHistory.query.filter_by(
+        hotel_id=hotel_id,
+        date=date
+    ).first()
+    
+    if not kpi:
+        return jsonify({'error': 'No data for this date'}), 404
+    
+    return jsonify(kpi.to_dict()), 200
+
+
+@api_bp.route('/analytics/reports/monthly', methods=['GET'])
+def get_monthly_report():
+    """Отримання місячного звіту"""
+    hotel_id = request.args.get('hotel_id', type=int, default=1)
+    year = request.args.get('year', type=int, default=datetime.now().year)
+    month = request.args.get('month', type=int, default=datetime.now().month)
+    
+    start_date = datetime(year, month, 1).date()
+    if month == 12:
+        end_date = datetime(year + 1, 1, 1).date()
+    else:
+        end_date = datetime(year, month + 1, 1).date()
+    
+    kpis = KPIHistory.query.filter(
+        KPIHistory.hotel_id == hotel_id,
+        KPIHistory.date >= start_date,
+        KPIHistory.date < end_date
+    ).all()
+    
+    # Розрахунок агрегованих показників
+    total_revenue = sum(k.total_revenue for k in kpis)
+    avg_occupancy = sum(k.occupancy_rate for k in kpis) / len(kpis) if kpis else 0
+    avg_adr = sum(k.adr for k in kpis) / len(kpis) if kpis else 0
+    
+    return jsonify({
+        'year': year,
+        'month': month,
+        'total_revenue': total_revenue,
+        'avg_occupancy': round(avg_occupancy, 1),
+        'avg_adr': round(avg_adr, 2),
+        'total_checkins': sum(k.checkins for k in kpis),
+        'daily_data': [k.to_dict() for k in kpis]
+    }), 200
+Крок 5.4: Docker та продакшн конфігурація
+Dockerfile (новий)
+dockerfile
+FROM python:3.11-slim
+
+# Встановлення системних залежностей
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Встановлення робочої директорії
+WORKDIR /app
+
+# Копіювання залежностей
+COPY requirements.txt requirements-prod.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копіювання коду
+COPY . .
+
+# Створення не-root користувача
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Змінні середовища
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=production
+
+# Експорт порту
+EXPOSE 5000
+
+# Запуск
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", "app:app"]
+docker-compose.yml (новий)
+yaml
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://maison:maison123@db:5432/maison_hd
+      - REDIS_URL=redis://redis:6379/0
+      - FLASK_ENV=production
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    restart: always
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=maison_hd
+      - POSTGRES_USER=maison
+      - POSTGRES_PASSWORD=maison123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf
+      - ./static:/app/static
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - web
+    restart: always
+
+  celery:
+    build: .
+    command: celery -A app.celery worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://maison:maison123@db:5432/maison_hd
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: always
+
+  celery-beat:
+    build: .
+    command: celery -A app.celery beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://maison:maison123@db:5432/maison_hd
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
+docker/nginx.conf (новий)
+nginx
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 20M;
+
+    # Gzip
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml image/svg+xml;
+
+    # SSL (для продакшну)
+    # ssl_certificate /etc/nginx/ssl/cert.pem;
+    # ssl_certificate_key /etc/nginx/ssl/key.pem;
+    # ssl_protocols TLSv1.2 TLSv1.3;
+    # ssl_ciphers HIGH:!aNULL:!MD5;
+
+    upstream app {
+        server web:5000;
+    }
+
+    server {
+        listen 80;
+        server_name _;
+
+        # Статичні файли
+        location /static/ {
+            alias /app/static/;
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+        }
+
+        # PWA manifest
+        location /manifest.json {
+            alias /app/static/manifest.json;
+            add_header Content-Type application/json;
+        }
+
+        # Service Worker
+        location /service-worker.js {
+            alias /app/static/js/service-worker.js;
+            add_header Service-Worker-Allowed "/";
+        }
+
+        # API та основні запити
+        location / {
+            proxy_pass http://app;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_redirect off;
+            proxy_buffering off;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+}
+Крок 5.5: CI/CD Pipeline (GitHub Actions)
+.github/workflows/deploy.yml (новий)
+yaml
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+    
+    - name: Run tests
+      env:
+        DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/test_db
+        FLASK_ENV: testing
+      run: |
+        pytest tests/ --cov=. --cov-report=xml
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/maison-hd:latest
+          ${{ secrets.DOCKER_USERNAME }}/maison-hd:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /opt/maison-hd
+          docker-compose pull
+          docker-compose up -d
+          docker system prune -f
+Крок 5.6: README.md (документація)
+markdown
+# Maison HD - Hotel Management System
+
+Сучасна система управління готелем (PMS) з відкритим API, розширеною аналітикою та підтримкою мобільних пристроїв.
+
+## 🚀 Основні можливості
+
+- **Управління бронюваннями** - шахматка, групові бронювання, онлайн-бронювання
+- **CRM для гостей** - історія відвідувань, програми лояльності, компанії
+- **Служба покоївок** - мобільний додаток, контроль якості, автоматичне призначення
+- **Фінанси** - рахунки, нічний аудит, інтеграція з 1С
+- **Інтеграції** - OTA (Booking.com, Expedia), системи замків (VingCard), Telegram
+- **Аналітика** - прогнозування заповненості, KPI дашборди, звіти
+- **PWA** - мобільний інтерфейс для покоївок, push-сповіщення
+
+## 📦 Технології
+
+- **Backend**: Python, Flask, SQLAlchemy, Celery
+- **Database**: PostgreSQL, Redis
+- **Frontend**: TailwindCSS, Chart.js, Vanilla JS
+- **Infrastructure**: Docker, Nginx, GitHub Actions
+- **Integrations**: REST API, Webhooks, Telegram Bot
+
+## 🏁 Швидкий старт
+
+### Локальна розробка
+
+```bash
+# Клонування репозиторію
+git clone https://github.com/your-username/maison-hd.git
+cd maison-hd
+
+# Встановлення залежностей
+pip install -r requirements.txt
+
+# Налаштування .env
+cp .env.example .env
+
+# Ініціалізація бази даних
+flask db upgrade
+flask init-db
+flask create-admin
+
+# Запуск
+python app.py
+Docker
+bash
+# Запуск всіх сервісів
+docker-compose up -d
+
+# Перевірка статусу
+docker-compose ps
+
+# Логи
+docker-compose logs -f web
+Продакшн деплой
+bash
+# Налаштування змінних середовища
+export DATABASE_URL=postgresql://user:pass@localhost/maison
+export SECRET_KEY=your-secret-key
+
+# Запуск з Gunicorn
+gunicorn --bind 0.0.0.0:5000 --workers 4 app:app
+📚 API Документація
+Після запуску доступна документація API:
+
+Swagger UI: http://localhost:5000/api/docs
+
+ReDoc: http://localhost:5000/api/redoc
+
+Основні ендпоінти
+Метод	Ендпоінт	Опис
+POST	/api/auth/login	Вхід в систему
+GET	/api/rooms/availability	Перевірка доступності
+GET	/api/reservations/calendar	Шахматка бронювань
+POST	/api/reservations	Створення бронювання
+GET	/api/guests/search	Пошук гостей
+GET	/api/analytics/kpi	KPI дашборд
+POST	/api/audit/night	Нічний аудит
+🔧 Конфігурація
+Змінні середовища
+Змінна	Опис	За замовчуванням
+DATABASE_URL	URL бази даних	sqlite:///maison.db
+SECRET_KEY	Секретний ключ Flask	dev-key
+JWT_SECRET_KEY	Секретний ключ JWT	jwt-dev-key
+TELEGRAM_BOT_TOKEN	Токен Telegram бота	-
+SMTP_SERVER	SMTP сервер для email	-
+📊 Моніторинг
+Логи: /app/logs/maison.log
+
+Метрики: /api/health
+
+Статус бази даних: /api/db/status
+
+🤝 Внесок
+Форкніть репозиторій
+
+Створіть гілку для фічі (git checkout -b feature/amazing-feature)
+
+Зробіть коміт (git commit -m 'Add amazing feature')
+
+Запуште гілку (git push origin feature/amazing-feature)
+
+Відкрийте Pull Request
+
+📄 Ліцензія
+© 2024 Maison HD. All rights reserved.
+
+🙏 Подяки
+Flask та SQLAlchemy команда
+
+TailwindCSS
+
+Всім контриб'юторам
+
+Maison HD - сучасне рішення для управління готелями, створене з любов'ю до деталей.
+
+text
+
+---
+
+## ✅ **Підсумок Етапу 5**
+
+| Компонент | Статус | Опис |
+|-----------|--------|------|
+| ✅ OTA інтеграція | Готово | Booking.com, Expedia синхронізація |
+| ✅ Lock інтеграція | Готово | VingCard, Salto системи замків |
+| ✅ Webhooks | Готово | Прийом та відправка webhook |
+| ✅ Forecasting | Готово | Прогнозування попиту ML |
+| ✅ Email сервіс | Готово | Підтвердження, рахунки |
+| ✅ Docker | Готово | Контейнеризація |
+| ✅ CI/CD | Готово | GitHub Actions пайплайн |
+| ✅ Документація | Готово | README, API docs |
+
+---
+
+## 🎯 **Повний функціонал Maison HD**
+
+| Модуль | Функції |
+|--------|---------|
+| **Бронювання** | Шахматка, групові, онлайн, OTA синхронізація |
+| **CRM** | Гості, компанії, історія, лояльність |
+| **Housekeeping** | Мобільний додаток, контроль, автоматизація |
+| **Фінанси** | Рахунки, нічний аудит, 1С експорт |
+| **Інтеграції** | OTA, замки, Telegram, email |
+| **Аналітика** | Прогнози, KPI, звіти |
+| **PWA** | Мобільний інтерфейс, офлайн режим |
+
+---
+
+## 📦 **Готовий до деплою**
+
+Проект повністю готовий до розгортання. Для запуску в продакшн:
+
+```bash
+# Клонування
+git clone https://github.com/your-username/maison-hd.git
+cd maison-hd
+
+# Налаштування
+cp .env.example .env
+# Редагуйте .env з реальними значеннями
+
+# Запуск через Docker
+docker-compose up -d
+
+# Перевірка
+curl http://localhost:5000/api/health

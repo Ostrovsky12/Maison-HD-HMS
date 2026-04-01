@@ -11,3 +11,5 @@ export * from "./payments";
 export * from "./notifications";
 export * from "./invoices";
 export * from "./night-audits";
+export * from "./integrations";
+export * from "./analytics-kpi";

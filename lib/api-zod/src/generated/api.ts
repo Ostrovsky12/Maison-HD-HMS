@@ -1977,3 +1977,328 @@ export const MarkNotificationReadResponse = zod.object({
   priority: zod.enum(["low", "normal", "high", "critical"]),
   createdAt: zod.date(),
 });
+
+/**
+ * @summary List OTA channels
+ */
+export const ListOtaChannelsResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  channelType: zod.string(),
+  apiKey: zod.string().nullish(),
+  apiSecret: zod.string().nullish(),
+  apiUrl: zod.string().nullish(),
+  commissionRate: zod.number(),
+  syncEnabled: zod.boolean(),
+  syncInterval: zod.number(),
+  lastSync: zod.date().nullish(),
+  totalBookings: zod.number(),
+  totalRevenue: zod.number(),
+  isActive: zod.boolean(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListOtaChannelsResponse = zod.array(ListOtaChannelsResponseItem);
+
+/**
+ * @summary Create OTA channel
+ */
+export const CreateOtaChannelBody = zod.object({
+  name: zod.string(),
+  channelType: zod.string(),
+  apiKey: zod.string().nullish(),
+  apiSecret: zod.string().nullish(),
+  apiUrl: zod.string().nullish(),
+  commissionRate: zod.number().optional(),
+  syncEnabled: zod.boolean().optional(),
+  syncInterval: zod.number().optional(),
+  isActive: zod.boolean().optional(),
+});
+
+/**
+ * @summary Update OTA channel
+ */
+export const UpdateOtaChannelParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateOtaChannelBody = zod.object({
+  name: zod.string(),
+  channelType: zod.string(),
+  apiKey: zod.string().nullish(),
+  apiSecret: zod.string().nullish(),
+  apiUrl: zod.string().nullish(),
+  commissionRate: zod.number().optional(),
+  syncEnabled: zod.boolean().optional(),
+  syncInterval: zod.number().optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateOtaChannelResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  channelType: zod.string(),
+  apiKey: zod.string().nullish(),
+  apiSecret: zod.string().nullish(),
+  apiUrl: zod.string().nullish(),
+  commissionRate: zod.number(),
+  syncEnabled: zod.boolean(),
+  syncInterval: zod.number(),
+  lastSync: zod.date().nullish(),
+  totalBookings: zod.number(),
+  totalRevenue: zod.number(),
+  isActive: zod.boolean(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Delete OTA channel
+ */
+export const DeleteOtaChannelParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary Sync OTA channel
+ */
+export const SyncOtaChannelParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const SyncOtaChannelResponse = zod.object({
+  message: zod.string(),
+  importedBookings: zod.number(),
+  channel: zod
+    .object({
+      id: zod.number(),
+      name: zod.string(),
+      channelType: zod.string(),
+      apiKey: zod.string().nullish(),
+      apiSecret: zod.string().nullish(),
+      apiUrl: zod.string().nullish(),
+      commissionRate: zod.number(),
+      syncEnabled: zod.boolean(),
+      syncInterval: zod.number(),
+      lastSync: zod.date().nullish(),
+      totalBookings: zod.number(),
+      totalRevenue: zod.number(),
+      isActive: zod.boolean(),
+      createdAt: zod.date(),
+      updatedAt: zod.date(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary List webhook endpoints
+ */
+export const ListWebhookEndpointsResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  url: zod.string(),
+  secret: zod.string().nullish(),
+  events: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  lastTriggered: zod.date().nullish(),
+  failureCount: zod.number(),
+  createdAt: zod.date(),
+});
+export const ListWebhookEndpointsResponse = zod.array(
+  ListWebhookEndpointsResponseItem,
+);
+
+/**
+ * @summary Create webhook endpoint
+ */
+export const CreateWebhookEndpointBody = zod.object({
+  name: zod.string(),
+  url: zod.string(),
+  secret: zod.string().nullish(),
+  events: zod.array(zod.string()).optional(),
+  isActive: zod.boolean().optional(),
+});
+
+/**
+ * @summary Update webhook endpoint
+ */
+export const UpdateWebhookEndpointParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateWebhookEndpointBody = zod.object({
+  name: zod.string(),
+  url: zod.string(),
+  secret: zod.string().nullish(),
+  events: zod.array(zod.string()).optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateWebhookEndpointResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  url: zod.string(),
+  secret: zod.string().nullish(),
+  events: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  lastTriggered: zod.date().nullish(),
+  failureCount: zod.number(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Delete webhook endpoint
+ */
+export const DeleteWebhookEndpointParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary Get KPI history
+ */
+export const listKpiHistoryQueryDaysDefault = 90;
+
+export const ListKpiHistoryQueryParams = zod.object({
+  days: zod.coerce.number().default(listKpiHistoryQueryDaysDefault),
+});
+
+export const ListKpiHistoryResponseItem = zod.object({
+  id: zod.number(),
+  date: zod.date(),
+  occupancyRate: zod.number(),
+  adr: zod.number(),
+  revpar: zod.number(),
+  totalRevenue: zod.number(),
+  accommodationRevenue: zod.number(),
+  checkins: zod.number(),
+  checkouts: zod.number(),
+  avgStay: zod.number(),
+  cancellationRate: zod.number(),
+  newBookings: zod.number(),
+  directBookings: zod.number(),
+  otaBookings: zod.number(),
+  totalUnits: zod.number(),
+  totalGuests: zod.number(),
+  createdAt: zod.date(),
+});
+export const ListKpiHistoryResponse = zod.array(ListKpiHistoryResponseItem);
+
+/**
+ * @summary Generate KPI record for today
+ */
+export const GenerateKpiResponse = zod.object({
+  id: zod.number(),
+  date: zod.date(),
+  occupancyRate: zod.number(),
+  adr: zod.number(),
+  revpar: zod.number(),
+  totalRevenue: zod.number(),
+  accommodationRevenue: zod.number(),
+  checkins: zod.number(),
+  checkouts: zod.number(),
+  avgStay: zod.number(),
+  cancellationRate: zod.number(),
+  newBookings: zod.number(),
+  directBookings: zod.number(),
+  otaBookings: zod.number(),
+  totalUnits: zod.number(),
+  totalGuests: zod.number(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Get demand forecasts
+ */
+export const listForecastsQueryDaysDefault = 30;
+
+export const ListForecastsQueryParams = zod.object({
+  days: zod.coerce.number().default(listForecastsQueryDaysDefault),
+});
+
+export const ListForecastsResponseItem = zod.object({
+  id: zod.number(),
+  forecastDate: zod.date(),
+  predictedOccupancy: zod.number(),
+  predictedRevenue: zod.number(),
+  predictedAdr: zod.number(),
+  confidenceLower: zod.number(),
+  confidenceUpper: zod.number(),
+  seasonFactor: zod.number(),
+  eventsFactor: zod.number(),
+  generatedAt: zod.date(),
+});
+export const ListForecastsResponse = zod.array(ListForecastsResponseItem);
+
+/**
+ * @summary Generate demand forecast
+ */
+export const generateForecastQueryDaysDefault = 30;
+
+export const GenerateForecastQueryParams = zod.object({
+  days: zod.coerce.number().default(generateForecastQueryDaysDefault),
+});
+
+export const GenerateForecastResponse = zod.object({
+  message: zod.string(),
+  forecasts: zod.array(
+    zod.object({
+      id: zod.number(),
+      forecastDate: zod.date(),
+      predictedOccupancy: zod.number(),
+      predictedRevenue: zod.number(),
+      predictedAdr: zod.number(),
+      confidenceLower: zod.number(),
+      confidenceUpper: zod.number(),
+      seasonFactor: zod.number(),
+      eventsFactor: zod.number(),
+      generatedAt: zod.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Get analytics summary
+ */
+export const GetAnalyticsSummaryResponse = zod.object({
+  currentMonth: zod.string(),
+  avgOccupancy: zod.number(),
+  avgAdr: zod.number(),
+  avgRevpar: zod.number(),
+  totalRevenue: zod.number(),
+  kpiDays: zod.number(),
+  nextForecast: zod.array(
+    zod.object({
+      id: zod.number(),
+      forecastDate: zod.date(),
+      predictedOccupancy: zod.number(),
+      predictedRevenue: zod.number(),
+      predictedAdr: zod.number(),
+      confidenceLower: zod.number(),
+      confidenceUpper: zod.number(),
+      seasonFactor: zod.number(),
+      eventsFactor: zod.number(),
+      generatedAt: zod.date(),
+    }),
+  ),
+  recentKpi: zod.array(
+    zod.object({
+      id: zod.number(),
+      date: zod.date(),
+      occupancyRate: zod.number(),
+      adr: zod.number(),
+      revpar: zod.number(),
+      totalRevenue: zod.number(),
+      accommodationRevenue: zod.number(),
+      checkins: zod.number(),
+      checkouts: zod.number(),
+      avgStay: zod.number(),
+      cancellationRate: zod.number(),
+      newBookings: zod.number(),
+      directBookings: zod.number(),
+      otaBookings: zod.number(),
+      totalUnits: zod.number(),
+      totalGuests: zod.number(),
+      createdAt: zod.date(),
+    }),
+  ),
+});
