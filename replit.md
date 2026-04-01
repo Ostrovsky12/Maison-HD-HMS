@@ -272,6 +272,51 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 43 — F&B / Restaurant Module
+
+### New DB Tables (lib/db/src/schema/fb.ts)
+- `fb_categories` — menu categories: name, emoji, sortOrder, isActive
+- `fb_items` — menu items: name, description, price, priceHappy (happy hour), cookMinutes, categoryId FK, isAvailable, isPopular, isVegetarian, allergens[], tags[], sortOrder
+- `fb_tables` — restaurant tables: number, capacity, location, status (4 values), currentOrderId, isActive
+- `fb_orders` — orders: tableId FK, bookingId FK, orderType (4 values), guestName, roomNumber, guestCount, status (6 values), totalAmount, paidAmount, notes, staffNotes, openedAt, closedAt
+- `fb_order_items` — order items (ON DELETE CASCADE): orderId FK, itemId FK, name, price, quantity, totalPrice, status (5 values), sentAt, readyAt, servedAt
+- 4 Enums: fb_order_status, fb_order_type, fb_item_status, fb_table_status
+
+### F&B API Routes (`/api/fb/*`) — requireAuth
+- `GET /api/fb/stats` — today: orders/revenue/openOrders; tables: total/free/occupied/reserved; topItems (top 5 by order count)
+- `GET /api/fb/categories` — list categories ordered by sortOrder
+- `POST /api/fb/categories` — create category
+- `GET /api/fb/items?categoryId=&available=true` — items with JOIN to categories (categoryName, categoryEmoji); ordered by category+sortOrder
+- `POST /api/fb/items` — create menu item
+- `PATCH /api/fb/items/:id` — update item (toggle isAvailable, price, etc.)
+- `GET /api/fb/tables` — tables with LEFT JOIN to current order (orderGuestName, orderTotal, orderStatus)
+- `POST /api/fb/tables` — create table
+- `PATCH /api/fb/tables/:id` — update status; if "free" → clears currentOrderId
+- `GET /api/fb/orders?status=&type=&open=true` — orders with JOIN to table (tableNumber, tableLocation); ordered by openedAt DESC
+- `GET /api/fb/orders/:id` — order detail + items[]; LEFT JOIN to table
+- `POST /api/fb/orders` — create order; auto-sets table status to "occupied" + currentOrderId
+- `PATCH /api/fb/orders/:id` — update status/paidAmount/staffNotes; on billed/cancelled → table set to "free"
+- `POST /api/fb/orders/:id/items` — add item (by itemId from menu OR custom name+price); auto-recalculates order totalAmount
+- `PATCH /api/fb/order-items/:id` — update item status with timestamps (sentAt/readyAt/servedAt)
+- Demo data: 7 categories, 19 menu items (breakfast/soups/mains/salads/desserts/drinks/bar), 12 tables (main hall/VIP/terrace/bar), 3 open orders with items
+
+### F&B UI (`/maison-hd/fb`)
+3-tab management page (Зал / Замовлення / Меню):
+- **Stats row**: відкритих замовлень, столів зайнято (x/total), виручка сьогодні, топ страва
+- **Зал** — visual table map grouped by location (Основний зал/VIP-зона/Тераса/Бар): colored tiles with table number, capacity, status dot, current order amount; click free → open new order dialog; click occupied → open order detail
+- **Замовлення** — filterable list by status (відкриті/all/specific) + type (в залі/рум-сервіс/…); each card: type icon, table number or room/guest name, status badge, type badge, time opened, total amount
+- **Меню** — searchable + category-filtered grid; each item: name, popular⭐/vegetarian🌿 icons, description, price, cook time; availability toggle (✓/○)
+- **Order detail view** (full-screen):
+  - Header: table/room number, status badge, type badge, guest name+count, total
+  - Items list: name, quantity×price=total, item status badge; action buttons (🔥 → cooking, ✓ → ready, 🍽 → served)
+  - Status workflow buttons: "Відправити на кухню" → "Готово до подачі" → "Подано гостям" → "Закрити рахунок (XXX ₴)"; Скасувати
+  - "+ Додати позиції" → AddItemDialog
+- **AddItemDialog**: search + category filter, quantity +/- per item, batch add multiple items + notes
+- **NewOrderDialog**: type select, table select (free only) / room number (room service), guest name, guestCount, notes
+- **NewMenuItemDialog**: name/description/category/price/cookMinutes/isVegetarian/isPopular
+- Table status legend at bottom of hall view
+- Sidebar nav: "F&B / Ресторан" (UtensilsCrossed icon), all roles
+
 ## Stage 42 — Events & Banquet Module
 
 ### New DB Tables (lib/db/src/schema/events.ts)

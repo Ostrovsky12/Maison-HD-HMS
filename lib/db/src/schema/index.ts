@@ -22,3 +22,4 @@ export * from "./guest-orders";
 export * from "./inbox";
 export * from "./spa";
 export * from "./events";
+export * from "./fb";

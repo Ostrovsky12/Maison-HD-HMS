@@ -27,6 +27,7 @@ import guestPortalRouter from "./guest-portal.js";
 import inboxRouter from "./inbox.js";
 import spaRouter from "./spa.js";
 import eventsRouter from "./events.js";
+import fbRouter from "./fb.js";
 
 const router: IRouter = Router();
 
@@ -58,5 +59,6 @@ router.use("/guest", guestPortalRouter);
 router.use("/inbox", inboxRouter);
 router.use("/spa", spaRouter);
 router.use("/events", eventsRouter);
+router.use("/fb", fbRouter);
 
 export default router;
