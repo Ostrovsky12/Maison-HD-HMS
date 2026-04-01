@@ -137,6 +137,9 @@ Premium HMS SaaS at `/maison-hd/`. Shares the same API server. Key pages:
 - `/maison-hd/reports` — Reports + Night audit
 - `/maison-hd/analytics` — Advanced KPI, ADR/RevPAR charts, forecast (Stage 5)
 - `/maison-hd/integrations` — OTA channels, Webhook management (Stage 5)
+- `/maison-hd/subscription` — Subscription plan cards + comparison table (Stage 6)
+- `/maison-hd/admin` — Super Admin panel: org list, 2-step create wizard (Stage 6)
+- `/maison-hd/onboarding` — 4-step owner onboarding wizard (Stage 6)
 
 Stage 5 DB tables: `ota_channels`, `webhook_endpoints`, `kpi_history`, `forecasts`
 
@@ -146,6 +149,20 @@ Stage 5 API routes:
 - `GET/POST /api/analytics/kpi` + `/kpi/generate` — KPI history
 - `GET/POST /api/analytics/forecast` + `/forecast/generate` — Forecasting
 - `GET /api/analytics/summary` — Analytics summary
+
+Stage 6 DB: `organizations` table extended (email, phone, subscriptionStatus, trialEndsAt, timezone, currency, primaryColor); added `organization_members` table
+
+Stage 6 API routes:
+- `GET /api/organizations/me` — current user's organization
+- `PATCH /api/organizations/:id` — update org
+- `GET /api/organizations/:id/members` — list members
+- `POST /api/organizations/:id/invite` — invite member
+- `DELETE /api/organizations/:id/members/:userId` — remove member
+
+Stage 6 Sidebar role-based nav:
+- `super_admin` → sees "Super Admin" (amber), "Підписка", Analytics, Integrations + all core
+- `owner/manager` → sees "Підписка", Analytics, Integrations + all core
+- `reception/housekeeper` → core only
 
 ## Running the App
 

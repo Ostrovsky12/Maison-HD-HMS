@@ -10,8 +10,12 @@ import type { CreateOrganizationRequestPlan } from "./createOrganizationRequestP
 export interface CreateOrganizationRequest {
   name: string;
   slug: string;
-  plan: CreateOrganizationRequestPlan;
+  plan?: CreateOrganizationRequestPlan;
+  email?: string;
+  phone?: string;
+  address?: string;
   ownerEmail: string;
   ownerName: string;
   ownerPassword: string;
+  trialDays?: number;
 }

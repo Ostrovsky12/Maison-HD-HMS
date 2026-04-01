@@ -1,0 +1,1171 @@
+Maison HD — це не просто система, а готовий до масштабування SaaS продукт, який можна продавати іншим готелям. Зараз я покажу, як відбувається онбординг нового закладу (на прикладі Dogoda) і як це виглядає для різних типів користувачів.
+
+🏢 Maison HD — Онбординг закладу: Заміський комплекс "Dogoda"
+1. 🎯 Процес продажу та впровадження
+Схема взаємодії з клієнтом
+text
+┌─────────────────────────────────────────────────────────────────────┐
+│                    MAISON HD - СААС ПРОДАКТ                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  🏢 SUPER ADMIN (Ми, як власники продукту)                          │
+│     ├── Створюємо заклад "Dogoda"                                   │
+│     ├── Призначаємо власника (Owner)                                │
+│     └── Налаштовуємо тарифний план                                  │
+│                                                                     │
+│  👤 OWNER (Власник закладу, наприклад Дмитро Головко)               │
+│     ├── Отримує доступ до адмін-панелі                              │
+│     ├── Додає своїх співробітників (рецепція, покоївки, бухгалтер)  │
+│     ├── Налаштовує номери, категорії, ціни                          │
+│     └── Налаштовує інтеграції (OTA, Telegram)                       │
+│                                                                     │
+│  🧑‍💼 RECEPTION (Співробітники рецепції)                             │
+│     ├── Працюють з шахматкою бронювань                              │
+│     ├── Заселяють/виселяють гостей                                  │
+│     ├── Створюють рахунки                                           │
+│     └── Працюють з CRM гостей                                       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+2. 🏛️ Архітектура для мульти-тенантності
+Схема бази даних (оновлена)
+typescript
+// db/schema.ts — додаємо multi-tenant підтримку
+
+export const organizations = pgTable('organizations', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 200 }).notNull(),
+  slug: varchar('slug', { length: 100 }).notNull().unique(), // "dogoda"
+  
+  // Контактні дані
+  email: varchar('email', { length: 200 }),
+  phone: varchar('phone', { length: 50 }),
+  address: text('address'),
+  website: varchar('website', { length: 200 }),
+  
+  // Брендинг
+  logo: varchar('logo', { length: 500 }),
+  primaryColor: varchar('primary_color', { length: 20 }).default('#4f46e5'),
+  
+  // Підписка
+  subscriptionTier: varchar('subscription_tier', { length: 50 }).default('basic'), // basic, pro, enterprise
+  subscriptionStatus: varchar('subscription_status', { length: 20 }).default('active'), // active, trial, suspended
+  trialEndsAt: timestamp('trial_ends_at'),
+  subscriptionEndsAt: timestamp('subscription_ends_at'),
+  
+  // Налаштування
+  timezone: varchar('timezone', { length: 50 }).default('Europe/Kiev'),
+  currency: varchar('currency', { length: 3 }).default('UAH'),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('20.0'),
+  
+  // Системні
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const organizationUsers = pgTable('organization_users', {
+  id: serial('id').primaryKey(),
+  organizationId: integer('organization_id').references(() => organizations.id).notNull(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  role: varchar('role', { length: 50 }).notNull(), // owner, admin, reception, housekeeper, accountant
+  
+  permissions: jsonb('permissions'), // ["view_bookings", "edit_rooms", ...]
+  isActive: boolean('is_active').default(true),
+  invitedAt: timestamp('invited_at'),
+  acceptedAt: timestamp('accepted_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Оновлюємо існуючі таблиці
+export const properties = pgTable('properties', {
+  id: serial('id').primaryKey(),
+  organizationId: integer('organization_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 200 }).notNull(),
+  // ... інші поля
+});
+
+export const units = pgTable('units', {
+  id: serial('id').primaryKey(),
+  propertyId: integer('property_id').references(() => properties.id).notNull(),
+  // ... інші поля
+});
+3. 🔧 Super Admin — створення нового закладу
+API Endpoint для Super Admin
+typescript
+// server/routes/admin/organizations.ts
+
+import { Router } from 'express';
+import { db } from '../../db';
+import { organizations, organizationUsers, users } from '../../db/schema';
+import { hash } from 'bcrypt';
+import { sendInvitationEmail } from '../../services/email';
+
+const router = Router();
+
+// POST /api/admin/organizations
+router.post('/organizations', async (req, res) => {
+  const { 
+    name, 
+    slug, 
+    email, 
+    phone, 
+    address,
+    ownerEmail,
+    ownerName,
+    ownerPassword,
+    subscriptionTier = 'pro',
+    trialDays = 30,
+  } = req.body;
+  
+  // 1. Створюємо організацію
+  const [organization] = await db.insert(organizations).values({
+    name,
+    slug,
+    email,
+    phone,
+    address,
+    subscriptionTier,
+    trialEndsAt: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
+    subscriptionStatus: 'trial',
+  }).returning();
+  
+  // 2. Створюємо користувача-власника
+  const hashedPassword = await hash(ownerPassword, 10);
+  const [owner] = await db.insert(users).values({
+    email: ownerEmail,
+    fullName: ownerName,
+    passwordHash: hashedPassword,
+  }).returning();
+  
+  // 3. Прив'язуємо власника до організації
+  await db.insert(organizationUsers).values({
+    organizationId: organization.id,
+    userId: owner.id,
+    role: 'owner',
+    permissions: ['*'], // всі права
+    invitedAt: new Date(),
+    acceptedAt: new Date(),
+  });
+  
+  // 4. Відправляємо привітальний email
+  await sendInvitationEmail(ownerEmail, organization.name, {
+    loginUrl: `https://app.maison-hd.com/${organization.slug}/login`,
+    email: ownerEmail,
+    password: ownerPassword,
+  });
+  
+  res.json({
+    success: true,
+    data: {
+      organization,
+      owner: { id: owner.id, email: owner.email },
+      loginUrl: `https://app.maison-hd.com/${organization.slug}/login`,
+    },
+  });
+});
+
+// GET /api/admin/organizations
+router.get('/organizations', async (req, res) => {
+  const orgs = await db.select()
+    .from(organizations)
+    .orderBy(organizations.createdAt, 'desc');
+  
+  res.json({ success: true, data: orgs });
+});
+
+export default router;
+Інтерфейс Super Admin для створення закладу
+tsx
+// src/components/admin/CreateOrganization.tsx
+
+import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { api } from '@/lib/api';
+import { toast } from 'sonner';
+
+export function CreateOrganization() {
+  const [step, setStep] = useState(1);
+  const [formData, setFormData] = useState({
+    // Інформація про заклад
+    name: '',
+    slug: '',
+    email: '',
+    phone: '',
+    address: '',
+    
+    // Інформація про власника
+    ownerName: '',
+    ownerEmail: '',
+    ownerPassword: '',
+    
+    // Підписка
+    subscriptionTier: 'pro',
+    trialDays: 30,
+  });
+  
+  const mutation = useMutation({
+    mutationFn: () => api.post('/admin/organizations', formData),
+    onSuccess: (data) => {
+      toast.success(`Заклад "${formData.name}" створено!`);
+      setStep(3);
+    },
+    onError: () => toast.error('Помилка створення закладу'),
+  });
+  
+  return (
+    <div className="max-w-2xl mx-auto py-10">
+      <div className="mb-8">
+        <div className="flex items-center justify-between">
+          {[1, 2, 3].map((s) => (
+            <div key={s} className="flex items-center">
+              <div className={`
+                w-10 h-10 rounded-full flex items-center justify-center
+                ${step >= s ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-500'}
+              `}>
+                {s}
+              </div>
+              {s < 3 && <div className="w-16 h-0.5 bg-gray-200 mx-2" />}
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-between mt-2 text-sm text-gray-500">
+          <span>Інформація про заклад</span>
+          <span>Власник закладу</span>
+          <span>Готово</span>
+        </div>
+      </div>
+      
+      {step === 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Новий заклад</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label>Назва закладу</Label>
+              <Input 
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Заміський комплекс Dogoda"
+              />
+            </div>
+            <div>
+              <Label>URL слаг</Label>
+              <Input 
+                value={formData.slug}
+                onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+                placeholder="dogoda"
+              />
+              <p className="text-xs text-gray-500 mt-1">dogoda.maison-hd.com</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Email</Label>
+                <Input 
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  placeholder="info@dogoda.com.ua"
+                />
+              </div>
+              <div>
+                <Label>Телефон</Label>
+                <Input 
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="+380 67 123 45 67"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Адреса</Label>
+              <Input 
+                value={formData.address}
+                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                placeholder="Київська обл., с. Догода, вул. Лісова, 1"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Тарифний план</Label>
+                <Select value={formData.subscriptionTier} onValueChange={(v) => setFormData({ ...formData, subscriptionTier: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="basic">Basic — 1 500 ₴/міс</SelectItem>
+                    <SelectItem value="pro">Pro — 3 500 ₴/міс</SelectItem>
+                    <SelectItem value="enterprise">Enterprise — за запитом</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Тестовий період (днів)</Label>
+                <Input 
+                  type="number"
+                  value={formData.trialDays}
+                  onChange={(e) => setFormData({ ...formData, trialDays: parseInt(e.target.value) })}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end pt-4">
+              <Button onClick={() => setStep(2)}>Далі →</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {step === 2 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Власник закладу</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label>ПІБ власника</Label>
+              <Input 
+                value={formData.ownerName}
+                onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
+                placeholder="Дмитро Головко"
+              />
+            </div>
+            <div>
+              <Label>Email власника</Label>
+              <Input 
+                type="email"
+                value={formData.ownerEmail}
+                onChange={(e) => setFormData({ ...formData, ownerEmail: e.target.value })}
+                placeholder="dmytro@dogoda.com.ua"
+              />
+            </div>
+            <div>
+              <Label>Пароль для входу</Label>
+              <Input 
+                type="password"
+                value={formData.ownerPassword}
+                onChange={(e) => setFormData({ ...formData, ownerPassword: e.target.value })}
+                placeholder="********"
+              />
+            </div>
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <p className="text-sm text-blue-800">
+                📧 Після створення власник отримає email з інструкціями для входу
+                та посиланням на панель управління.
+              </p>
+            </div>
+            <div className="flex justify-between pt-4">
+              <Button variant="outline" onClick={() => setStep(1)}>← Назад</Button>
+              <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+                {mutation.isPending ? 'Створення...' : 'Створити заклад'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {step === 3 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>✅ Заклад створено!</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="bg-green-50 p-4 rounded-lg">
+              <p className="font-medium text-green-800">Дані для входу власника:</p>
+              <p className="text-sm text-green-700 mt-2">
+                📧 Email: {formData.ownerEmail}<br />
+                🔑 Пароль: {formData.ownerPassword}<br />
+                🔗 Посилання: <code className="bg-white px-1">https://app.maison-hd.com/{formData.slug}/login</code>
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => window.location.reload()}>Створити ще</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+4. 👤 Owner — Панель управління закладом
+Після входу власник бачить дашборд з усіма можливостями для налаштування свого закладу.
+
+Owner Dashboard — перший вхід
+tsx
+// src/components/owner/OnboardingWizard.tsx
+
+import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { toast } from 'sonner';
+
+export function OnboardingWizard({ organizationId }: { organizationId: number }) {
+  const [step, setStep] = useState(1);
+  
+  const { data: property } = useQuery({
+    queryKey: ['property', organizationId],
+    queryFn: () => api.get(`/properties?organizationId=${organizationId}`),
+  });
+  
+  const hasProperty = property?.data?.length > 0;
+  
+  // Якщо заклад ще не налаштований — показуємо візард
+  if (!hasProperty) {
+    return (
+      <div className="max-w-3xl mx-auto py-10">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold">Вітаємо в Maison HD!</h1>
+          <p className="text-gray-500 mt-2">Давайте налаштуємо ваш заклад за 5 хвилин</p>
+        </div>
+        
+        {step === 1 && (
+          <SetupPropertyForm 
+            organizationId={organizationId} 
+            onComplete={() => setStep(2)} 
+          />
+        )}
+        
+        {step === 2 && (
+          <SetupRoomsForm 
+            organizationId={organizationId} 
+            onComplete={() => setStep(3)} 
+          />
+        )}
+        
+        {step === 3 && (
+          <InviteStaffForm 
+            organizationId={organizationId} 
+            onComplete={() => setStep(4)} 
+          />
+        )}
+        
+        {step === 4 && (
+          <div className="text-center">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="fas fa-check text-green-600 text-2xl"></i>
+            </div>
+            <h2 className="text-xl font-bold">Готово!</h2>
+            <p className="text-gray-500 mt-2">Ваш заклад налаштовано. Ви можете почати приймати бронювання!</p>
+            <Button className="mt-6" onClick={() => window.location.reload()}>
+              Перейти до дашборду
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  
+  return <OwnerDashboard organizationId={organizationId} />;
+}
+SetupPropertyForm — налаштування закладу
+tsx
+function SetupPropertyForm({ organizationId, onComplete }: { organizationId: number; onComplete: () => void }) {
+  const [formData, setFormData] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    email: '',
+    checkinTime: '14:00',
+    checkoutTime: '12:00',
+    timezone: 'Europe/Kiev',
+    currency: 'UAH',
+  });
+  
+  const mutation = useMutation({
+    mutationFn: () => api.post('/properties', { ...formData, organizationId }),
+    onSuccess: () => {
+      toast.success('Інформацію про заклад збережено');
+      onComplete();
+    },
+  });
+  
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-6">
+      <h2 className="text-lg font-semibold mb-4">Інформація про заклад</h2>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Назва закладу</label>
+          <input 
+            className="w-full border rounded-lg px-3 py-2"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            placeholder="Заміський комплекс Dogoda"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Телефон</label>
+            <input 
+              className="w-full border rounded-lg px-3 py-2"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              placeholder="+380 67 123 45 67"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Email</label>
+            <input 
+              className="w-full border rounded-lg px-3 py-2"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              placeholder="info@dogoda.com.ua"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Адреса</label>
+          <textarea 
+            className="w-full border rounded-lg px-3 py-2"
+            rows={2}
+            value={formData.address}
+            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+            placeholder="Київська обл., с. Догода, вул. Лісова, 1"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Час заїзду</label>
+            <input type="time" className="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Час виїзду</label>
+            <input type="time" className="w-full border rounded-lg px-3 py-2" />
+          </div>
+        </div>
+        <div className="flex justify-end pt-4">
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            {mutation.isPending ? 'Збереження...' : 'Продовжити →'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+SetupRoomsForm — додавання номерів
+tsx
+function SetupRoomsForm({ organizationId, onComplete }: { organizationId: number; onComplete: () => void }) {
+  const [rooms, setRooms] = useState([
+    { number: '101', category: 'standard', capacity: 2, price: 2500 },
+    { number: '102', category: 'standard', capacity: 2, price: 2500 },
+    { number: '103', category: 'standard', capacity: 2, price: 2500 },
+    { number: '201', category: 'suite', capacity: 4, price: 4500 },
+    { number: '202', category: 'suite', capacity: 4, price: 4500 },
+    { number: '301', category: 'cottage', capacity: 6, price: 8000 },
+  ]);
+  
+  const mutation = useMutation({
+    mutationFn: () => Promise.all(rooms.map(room => 
+      api.post('/units', { ...room, propertyId: organizationId })
+    )),
+    onSuccess: () => {
+      toast.success(`Додано ${rooms.length} номерів`);
+      onComplete();
+    },
+  });
+  
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-6">
+      <h2 className="text-lg font-semibold mb-4">Номери та ціни</h2>
+      <div className="mb-4">
+        <div className="grid grid-cols-4 gap-2 text-sm font-medium text-gray-500 pb-2 border-b">
+          <span>Номер</span>
+          <span>Категорія</span>
+          <span>Місткість</span>
+          <span>Ціна (₴/ніч)</span>
+        </div>
+        {rooms.map((room, idx) => (
+          <div key={idx} className="grid grid-cols-4 gap-2 py-2 border-b">
+            <input 
+              className="border rounded px-2 py-1"
+              value={room.number}
+              onChange={(e) => {
+                const newRooms = [...rooms];
+                newRooms[idx].number = e.target.value;
+                setRooms(newRooms);
+              }}
+            />
+            <select 
+              className="border rounded px-2 py-1"
+              value={room.category}
+              onChange={(e) => {
+                const newRooms = [...rooms];
+                newRooms[idx].category = e.target.value;
+                setRooms(newRooms);
+              }}
+            >
+              <option value="standard">Стандарт</option>
+              <option value="suite">Люкс</option>
+              <option value="cottage">Котедж</option>
+            </select>
+            <input 
+              type="number"
+              className="border rounded px-2 py-1"
+              value={room.capacity}
+              onChange={(e) => {
+                const newRooms = [...rooms];
+                newRooms[idx].capacity = parseInt(e.target.value);
+                setRooms(newRooms);
+              }}
+            />
+            <input 
+              type="number"
+              className="border rounded px-2 py-1"
+              value={room.price}
+              onChange={(e) => {
+                const newRooms = [...rooms];
+                newRooms[idx].price = parseInt(e.target.value);
+                setRooms(newRooms);
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between pt-4">
+        <Button variant="outline" onClick={onComplete}>Пропустити</Button>
+        <Button onClick={() => mutation.mutate()}>
+          {mutation.isPending ? 'Збереження...' : 'Зберегти номери →'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+InviteStaffForm — запрошення співробітників
+tsx
+function InviteStaffForm({ organizationId, onComplete }: { organizationId: number; onComplete: () => void }) {
+  const [invites, setInvites] = useState([
+    { email: '', role: 'reception', name: '' }
+  ]);
+  
+  const mutation = useMutation({
+    mutationFn: () => Promise.all(invites.map(invite => 
+      api.post('/organizations/invite', { ...invite, organizationId })
+    )),
+    onSuccess: () => {
+      toast.success('Запрошення надіслано');
+      onComplete();
+    },
+  });
+  
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-6">
+      <h2 className="text-lg font-semibold mb-4">Запросити співробітників</h2>
+      <p className="text-sm text-gray-500 mb-4">
+        Співробітники отримають email з посиланням для реєстрації
+      </p>
+      
+      {invites.map((invite, idx) => (
+        <div key={idx} className="grid grid-cols-3 gap-3 mb-3">
+          <input 
+            placeholder="Email"
+            className="border rounded-lg px-3 py-2"
+            value={invite.email}
+            onChange={(e) => {
+              const newInvites = [...invites];
+              newInvites[idx].email = e.target.value;
+              setInvites(newInvites);
+            }}
+          />
+          <input 
+            placeholder="ПІБ"
+            className="border rounded-lg px-3 py-2"
+            value={invite.name}
+            onChange={(e) => {
+              const newInvites = [...invites];
+              newInvites[idx].name = e.target.value;
+              setInvites(newInvites);
+            }}
+          />
+          <select 
+            className="border rounded-lg px-3 py-2"
+            value={invite.role}
+            onChange={(e) => {
+              const newInvites = [...invites];
+              newInvites[idx].role = e.target.value;
+              setInvites(newInvites);
+            }}
+          >
+            <option value="reception">Адміністратор рецепції</option>
+            <option value="housekeeper">Покоївка</option>
+            <option value="accountant">Бухгалтер</option>
+          </select>
+        </div>
+      ))}
+      
+      <Button 
+        variant="outline" 
+        size="sm" 
+        className="mt-2"
+        onClick={() => setInvites([...invites, { email: '', role: 'reception', name: '' }])}
+      >
+        + Додати ще
+      </Button>
+      
+      <div className="flex justify-between pt-6">
+        <Button variant="outline" onClick={onComplete}>Пропустити</Button>
+        <Button onClick={() => mutation.mutate()}>
+          {mutation.isPending ? 'Надсилання...' : 'Надіслати запрошення →'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+5. 🧑‍💼 Reception — Робоче місце адміністратора
+Після налаштування закладу, співробітники рецепції бачать спрощений інтерфейс з фокусом на операційні завдання.
+
+Reception Dashboard для "Dogoda"
+tsx
+// src/components/reception/ReceptionDashboard.tsx
+
+import { useQuery } from '@tanstack/react-query';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Calendar, Users, Bed, TrendingUp, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { api } from '@/lib/api';
+
+export function ReceptionDashboard({ propertyId }: { propertyId: number }) {
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ['reception-stats', propertyId],
+    queryFn: () => api.get(`/dashboard/stats?propertyId=${propertyId}`),
+    refetchInterval: 30000, // оновлення кожні 30 секунд
+  });
+  
+  if (isLoading) return <div className="flex justify-center p-8">Завантаження...</div>;
+  
+  const { 
+    occupancy, 
+    todayCheckins, 
+    todayCheckouts,
+    pendingCheckins,
+    pendingCheckouts,
+    cleanRooms,
+    totalRooms,
+    revenueToday,
+    alerts,
+  } = stats?.data || {};
+  
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold">Заміський комплекс Dogoda</h1>
+          <p className="text-gray-500">{new Date().toLocaleDateString('uk-UA', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          })}</p>
+        </div>
+        <div className="flex space-x-3">
+          <Button className="bg-indigo-600">
+            <Calendar className="w-4 h-4 mr-2" />
+            Нове бронювання
+          </Button>
+          <Button variant="outline">
+            <Users className="w-4 h-4 mr-2" />
+            Швидке заселення
+          </Button>
+        </div>
+      </div>
+      
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm text-gray-500">Заповненість</p>
+                <p className="text-2xl font-bold">{occupancy}%</p>
+              </div>
+              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                <Bed className="w-5 h-5 text-indigo-600" />
+              </div>
+            </div>
+            <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${occupancy}%` }} />
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm text-gray-500">Сьогодні заїзд</p>
+                <p className="text-2xl font-bold">{todayCheckins}</p>
+                {pendingCheckins > 0 && (
+                  <p className="text-xs text-orange-500">Не заселено: {pendingCheckins}</p>
+                )}
+              </div>
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm text-gray-500">Сьогодні виїзд</p>
+                <p className="text-2xl font-bold">{todayCheckouts}</p>
+                {pendingCheckouts > 0 && (
+                  <p className="text-xs text-orange-500">Не виселено: {pendingCheckouts}</p>
+                )}
+              </div>
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <XCircle className="w-5 h-5 text-red-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm text-gray-500">Дохід сьогодні</p>
+                <p className="text-2xl font-bold">{revenueToday?.toLocaleString()} ₴</p>
+              </div>
+              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-yellow-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Today's Schedule */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Заїзди сьогодні</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TodayArrivalsList propertyId={propertyId} />
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader>
+            <CardTitle>Виїзди сьогодні</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TodayDeparturesList propertyId={propertyId} />
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Alerts & Notifications */}
+      {alerts?.length > 0 && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardHeader>
+            <CardTitle className="text-orange-700">⚠️ Важливі сповіщення</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {alerts.map((alert: any, idx: number) => (
+              <div key={idx} className="flex items-start space-x-3 p-2 border-b border-orange-100 last:border-0">
+                <Clock className="w-4 h-4 text-orange-500 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-orange-800">{alert.title}</p>
+                  <p className="text-xs text-orange-600">{alert.message}</p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+Шахматка бронювань для рецепції
+tsx
+// src/components/reception/BookingCalendar.tsx
+
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+
+export function BookingCalendar({ propertyId }: { propertyId: number }) {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  
+  const { data: calendar } = useQuery({
+    queryKey: ['calendar', propertyId, currentDate],
+    queryFn: () => api.get(`/bookings/calendar?propertyId=${propertyId}&month=${currentDate.getMonth()+1}&year=${currentDate.getFullYear()}`),
+  });
+  
+  const weekdays = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'НД'];
+  const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+  const firstDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay() || 7;
+  
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-lg font-semibold">
+          {currentDate.toLocaleString('uk-UA', { month: 'long', year: 'numeric' })}
+        </h2>
+        <div className="flex space-x-2">
+          <button 
+            onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            ←
+          </button>
+          <button 
+            onClick={() => setCurrentDate(new Date())}
+            className="px-3 py-1 text-sm border rounded-lg hover:bg-gray-50"
+          >
+            Сьогодні
+          </button>
+          <button 
+            onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            →
+          </button>
+        </div>
+      </div>
+      
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              {weekdays.map(day => (
+                <th key={day} className="p-3 text-center text-sm font-medium text-gray-500">
+                  {day}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: Math.ceil((daysInMonth + firstDay - 1) / 7) }).map((_, weekIdx) => (
+              <tr key={weekIdx}>
+                {Array.from({ length: 7 }).map((_, dayIdx) => {
+                  const dayNumber = weekIdx * 7 + dayIdx - firstDay + 2;
+                  const isValid = dayNumber >= 1 && dayNumber <= daysInMonth;
+                  const date = `${currentDate.getFullYear()}-${String(currentDate.getMonth()+1).padStart(2,'0')}-${String(dayNumber).padStart(2,'0')}`;
+                  const bookings = calendar?.data?.bookings?.[date] || [];
+                  const occupancy = calendar?.data?.occupancy?.[date] || 0;
+                  
+                  return (
+                    <td 
+                      key={dayIdx}
+                      className={`
+                        p-2 border text-center align-top cursor-pointer hover:bg-indigo-50
+                        ${!isValid ? 'bg-gray-50' : ''}
+                        ${occupancy >= 90 ? 'bg-red-50' : occupancy >= 50 ? 'bg-yellow-50' : 'bg-green-50'}
+                      `}
+                      onClick={() => isValid && console.log('Select date', date)}
+                    >
+                      {isValid && (
+                        <>
+                          <div className="font-medium">{dayNumber}</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {bookings.length > 0 && (
+                              <span className="block">{bookings.length} бронь</span>
+                            )}
+                            {occupancy > 0 && (
+                              <span className="block text-xs font-medium">
+                                {Math.round(occupancy)}%
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+6. 📧 Email запрошення для співробітників
+html
+<!-- templates/emails/invitation.html -->
+
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #4f46e5; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; }
+    .button { 
+      display: inline-block; 
+      background: #4f46e5; 
+      color: white; 
+      padding: 12px 24px; 
+      text-decoration: none; 
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+    .footer { text-align: center; padding: 20px; color: #6b7280; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Maison HD</h1>
+      <p>Ви отримали запрошення</p>
+    </div>
+    <div class="content">
+      <p>Вітаємо, <strong>{{name}}</strong>!</p>
+      <p>Вас запрошено приєднатися до закладу <strong>{{organization}}</strong> на посаді <strong>{{role}}</strong>.</p>
+      
+      <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <p><strong>Ваші дані для входу:</strong></p>
+        <p>📧 Email: {{email}}<br>
+        🔑 Пароль: {{password}}</p>
+      </div>
+      
+      <a href="{{loginUrl}}" class="button">Увійти в систему</a>
+      
+      <p>Після першого входу ви зможете змінити пароль та налаштувати свій профіль.</p>
+      <p>З повагою,<br>Команда Maison HD</p>
+    </div>
+    <div class="footer">
+      <p>Цей лист створено автоматично. Якщо ви не очікували запрошення, проігноруйте його.</p>
+    </div>
+  </div>
+</body>
+</html>
+7. 📊 Модель підписки для продажу
+Тарифні плани
+typescript
+// server/services/subscription.ts
+
+export const SUBSCRIPTION_PLANS = {
+  basic: {
+    name: 'Basic',
+    price: 1500, // ₴/міс
+    features: [
+      'До 20 номерів',
+      'Базові звіти',
+      'Email підтримка',
+      'Шахматка бронювань',
+      'CRM гостей',
+    ],
+    limits: {
+      maxRooms: 20,
+      maxUsers: 5,
+      retentionDays: 30,
+      apiCallsPerDay: 1000,
+    },
+  },
+  pro: {
+    name: 'Pro',
+    price: 3500, // ₴/міс
+    features: [
+      'До 100 номерів',
+      'Розширена аналітика (ADR, RevPAR)',
+      'Прогнозування попиту',
+      'Інтеграція з OTA',
+      'Telegram сповіщення',
+      'Пріоритетна підтримка',
+      'До 15 користувачів',
+    ],
+    limits: {
+      maxRooms: 100,
+      maxUsers: 15,
+      retentionDays: 365,
+      apiCallsPerDay: 5000,
+    },
+  },
+  enterprise: {
+    name: 'Enterprise',
+    price: 'За запитом',
+    features: [
+      'Безліміт номерів',
+      'Всі функції Pro',
+      'Інтеграція з 1С',
+      'Кастомний брендинг',
+      'SLA 99.9%',
+      'Виділений менеджер',
+      'Безліміт користувачів',
+      'API без обмежень',
+    ],
+    limits: {
+      maxRooms: null,
+      maxUsers: null,
+      retentionDays: null,
+      apiCallsPerDay: null,
+    },
+  },
+};
+Owner — Сторінка підписки
+tsx
+// src/components/owner/SubscriptionPage.tsx
+
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Check } from 'lucide-react';
+
+export function SubscriptionPage({ organizationId, currentTier }: { organizationId: number; currentTier: string }) {
+  const plans = [
+    { id: 'basic', name: 'Basic', price: '1 500 ₴', period: '/міс', features: ['До 20 номерів', 'Email підтримка', 'CRM гостей'] },
+    { id: 'pro', name: 'Pro', price: '3 500 ₴', period: '/міс', features: ['До 100 номерів', 'OTA інтеграція', 'Аналітика ADR/RevPAR', 'Прогнозування'] },
+    { id: 'enterprise', name: 'Enterprise', price: 'За запитом', period: '', features: ['Безліміт номерів', '1С інтеграція', 'SLA 99.9%', 'Виділений менеджер'] },
+  ];
+  
+  return (
+    <div className="max-w-5xl mx-auto py-10">
+      <div className="text-center mb-10">
+        <h1 className="text-3xl font-bold">Оберіть тарифний план</h1>
+        <p className="text-gray-500 mt-2">Змініть план у будь-який час. Без штрафів.</p>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {plans.map(plan => (
+          <Card key={plan.id} className={plan.id === 'pro' ? 'border-indigo-300 shadow-lg' : ''}>
+            {plan.id === 'pro' && (
+              <div className="bg-indigo-600 text-white text-center py-1 text-sm rounded-t-lg">
+                ПОПУЛЯРНИЙ
+              </div>
+            )}
+            <CardHeader>
+              <CardTitle>{plan.name}</CardTitle>
+              <div className="mt-2">
+                <span className="text-3xl font-bold">{plan.price}</span>
+                <span className="text-gray-500">{plan.period}</span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2">
+                {plan.features.map(feature => (
+                  <li key={feature} className="flex items-center text-sm">
+                    <Check className="w-4 h-4 text-green-500 mr-2" />
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+              <Button 
+                className={`w-full mt-6 ${plan.id === currentTier ? 'bg-green-600 hover:bg-green-700' : ''}`}
+                disabled={plan.id === currentTier}
+              >
+                {plan.id === currentTier ? 'Активний план' : 'Обрати план'}
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+✅ Підсумок: Процес продажу та впровадження
+Етап	Хто виконує	Дія	Результат
+1	Super Admin (Ми)	Створення закладу в системі	Організація "Dogoda" створена
+2	Super Admin	Призначення власника	Власник отримує email з даними
+3	Owner (Дмитро)	Онбординг: налаштування закладу	Додано інформацію про комплекс
+4	Owner	Додавання номерів	6 номерів в системі
+5	Owner	Запрошення співробітників	Співробітники отримують доступ
+6	Reception	Робота з бронюваннями	Початок прийому гостей
+7	Owner	Налаштування підписки	Активація Pro плану

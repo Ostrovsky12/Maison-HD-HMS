@@ -16,6 +16,8 @@ import {
   FileText,
   TrendingUp,
   Plug,
+  Crown,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,17 +27,19 @@ import { ReactNode, useState, useRef, useEffect } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { uk } from "date-fns/locale";
 
-const navItems = [
-  { name: "Головна", path: "/dashboard", icon: LayoutDashboard },
-  { name: "Бронювання", path: "/bookings", icon: CalendarDays },
-  { name: "Шахматка", path: "/chess", icon: Grid3X3 },
-  { name: "Номери", path: "/units", icon: KeyRound },
-  { name: "Гості", path: "/guests", icon: Users },
-  { name: "Прибирання", path: "/housekeeping", icon: Sparkles },
-  { name: "Рахунки", path: "/invoices", icon: FileText },
-  { name: "Звіти", path: "/reports", icon: BarChart3 },
-  { name: "Аналітика", path: "/analytics", icon: TrendingUp },
-  { name: "Інтеграції", path: "/integrations", icon: Plug },
+const allNavItems = [
+  { name: "Головна", path: "/dashboard", icon: LayoutDashboard, roles: null },
+  { name: "Бронювання", path: "/bookings", icon: CalendarDays, roles: null },
+  { name: "Шахматка", path: "/chess", icon: Grid3X3, roles: null },
+  { name: "Номери", path: "/units", icon: KeyRound, roles: null },
+  { name: "Гості", path: "/guests", icon: Users, roles: null },
+  { name: "Прибирання", path: "/housekeeping", icon: Sparkles, roles: null },
+  { name: "Рахунки", path: "/invoices", icon: FileText, roles: null },
+  { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },
+  { name: "Аналітика", path: "/analytics", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
+  { name: "Інтеграції", path: "/integrations", icon: Plug, roles: ["super_admin", "owner", "manager"] },
+  { name: "Підписка", path: "/subscription", icon: CreditCard, roles: ["owner", "super_admin"] },
+  { name: "Super Admin", path: "/admin", icon: Crown, roles: ["super_admin"] },
 ];
 
 const NOTIF_TYPE_COLORS: Record<string, string> = {
@@ -201,26 +205,30 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
         
         <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = location.startsWith(item.path);
-            const Icon = item.icon;
-            
-            return (
-              <a
-                key={item.path}
-                href={`${BASE}${item.path}`}
-                onClick={(e) => { e.preventDefault(); navigate(`~${BASE}${item.path}`); }}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${
-                  isActive 
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
-                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="text-sm">{item.name}</span>
-              </a>
-            );
-          })}
+          {allNavItems
+            .filter(item => !item.roles || item.roles.includes(user?.role || ""))
+            .map((item) => {
+              const isActive = location.startsWith(item.path);
+              const Icon = item.icon;
+              const isAdmin = item.path === "/admin";
+              return (
+                <a
+                  key={item.path}
+                  href={`${BASE}${item.path}`}
+                  onClick={(e) => { e.preventDefault(); navigate(`~${BASE}${item.path}`); }}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${
+                    isActive 
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
+                      : isAdmin
+                        ? "text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                        : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="text-sm">{item.name}</span>
+                </a>
+              );
+            })}
         </nav>
 
         <div className="p-4 border-t border-sidebar-border/50 space-y-2">

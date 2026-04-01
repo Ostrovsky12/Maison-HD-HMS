@@ -78,9 +78,25 @@ export const ListOrganizationsResponseItem = zod.object({
   name: zod.string(),
   slug: zod.string(),
   plan: zod.enum(["basic", "pro", "enterprise"]),
+  subscriptionStatus: zod
+    .enum(["active", "trial", "suspended", "cancelled"])
+    .nullish(),
   maxUnits: zod.number(),
   maxUsers: zod.number(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  website: zod.string().nullish(),
+  logo: zod.string().nullish(),
+  primaryColor: zod.string().nullish(),
+  timezone: zod.string().nullish(),
+  currency: zod.string().nullish(),
+  taxRate: zod.string().nullish(),
+  trialEndsAt: zod.date().nullish(),
+  subscriptionEndsAt: zod.date().nullish(),
   isActive: zod.boolean(),
+  userCount: zod.number().nullish(),
+  propertyCount: zod.number().nullish(),
   createdAt: zod.date(),
 });
 export const ListOrganizationsResponse = zod.array(
@@ -88,15 +104,49 @@ export const ListOrganizationsResponse = zod.array(
 );
 
 /**
- * @summary Create organization
+ * @summary Create organization with owner
  */
 export const CreateOrganizationBody = zod.object({
   name: zod.string(),
   slug: zod.string(),
-  plan: zod.enum(["basic", "pro", "enterprise"]),
+  plan: zod.enum(["basic", "pro", "enterprise"]).optional(),
+  email: zod.string().optional(),
+  phone: zod.string().optional(),
+  address: zod.string().optional(),
   ownerEmail: zod.string().email(),
   ownerName: zod.string(),
   ownerPassword: zod.string(),
+  trialDays: zod.number().optional(),
+});
+
+/**
+ * @summary Get current user's organization
+ */
+export const GetMyOrganizationResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  slug: zod.string(),
+  plan: zod.enum(["basic", "pro", "enterprise"]),
+  subscriptionStatus: zod
+    .enum(["active", "trial", "suspended", "cancelled"])
+    .nullish(),
+  maxUnits: zod.number(),
+  maxUsers: zod.number(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  website: zod.string().nullish(),
+  logo: zod.string().nullish(),
+  primaryColor: zod.string().nullish(),
+  timezone: zod.string().nullish(),
+  currency: zod.string().nullish(),
+  taxRate: zod.string().nullish(),
+  trialEndsAt: zod.date().nullish(),
+  subscriptionEndsAt: zod.date().nullish(),
+  isActive: zod.boolean(),
+  userCount: zod.number().nullish(),
+  propertyCount: zod.number().nullish(),
+  createdAt: zod.date(),
 });
 
 /**
@@ -111,10 +161,120 @@ export const GetOrganizationResponse = zod.object({
   name: zod.string(),
   slug: zod.string(),
   plan: zod.enum(["basic", "pro", "enterprise"]),
+  subscriptionStatus: zod
+    .enum(["active", "trial", "suspended", "cancelled"])
+    .nullish(),
   maxUnits: zod.number(),
   maxUsers: zod.number(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  website: zod.string().nullish(),
+  logo: zod.string().nullish(),
+  primaryColor: zod.string().nullish(),
+  timezone: zod.string().nullish(),
+  currency: zod.string().nullish(),
+  taxRate: zod.string().nullish(),
+  trialEndsAt: zod.date().nullish(),
+  subscriptionEndsAt: zod.date().nullish(),
+  isActive: zod.boolean(),
+  userCount: zod.number().nullish(),
+  propertyCount: zod.number().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Update organization
+ */
+export const UpdateOrganizationParams = zod.object({
+  orgId: zod.coerce.number(),
+});
+
+export const UpdateOrganizationBody = zod.object({
+  name: zod.string().optional(),
+  email: zod.string().optional(),
+  phone: zod.string().optional(),
+  address: zod.string().optional(),
+  website: zod.string().optional(),
+  logo: zod.string().optional(),
+  primaryColor: zod.string().optional(),
+  timezone: zod.string().optional(),
+  currency: zod.string().optional(),
+  plan: zod.enum(["basic", "pro", "enterprise"]).optional(),
+  subscriptionStatus: zod
+    .enum(["active", "trial", "suspended", "cancelled"])
+    .optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateOrganizationResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  slug: zod.string(),
+  plan: zod.enum(["basic", "pro", "enterprise"]),
+  subscriptionStatus: zod
+    .enum(["active", "trial", "suspended", "cancelled"])
+    .nullish(),
+  maxUnits: zod.number(),
+  maxUsers: zod.number(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  website: zod.string().nullish(),
+  logo: zod.string().nullish(),
+  primaryColor: zod.string().nullish(),
+  timezone: zod.string().nullish(),
+  currency: zod.string().nullish(),
+  taxRate: zod.string().nullish(),
+  trialEndsAt: zod.date().nullish(),
+  subscriptionEndsAt: zod.date().nullish(),
+  isActive: zod.boolean(),
+  userCount: zod.number().nullish(),
+  propertyCount: zod.number().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary List organization members
+ */
+export const ListOrganizationMembersParams = zod.object({
+  orgId: zod.coerce.number(),
+});
+
+export const ListOrganizationMembersResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  email: zod.string(),
+  role: zod.string(),
   isActive: zod.boolean(),
   createdAt: zod.date(),
+});
+export const ListOrganizationMembersResponse = zod.array(
+  ListOrganizationMembersResponseItem,
+);
+
+/**
+ * @summary Invite (create) a new staff member
+ */
+export const InviteOrganizationMemberParams = zod.object({
+  orgId: zod.coerce.number(),
+});
+
+export const InviteOrganizationMemberBody = zod.object({
+  email: zod.string().email(),
+  name: zod.string(),
+  role: zod
+    .enum(["reception", "housekeeper", "accountant", "admin"])
+    .optional(),
+  password: zod.string().optional(),
+});
+
+/**
+ * @summary Deactivate organization member
+ */
+export const RemoveOrganizationMemberParams = zod.object({
+  orgId: zod.coerce.number(),
+  userId: zod.coerce.number(),
 });
 
 /**

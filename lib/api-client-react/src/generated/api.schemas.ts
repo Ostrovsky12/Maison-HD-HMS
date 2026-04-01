@@ -95,14 +95,39 @@ export const OrganizationPlan = {
   enterprise: "enterprise",
 } as const;
 
+export type OrganizationSubscriptionStatus =
+  | (typeof OrganizationSubscriptionStatus)[keyof typeof OrganizationSubscriptionStatus]
+  | null;
+
+export const OrganizationSubscriptionStatus = {
+  active: "active",
+  trial: "trial",
+  suspended: "suspended",
+  cancelled: "cancelled",
+} as const;
+
 export interface Organization {
   id: number;
   name: string;
   slug: string;
   plan: OrganizationPlan;
+  subscriptionStatus?: OrganizationSubscriptionStatus;
   maxUnits: number;
   maxUsers: number;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  website?: string | null;
+  logo?: string | null;
+  primaryColor?: string | null;
+  timezone?: string | null;
+  currency?: string | null;
+  taxRate?: string | null;
+  trialEndsAt?: string | null;
+  subscriptionEndsAt?: string | null;
   isActive: boolean;
+  userCount?: number | null;
+  propertyCount?: number | null;
   createdAt: string;
 }
 
@@ -118,10 +143,94 @@ export const CreateOrganizationRequestPlan = {
 export interface CreateOrganizationRequest {
   name: string;
   slug: string;
-  plan: CreateOrganizationRequestPlan;
+  plan?: CreateOrganizationRequestPlan;
+  email?: string;
+  phone?: string;
+  address?: string;
   ownerEmail: string;
   ownerName: string;
   ownerPassword: string;
+  trialDays?: number;
+}
+
+export type CreateOrganizationResponseOwner = {
+  id: number;
+  email: string;
+  name: string;
+};
+
+export interface CreateOrganizationResponse {
+  organization: Organization;
+  owner: CreateOrganizationResponseOwner;
+}
+
+export type UpdateOrganizationRequestPlan =
+  (typeof UpdateOrganizationRequestPlan)[keyof typeof UpdateOrganizationRequestPlan];
+
+export const UpdateOrganizationRequestPlan = {
+  basic: "basic",
+  pro: "pro",
+  enterprise: "enterprise",
+} as const;
+
+export type UpdateOrganizationRequestSubscriptionStatus =
+  (typeof UpdateOrganizationRequestSubscriptionStatus)[keyof typeof UpdateOrganizationRequestSubscriptionStatus];
+
+export const UpdateOrganizationRequestSubscriptionStatus = {
+  active: "active",
+  trial: "trial",
+  suspended: "suspended",
+  cancelled: "cancelled",
+} as const;
+
+export interface UpdateOrganizationRequest {
+  name?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  website?: string;
+  logo?: string;
+  primaryColor?: string;
+  timezone?: string;
+  currency?: string;
+  plan?: UpdateOrganizationRequestPlan;
+  subscriptionStatus?: UpdateOrganizationRequestSubscriptionStatus;
+  isActive?: boolean;
+}
+
+export interface OrganizationMember {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export type InviteMemberRequestRole =
+  (typeof InviteMemberRequestRole)[keyof typeof InviteMemberRequestRole];
+
+export const InviteMemberRequestRole = {
+  reception: "reception",
+  housekeeper: "housekeeper",
+  accountant: "accountant",
+  admin: "admin",
+} as const;
+
+export interface InviteMemberRequest {
+  email: string;
+  name: string;
+  role?: InviteMemberRequestRole;
+  password?: string;
+}
+
+export interface InviteMemberResponse {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  temporaryPassword: string;
+  organizationId: number;
 }
 
 export type PropertyType = (typeof PropertyType)[keyof typeof PropertyType];

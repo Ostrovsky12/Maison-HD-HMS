@@ -18,6 +18,9 @@ import ChessPage from "@/pages/chess";
 import InvoicesPage from "@/pages/invoices";
 import AnalyticsPage from "@/pages/analytics";
 import IntegrationsPage from "@/pages/integrations";
+import AdminPage from "@/pages/admin";
+import OnboardingPage from "@/pages/onboarding";
+import SubscriptionPage from "@/pages/subscription";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,7 +31,7 @@ const queryClient = new QueryClient({
   },
 });
 
-function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+function ProtectedRoute({ component: Component, roles }: { component: React.ComponentType; roles?: string[] }) {
   const { data: user, isLoading, error } = useGetMe();
 
   if (isLoading) {
@@ -43,6 +46,10 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
     return <Redirect to="/login" />;
   }
 
+  if (roles && !roles.includes(user.role)) {
+    return <Redirect to="/dashboard" />;
+  }
+
   return <Component />;
 }
 
@@ -50,6 +57,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={LoginPage} />
+      <Route path="/onboarding" component={OnboardingPage} />
       <Route path="/dashboard"><ProtectedRoute component={DashboardPage} /></Route>
       <Route path="/bookings"><ProtectedRoute component={BookingsPage} /></Route>
       <Route path="/units"><ProtectedRoute component={UnitsPage} /></Route>
@@ -61,12 +69,13 @@ function Router() {
       <Route path="/analytics"><ProtectedRoute component={AnalyticsPage} /></Route>
       <Route path="/integrations"><ProtectedRoute component={IntegrationsPage} /></Route>
       <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
-      
-      {/* Default redirect based on auth */}
+      <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} /></Route>
+      <Route path="/admin"><ProtectedRoute component={AdminPage} roles={["super_admin"]} /></Route>
+
       <Route path="/">
         <Redirect to="/dashboard" />
       </Route>
-      
+
       <Route component={NotFound} />
     </Switch>
   );

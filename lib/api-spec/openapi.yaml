@@ -132,7 +132,7 @@ paths:
     post:
       operationId: createOrganization
       tags: [organizations]
-      summary: Create organization
+      summary: Create organization with owner
       security:
         - bearerAuth: []
       requestBody:
@@ -144,6 +144,21 @@ paths:
       responses:
         "201":
           description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateOrganizationResponse"
+
+  /organizations/me:
+    get:
+      operationId: getMyOrganization
+      tags: [organizations]
+      summary: Get current user's organization
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current organization
           content:
             application/json:
               schema:
@@ -169,6 +184,101 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Organization"
+    patch:
+      operationId: updateOrganization
+      tags: [organizations]
+      summary: Update organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationRequest"
+      responses:
+        "200":
+          description: Updated organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+
+  /organizations/{orgId}/members:
+    get:
+      operationId: listOrganizationMembers
+      tags: [organizations]
+      summary: List organization members
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Members list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrganizationMember"
+    post:
+      operationId: inviteOrganizationMember
+      tags: [organizations]
+      summary: Invite (create) a new staff member
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteMemberRequest"
+      responses:
+        "201":
+          description: Member created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteMemberResponse"
+
+  /organizations/{orgId}/members/{userId}:
+    delete:
+      operationId: removeOrganizationMember
+      tags: [organizations]
+      summary: Deactivate organization member
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Member deactivated
 
   /properties:
     get:
@@ -2110,12 +2220,57 @@ components:
         plan:
           type: string
           enum: [basic, pro, enterprise]
+        subscriptionStatus:
+          type: string
+          enum: [active, trial, suspended, cancelled]
+          nullable: true
         maxUnits:
           type: integer
         maxUsers:
           type: integer
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        website:
+          type: string
+          nullable: true
+        logo:
+          type: string
+          nullable: true
+        primaryColor:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        taxRate:
+          type: string
+          nullable: true
+        trialEndsAt:
+          type: string
+          format: date-time
+          nullable: true
+        subscriptionEndsAt:
+          type: string
+          format: date-time
+          nullable: true
         isActive:
           type: boolean
+        userCount:
+          type: integer
+          nullable: true
+        propertyCount:
+          type: integer
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -2139,6 +2294,12 @@ components:
         plan:
           type: string
           enum: [basic, pro, enterprise]
+        email:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
         ownerEmail:
           type: string
           format: email
@@ -2146,13 +2307,130 @@ components:
           type: string
         ownerPassword:
           type: string
+        trialDays:
+          type: integer
       required:
         - name
         - slug
-        - plan
         - ownerEmail
         - ownerName
         - ownerPassword
+
+    CreateOrganizationResponse:
+      type: object
+      properties:
+        organization:
+          $ref: "#/components/schemas/Organization"
+        owner:
+          type: object
+          properties:
+            id:
+              type: integer
+            email:
+              type: string
+            name:
+              type: string
+          required:
+            - id
+            - email
+            - name
+      required:
+        - organization
+        - owner
+
+    UpdateOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        website:
+          type: string
+        logo:
+          type: string
+        primaryColor:
+          type: string
+        timezone:
+          type: string
+        currency:
+          type: string
+        plan:
+          type: string
+          enum: [basic, pro, enterprise]
+        subscriptionStatus:
+          type: string
+          enum: [active, trial, suspended, cancelled]
+        isActive:
+          type: boolean
+
+    OrganizationMember:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - email
+        - role
+        - isActive
+        - createdAt
+
+    InviteMemberRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          type: string
+          enum: [reception, housekeeper, accountant, admin]
+        password:
+          type: string
+      required:
+        - email
+        - name
+
+    InviteMemberResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        temporaryPassword:
+          type: string
+        organizationId:
+          type: integer
+      required:
+        - id
+        - email
+        - name
+        - role
+        - temporaryPassword
+        - organizationId
 
     Property:
       type: object

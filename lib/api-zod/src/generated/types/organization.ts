@@ -6,14 +6,29 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OrganizationPlan } from "./organizationPlan";
+import type { OrganizationSubscriptionStatus } from "./organizationSubscriptionStatus";
 
 export interface Organization {
   id: number;
   name: string;
   slug: string;
   plan: OrganizationPlan;
+  subscriptionStatus?: OrganizationSubscriptionStatus;
   maxUnits: number;
   maxUsers: number;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  website?: string | null;
+  logo?: string | null;
+  primaryColor?: string | null;
+  timezone?: string | null;
+  currency?: string | null;
+  taxRate?: string | null;
+  trialEndsAt?: Date | null;
+  subscriptionEndsAt?: Date | null;
   isActive: boolean;
+  userCount?: number | null;
+  propertyCount?: number | null;
   createdAt: Date;
 }
