@@ -272,6 +272,44 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 42 — Events & Banquet Module
+
+### New DB Tables (lib/db/src/schema/events.ts)
+- `event_spaces` — halls/venues: name, description, capacityMin/Max, areaSqm, pricePerHour, pricePerDay, amenities[], isActive, color
+- `events` — main event record: eventType, name, clientName/Phone/Email, eventDate (DATE), startTime/endTime, guestCount, status (6 values), venuePrice, servicesPrice, totalPrice, depositAmount, depositPaid, notes, staffNotes, tags
+- `event_services` — ordered services per event (ON DELETE CASCADE): category, name, quantity, unitPrice, totalPrice, isConfirmed, vendorName, vendorPhone, notes
+- `event_tasks` — checklist tasks per event (ON DELETE CASCADE): title, status (4 values), dueDate, assignedTo, sortOrder, completedAt
+- 4 Enums: event_type (8 values), event_status (6 values), event_service_category (8 values), event_task_status (4 values)
+
+### Events API Routes (`/api/events/*`) — requireAuth
+- `GET /api/events/stats` — upcoming/thisWeek/thisMonth/confirmed/completed counts, totalRevenue (completed), upcomingRevenue
+- `GET /api/events/spaces` — list all halls/venues
+- `POST /api/events/spaces` — create space
+- `PATCH /api/events/spaces/:id` — update space
+- `GET /api/events/?status=&type=&from=&to=` — events list with JOIN to space (spaceName, spaceColor, spaceCapacityMax); ordered by eventDate+startTime
+- `GET /api/events/:id` — single event + services[] + tasks[]; full detail
+- `POST /api/events/` — create event; auto-generates 7 standard tasks (підтвердити договір → отримати депозит → план → підрядники → підготовка залу → проведення → прибирання)
+- `PATCH /api/events/:id` — update status/staffNotes/depositPaid/depositAmount/prices/guestCount/startTime/endTime/tags
+- `POST /api/events/:id/services` — add service; auto-recalculates servicesPrice + totalPrice on event
+- `PATCH /api/events/services/:id` — toggle isConfirmed, update notes
+- `POST /api/events/:id/tasks` — add custom task
+- `PATCH /api/events/tasks/:id` — toggle task status (done ↔ pending); sets completedAt timestamp
+- Demo data: 4 halls, 5 events (wedding×2, corporate, birthday, gala), 8 services, 9 tasks (auto-seed on first request)
+
+### Events UI (`/maison-hd/events`)
+3-tab management page (Майбутні / Всі заходи / Зали):
+- **Stats row**: 4 cards — майбутніх, підтверджено, виручка (проведені), очікується виручка
+- **Filters**: status dropdown + type dropdown (per events tabs)
+- **Event list cards**: type icon, name, type badge (colored per type), status badge, date (with countdown "14 дн." in orange if <30 days), time range, guestCount, hall name, client name, total price, deposit badge
+- **Spaces grid**: colored icon, name, description, capacity range, area sqm, price/hour+day, amenities badges
+- **Event detail view** (full-screen replace):
+  - Back button, name header with type+status badges, date/time subtitle
+  - Left column: Client card (name/phone/email), Details card (guests/hall/area/notes), Financials card (venue/services/total with border separator, deposit paid toggle button)
+  - Status change row: pill buttons for all 6 statuses
+  - Right column: Tasks card with progress bar (doneTasks/total %) — click circle to toggle done/pending; Services card with category icon, name, quantity×price=total, vendor name, confirm toggle button; "+ Додати" button
+- **3 Create Dialogs**: NewEvent (name/client/phone/email/type/hall/date/time/guests/venuePrice/notes), NewEventService (category/name/qty/unitPrice/vendor), NewSpace (name/description/capacityMin-Max/areaSqm/pricePerHour-Day/amenities/color)
+- Sidebar nav: "Events & Banquet" (PartyPopper icon), all roles
+
 ## Stage 41 — SPA & Wellness Module
 
 ### New DB Tables (lib/db/src/schema/spa.ts)

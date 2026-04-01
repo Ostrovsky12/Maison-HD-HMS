@@ -27,6 +27,7 @@ import MigrationPage from "@/pages/migration";
 import GuestPortalPage from "@/pages/guest-portal";
 import InboxPage from "@/pages/inbox";
 import SpaPage from "@/pages/spa";
+import EventsPage from "@/pages/events";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -101,6 +102,7 @@ function Router() {
       <Route path="/guest/:code" component={GuestPortalPage} />
       <Route path="/inbox"><ProtectedRoute component={InboxPage} /></Route>
       <Route path="/spa"><ProtectedRoute component={SpaPage} /></Route>
+      <Route path="/events"><ProtectedRoute component={EventsPage} /></Route>
 
       <Route path="/" component={HomeRoute} />
 

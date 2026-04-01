@@ -26,6 +26,7 @@ import migrationRouter from "./migration.js";
 import guestPortalRouter from "./guest-portal.js";
 import inboxRouter from "./inbox.js";
 import spaRouter from "./spa.js";
+import eventsRouter from "./events.js";
 
 const router: IRouter = Router();
 
@@ -56,5 +57,6 @@ router.use("/migration", migrationRouter);
 router.use("/guest", guestPortalRouter);
 router.use("/inbox", inboxRouter);
 router.use("/spa", spaRouter);
+router.use("/events", eventsRouter);
 
 export default router;
