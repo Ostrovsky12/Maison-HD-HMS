@@ -55,6 +55,24 @@ function ProtectedRoute({ component: Component, roles }: { component: React.Comp
   return <Component />;
 }
 
+function HomeRoute() {
+  const { data: user, isLoading } = useGetMe();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Redirect to="/dashboard" />;
+  }
+
+  return <DemoPage />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -76,9 +94,7 @@ function Router() {
       <Route path="/demo-requests"><ProtectedRoute component={DemoRequestsPage} roles={["super_admin"]} /></Route>
       <Route path="/demo" component={DemoPage} />
 
-      <Route path="/">
-        <Redirect to="/dashboard" />
-      </Route>
+      <Route path="/" component={HomeRoute} />
 
       <Route component={NotFound} />
     </Switch>
