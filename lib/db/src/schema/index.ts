@@ -19,3 +19,4 @@ export * from "./legal-entities";
 export * from "./discount-types";
 export * from "./migration";
 export * from "./guest-orders";
+export * from "./inbox";

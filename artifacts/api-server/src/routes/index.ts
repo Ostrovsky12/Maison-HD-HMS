@@ -24,6 +24,7 @@ import legalEntitiesRouter from "./legal-entities.js";
 import discountTypesRouter from "./discount-types.js";
 import migrationRouter from "./migration.js";
 import guestPortalRouter from "./guest-portal.js";
+import inboxRouter from "./inbox.js";
 
 const router: IRouter = Router();
 
@@ -52,5 +53,6 @@ router.use("/legal-entities", legalEntitiesRouter);
 router.use("/discount-types", discountTypesRouter);
 router.use("/migration", migrationRouter);
 router.use("/guest", guestPortalRouter);
+router.use("/inbox", inboxRouter);
 
 export default router;

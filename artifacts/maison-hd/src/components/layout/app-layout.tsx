@@ -20,6 +20,7 @@ import {
   CreditCard,
   ClipboardList,
   ArrowRightLeft,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ const allNavItems = [
   { name: "Номери", path: "/units", icon: KeyRound, roles: null },
   { name: "Гості", path: "/guests", icon: Users, roles: null },
   { name: "Прибирання", path: "/housekeeping", icon: Sparkles, roles: null },
+  { name: "Inbox", path: "/inbox", icon: MessageSquare, roles: null },
   { name: "Рахунки", path: "/invoices", icon: FileText, roles: null },
   { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },
   { name: "Аналітика", path: "/analytics", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },

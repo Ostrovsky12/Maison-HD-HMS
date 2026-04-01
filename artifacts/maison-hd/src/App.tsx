@@ -25,6 +25,7 @@ import DemoPage from "@/pages/demo";
 import DemoRequestsPage from "@/pages/demo-requests";
 import MigrationPage from "@/pages/migration";
 import GuestPortalPage from "@/pages/guest-portal";
+import InboxPage from "@/pages/inbox";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -97,6 +98,7 @@ function Router() {
       <Route path="/migration"><ProtectedRoute component={MigrationPage} roles={["super_admin", "owner", "manager"]} /></Route>
       <Route path="/demo" component={DemoPage} />
       <Route path="/guest/:code" component={GuestPortalPage} />
+      <Route path="/inbox"><ProtectedRoute component={InboxPage} /></Route>
 
       <Route path="/" component={HomeRoute} />
 

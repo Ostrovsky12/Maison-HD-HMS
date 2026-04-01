@@ -272,6 +272,38 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 40 — Unified Inbox
+
+### New DB Tables (lib/db/src/schema/inbox.ts)
+- `conversations` — one per guest dialogue: channel, guestName, phone, email, status, unreadCount, bookingId (FK), lastMessageAt, aiSummary, tags
+- `messages` — all messages: direction (inbound/outbound), messageType, content, senderName, isAiGenerated, isRead
+- `channel_configs` — per-org channel settings: isEnabled, webhookUrl, config jsonb
+- Enums: `inbox_channel` (telegram/instagram/website/email/phone/whatsapp/viber), `conversation_status` (open/pending/resolved/spam), `message_direction`, `message_type`
+
+### Inbox API Routes (`/api/inbox/*`) — requireAuth
+- `GET /api/inbox/stats` — totals: open, pending, resolved, totalUnread, byChannel map
+- `GET /api/inbox/conversations` — list with filters: status, channel, search; returns conversations[] + totalUnread
+- `GET /api/inbox/conversations/:id` — conversation + messages + linked booking summary; marks inbound as read
+- `POST /api/inbox/conversations` — create new conversation manually
+- `PATCH /api/inbox/conversations/:id` — update status/bookingId/tags/assignedToId
+- `POST /api/inbox/conversations/:id/reply` — send outbound message, updates lastMessagePreview
+- `POST /api/inbox/conversations/:id/ai-suggest` — rule-based AI reply suggestion (contextual: SPA, rental, wedding, corporate, availability, pricing)
+- `POST /api/inbox/conversations/:id/link-booking/:bookingId` — link booking + system message
+- `GET /api/inbox/channels` — channel configs (enabled state, webhookUrl)
+- Demo data: auto-seeds 6 realistic Ukrainian conversations on first load (Telegram, Instagram, Website, Viber, Email)
+
+### Inbox UI (`/maison-hd/inbox`)
+- **Two-panel layout**: conversation sidebar (left) + chat area (right)
+- **Left sidebar**: stats cards (open/pending/resolved), search bar, status filter tabs (Всі/Відкриті/Очікують/Вирішені), channel pill filters with counts + icons
+- **Conversation list**: avatar with channel icon, guest name, subject, last message preview, timestamp (relative), unread badge, status badge
+- **Chat header**: channel avatar, guest name+phone, status badge, subject, "Вирішено" / "Відкрити" button, link-booking panel
+- **Linked booking bar**: shows booking ID, unit name, dates, payment status when linked
+- **Messages**: bubbles (inbound left / outbound right), system messages centered, AI-generated badge, timestamps, read indicators
+- **AI suggestion panel** (indigo): shows suggestion above composer with "Використати" / dismiss buttons
+- **Reply composer**: Textarea + AI button (indigo) + Send button (blue), Shift+Enter for newline, status change pills
+- **Mobile**: single-column with back button, responsive hide/show panels
+- Sidebar nav: "Inbox" (MessageSquare icon), all roles
+
 ## Stage 39 — Guest Cabinet & Online Check-in
 
 ### New DB Fields/Tables
