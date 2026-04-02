@@ -16,6 +16,7 @@ import {
   BookOpen, GitBranch, Bot, Send, RefreshCw, Plus, Trash2,
   Edit2, Search, ChevronRight, Sparkles, AlertCircle, CheckCircle2,
   ArrowUp, ArrowDown, Minus, Loader2, X, Save, Tag,
+  Zap, Shield, LayoutGrid, Activity, Star, Target, DollarSign,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
@@ -57,35 +58,63 @@ const CATEGORY_UK: Record<string, string> = {
 };
 
 export default function AiHubPage() {
-  const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState("copilot");
+  const [activeTab, setActiveTab] = useState("shell");
 
   return (
     <AppLayout>
       <div className="p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl shadow-lg">
-            <Brain className="w-6 h-6 text-white" />
+        {/* ── Preium Header ── */}
+        <div className="relative rounded-2xl overflow-hidden bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-700 p-6 text-white shadow-xl">
+          <div className="absolute inset-0 opacity-10"
+            style={{ backgroundImage: "radial-gradient(circle at 20% 80%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)", backgroundSize: "40px 40px" }}
+          />
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-sm">
+                <Brain className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold">AI Hub</h1>
+                  <Badge className="bg-amber-400/30 text-amber-200 border-amber-400/50 text-xs">GPT-5 LIVE</Badge>
+                </div>
+                <p className="text-violet-200 text-sm">Повноцінна AI-оболонка для готельного менеджменту</p>
+              </div>
+            </div>
+            <div className="hidden lg:flex items-center gap-3">
+              {[
+                { icon: Bot, label: "Staff Copilot", tab: "copilot" },
+                { icon: TrendingUp, label: "Sales AI", tab: "sales" },
+                { icon: BarChart3, label: "Owner Analyst", tab: "owner-insights" },
+                { icon: BookOpen, label: "Knowledge", tab: "knowledge" },
+              ].map(({ icon: Icon, label, tab }) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs font-medium transition-colors"
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">AI Hub</h1>
-            <p className="text-sm text-gray-500">Штучний інтелект для всього готелю</p>
-          </div>
-          <Badge className="ml-auto bg-violet-100 text-violet-700 border-violet-200">GPT-5</Badge>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="flex flex-wrap gap-1 h-auto p-1 bg-gray-100 rounded-xl">
-            <TabsTrigger value="copilot" className="gap-1.5 text-xs"><Bot className="w-3.5 h-3.5" />Copilot</TabsTrigger>
-            <TabsTrigger value="chat-reply" className="gap-1.5 text-xs"><MessageSquare className="w-3.5 h-3.5" />AI Чат</TabsTrigger>
+            <TabsTrigger value="shell" className="gap-1.5 text-xs"><LayoutGrid className="w-3.5 h-3.5" />AI Shell</TabsTrigger>
+            <TabsTrigger value="copilot" className="gap-1.5 text-xs"><Bot className="w-3.5 h-3.5" />Staff Copilot</TabsTrigger>
             <TabsTrigger value="sales" className="gap-1.5 text-xs"><TrendingUp className="w-3.5 h-3.5" />Sales AI</TabsTrigger>
-            <TabsTrigger value="guest-summary" className="gap-1.5 text-xs"><User className="w-3.5 h-3.5" />Гість AI</TabsTrigger>
+            <TabsTrigger value="owner-insights" className="gap-1.5 text-xs"><BarChart3 className="w-3.5 h-3.5" />Owner Analyst</TabsTrigger>
+            <TabsTrigger value="knowledge" className="gap-1.5 text-xs"><BookOpen className="w-3.5 h-3.5" />Knowledge</TabsTrigger>
+            <TabsTrigger value="chat-reply" className="gap-1.5 text-xs"><MessageSquare className="w-3.5 h-3.5" />Chat Reply</TabsTrigger>
+            <TabsTrigger value="guest-summary" className="gap-1.5 text-xs"><User className="w-3.5 h-3.5" />Guest AI</TabsTrigger>
             <TabsTrigger value="admin-tips" className="gap-1.5 text-xs"><Lightbulb className="w-3.5 h-3.5" />Поради</TabsTrigger>
-            <TabsTrigger value="owner-insights" className="gap-1.5 text-xs"><BarChart3 className="w-3.5 h-3.5" />Insights</TabsTrigger>
-            <TabsTrigger value="knowledge" className="gap-1.5 text-xs"><BookOpen className="w-3.5 h-3.5" />База знань</TabsTrigger>
             <TabsTrigger value="routing" className="gap-1.5 text-xs"><GitBranch className="w-3.5 h-3.5" />Routing</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="shell"><AiShellTab onNavigate={setActiveTab} /></TabsContent>
           <TabsContent value="copilot"><CopilotTab /></TabsContent>
           <TabsContent value="chat-reply"><ChatReplyTab /></TabsContent>
           <TabsContent value="sales"><SalesTab /></TabsContent>
@@ -97,6 +126,289 @@ export default function AiHubPage() {
         </Tabs>
       </div>
     </AppLayout>
+  );
+}
+
+// ─── 0. AI Shell Overview ─────────────────────────────────────────────────────
+function AiShellTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
+  const [stats, setStats] = useState<any>(null);
+  const [tips, setTips] = useState<any[]>([]);
+  const [loadingTips, setLoadingTips] = useState(false);
+  const [copilotInput, setCopilotInput] = useState("");
+  const [copilotReply, setCopilotReply] = useState("");
+  const [copilotLoading, setCopilotLoading] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    apiFetch("/admin-tips")
+      .then(r => r.json())
+      .then(d => { if (d.tips) { setTips(d.tips.slice(0, 3)); setStats(d.stats); } })
+      .catch(() => {});
+  }, []);
+
+  const quickAsk = async () => {
+    if (!copilotInput.trim() || copilotLoading) return;
+    const q = copilotInput.trim();
+    setCopilotInput("");
+    setCopilotLoading(true);
+    setCopilotReply("");
+    let msg = "";
+    try {
+      const res = await fetch(
+        `${BASE.replace("/maison-hd", "")}/api/ai/copilot`,
+        {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token()}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ message: q, history: [] }),
+        }
+      );
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.content) { msg += data.content; setCopilotReply(msg); }
+            } catch {}
+          }
+        }
+      }
+    } catch {
+      setCopilotReply("Помилка з'єднання.");
+    } finally {
+      setCopilotLoading(false);
+    }
+  };
+
+  const USE_CASES = [
+    {
+      tab: "copilot",
+      icon: Bot,
+      gradient: "from-violet-500 to-purple-600",
+      bg: "bg-violet-50",
+      border: "border-violet-200",
+      badge: "bg-violet-100 text-violet-700",
+      title: "AI Staff Copilot",
+      subtitle: "Асистент для персоналу",
+      desc: "Скрипти для гостей, процедури, відповіді на ситуації — все в одному чаті з AI.",
+      features: ["Скрипти для будь-якої ситуації", "Процедури та SOP", "Streaming відповіді (GPT-5)"],
+      cta: "Відкрити Copilot",
+    },
+    {
+      tab: "sales",
+      icon: TrendingUp,
+      gradient: "from-emerald-500 to-teal-600",
+      bg: "bg-emerald-50",
+      border: "border-emerald-200",
+      badge: "bg-emerald-100 text-emerald-700",
+      title: "AI Sales Assistant",
+      subtitle: "Продажі та апсейли",
+      desc: "AI аналізує гостей і генерує персоналізовані пропозиції для збільшення виручки.",
+      features: ["Персоналізовані пропозиції", "Апсейл та крос-сейл", "Рейтинг пріоритетів"],
+      cta: "Генерувати пропозиції",
+    },
+    {
+      tab: "owner-insights",
+      icon: BarChart3,
+      gradient: "from-blue-500 to-indigo-600",
+      bg: "bg-blue-50",
+      border: "border-blue-200",
+      badge: "bg-blue-100 text-blue-700",
+      title: "AI Owner Analyst",
+      subtitle: "Аналітика для власника",
+      desc: "Стратегічний AI-аналіз: KPI, тренди, можливості, прогнози та рекомендації.",
+      features: ["Executive summary", "KPI аналіз та тренди", "Стратегічні рекомендації"],
+      cta: "Відкрити аналітику",
+    },
+    {
+      tab: "knowledge",
+      icon: BookOpen,
+      gradient: "from-amber-500 to-orange-600",
+      bg: "bg-amber-50",
+      border: "border-amber-200",
+      badge: "bg-amber-100 text-amber-700",
+      title: "AI Knowledge Assistant",
+      subtitle: "База знань готелю",
+      desc: "Централізована база знань з AI-пошуком: процедури, FAQ, правила, місцеві поради.",
+      features: ["AI-пошук по базі", "Категорії та теги", "Редагування та додавання"],
+      cta: "Відкрити базу знань",
+    },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Live stats strip */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Заїздів сьогодні", value: stats.todayCheckIns, icon: Activity, color: "text-blue-600", bg: "bg-blue-50" },
+            { label: "Виїздів сьогодні", value: stats.todayCheckOuts, icon: Zap, color: "text-orange-600", bg: "bg-orange-50" },
+            { label: "HK завдань", value: stats.pendingHK, icon: Shield, color: "text-amber-600", bg: "bg-amber-50" },
+            { label: "Відкритих чатів", value: stats.openInbox, icon: MessageSquare, color: "text-violet-600", bg: "bg-violet-50" },
+          ].map(s => (
+            <Card key={s.label} className="border-0 shadow-sm">
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl ${s.bg}`}>
+                    <s.icon className={`w-4 h-4 ${s.color}`} />
+                  </div>
+                  <div>
+                    <div className={`text-2xl font-bold ${s.color}`}>{s.value ?? "—"}</div>
+                    <div className="text-xs text-gray-500">{s.label}</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* 4 Core Use Cases */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {USE_CASES.map(uc => (
+          <Card key={uc.tab} className={`border ${uc.border} hover:shadow-lg transition-all cursor-pointer group`} onClick={() => onNavigate(uc.tab)}>
+            <CardContent className="p-5">
+              <div className="flex items-start gap-4">
+                <div className={`p-3 rounded-2xl bg-gradient-to-br ${uc.gradient} shadow-md group-hover:scale-105 transition-transform`}>
+                  <uc.icon className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <h3 className="font-bold text-gray-900 text-sm">{uc.title}</h3>
+                    <Badge className={`text-xs ${uc.badge}`}>{uc.subtitle}</Badge>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3 line-clamp-2">{uc.desc}</p>
+                  <div className="space-y-1 mb-3">
+                    {uc.features.map((f, i) => (
+                      <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
+                        <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />
+                        {f}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    className={`text-xs font-semibold flex items-center gap-1 bg-gradient-to-r ${uc.gradient} bg-clip-text text-transparent`}
+                  >
+                    {uc.cta} <ChevronRight className="w-3.5 h-3.5" style={{ color: "inherit" }} />
+                  </button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Quick AI Ask */}
+      <Card className="border-violet-200 bg-gradient-to-br from-violet-50 to-purple-50">
+        <CardHeader className="py-3 px-5">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-violet-500" />
+            Швидкий AI-запит
+            <span className="text-xs font-normal text-gray-500 ml-1">— задайте будь-яке питання без переходу на Copilot</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-5 space-y-3">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={copilotInput}
+              onChange={e => setCopilotInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && quickAsk()}
+              placeholder="Напр.: Як правильно зустріти VIP гостя?"
+              className="flex-1 px-3 py-2 rounded-lg border border-violet-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+            <button
+              onClick={quickAsk}
+              disabled={copilotLoading || !copilotInput.trim()}
+              className="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors"
+            >
+              {copilotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {copilotLoading ? "..." : "Ask AI"}
+            </button>
+          </div>
+          {copilotReply && (
+            <div className="p-4 bg-white rounded-xl border border-violet-100 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Bot className="w-4 h-4 text-violet-500" />
+                <span className="text-xs font-semibold text-violet-600">AI Відповідь</span>
+              </div>
+              {copilotReply}
+            </div>
+          )}
+          {/* Quick questions */}
+          <div className="flex flex-wrap gap-2">
+            {[
+              "Скрипт для відмови апгрейду",
+              "Процедура при скарзі",
+              "Як пропонувати SPA?",
+              "Правила пізнього виїзду",
+            ].map(q => (
+              <button
+                key={q}
+                onClick={() => setCopilotInput(q)}
+                className="text-xs px-2.5 py-1 bg-white border border-violet-200 rounded-full text-violet-600 hover:bg-violet-100 transition-colors"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Today's AI Tips */}
+      {tips.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+              <Lightbulb className="w-4 h-4 text-amber-500" />
+              AI-поради на сьогодні
+            </p>
+            <button onClick={() => onNavigate("admin-tips")} className="text-xs text-violet-600 hover:underline flex items-center gap-1">
+              Всі поради <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {tips.map((tip, i) => (
+              <div key={i} className={`p-3 rounded-xl border-l-4 bg-white shadow-sm ${tip.priority === "high" || tip.priority === "urgent" ? "border-l-red-400" : tip.priority === "medium" ? "border-l-amber-400" : "border-l-green-400"}`}>
+                <Badge className={`text-xs mb-2 ${PRIORITY_COLOR[tip.priority] || "bg-gray-100"}`}>{PRIORITY_UK[tip.priority] || tip.priority}</Badge>
+                <p className="text-xs text-gray-700 font-medium">{tip.tip}</p>
+                {tip.action && <p className="text-xs text-gray-400 mt-1">{tip.action}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Additional AI tools */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {[
+          { tab: "guest-summary", icon: User, title: "AI Guest Profile", desc: "AI-профіль гостя з перевагами та ризиками" },
+          { tab: "chat-reply", icon: MessageSquare, title: "Chat Reply AI", desc: "Автоматичні відповіді на повідомлення гостей" },
+          { tab: "routing", icon: GitBranch, title: "Task Routing", desc: "AI маршрутизація задач по відділах" },
+        ].map(t => (
+          <button
+            key={t.tab}
+            onClick={() => onNavigate(t.tab)}
+            className="p-4 bg-white border border-gray-200 rounded-xl hover:border-violet-300 hover:shadow-md transition-all text-left group"
+          >
+            <div className="flex items-center gap-2 mb-1.5">
+              <div className="p-1.5 bg-gray-100 group-hover:bg-violet-100 rounded-lg transition-colors">
+                <t.icon className="w-3.5 h-3.5 text-gray-500 group-hover:text-violet-600 transition-colors" />
+              </div>
+              <span className="text-sm font-semibold text-gray-800">{t.title}</span>
+            </div>
+            <p className="text-xs text-gray-500">{t.desc}</p>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
