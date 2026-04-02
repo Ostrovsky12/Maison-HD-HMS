@@ -56,4 +56,31 @@ router.get("/:propertyId", requireAuth, async (req, res) => {
   res.json({ ...prop, unitCount: Number(unitCountRow?.count || 0) });
 });
 
+router.patch("/:propertyId", requireAuth, async (req, res) => {
+  const propertyId = parseInt(req.params.propertyId);
+  const user = (req as any).user;
+  const [prop] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId)).limit(1);
+  if (!prop) {
+    res.status(404).json({ error: "Not Found", message: "Property not found" });
+    return;
+  }
+  if (user.role !== "super_admin" && prop.organizationId !== user.organizationId) {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+    return;
+  }
+  if (!["super_admin", "owner", "manager"].includes(user.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Insufficient permissions" });
+    return;
+  }
+  const { name, address, type, description, timezone, currency } = req.body;
+  const [updated] = await db.update(propertiesTable).set({
+    ...(name !== undefined && { name }),
+    ...(address !== undefined && { address }),
+    ...(type !== undefined && { type }),
+    ...(description !== undefined && { description }),
+  }).where(eq(propertiesTable.id, propertyId)).returning();
+  const [unitCountRow] = await db.select({ count: count() }).from(unitsTable).where(eq(unitsTable.propertyId, propertyId));
+  res.json({ ...updated, unitCount: Number(unitCountRow?.count || 0) });
+});
+
 export default router;
