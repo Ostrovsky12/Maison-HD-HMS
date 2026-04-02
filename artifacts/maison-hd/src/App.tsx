@@ -80,6 +80,12 @@ function ProtectedRoute({ component: Component, roles }: { component: React.Comp
     return <Redirect to="/dashboard" />;
   }
 
+  // Redirect new owners/managers to onboarding wizard on first login
+  const onboardingDone = localStorage.getItem("mhd_onboarding_done");
+  if (!onboardingDone && (user.role === "owner" || user.role === "manager")) {
+    return <Redirect to="/onboarding" />;
+  }
+
   return <Component />;
 }
 
