@@ -43,6 +43,7 @@ import maintenanceRouter from "./maintenance.js";
 import restaurantRouter from "./restaurant.js";
 import activitiesRouter from "./activities.js";
 import accommodationRouter from "./accommodation.js";
+import consoleRouter from "./console.js";
 
 const router: IRouter = Router();
 
@@ -90,5 +91,6 @@ router.use("/maintenance", maintenanceRouter);
 router.use("/restaurant", restaurantRouter);
 router.use("/activities", activitiesRouter);
 router.use("/accommodation", accommodationRouter);
+router.use("/console", consoleRouter);
 
 export default router;

@@ -39,6 +39,7 @@ import {
   ChefHat,
   Bike,
   BedDouble,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,7 @@ import { formatDistanceToNow } from "date-fns";
 import { uk } from "date-fns/locale";
 
 const allNavItems = [
+  { name: "Staff Console", path: "/console", icon: Activity, roles: null },
   { name: "Command Center", path: "/hq", icon: Zap, roles: ["super_admin", "owner", "manager"] },
   { name: "AI Automation", path: "/automation", icon: Bot, roles: ["super_admin", "owner", "manager"] },
   { name: "AI Hub", path: "/ai-hub", icon: Brain, roles: ["super_admin", "owner", "manager"] },
