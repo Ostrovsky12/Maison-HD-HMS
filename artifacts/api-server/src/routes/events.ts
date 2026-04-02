@@ -299,4 +299,217 @@ router.post("/:id/tasks", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Update event fees (banquet min, service fee, cork fee) ───────────────────
+router.patch("/:id/fees", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const { banquetMinimum, serviceFeeP, corkFeePerBottle, corkFeeBottles } = req.body;
+
+    const evRes = await db.execute(sql`SELECT * FROM events WHERE id = ${eventId} AND organization_id = ${orgId}`);
+    const ev = evRes.rows[0] as any;
+    if (!ev) return res.status(404).json({ error: "Not found" });
+
+    const banqMin = banquetMinimum !== undefined ? parseFloat(banquetMinimum) : parseFloat(ev.banquet_minimum || "0");
+    const svcPct = serviceFeeP !== undefined ? parseFloat(serviceFeeP) : parseFloat(ev.service_fee_pct || "0");
+    const corkPer = corkFeePerBottle !== undefined ? parseFloat(corkFeePerBottle) : parseFloat(ev.cork_fee_per_bottle || "0");
+    const corkBtl = corkFeeBottles !== undefined ? parseInt(corkFeeBottles) : parseInt(ev.cork_fee_bottles || "0");
+
+    const subtotal = parseFloat(ev.total_price || "0");
+    const svcAmt = Math.round(subtotal * svcPct / 100 * 100) / 100;
+    const corkTotal = Math.round(corkPer * corkBtl * 100) / 100;
+    const grandTotal = subtotal + svcAmt + corkTotal;
+    const balanceDue = grandTotal - parseFloat(ev.deposit_amount || "0");
+
+    await db.execute(sql`UPDATE events SET
+      banquet_minimum = ${banqMin}, service_fee_pct = ${svcPct}, service_fee_amount = ${svcAmt},
+      cork_fee_per_bottle = ${corkPer}, cork_fee_bottles = ${corkBtl}, cork_fee_total = ${corkTotal},
+      subtotal = ${subtotal}, grand_total = ${grandTotal}, balance_due = ${balanceDue},
+      updated_at = NOW()
+      WHERE id = ${eventId} AND organization_id = ${orgId}`);
+
+    res.json({ success: true, grandTotal, balanceDue, svcAmt, corkTotal });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Event timings (run-of-show) ──────────────────────────────────────────────
+router.get("/:id/timings", requireAuth, async (req: any, res) => {
+  try {
+    const eventId = parseInt(req.params.id);
+    const timings = await db.execute(sql`
+      SELECT * FROM event_timings WHERE event_id = ${eventId}
+      ORDER BY sort_order ASC, time_start ASC
+    `);
+    res.json({ timings: timings.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/:id/timings", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const { timeStart, timeEnd, title, description, category = "general", assignedTo, sortOrder = 99 } = req.body;
+
+    const res2 = await db.execute(sql`
+      INSERT INTO event_timings (event_id, organization_id, time_start, time_end, title, description, category, assigned_to, sort_order, created_at)
+      VALUES (${eventId}, ${orgId}, ${timeStart}, ${timeEnd ?? null}, ${title}, ${description ?? null}, ${category}, ${assignedTo ?? null}, ${sortOrder}, NOW())
+      RETURNING *
+    `);
+    res.status(201).json({ timing: res2.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/timings/:tid", requireAuth, async (req: any, res) => {
+  try {
+    const tid = parseInt(req.params.tid);
+    const { isConfirmed, assignedTo, timeStart, timeEnd } = req.body;
+    const updates: string[] = [];
+    if (isConfirmed !== undefined) updates.push(`is_confirmed = ${isConfirmed}`);
+    if (assignedTo !== undefined) updates.push(`assigned_to = '${(assignedTo||"").replace(/'/g,"''")}'`);
+    if (timeStart) updates.push(`time_start = '${timeStart}'`);
+    if (timeEnd !== undefined) updates.push(`time_end = ${timeEnd ? `'${timeEnd}'` : "NULL"}`);
+    if (!updates.length) return res.json({ success: true });
+
+    const r = await db.execute(sql.raw(`UPDATE event_timings SET ${updates.join(", ")} WHERE id = ${tid} RETURNING *`));
+    res.json({ timing: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/timings/:tid", requireAuth, async (req: any, res) => {
+  try {
+    await db.execute(sql`DELETE FROM event_timings WHERE id = ${parseInt(req.params.tid)}`);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Group check-ins ──────────────────────────────────────────────────────────
+router.get("/:id/group-checkins", requireAuth, async (req: any, res) => {
+  try {
+    const eventId = parseInt(req.params.id);
+    const groups = await db.execute(sql`
+      SELECT gc.*,
+        (SELECT COUNT(*) FROM event_guest_allocations WHERE group_checkin_id = gc.id) as allocated_count,
+        (SELECT COUNT(*) FROM event_guest_allocations WHERE group_checkin_id = gc.id AND status = 'checked_in') as checked_in_count
+      FROM event_group_checkins gc
+      WHERE gc.event_id = ${eventId}
+      ORDER BY gc.arrival_date ASC, gc.arrival_time ASC
+    `);
+    res.json({ groups: groups.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/:id/group-checkins", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const { groupName, arrivalDate, arrivalTime = "14:00", departureDate, departureTime = "12:00", totalGuests = 1, notes } = req.body;
+
+    const r = await db.execute(sql`
+      INSERT INTO event_group_checkins (event_id, organization_id, group_name, arrival_date, arrival_time, departure_date, departure_time, total_guests, notes, status, created_at, updated_at)
+      VALUES (${eventId}, ${orgId}, ${groupName}, ${arrivalDate}, ${arrivalTime}, ${departureDate ?? null}, ${departureTime}, ${totalGuests}, ${notes ?? null}, 'pending', NOW(), NOW())
+      RETURNING *
+    `);
+    res.status(201).json({ group: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/group-checkins/:gid", requireAuth, async (req: any, res) => {
+  try {
+    const gid = parseInt(req.params.gid);
+    const { status, notes, arrivalTime, totalGuests } = req.body;
+    const updates: string[] = ["updated_at = NOW()"];
+    if (status) updates.push(`status = '${status}'`);
+    if (notes !== undefined) updates.push(`notes = '${(notes||"").replace(/'/g,"''")}'`);
+    if (arrivalTime) updates.push(`arrival_time = '${arrivalTime}'`);
+    if (totalGuests) updates.push(`total_guests = ${totalGuests}`);
+
+    const r = await db.execute(sql.raw(`UPDATE event_group_checkins SET ${updates.join(", ")} WHERE id = ${gid} RETURNING *`));
+    res.json({ group: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Guest allocations ────────────────────────────────────────────────────────
+router.get("/:id/allocations", requireAuth, async (req: any, res) => {
+  try {
+    const eventId = parseInt(req.params.id);
+    const allocs = await db.execute(sql`
+      SELECT ga.*, u.name as unit_name, u.category as unit_type,
+        gc.group_name, gc.arrival_date, gc.arrival_time
+      FROM event_guest_allocations ga
+      LEFT JOIN units u ON u.id = ga.unit_id
+      LEFT JOIN event_group_checkins gc ON gc.id = ga.group_checkin_id
+      WHERE ga.event_id = ${eventId}
+      ORDER BY ga.check_in_date ASC NULLS LAST, ga.guest_name ASC
+    `);
+
+    const summaryRes = await db.execute(sql`
+      SELECT
+        COUNT(*)::int as total,
+        COALESCE(SUM(guests_count),0)::int as total_guests,
+        SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END)::int as confirmed,
+        SUM(CASE WHEN status = 'checked_in' THEN 1 ELSE 0 END)::int as checked_in,
+        SUM(CASE WHEN unit_id IS NOT NULL THEN 1 ELSE 0 END)::int as allocated
+      FROM event_guest_allocations WHERE event_id = ${eventId}
+    `);
+
+    res.json({ allocations: allocs.rows, summary: summaryRes.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: "Failed query: " + e.message }); }
+});
+
+router.post("/:id/allocations", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const { groupCheckinId, unitId, guestName, guestPhone, guestEmail, guestsCount = 1, relationToEvent, checkInDate, checkOutDate, checkInTime = "14:00", checkOutTime = "12:00", notes } = req.body;
+
+    const unitIdVal = unitId ? parseInt(unitId) : null;
+    const groupIdVal = groupCheckinId ? parseInt(groupCheckinId) : null;
+
+    const r = await db.execute(sql`
+      INSERT INTO event_guest_allocations (event_id, group_checkin_id, organization_id, unit_id, guest_name, guest_phone, guest_email, guests_count, relation_to_event, check_in_date, check_out_date, check_in_time, check_out_time, notes, status, created_at, updated_at)
+      VALUES (${eventId}, ${groupIdVal}, ${orgId}, ${unitIdVal}, ${guestName}, ${guestPhone ?? null}, ${guestEmail ?? null}, ${guestsCount}, ${relationToEvent ?? null}, ${checkInDate ?? null}, ${checkOutDate ?? null}, ${checkInTime}, ${checkOutTime}, ${notes ?? null}, 'pending', NOW(), NOW())
+      RETURNING *
+    `);
+    res.status(201).json({ allocation: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/allocations/:aid", requireAuth, async (req: any, res) => {
+  try {
+    const aid = parseInt(req.params.aid);
+    const { status, unitId, notes } = req.body;
+    const updates: string[] = ["updated_at = NOW()"];
+    if (status) {
+      updates.push(`status = '${status}'`);
+      if (status === "checked_in") updates.push("checked_in_at = NOW()");
+    }
+    if (unitId !== undefined) updates.push(`unit_id = ${unitId || "NULL"}`);
+    if (notes !== undefined) updates.push(`notes = '${(notes||"").replace(/'/g,"''")}'`);
+
+    const r = await db.execute(sql.raw(`UPDATE event_guest_allocations SET ${updates.join(", ")} WHERE id = ${aid} RETURNING *`));
+    res.json({ allocation: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Available units for allocation ──────────────────────────────────────────
+router.get("/:id/available-units", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+
+    const units = await db.execute(sql`
+      SELECT u.id, u.name, u.category as unit_type, u.base_price, u.capacity,
+        p.name as property_name,
+        (SELECT COUNT(*) FROM event_guest_allocations WHERE unit_id = u.id AND event_id = ${eventId}) as already_allocated
+      FROM units u
+      JOIN properties p ON p.id = u.property_id
+      WHERE p.organization_id = ${orgId}
+        AND p.is_active = TRUE
+      ORDER BY p.name ASC, u.name ASC
+      LIMIT 60
+    `);
+    res.json({ units: units.rows });
+  } catch (e: any) { res.status(500).json({ error: "Failed units: " + e.message }); }
+});
+
 export default router;

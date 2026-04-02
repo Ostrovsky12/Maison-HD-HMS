@@ -815,6 +815,35 @@ Returns: `{ kpi{…}, arrivals[], departures[], inHouse[], hk{…}, spaToday[], 
 - Inline amber bar shows truncated URL + 3 action icons (copy, open, Telegram)
 - Access code persists across sessions (stored in bookings.guestAccessCode)
 
+## Stage 58 — Maintenance & Facilities Management
+
+### DB Tables
+- `maintenance_requests` — work orders (10+ requests seeded): title, description, category (15 enums), priority (4 levels), status (6 states), costs (estimated/actual/parts/labor), vendor, duration, guest rating, audit trail
+- `maintenance_schedules` — preventive maintenance schedules (6 seeded): frequency (7 options), checklist JSONB, last/next performed dates, advance notice
+- `maintenance_logs` — activity log per request (status changes, comments, creation)
+
+### API Routes (`/api/maintenance/*`) — requireAuth
+- `GET /stats` — total, open, in_progress, critical_open, escalated, overdue, upcomingScheduled, avg_resolution_min, byCategory
+- `GET /` — list with filters: status, priority, category, propertyId, search; joined with property/unit/user names
+- `GET /:id` — single request + full activity log
+- `POST /` — create request → auto-creates activity log entry
+- `PATCH /:id` — update request fields + auto-log status changes; auto-sets started_at / resolved_at
+- `DELETE /:id` — soft or hard delete
+- `POST /:id/logs` — add comment to activity log
+- `GET /schedules/list` — all schedules with is_overdue / due_soon flags
+- `POST /schedules` — create new preventive maintenance schedule
+- `PATCH /schedules/:id` — update schedule (title, frequency, checklist, dates)
+- `POST /schedules/:id/perform` — mark performed → auto-calculates next_due_at + creates resolved request
+- `DELETE /schedules/:id` — delete schedule
+- `GET /analytics/costs` — monthly cost chart, by-category breakdown, by-priority with avg resolution hours
+
+### Frontend (`/maison-hd/maintenance`)
+- 8-card KPI strip: total, open, in_progress, critical, escalated, overdue, upcoming scheduled, avg time
+- **Tab 1 — Заявки**: filterable list (status tabs + priority/category dropdowns + search), color-coded left border by priority, click-to-detail; "Нова заявка" modal
+- **Tab 2 — Профілактика**: card grid of schedules with due_soon / overdue badges; "Виконано" button → auto-advances next_due_at; "Новий розклад" modal
+- **Tab 3 — Аналітика**: monthly cost bar chart, category breakdown bars, priority breakdown cards, financial summary
+- **Tab 4 — Деталі заявки**: full detail with info grid, status change buttons, actual cost/time inputs, resolution notes, activity log with comment input, financial summary panel
+
 ## Running the App
 
 The API server and HMS frontend run automatically via Replit workflows.

@@ -39,6 +39,7 @@ import aiRouter from "./ai.js";
 import accountingRouter from "./accounting.js";
 import financeRouter from "./finance.js";
 import salesRouter from "./sales.js";
+import maintenanceRouter from "./maintenance.js";
 
 const router: IRouter = Router();
 
@@ -82,5 +83,6 @@ router.use("/ai", aiRouter);
 router.use("/accounting", accountingRouter);
 router.use("/finance", financeRouter);
 router.use("/sales", salesRouter);
+router.use("/maintenance", maintenanceRouter);
 
 export default router;
