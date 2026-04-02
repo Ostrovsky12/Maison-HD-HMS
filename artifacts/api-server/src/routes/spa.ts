@@ -414,4 +414,90 @@ router.post("/day-passes", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Analytics ────────────────────────────────────────────────────────────────
+router.get("/analytics", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrgId(req);
+    const { from, to } = req.query as Record<string, string>;
+    const fromDate = from || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+    const toDate = to || new Date().toISOString().slice(0, 10);
+
+    // Revenue by category
+    const byCategoryRaw = await db.execute<any>(sql`
+      SELECT s.category, COUNT(a.id)::int AS bookings, COALESCE(SUM(a.price::numeric),0)::float AS revenue
+      FROM spa_appointments a
+      JOIN spa_services s ON a.service_id = s.id
+      WHERE a.organization_id = ${orgId}
+        AND a.appointment_date BETWEEN ${fromDate}::date AND ${toDate}::date
+        AND a.status IN ('completed','in_progress')
+      GROUP BY s.category ORDER BY revenue DESC
+    `);
+
+    // Top services
+    const topServicesRaw = await db.execute<any>(sql`
+      SELECT s.name, s.category, COUNT(a.id)::int AS bookings, COALESCE(SUM(a.price::numeric),0)::float AS revenue
+      FROM spa_appointments a
+      JOIN spa_services s ON a.service_id = s.id
+      WHERE a.organization_id = ${orgId}
+        AND a.appointment_date BETWEEN ${fromDate}::date AND ${toDate}::date
+        AND a.status IN ('completed','in_progress','confirmed')
+      GROUP BY s.id, s.name, s.category ORDER BY revenue DESC LIMIT 8
+    `);
+
+    // Daily revenue (last 30 days)
+    const dailyRaw = await db.execute<any>(sql`
+      SELECT appointment_date::text AS date,
+        COUNT(id)::int AS bookings,
+        COALESCE(SUM(price::numeric) FILTER(WHERE status IN ('completed','in_progress')),0)::float AS revenue
+      FROM spa_appointments
+      WHERE organization_id = ${orgId}
+        AND appointment_date BETWEEN ${fromDate}::date AND ${toDate}::date
+      GROUP BY appointment_date ORDER BY appointment_date ASC
+    `);
+
+    // Day pass revenue
+    const dayPassRaw = await db.execute<any>(sql`
+      SELECT SUM(price::numeric)::float AS revenue, COUNT(*)::int AS passes, SUM(guest_count)::int AS guests
+      FROM spa_day_passes
+      WHERE organization_id = ${orgId}
+        AND pass_date BETWEEN ${fromDate}::date AND ${toDate}::date
+        AND is_active = true
+    `);
+
+    // Specialist performance
+    const specialistRaw = await db.execute<any>(sql`
+      SELECT sp.first_name || ' ' || sp.last_name AS name, sp.color,
+        COUNT(a.id)::int AS bookings,
+        COALESCE(SUM(a.price::numeric) FILTER(WHERE a.status IN ('completed','in_progress')),0)::float AS revenue,
+        COUNT(a.id) FILTER(WHERE a.status = 'completed')::int AS completed
+      FROM spa_specialists sp
+      LEFT JOIN spa_appointments a ON a.specialist_id = sp.id AND a.appointment_date BETWEEN ${fromDate}::date AND ${toDate}::date
+      WHERE sp.organization_id = ${orgId}
+      GROUP BY sp.id, sp.first_name, sp.last_name, sp.color ORDER BY revenue DESC
+    `);
+
+    // Overall totals
+    const totalsRaw = await db.execute<any>(sql`
+      SELECT COUNT(*)::int AS total,
+        COUNT(*) FILTER(WHERE status='completed')::int AS completed,
+        COUNT(*) FILTER(WHERE status='cancelled')::int AS cancelled,
+        COUNT(*) FILTER(WHERE status='no_show')::int AS no_show,
+        COALESCE(SUM(price::numeric) FILTER(WHERE status IN ('completed','in_progress')),0)::float AS revenue
+      FROM spa_appointments
+      WHERE organization_id = ${orgId}
+        AND appointment_date BETWEEN ${fromDate}::date AND ${toDate}::date
+    `);
+
+    res.json({
+      period: { from: fromDate, to: toDate },
+      totals: totalsRaw.rows[0] || {},
+      dayPass: dayPassRaw.rows[0] || {},
+      byCategory: byCategoryRaw.rows || [],
+      topServices: topServicesRaw.rows || [],
+      dailyRevenue: dailyRaw.rows || [],
+      specialists: specialistRaw.rows || [],
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

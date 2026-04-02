@@ -15,6 +15,7 @@ import {
   Waves, Calendar, Users, Star, Clock, Plus, CheckCircle2,
   XCircle, RefreshCw, ChevronRight, Ticket, Award, Search,
   Coffee, Dumbbell, Sparkles, Filter, Edit, Activity, DollarSign,
+  TrendingUp, BarChart2,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
@@ -30,6 +31,7 @@ const TABS = [
   { id: "specialists", label: "Спеціалісти", icon: Users },
   { id: "memberships", label: "Абонементи", icon: Award },
   { id: "daypasses", label: "Day Pass", icon: Ticket },
+  { id: "analytics", label: "Аналітика", icon: BarChart2 },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -66,6 +68,9 @@ export default function SpaPage() {
   const [resources, setResources] = useState<any[]>([]);
   const [memberships, setMemberships] = useState<any[]>([]);
   const [dayPasses, setDayPasses] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [analyticsFrom, setAnalyticsFrom] = useState(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd"));
+  const [analyticsTo, setAnalyticsTo] = useState(format(new Date(), "yyyy-MM-dd"));
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -109,11 +114,19 @@ export default function SpaPage() {
     const r = await apiFetch(`/day-passes?${params}`);
     if (r.ok) { const d = await r.json(); setDayPasses(d.passes || []); }
   };
+  const loadAnalytics = async (from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    const r = await apiFetch(`/analytics?${params}`);
+    if (r.ok) setAnalytics(await r.json());
+  };
 
   useEffect(() => { loadStats(); loadServices(); loadSpecialists(); loadResources(); }, []);
   useEffect(() => { if (tab === "schedule" || tab === "appointments") loadAppointments(tab === "schedule" ? selectedDate : undefined, statusFilter); }, [tab, selectedDate, statusFilter]);
   useEffect(() => { if (tab === "memberships") loadMemberships(); }, [tab]);
   useEffect(() => { if (tab === "daypasses") loadDayPasses(selectedDate); }, [tab, selectedDate]);
+  useEffect(() => { if (tab === "analytics") loadAnalytics(analyticsFrom, analyticsTo); }, [tab, analyticsFrom, analyticsTo]);
 
   const handleStatusChange = async (id: number, status: string) => {
     const r = await apiFetch(`/appointments/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
@@ -464,6 +477,164 @@ export default function SpaPage() {
                 </CardContent>
               </Card>
             ))}
+          </div>
+        )}
+        {/* ── ANALYTICS ── */}
+        {tab === "analytics" && (
+          <div className="space-y-5">
+            {/* Date range */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-sm whitespace-nowrap">Від</Label>
+                <Input type="date" value={analyticsFrom} onChange={e => setAnalyticsFrom(e.target.value)} className="w-40" />
+                <Label className="text-sm whitespace-nowrap">До</Label>
+                <Input type="date" value={analyticsTo} onChange={e => setAnalyticsTo(e.target.value)} className="w-40" />
+              </div>
+              {[
+                { label: "Місяць", from: format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd"), to: format(new Date(), "yyyy-MM-dd") },
+                { label: "7 днів", from: format(addDays(new Date(), -7), "yyyy-MM-dd"), to: format(new Date(), "yyyy-MM-dd") },
+                { label: "Квартал", from: format(new Date(new Date().getFullYear(), Math.floor(new Date().getMonth() / 3) * 3, 1), "yyyy-MM-dd"), to: format(new Date(), "yyyy-MM-dd") },
+              ].map(p => (
+                <Button key={p.label} variant="outline" size="sm" onClick={() => { setAnalyticsFrom(p.from); setAnalyticsTo(p.to); }}>
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+
+            {!analytics ? (
+              <Card className="border-dashed"><CardContent className="py-10 text-center text-gray-400">Завантаження аналітики…</CardContent></Card>
+            ) : (
+              <>
+                {/* KPI Row */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Card className="border-0 shadow-sm">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-gray-500 flex items-center gap-1"><TrendingUp className="h-3.5 w-3.5 text-blue-500" /> Загальна виручка</p>
+                      <p className="text-2xl font-bold text-blue-600">{(analytics.totals.revenue || 0).toLocaleString()} ₴</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Day Pass: {(analytics.dayPass.revenue || 0).toLocaleString()} ₴</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-0 shadow-sm">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-gray-500 flex items-center gap-1"><Calendar className="h-3.5 w-3.5 text-purple-500" /> Записів всього</p>
+                      <p className="text-2xl font-bold text-purple-600">{analytics.totals.total || 0}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Завершено: {analytics.totals.completed || 0}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-0 shadow-sm">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-gray-500 flex items-center gap-1"><Ticket className="h-3.5 w-3.5 text-teal-500" /> Day Pass видано</p>
+                      <p className="text-2xl font-bold text-teal-600">{analytics.dayPass.passes || 0}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Гостей: {analytics.dayPass.guests || 0}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-0 shadow-sm">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-gray-500 flex items-center gap-1"><XCircle className="h-3.5 w-3.5 text-red-400" /> Не з'явились</p>
+                      <p className="text-2xl font-bold text-red-500">{analytics.totals.no_show || 0}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Скасовано: {analytics.totals.cancelled || 0}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* By Category */}
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold text-gray-700">Виручка за категоріями</CardTitle></CardHeader>
+                    <CardContent className="space-y-2 pt-0">
+                      {analytics.byCategory.length === 0 ? (
+                        <p className="text-sm text-gray-400 py-4 text-center">Немає даних за обраний період</p>
+                      ) : analytics.byCategory.map((c: any) => {
+                        const maxRev = Math.max(...analytics.byCategory.map((x: any) => x.revenue));
+                        const pct = maxRev > 0 ? (c.revenue / maxRev) * 100 : 0;
+                        return (
+                          <div key={c.category} className="space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <span className="font-medium">{CATEGORY_UA[c.category] || c.category}</span>
+                              <span className="text-gray-500">{c.revenue.toLocaleString()} ₴ · {c.bookings} зап.</span>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-1.5">
+                              <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+
+                  {/* Top Services */}
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold text-gray-700">Топ послуги</CardTitle></CardHeader>
+                    <CardContent className="space-y-2 pt-0">
+                      {analytics.topServices.length === 0 ? (
+                        <p className="text-sm text-gray-400 py-4 text-center">Немає даних за обраний період</p>
+                      ) : analytics.topServices.map((s: any, i: number) => {
+                        const Icon = CATEGORY_ICON[s.category] || Star;
+                        return (
+                          <div key={i} className="flex items-center gap-3 py-1">
+                            <span className="text-xs text-gray-400 w-4 text-right font-bold">{i + 1}</span>
+                            <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                              <Icon className="h-3.5 w-3.5 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{s.name}</p>
+                              <p className="text-xs text-gray-400">{s.bookings} записів</p>
+                            </div>
+                            <span className="text-sm font-bold text-gray-700">{s.revenue.toLocaleString()} ₴</span>
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Daily Revenue Chart (text-based) */}
+                {analytics.dailyRevenue.length > 1 && (
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold text-gray-700">Записи по дням</CardTitle></CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="flex items-end gap-1 h-24 overflow-x-auto">
+                        {analytics.dailyRevenue.map((d: any) => {
+                          const maxB = Math.max(...analytics.dailyRevenue.map((x: any) => x.bookings));
+                          const h = maxB > 0 ? Math.max(4, (d.bookings / maxB) * 80) : 4;
+                          return (
+                            <div key={d.date} className="flex flex-col items-center gap-0.5 flex-1 min-w-[24px]" title={`${d.date}: ${d.bookings} записів, ${d.revenue.toLocaleString()}₴`}>
+                              <div className="w-full rounded-t-sm bg-blue-400 transition-all" style={{ height: `${h}px` }} />
+                              <span className="text-[8px] text-gray-400">{d.date.slice(8)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Specialist Performance */}
+                <Card className="border-0 shadow-sm">
+                  <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold text-gray-700">Ефективність спеціалістів</CardTitle></CardHeader>
+                  <CardContent className="pt-0">
+                    {analytics.specialists.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-4 text-center">Немає спеціалістів</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {analytics.specialists.map((sp: any, i: number) => (
+                          <div key={i} className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: sp.color || "#6366f1" }}>
+                              {sp.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium">{sp.name}</p>
+                              <p className="text-xs text-gray-400">{sp.bookings} записів · {sp.completed} завершено</p>
+                            </div>
+                            <span className="text-sm font-bold text-gray-700 whitespace-nowrap">{(sp.revenue || 0).toLocaleString()} ₴</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </div>
         )}
       </div>
