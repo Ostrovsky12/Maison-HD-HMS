@@ -12,6 +12,7 @@ import BookingsPage from "@/pages/bookings";
 import UnitsPage from "@/pages/units";
 import GuestsPage from "@/pages/guests";
 import HousekeepingPage from "@/pages/housekeeping";
+import OperationsPage from "@/pages/operations";
 import ReportsPage from "@/pages/reports";
 import SettingsPage from "@/pages/settings";
 import ChessPage from "@/pages/chess";
@@ -110,6 +111,7 @@ function Router() {
       <Route path="/guests"><ProtectedRoute component={GuestsPage} /></Route>
       <Route path="/chess"><ProtectedRoute component={ChessPage} /></Route>
       <Route path="/housekeeping"><ProtectedRoute component={HousekeepingPage} /></Route>
+      <Route path="/operations"><ProtectedRoute component={OperationsPage} /></Route>
       <Route path="/invoices"><ProtectedRoute component={InvoicesPage} /></Route>
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
       <Route path="/analytics"><ProtectedRoute component={AnalyticsPage} /></Route>

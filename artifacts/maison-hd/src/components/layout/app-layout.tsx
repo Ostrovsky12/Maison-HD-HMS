@@ -40,6 +40,7 @@ import {
   Bike,
   BedDouble,
   Activity,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +67,7 @@ const allNavItems = [
   { name: "Шахматка", path: "/chess", icon: Grid3X3, roles: null },
   { name: "Номери", path: "/units", icon: KeyRound, roles: null },
   { name: "Гості", path: "/guests", icon: Users, roles: null },
+  { name: "Операції (Internal)", path: "/operations", icon: Layers, roles: null },
   { name: "Прибирання", path: "/housekeeping", icon: Sparkles, roles: null },
   { name: "SPA & Wellness", path: "/spa", icon: Waves, roles: null },
   { name: "Events & Banquet", path: "/events", icon: PartyPopper, roles: null },
