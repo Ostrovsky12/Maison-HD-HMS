@@ -13,7 +13,7 @@ import {
   ArrowLeft, Edit, Tag, Phone, RefreshCw,
   X, Check, Loader2, AlarmClock, BedSingle, UserCheck,
   Wine, Percent, TrendingUp,
-  ListChecks, Route, Hotel, Users2,
+  ListChecks, Route, Hotel, Users2, FileText,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
@@ -79,20 +79,23 @@ const num = (v: any) => Number(v) || 0;
 const fmt = (v: any, d = 0) => num(v).toLocaleString("uk-UA", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 const MAIN_TABS = [
-  { id: "upcoming", label: "Майбутні",   icon: Calendar },
-  { id: "all",      label: "Всі заходи", icon: PartyPopper },
-  { id: "spaces",   label: "Зали",       icon: Building2 },
+  { id: "upcoming",  label: "Майбутні",   icon: Calendar },
+  { id: "all",       label: "Всі заходи", icon: PartyPopper },
+  { id: "calendar",  label: "Календар",   icon: AlarmClock },
+  { id: "spaces",    label: "Зали",       icon: Building2 },
 ] as const;
-type MainTab = "upcoming" | "all" | "spaces";
+type MainTab = "upcoming" | "all" | "calendar" | "spaces";
 
 const DETAIL_TABS = [
-  { id: "finance",  label: "Фінанси",    icon: DollarSign },
-  { id: "services", label: "Послуги",    icon: UtensilsCrossed },
-  { id: "tasks",    label: "Завдання",   icon: ListChecks },
-  { id: "timing",   label: "Таймінг",    icon: Route },
-  { id: "checkins", label: "Розміщення", icon: Hotel },
+  { id: "finance",    label: "Фінанси",    icon: DollarSign },
+  { id: "services",   label: "Послуги",    icon: UtensilsCrossed },
+  { id: "menu",       label: "Меню",       icon: UtensilsCrossed },
+  { id: "tasks",      label: "Завдання",   icon: ListChecks },
+  { id: "timing",     label: "Таймінг",    icon: Route },
+  { id: "checkins",   label: "Розміщення", icon: Hotel },
+  { id: "settlement", label: "Розрахунок", icon: DollarSign },
 ] as const;
-type DetailTab = "finance" | "services" | "tasks" | "timing" | "checkins";
+type DetailTab = "finance" | "services" | "menu" | "tasks" | "timing" | "checkins" | "settlement";
 
 // ══════════════════════════════════════════════════════════════════════════════
 export default function EventsPage() {
@@ -119,6 +122,26 @@ export default function EventsPage() {
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [showAddAlloc, setShowAddAlloc] = useState(false);
   const [showFeesEditor, setShowFeesEditor] = useState(false);
+  const [showLeadForm, setShowLeadForm] = useState(false);
+
+  // Calendar state
+  const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() + 1 }; });
+  const [calEvents, setCalEvents] = useState<any[]>([]);
+  const [calLoading, setCalLoading] = useState(false);
+
+  // Settlement state
+  const [settlement, setSettlement] = useState<any>(null);
+  const [settleModal, setSettleModal] = useState(false);
+  const [settleForm, setSettleForm] = useState({ payment_method: 'cash', notes: '' });
+
+  // Banquet menu state
+  const [menuOptions, setMenuOptions] = useState<any[]>([]);
+  const [restaurantMenuItems, setRestaurantMenuItems] = useState<any[]>([]);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [nMenu, setNMenu] = useState({ name: '', description: '', price: '', quantity: '', unit: 'особа', notes: '' });
+
+  // Lead form state
+  const [nLead, setNLead] = useState({ name: '', clientName: '', clientPhone: '', clientEmail: '', eventType: 'wedding', eventDate: '', guestCount: '50', notes: '' });
 
   const [nEv, setNEv] = useState({ name: "", eventType: "wedding", clientName: "", clientPhone: "", clientEmail: "", eventDate: "", startTime: "14:00", endTime: "23:00", guestCount: "50", spaceId: "", venuePrice: "", notes: "" });
   const [nTim, setNTim] = useState({ timeStart: "", timeEnd: "", title: "", category: "general", assignedTo: "", description: "" });
@@ -164,6 +187,80 @@ export default function EventsPage() {
 
   const selectEvent = (ev: any) => { setDetailTab("finance"); loadDetail(ev.id); };
   const back = () => { setSelected(null); loadList(); };
+
+  // ── Calendar loader ────────────────────────────────────────────────────────
+  const loadCalendar = useCallback(async (year: number, month: number) => {
+    setCalLoading(true);
+    try {
+      const r = await apiFetch(`/calendar/${year}/${month}`);
+      const d = await r.json();
+      setCalEvents(d.events || []);
+    } catch {} finally { setCalLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (mainTab === "calendar") loadCalendar(calMonth.year, calMonth.month);
+  }, [mainTab, calMonth]);
+
+  // ── Settlement loader ──────────────────────────────────────────────────────
+  const loadSettlement = useCallback(async (id: number) => {
+    try {
+      const r = await apiFetch(`/${id}/settlement`);
+      const d = await r.json();
+      setSettlement(d.settlement || null);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (selected && detailTab === "settlement") loadSettlement(selected.id);
+  }, [detailTab, selected]);
+
+  const doSettle = async () => {
+    if (!selected) return;
+    await apiFetch(`/${selected.id}/settle`, { method: 'POST', body: JSON.stringify(settleForm) });
+    setSettleModal(false);
+    await loadDetail(selected.id);
+    loadSettlement(selected.id);
+    toast({ title: "Захід розрахований!" });
+  };
+
+  // ── Banquet menu loader ────────────────────────────────────────────────────
+  const loadMenuOptions = useCallback(async (id: number) => {
+    try {
+      const r = await apiFetch(`/${id}/menu-options`);
+      const d = await r.json();
+      setMenuOptions(d.options || []);
+      setRestaurantMenuItems(d.menuItems || []);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (selected && detailTab === "menu") loadMenuOptions(selected.id);
+  }, [detailTab, selected]);
+
+  const addMenuOption = async () => {
+    if (!selected || !nMenu.name) return;
+    await apiFetch(`/${selected.id}/menu-options`, {
+      method: 'POST',
+      body: JSON.stringify({ name: nMenu.name, description: nMenu.description, price: parseFloat(nMenu.price) || 0, quantity: parseInt(nMenu.quantity) || selected.guestCount, unit: nMenu.unit, notes: nMenu.notes })
+    });
+    setShowAddMenu(false);
+    setNMenu({ name: '', description: '', price: '', quantity: '', unit: 'особа', notes: '' });
+    loadMenuOptions(selected.id);
+    toast({ title: "Позицію меню додано!" });
+  };
+
+  // ── Lead inquiry ──────────────────────────────────────────────────────────
+  const submitLead = async () => {
+    if (!nLead.clientName || !nLead.eventDate) { toast({ title: "Заповніть обов'язкові поля", variant: "destructive" }); return; }
+    const r = await apiFetch("/lead", { method: 'POST', body: JSON.stringify({ ...nLead, guestCount: parseInt(nLead.guestCount) || 50 }) });
+    if (r.ok) {
+      setShowLeadForm(false);
+      setNLead({ name: '', clientName: '', clientPhone: '', clientEmail: '', eventType: 'wedding', eventDate: '', guestCount: '50', notes: '' });
+      loadList();
+      toast({ title: "Запит надіслано!" });
+    }
+  };
 
   const createEvent = async () => {
     if (!nEv.name || !nEv.clientName || !nEv.eventDate) { toast({ title: "Заповніть обов'язкові поля", variant: "destructive" }); return; }
@@ -628,6 +725,253 @@ export default function EventsPage() {
                   </div>
                 </div>
               )}
+
+              {/* ── БАНКЕТНЕ МЕНЮ ──────────────────────────────── */}
+              {detailTab === "menu" && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Банкетне меню</h3>
+                      <p className="text-sm text-gray-500 mt-0.5">{selected.guestCount} гостей · Позицій: {menuOptions.length}</p>
+                    </div>
+                    <Button size="sm" className="bg-purple-600 hover:bg-purple-700 gap-1" onClick={() => setShowAddMenu(true)}>
+                      <Plus className="w-3.5 h-3.5" />Додати позицію
+                    </Button>
+                  </div>
+
+                  {menuOptions.length === 0 ? (
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border p-12 text-center">
+                      <UtensilsCrossed className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                      <p className="text-gray-400">Меню ще не сформовано</p>
+                      <p className="text-xs text-gray-400 mt-1">Додайте страви, пакети та напої для цього заходу</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {menuOptions.map((opt: any) => (
+                        <div key={opt.id} className="bg-white dark:bg-gray-800 rounded-xl border p-4 flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-800">{opt.service_name}</div>
+                            {opt.description && <p className="text-sm text-gray-500 mt-0.5">{opt.description}</p>}
+                            {opt.notes && <p className="text-xs text-gray-400 italic mt-0.5">{opt.notes}</p>}
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="font-semibold text-gray-900">{fmt(opt.price)} ₴ / {opt.unit || 'особа'}</div>
+                            <div className="text-xs text-gray-400">× {opt.quantity} = {fmt(Number(opt.price) * Number(opt.quantity))} ₴</div>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${opt.is_confirmed ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {opt.is_confirmed ? 'Підтверджено' : 'Пропозиція'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="bg-purple-50 rounded-xl border border-purple-200 p-4 flex items-center justify-between">
+                        <span className="font-semibold text-purple-800">Разом по меню:</span>
+                        <span className="text-xl font-bold text-purple-700">
+                          {fmt(menuOptions.reduce((s: number, o: any) => s + Number(o.price) * Number(o.quantity), 0))} ₴
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Restaurant menu quick add */}
+                  {restaurantMenuItems.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border p-4">
+                      <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2"><UtensilsCrossed className="w-4 h-4 text-purple-500" />Обрати з меню ресторану</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                        {restaurantMenuItems.slice(0, 18).map((mi: any) => (
+                          <button key={mi.id} onClick={() => { setNMenu({ name: mi.name, description: mi.description || '', price: String(mi.price), quantity: String(selected.guestCount), unit: 'особа', notes: '' }); setShowAddMenu(true); }}
+                            className="text-left p-2 border border-gray-100 rounded-lg hover:border-purple-200 hover:bg-purple-50 transition-all text-xs">
+                            <div className="font-medium text-gray-800 truncate">{mi.name}</div>
+                            <div className="text-gray-400 mt-0.5">{fmt(mi.price)} ₴ · {mi.category_name || '—'}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add menu option modal */}
+                  {showAddMenu && (
+                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md">
+                        <div className="p-5 border-b flex items-center justify-between">
+                          <h3 className="font-semibold flex items-center gap-2"><UtensilsCrossed className="w-4 h-4 text-purple-600" />Позиція меню</h3>
+                          <button onClick={() => setShowAddMenu(false)}><X className="w-5 h-5 text-gray-400" /></button>
+                        </div>
+                        <div className="p-5 space-y-3">
+                          <div><label className="text-xs text-gray-500 mb-1 block">Назва *</label><Input value={nMenu.name} onChange={e => setNMenu(f => ({ ...f, name: e.target.value }))} placeholder="Банкетне меню «Класик»" /></div>
+                          <div><label className="text-xs text-gray-500 mb-1 block">Опис</label><Input value={nMenu.description} onChange={e => setNMenu(f => ({ ...f, description: e.target.value }))} placeholder="3 страви + салат + десерт" /></div>
+                          <div className="grid grid-cols-3 gap-3">
+                            <div><label className="text-xs text-gray-500 mb-1 block">Ціна (₴)</label><Input type="number" value={nMenu.price} onChange={e => setNMenu(f => ({ ...f, price: e.target.value }))} placeholder="0" /></div>
+                            <div><label className="text-xs text-gray-500 mb-1 block">Кількість</label><Input type="number" value={nMenu.quantity} onChange={e => setNMenu(f => ({ ...f, quantity: e.target.value }))} placeholder={String(selected.guestCount)} /></div>
+                            <div><label className="text-xs text-gray-500 mb-1 block">Одиниця</label>
+                              <select value={nMenu.unit} onChange={e => setNMenu(f => ({ ...f, unit: e.target.value }))} className="w-full h-10 px-2 border rounded-md text-sm">
+                                <option value="особа">особа</option><option value="страва">страва</option><option value="пляшка">пляшка</option><option value="кг">кг</option><option value="порція">порція</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div><label className="text-xs text-gray-500 mb-1 block">Нотатки</label><Input value={nMenu.notes} onChange={e => setNMenu(f => ({ ...f, notes: e.target.value }))} placeholder="Алергени, особливості..." /></div>
+                        </div>
+                        <div className="p-5 border-t flex gap-3">
+                          <Button variant="outline" className="flex-1" onClick={() => setShowAddMenu(false)}>Скасувати</Button>
+                          <Button className="flex-1 bg-purple-600 hover:bg-purple-700" onClick={addMenuOption}>Додати</Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── РОЗРАХУНОК (SETTLEMENT) ────────────────────── */}
+              {detailTab === "settlement" && (
+                <div className="space-y-5">
+                  {/* Settlement summary */}
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border overflow-hidden">
+                    <div className="px-5 py-4 border-b flex items-center justify-between">
+                      <h3 className="font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4 text-green-600" />Фінальний розрахунок</h3>
+                      {selected.status !== 'completed' && (
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700 gap-1" onClick={() => setSettleModal(true)}>
+                          <Check className="w-3.5 h-3.5" />Закрити захід
+                        </Button>
+                      )}
+                    </div>
+                    {settlement ? (
+                      <div className="p-5 space-y-3">
+                        {[
+                          { label: "Оренда залу", value: settlement.venue_price },
+                          { label: "Послуги (підтверджено)", value: settlement.services_subtotal },
+                          { label: `Сервісний збір (${settlement.service_fee_pct}%)`, value: settlement.service_fee_amount },
+                          { label: `Cork fee (${settlement.cork_fee_bottles || 0} пл.)`, value: settlement.cork_fee_total },
+                        ].map(row => (
+                          <div key={row.label} className="flex items-center justify-between text-sm">
+                            <span className="text-gray-600">{row.label}</span>
+                            <span className="font-medium text-gray-800">{fmt(row.value)} ₴</span>
+                          </div>
+                        ))}
+                        <div className="border-t pt-3 flex items-center justify-between">
+                          <span className="font-semibold text-gray-700">Сума до оплати</span>
+                          <span className="text-xl font-bold text-gray-900">{fmt(settlement.grand_total)} ₴</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <div className="text-xs text-gray-500">Депозит</div>
+                            <div className="font-bold text-lg">{fmt(settlement.deposit_amount)} ₴</div>
+                            <div className={`text-xs font-medium ${settlement.deposit_paid ? 'text-green-600' : 'text-red-500'}`}>
+                              {settlement.deposit_paid ? '✓ Отримано' : '✗ Очікується'}
+                            </div>
+                          </div>
+                          <div className={`rounded-lg p-3 ${settlement.balance_due > 0 ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
+                            <div className="text-xs text-gray-500">Залишок до оплати</div>
+                            <div className={`font-bold text-lg ${settlement.balance_due > 0 ? 'text-red-700' : 'text-green-700'}`}>{fmt(settlement.balance_due)} ₴</div>
+                            <div className={`text-xs font-medium ${settlement.balance_due > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                              {settlement.balance_due > 0 ? 'До оплати' : '✓ Розраховано'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center text-gray-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                        Завантаження...
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Contract placeholder */}
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border p-5">
+                    <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-gray-500" />Договір та документи
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        { icon: FileText, label: "Договір оренди", color: "text-blue-600 bg-blue-50" },
+                        { icon: DollarSign, label: "Рахунок-фактура", color: "text-green-600 bg-green-50" },
+                        { icon: UtensilsCrossed, label: "Меню-замовлення", color: "text-purple-600 bg-purple-50" },
+                        { icon: Users, label: "Список гостей", color: "text-amber-600 bg-amber-50" },
+                        { icon: Tag, label: "Кошторис", color: "text-rose-600 bg-rose-50" },
+                        { icon: Check, label: "Акт виконання", color: "text-teal-600 bg-teal-50" },
+                      ].map((doc, i) => (
+                        <button key={i} className={`flex items-center gap-2 p-3 rounded-xl border-2 border-dashed border-gray-200 hover:border-gray-300 transition-colors text-left group`}>
+                          <div className={`p-1.5 rounded-lg ${doc.color}`}><doc.icon className="w-3.5 h-3.5" /></div>
+                          <span className="text-sm text-gray-600 group-hover:text-gray-800">{doc.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-3">Функція генерації документів буде доступна після підключення шаблонів</p>
+                  </div>
+
+                  {/* Staff notes */}
+                  {selected.staff_notes && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                      <h4 className="font-medium text-amber-800 mb-2 text-sm flex items-center gap-1.5"><Tag className="w-3.5 h-3.5" />Внутрішні нотатки</h4>
+                      <p className="text-sm text-amber-700 whitespace-pre-line">{selected.staff_notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Lead Form Modal */}
+        {showLeadForm && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-auto">
+              <div className="p-5 border-b flex items-center justify-between">
+                <h3 className="font-semibold flex items-center gap-2"><PartyPopper className="w-4 h-4 text-purple-600" />Новий запит / Lead</h3>
+                <button onClick={() => setShowLeadForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div><label className="text-xs text-gray-500 mb-1 block">Назва заходу</label><Input value={nLead.name} onChange={e => setNLead(f => ({ ...f, name: e.target.value }))} placeholder="Весілля Іванченків" /></div>
+                <div><label className="text-xs text-gray-500 mb-1 block">Тип заходу</label>
+                  <select value={nLead.eventType} onChange={e => setNLead(f => ({ ...f, eventType: e.target.value }))} className="w-full h-10 px-3 border rounded-md text-sm bg-white dark:bg-gray-800 dark:text-white">
+                    {Object.entries(EVT_TYPE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+                <div><label className="text-xs text-gray-500 mb-1 block">Ім'я клієнта *</label><Input value={nLead.clientName} onChange={e => setNLead(f => ({ ...f, clientName: e.target.value }))} placeholder="Олена Петренко" /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="text-xs text-gray-500 mb-1 block">Телефон</label><Input value={nLead.clientPhone} onChange={e => setNLead(f => ({ ...f, clientPhone: e.target.value }))} placeholder="+380..." /></div>
+                  <div><label className="text-xs text-gray-500 mb-1 block">Email</label><Input type="email" value={nLead.clientEmail} onChange={e => setNLead(f => ({ ...f, clientEmail: e.target.value }))} placeholder="email@..." /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="text-xs text-gray-500 mb-1 block">Дата заходу *</label><Input type="date" value={nLead.eventDate} onChange={e => setNLead(f => ({ ...f, eventDate: e.target.value }))} /></div>
+                  <div><label className="text-xs text-gray-500 mb-1 block">Кількість гостей</label><Input type="number" value={nLead.guestCount} onChange={e => setNLead(f => ({ ...f, guestCount: e.target.value }))} min={1} /></div>
+                </div>
+                <div><label className="text-xs text-gray-500 mb-1 block">Побажання</label><Textarea value={nLead.notes} onChange={e => setNLead(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Особливі вимоги..." /></div>
+              </div>
+              <div className="p-5 border-t flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={() => setShowLeadForm(false)}>Скасувати</Button>
+                <Button className="flex-1 bg-purple-600 hover:bg-purple-700" onClick={submitLead}>Зберегти запит</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settle Modal */}
+        {settleModal && settlement && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm">
+              <div className="p-5 border-b flex items-center justify-between">
+                <h3 className="font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4 text-green-600" />Закрити захід</h3>
+                <button onClick={() => setSettleModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div className="bg-green-50 rounded-lg p-3 text-center">
+                  <div className="text-sm text-gray-500">До оплати</div>
+                  <div className="text-2xl font-bold text-green-700">{fmt(settlement.balance_due)} ₴</div>
+                </div>
+                <div><label className="text-xs text-gray-500 mb-1 block">Спосіб оплати</label>
+                  <select value={settleForm.payment_method} onChange={e => setSettleForm(f => ({ ...f, payment_method: e.target.value }))} className="w-full h-10 px-3 border rounded-md text-sm">
+                    <option value="cash">Готівка</option>
+                    <option value="card">Картка</option>
+                    <option value="bank_transfer">Банківський переказ</option>
+                    <option value="mixed">Змішана оплата</option>
+                  </select>
+                </div>
+                <div><label className="text-xs text-gray-500 mb-1 block">Нотатки</label><Input value={settleForm.notes} onChange={e => setSettleForm(f => ({ ...f, notes: e.target.value }))} placeholder="Додаткова інформація..." /></div>
+              </div>
+              <div className="p-5 border-t flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={() => setSettleModal(false)}>Скасувати</Button>
+                <Button className="flex-1 bg-green-600 hover:bg-green-700" onClick={doSettle}>Підтвердити оплату</Button>
+              </div>
             </div>
           </div>
         )}
@@ -677,7 +1021,7 @@ export default function EventsPage() {
                 </div>
               )}
 
-              {mainTab !== "spaces" && (
+              {(mainTab === "upcoming" || mainTab === "all") && (
                 <div className="flex flex-wrap gap-2 bg-white dark:bg-gray-800 border rounded-xl p-3">
                   <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="h-9 px-3 border rounded-md text-sm bg-white dark:bg-gray-800 dark:text-white">
                     <option value="all">Всі статуси</option>
@@ -687,11 +1031,14 @@ export default function EventsPage() {
                     <option value="all">Всі типи</option>
                     {Object.entries(EVT_TYPE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
-                  <span className="ml-auto text-sm text-gray-400 self-center">{displayList.length} заходів</span>
+                  <button onClick={() => setShowLeadForm(true)} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200 transition-colors">
+                    <Plus className="w-3.5 h-3.5" />Запит
+                  </button>
+                  <span className="text-sm text-gray-400 self-center">{displayList.length} заходів</span>
                 </div>
               )}
 
-              {mainTab !== "spaces" && (
+              {(mainTab === "upcoming" || mainTab === "all") && (
                 <div className="space-y-3">
                   {loading ? (
                     <div className="flex items-center justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-purple-600" /></div>
@@ -728,6 +1075,81 @@ export default function EventsPage() {
                   })}
                 </div>
               )}
+
+              {/* ── CALENDAR VIEW ── */}
+              {mainTab === "calendar" && (() => {
+                const MONTHS_UA = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+                const DAYS_UA = ["Пн","Вт","Ср","Чт","Пт","Сб","Нд"];
+                const firstDay = new Date(calMonth.year, calMonth.month - 1, 1);
+                const daysInMonth = new Date(calMonth.year, calMonth.month, 0).getDate();
+                const startWeekday = (firstDay.getDay() + 6) % 7; // Mon = 0
+                const cells: (number | null)[] = [...Array(startWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+                while (cells.length % 7 !== 0) cells.push(null);
+                const evByDay: Record<number, any[]> = {};
+                calEvents.forEach(ev => {
+                  const d = new Date(ev.event_date + "T12:00:00").getDate();
+                  if (!evByDay[d]) evByDay[d] = [];
+                  evByDay[d].push(ev);
+                });
+                const today = new Date(); const isCurrentMonth = today.getFullYear() === calMonth.year && today.getMonth() + 1 === calMonth.month;
+                const prevMonth = () => setCalMonth(m => m.month === 1 ? { year: m.year - 1, month: 12 } : { year: m.year, month: m.month - 1 });
+                const nextMonth = () => setCalMonth(m => m.month === 12 ? { year: m.year + 1, month: 1 } : { year: m.year, month: m.month + 1 });
+                return (
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl border overflow-hidden">
+                    {/* Calendar header */}
+                    <div className="px-4 py-3 flex items-center justify-between border-b">
+                      <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><ArrowLeft className="w-4 h-4" /></button>
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-gray-900">{MONTHS_UA[calMonth.month - 1]} {calMonth.year}</span>
+                        {calLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-500" />}
+                      </div>
+                      <button onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                    </div>
+                    {/* Day headers */}
+                    <div className="grid grid-cols-7 border-b">
+                      {DAYS_UA.map(d => (
+                        <div key={d} className="py-2 text-center text-xs font-medium text-gray-400">{d}</div>
+                      ))}
+                    </div>
+                    {/* Calendar grid */}
+                    <div className="grid grid-cols-7">
+                      {cells.map((day, i) => {
+                        const isToday = isCurrentMonth && day === today.getDate();
+                        const dayEvents = day ? evByDay[day] || [] : [];
+                        return (
+                          <div key={i} className={`min-h-[90px] border-r border-b p-1.5 ${!day ? 'bg-gray-50' : isToday ? 'bg-purple-50' : 'hover:bg-gray-50'} ${i % 7 === 6 ? 'border-r-0' : ''}`}>
+                            {day && (
+                              <>
+                                <div className={`w-6 h-6 flex items-center justify-center rounded-full text-sm mb-1 font-medium ${isToday ? 'bg-purple-600 text-white' : 'text-gray-700'}`}>{day}</div>
+                                <div className="space-y-0.5">
+                                  {dayEvents.slice(0, 2).map((ev: any) => {
+                                    const meta = EVT_TYPE[ev.event_type] || EVT_TYPE.other;
+                                    return (
+                                      <button key={ev.id} onClick={() => selectEvent({ ...ev, eventDate: ev.event_date, eventType: ev.event_type, guestCount: ev.guest_count, startTime: ev.start_time, endTime: ev.end_time, clientName: ev.client_name, spaceName: ev.space_name, totalPrice: ev.grand_total })}
+                                        className={`w-full text-left px-1.5 py-0.5 rounded text-xs truncate font-medium ${meta.bg} ${meta.color}`}>
+                                        {ev.name}
+                                      </button>
+                                    );
+                                  })}
+                                  {dayEvents.length > 2 && <div className="text-xs text-gray-400 pl-1">+{dayEvents.length - 2} ще</div>}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Legend */}
+                    <div className="px-4 py-2 border-t flex flex-wrap gap-2">
+                      {Object.entries(EVT_TYPE).map(([k, v]) => (
+                        <div key={k} className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${v.bg} ${v.color}`}>
+                          <v.icon className="w-3 h-3" />{v.label}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {mainTab === "spaces" && (
                 <div className="grid md:grid-cols-2 gap-4">

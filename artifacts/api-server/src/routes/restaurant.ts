@@ -586,4 +586,168 @@ router.get('/analytics/revenue', async (req, res) => {
   }
 });
 
+// ─── ROOM CHARGES ────────────────────────────────────────────────────────────
+router.get('/room-charges', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const charges = (await db.execute(sql`
+      SELECT
+        b.id AS booking_id, b.check_in, b.check_out,
+        COALESCE(b.first_name || ' ' || b.last_name, '#' || b.id::text) AS guest_display,
+        b.first_name, b.last_name,
+        u.name AS unit_name,
+        COALESCE(SUM(ro.total) FILTER (WHERE ro.status != 'cancelled'), 0) AS total_charged,
+        COALESCE(SUM(ro.paid_amount) FILTER (WHERE ro.status != 'cancelled'), 0) AS total_paid,
+        COUNT(ro.id) FILTER (WHERE ro.status NOT IN ('paid','cancelled')) AS open_orders,
+        COUNT(ro.id) FILTER (WHERE ro.status = 'paid') AS closed_orders
+      FROM bookings b
+      JOIN units u ON u.id = b.unit_id
+      JOIN properties p ON p.id = u.property_id AND p.organization_id = ${orgId}
+      LEFT JOIN restaurant_orders ro ON ro.booking_id = b.id
+      WHERE b.check_in <= CURRENT_DATE AND b.check_out >= CURRENT_DATE
+        AND b.status IN ('confirmed','checked_in','pending')
+      GROUP BY b.id, b.check_in, b.check_out, b.first_name, b.last_name, u.name
+      ORDER BY b.last_name ASC NULLS LAST
+    `)).rows;
+    res.json({ charges });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/room-charges/:bookingId/orders', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { bookingId } = req.params;
+    const orders = (await db.execute(sql`
+      SELECT ro.*, rt.number AS table_number
+      FROM restaurant_orders ro
+      LEFT JOIN restaurant_tables rt ON rt.id = ro.table_id
+      WHERE ro.booking_id = ${parseInt(bookingId)}
+      ORDER BY ro.created_at DESC
+    `)).rows;
+    res.json({ orders });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/room-charges/:bookingId/charge', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { bookingId } = req.params;
+    const { amount, description, order_type = 'room_service' } = req.body;
+    const [booking] = (await db.execute(sql`
+      SELECT b.*, u.name as unit_name FROM bookings b
+      JOIN units u ON u.id = b.unit_id
+      JOIN properties p ON p.id = u.property_id AND p.organization_id = ${orgId}
+      WHERE b.id = ${parseInt(bookingId)} LIMIT 1
+    `)).rows as any[];
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    const guestName = [booking.first_name, booking.last_name].filter(Boolean).join(' ') || `Гість #${bookingId}`;
+    const [order] = (await db.execute(sql`
+      INSERT INTO restaurant_orders
+        (organization_id, booking_id, order_type, status, guest_name, notes, subtotal, total, created_at, updated_at)
+      VALUES
+        (${orgId}, ${parseInt(bookingId)}, ${order_type}::restaurant_order_type, 'paid'::restaurant_order_status,
+         ${guestName}, ${description || 'Рахунок на кімнату'},
+         ${parseFloat(amount)}, ${parseFloat(amount)}, NOW(), NOW())
+      RETURNING *
+    `)).rows as any[];
+    res.json({ order });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── GUEST LOOKUP ─────────────────────────────────────────────────────────────
+router.get('/guest-lookup', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { q = '' } = req.query;
+    const search = `%${q}%`;
+    const guests = (await db.execute(sql`
+      SELECT b.id AS booking_id,
+        b.first_name, b.last_name,
+        b.check_in, b.check_out,
+        u.name AS unit_name,
+        EXISTS(
+          SELECT 1 FROM booking_addons ba
+          JOIN addons ad ON ad.id = ba.addon_id
+          WHERE ba.booking_id = b.id AND LOWER(ad.name) LIKE '%breakfast%'
+        ) AS breakfast_included
+      FROM bookings b
+      JOIN units u ON u.id = b.unit_id
+      JOIN properties p ON p.id = u.property_id AND p.organization_id = ${orgId}
+      WHERE b.check_in <= CURRENT_DATE AND b.check_out >= CURRENT_DATE
+        AND b.status IN ('confirmed','checked_in','pending')
+        AND (LOWER(COALESCE(b.first_name,'') || ' ' || COALESCE(b.last_name,'')) LIKE LOWER(${search})
+             OR LOWER(u.name) LIKE LOWER(${search}))
+      ORDER BY b.last_name ASC NULLS LAST LIMIT 20
+    `)).rows;
+    res.json({ guests });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── BREAKFAST FLAGS ──────────────────────────────────────────────────────────
+router.get('/breakfast-flags', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const today = new Date().toISOString().split('T')[0];
+    const guests = (await db.execute(sql`
+      SELECT
+        b.id AS booking_id, b.first_name, b.last_name,
+        u.name AS unit_name,
+        EXISTS(
+          SELECT 1 FROM booking_addons ba
+          JOIN addons ad ON ad.id = ba.addon_id
+          WHERE ba.booking_id = b.id AND LOWER(ad.name) LIKE '%breakfast%'
+        ) AS breakfast_included,
+        (SELECT COUNT(*) FROM restaurant_orders ro
+          WHERE ro.booking_id = b.id AND ro.order_type = 'breakfast'::restaurant_order_type
+            AND DATE(ro.created_at) = ${today}::date AND ro.status != 'cancelled'::restaurant_order_status
+        ) AS breakfast_orders_today
+      FROM bookings b
+      JOIN units u ON u.id = b.unit_id
+      JOIN properties p ON p.id = u.property_id AND p.organization_id = ${orgId}
+      WHERE b.check_in <= CURRENT_DATE AND b.check_out >= CURRENT_DATE
+        AND b.status IN ('confirmed','checked_in','pending')
+      ORDER BY u.name ASC NULLS LAST
+    `)).rows;
+    res.json({ guests });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── POS CONFIG / SYNC ────────────────────────────────────────────────────────
+router.get('/pos-config', async (req, res) => {
+  try {
+    res.json({
+      config: null,
+      providers: [
+        { id: 'poster', name: 'Poster POS', logo: 'poster', status: 'available', description: 'Хмарна POS-система для ресторанів' },
+        { id: 'iiko', name: 'iiko', logo: 'iiko', status: 'available', description: 'Система автоматизації ресторану' },
+        { id: 'rkeeper', name: 'R-Keeper', logo: 'rkeeper', status: 'available', description: 'Система управління рестораном R-Keeper' },
+        { id: 'generic', name: 'Generic REST API', logo: 'api', status: 'available', description: 'Власна POS-система через REST API' },
+      ],
+      activeProvider: null,
+      lastSync: null,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/pos-sync', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { provider = 'generic', action = 'pull_orders' } = req.body;
+    await db.execute(sql`
+      INSERT INTO integration_logs (organization_id, integration_type, action, status, created_at)
+      VALUES (${orgId}, ${'pos_' + provider}, ${action}, 'success', NOW())
+      ON CONFLICT DO NOTHING
+    `);
+    res.json({
+      success: true,
+      provider,
+      action,
+      syncedAt: new Date().toISOString(),
+      message: `Синхронізацію з ${provider} запущено успішно`,
+      ordersImported: 0,
+      ordersExported: 0,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

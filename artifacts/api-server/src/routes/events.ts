@@ -512,4 +512,142 @@ router.get("/:id/available-units", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: "Failed units: " + e.message }); }
 });
 
+// ─── SETTLEMENT ──────────────────────────────────────────────────────────────
+router.get("/:id/settlement", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const [evt] = (await db.execute(sql`
+      SELECT e.*, s.name AS space_name
+      FROM events e
+      LEFT JOIN event_spaces s ON s.id = e.event_space_id
+      WHERE e.id = ${eventId} AND e.organization_id = ${orgId}
+    `)).rows as any[];
+    if (!evt) return res.status(404).json({ error: "Event not found" });
+
+    const settlement = {
+      venue_price: Number(evt.venue_price) || 0,
+      services_subtotal: Number(evt.services_price) || 0,
+      service_fee_pct: Number(evt.service_fee_pct) || 0,
+      service_fee_amount: Number(evt.service_fee_amount) || 0,
+      cork_fee_total: Number(evt.cork_fee_total) || 0,
+      cork_fee_bottles: Number(evt.cork_fee_bottles) || 0,
+      subtotal: Number(evt.subtotal) || 0,
+      grand_total: Number(evt.grand_total) || 0,
+      deposit_amount: Number(evt.deposit_amount) || 0,
+      deposit_paid: Boolean(evt.deposit_paid),
+      balance_due: Number(evt.balance_due) || 0,
+      status: evt.status,
+    };
+    res.json({ settlement, event: evt });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/:id/settle", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const { payment_method = "cash", notes = "" } = req.body;
+    await db.execute(sql`
+      UPDATE events SET
+        status = 'completed'::event_status,
+        deposit_paid = TRUE,
+        staff_notes = COALESCE(staff_notes, '') || ${'\nОплата: ' + payment_method + (notes ? '. ' + notes : '') + ' [' + new Date().toISOString() + ']'},
+        updated_at = NOW()
+      WHERE id = ${eventId} AND organization_id = ${orgId}
+    `);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── BANQUET MENU OPTIONS ─────────────────────────────────────────────────────
+router.get("/:id/menu-options", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const options = (await db.execute(sql`
+      SELECT es.* FROM event_services es
+      WHERE es.event_id = ${eventId} AND es.category = 'catering'::event_service_category
+      ORDER BY es.created_at ASC
+    `)).rows;
+    const menuItems = (await db.execute(sql`
+      SELECT mi.id, mi.name, mi.description, mi.price, mc.name AS category_name
+      FROM menu_items mi
+      LEFT JOIN menu_categories mc ON mc.id = mi.category_id
+      WHERE mi.organization_id = ${orgId} AND mi.is_available = TRUE
+      ORDER BY mc.name, mi.name LIMIT 100
+    `)).rows;
+    res.json({ options, menuItems });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/:id/menu-options", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const eventId = parseInt(req.params.id);
+    const { name, description = "", price = 0, quantity = 1, notes = "" } = req.body;
+    const unitPrice = parseFloat(price) || 0;
+    const qty = parseInt(quantity) || 1;
+    const [svc] = (await db.execute(sql`
+      INSERT INTO event_services
+        (event_id, organization_id, category, name, description, vendor_name, unit_price, quantity, total_price, notes, is_confirmed, created_at)
+      VALUES
+        (${eventId}, ${orgId}, 'catering'::event_service_category,
+         ${name || 'Банкетне меню'}, ${description}, ${'Власна кухня'},
+         ${unitPrice}, ${qty}, ${unitPrice * qty}, ${notes}, FALSE, NOW())
+      RETURNING *
+    `)).rows;
+    res.json({ service: svc });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── EVENT CALENDAR DATA ──────────────────────────────────────────────────────
+router.get("/calendar/:year/:month", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const year = parseInt(req.params.year);
+    const month = parseInt(req.params.month);
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const nextMonth = month === 12 ? `${year+1}-01-01` : `${year}-${String(month+1).padStart(2,'0')}-01`;
+    const events = (await db.execute(sql`
+      SELECT e.id, e.name, e.event_date, e.event_type, e.status,
+        e.client_name, e.guest_count, e.grand_total, e.start_time, e.end_time,
+        s.name AS space_name
+      FROM events e
+      LEFT JOIN event_spaces s ON s.id = e.event_space_id
+      WHERE e.organization_id = ${orgId}
+        AND e.event_date >= ${startDate}::date
+        AND e.event_date < ${nextMonth}::date
+      ORDER BY e.event_date ASC, e.start_time ASC
+    `)).rows;
+    res.json({ events });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── LEAD INQUIRY ─────────────────────────────────────────────────────────────
+router.post("/lead", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const {
+      name, client_name, client_phone, client_email,
+      event_type = "private", event_date, guest_count = 1,
+      event_space_id, notes = ""
+    } = req.body;
+    const [evt] = (await db.execute(sql`
+      INSERT INTO events
+        (organization_id, name, client_name, client_phone, client_email,
+         event_type, event_date, start_time, end_time, guest_count,
+         status, notes, created_at, updated_at)
+      VALUES
+        (${orgId}, ${name || client_name + ' – ' + event_type}, ${client_name},
+         ${client_phone || ''}, ${client_email || ''},
+         ${event_type}::event_type,
+         ${event_date}::date, '12:00', '18:00', ${parseInt(guest_count)},
+         'inquiry'::event_status, ${notes}, NOW(), NOW())
+      RETURNING *
+    `)).rows;
+    res.json({ event: evt });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

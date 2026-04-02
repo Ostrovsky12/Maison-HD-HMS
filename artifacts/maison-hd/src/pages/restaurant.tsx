@@ -5,7 +5,9 @@ import {
   Plus, X, ChefHat, Beer, Coffee, Star, Clock, Users, Wifi,
   CheckCircle, AlertTriangle, RefreshCw, Home, Truck, Sunrise,
   PartyPopper, Building2, CreditCard, Search, ChevronDown,
-  Flame, Zap, ArrowRight, Circle, Edit2, Trash2, Phone
+  Flame, Zap, ArrowRight, Circle, Edit2, Trash2, Phone,
+  Hotel, Settings, Link2, Power, BedDouble, Receipt, CloudUpload,
+  ChevronRight, Package, Loader2, Banknote, FileText, Tag
 } from 'lucide-react';
 
 const BASE = '/api';
@@ -956,10 +958,453 @@ function AnalyticsTab() {
   );
 }
 
+// ─── ROOM CHARGES TAB ─────────────────────────────────────────────────────────
+function RoomChargesTab() {
+  const [charges, setCharges] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<any>(null);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [breakfastGuests, setBreakfastGuests] = useState<any[]>([]);
+  const [chargeForm, setChargeForm] = useState({ amount: '', description: '', order_type: 'room_service' });
+  const [chargeModal, setChargeModal] = useState(false);
+  const [search, setSearch] = useState('');
+  const [bfMode, setBfMode] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/restaurant/room-charges').then(r => r.json());
+      setCharges(r.charges || []);
+    } catch {} finally { setLoading(false); }
+  };
+  const loadBreakfast = async () => {
+    try {
+      const r = await apiFetch('/restaurant/breakfast-flags').then(r => r.json());
+      setBreakfastGuests(r.guests || []);
+    } catch {}
+  };
+  const loadOrders = async (bookingId: number) => {
+    setOrdersLoading(true);
+    try {
+      const r = await apiFetch(`/restaurant/room-charges/${bookingId}/orders`).then(r => r.json());
+      setOrders(r.orders || []);
+    } catch {} finally { setOrdersLoading(false); }
+  };
+  const selectGuest = (g: any) => { setSelected(g); loadOrders(g.booking_id); };
+  const addCharge = async () => {
+    if (!chargeForm.amount || !selected) return;
+    await apiFetch(`/restaurant/room-charges/${selected.booking_id}/charge`, {
+      method: 'POST', body: JSON.stringify(chargeForm)
+    });
+    setChargeModal(false); setChargeForm({ amount: '', description: '', order_type: 'room_service' });
+    await load(); await loadOrders(selected.booking_id);
+    const c = charges.find(x => x.booking_id === selected.booking_id);
+    if (c) setSelected(c);
+  };
+
+  useEffect(() => { load(); loadBreakfast(); }, []);
+
+  const filtered = charges.filter(g =>
+    !search || `${g.first_name} ${g.last_name} ${g.unit_name} ${g.reservation_number}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setBfMode(false)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!bfMode ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            <BedDouble className="w-3.5 h-3.5 inline mr-1" />Рахунки до кімнати
+          </button>
+          <button onClick={() => setBfMode(true)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${bfMode ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            <Sunrise className="w-3.5 h-3.5 inline mr-1" />Сніданки
+          </button>
+        </div>
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Пошук гостя..." className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg" />
+        </div>
+      </div>
+
+      {bfMode ? (
+        /* ── Breakfast Flags View ── */
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+            <Sunrise className="w-4 h-4 text-amber-600" />
+            <span className="font-semibold text-gray-800">Сніданки на сьогодні</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left font-medium text-gray-500">Гість</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-500">Кімната</th>
+                <th className="px-4 py-2 text-center font-medium text-gray-500">Включено</th>
+                <th className="px-4 py-2 text-center font-medium text-gray-500">Замовлень сьогодні</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {breakfastGuests.map((g: any) => (
+                <tr key={g.booking_id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-2.5 font-medium text-gray-800">{g.first_name} {g.last_name}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{g.unit_name || '—'}</td>
+                  <td className="px-4 py-2.5 text-center">
+                    {g.breakfast_included ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                        <CheckCircle className="w-3 h-3" />Включено
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">Без сніданку</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    <span className={`text-sm font-semibold ${Number(g.breakfast_orders_today) > 0 ? 'text-green-700' : 'text-gray-400'}`}>
+                      {g.breakfast_orders_today || 0}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {breakfastGuests.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Немає проживаючих гостей</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        /* ── Room Charges View ── */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Guest list */}
+          <div className="lg:col-span-1 bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <span className="font-semibold text-gray-800 text-sm">Проживаючі гості ({filtered.length})</span>
+              <button onClick={load} className="text-gray-400 hover:text-gray-600 transition-colors"><RefreshCw className="w-3.5 h-3.5" /></button>
+            </div>
+            {loading ? (
+              <div className="p-8 text-center"><Loader2 className="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
+            ) : filtered.length === 0 ? (
+              <div className="p-8 text-center text-gray-400 text-sm">Немає проживаючих гостей</div>
+            ) : (
+              <div className="divide-y divide-gray-50 max-h-[60vh] overflow-y-auto">
+                {filtered.map((g: any) => (
+                  <button key={g.booking_id} onClick={() => selectGuest(g)}
+                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${selected?.booking_id === g.booking_id ? 'bg-indigo-50 border-l-2 border-indigo-500' : ''}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-medium text-gray-800 text-sm">{g.first_name} {g.last_name}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">{g.unit_name || g.reservation_number}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-sm font-semibold text-gray-900">{Number(g.total_charged).toLocaleString('uk-UA')} ₴</div>
+                        {Number(g.open_orders) > 0 && (
+                          <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{g.open_orders} відкр.</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Guest detail */}
+          <div className="lg:col-span-2">
+            {selected ? (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-gray-800">{selected.first_name} {selected.last_name}</div>
+                    <div className="text-xs text-gray-500">{selected.unit_name} · #{selected.reservation_number}</div>
+                  </div>
+                  <button onClick={() => setChargeModal(true)} className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                    <Plus className="w-3.5 h-3.5" />Нарахування
+                  </button>
+                </div>
+
+                {/* Summary bar */}
+                <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 grid grid-cols-3 gap-3 text-center">
+                  <div>
+                    <div className="text-lg font-bold text-gray-900">{Number(selected.total_charged).toLocaleString('uk-UA')} ₴</div>
+                    <div className="text-xs text-gray-500">Нараховано</div>
+                  </div>
+                  <div>
+                    <div className="text-lg font-bold text-green-700">{Number(selected.total_paid).toLocaleString('uk-UA')} ₴</div>
+                    <div className="text-xs text-gray-500">Оплачено</div>
+                  </div>
+                  <div>
+                    <div className="text-lg font-bold text-red-600">{(Number(selected.total_charged) - Number(selected.total_paid)).toLocaleString('uk-UA')} ₴</div>
+                    <div className="text-xs text-gray-500">До оплати</div>
+                  </div>
+                </div>
+
+                {/* Orders list */}
+                {ordersLoading ? (
+                  <div className="p-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-gray-300 mx-auto" /></div>
+                ) : (
+                  <div className="max-h-[50vh] overflow-y-auto divide-y divide-gray-50">
+                    {orders.length === 0 ? (
+                      <div className="p-8 text-center text-gray-400 text-sm">Немає замовлень на кімнату</div>
+                    ) : orders.map((o: any) => (
+                      <div key={o.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`p-1.5 rounded-lg ${ORDER_TYPE_ICONS[o.order_type as OrderType] ? 'bg-indigo-50 text-indigo-600' : 'bg-gray-50 text-gray-400'}`}>
+                            {(() => { const I = ORDER_TYPE_ICONS[o.order_type as OrderType]; return I ? <I className="w-3.5 h-3.5" /> : <Receipt className="w-3.5 h-3.5" />; })()}
+                          </div>
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">{ORDER_TYPE_LABELS[o.order_type as OrderType] || o.order_type}</div>
+                            <div className="text-xs text-gray-400">{o.notes || '—'} · {new Date(o.created_at).toLocaleDateString('uk-UA')}</div>
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <div className="text-sm font-semibold text-gray-900">{Number(o.total).toLocaleString('uk-UA')} ₴</div>
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${ORDER_STATUS_COLORS[o.status as OrderStatus] || 'bg-gray-100 text-gray-500'}`}>
+                            {ORDER_STATUS_LABELS[o.status as OrderStatus] || o.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+                <Hotel className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+                <p className="text-gray-400 text-sm">Оберіть гостя зліва</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Charge Modal */}
+      {chargeModal && selected && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-900">Нарахування на кімнату</h3>
+              <button onClick={() => setChargeModal(false)}><X className="w-4 h-4 text-gray-400" /></button>
+            </div>
+            <div className="text-sm text-gray-600 mb-4 p-2 bg-gray-50 rounded-lg">
+              {selected.first_name} {selected.last_name} · {selected.unit_name || selected.reservation_number}
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Тип нарахування</label>
+                <select value={chargeForm.order_type} onChange={e => setChargeForm(f => ({ ...f, order_type: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="room_service">Room Service</option>
+                  <option value="breakfast">Сніданок</option>
+                  <option value="banquet">Банкет</option>
+                  <option value="bar">Бар</option>
+                  <option value="dine_in">Ресторан</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Сума (₴)</label>
+                <input type="number" value={chargeForm.amount} onChange={e => setChargeForm(f => ({ ...f, amount: e.target.value }))}
+                  placeholder="0.00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Опис</label>
+                <input value={chargeForm.description} onChange={e => setChargeForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="Опис нарахування..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setChargeModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm font-medium">Скасувати</button>
+              <button onClick={addCharge} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors">Нарахувати</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── POS INTEGRATION TAB ────────────────────────────────────────────────────
+function PosIntegrationTab() {
+  const [config, setConfig] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<any>(null);
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
+  const [configForm, setConfigForm] = useState({ api_url: '', api_key: '', location_id: '' });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/restaurant/pos-config').then(r => r.json());
+      setConfig(r);
+      setActiveProvider(r.activeProvider);
+      if (r.config) setConfigForm({ api_url: r.config.api_url || '', api_key: '', location_id: r.config.location_id || '' });
+    } catch {} finally { setLoading(false); }
+  };
+
+  const runSync = async (action: string) => {
+    setSyncing(true); setSyncResult(null);
+    try {
+      const r = await apiFetch('/restaurant/pos-sync', {
+        method: 'POST', body: JSON.stringify({ provider: activeProvider || 'generic', action })
+      }).then(r => r.json());
+      setSyncResult(r);
+    } catch (e: any) {
+      setSyncResult({ success: false, message: e.message });
+    } finally { setSyncing(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const providers: any[] = config?.providers || [];
+
+  const PROVIDER_COLORS: Record<string, string> = {
+    poster: 'from-orange-400 to-orange-600',
+    iiko: 'from-blue-500 to-blue-700',
+    rkeeper: 'from-red-500 to-red-700',
+    generic: 'from-gray-500 to-gray-700',
+  };
+
+  if (loading) return <div className="p-12 text-center"><Loader2 className="w-6 h-6 animate-spin text-gray-300 mx-auto" /></div>;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-6 text-white">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="p-2 bg-white/10 rounded-xl"><Link2 className="w-5 h-5" /></div>
+          <div>
+            <h2 className="font-bold text-lg">POS Integration Layer</h2>
+            <p className="text-slate-300 text-sm">Універсальний адаптер для підключення POS-системи</p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+          {[
+            { label: 'Room Charge', icon: Hotel, status: 'active' },
+            { label: 'Breakfast Flag', icon: Sunrise, status: 'active' },
+            { label: 'Guest Map', icon: Users, status: 'active' },
+            { label: 'POS Sync', icon: CloudUpload, status: activeProvider ? 'active' : 'idle' },
+          ].map((f, i) => (
+            <div key={i} className="bg-white/10 rounded-xl p-3">
+              <f.icon className="w-4 h-4 mx-auto mb-1 opacity-80" />
+              <div className="text-xs font-medium">{f.label}</div>
+              <div className={`text-xs mt-0.5 ${f.status === 'active' ? 'text-green-300' : 'text-slate-400'}`}>
+                {f.status === 'active' ? '● Активний' : '○ Налаштувати'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Provider Selection */}
+      <div>
+        <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2"><Package className="w-4 h-4 text-gray-500" />Постачальники POS</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {providers.map((p: any) => (
+            <button key={p.id} onClick={() => setActiveProvider(p.id === activeProvider ? null : p.id)}
+              className={`relative p-4 rounded-xl border-2 text-left transition-all ${activeProvider === p.id ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+              {activeProvider === p.id && (
+                <div className="absolute top-2 right-2 w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-3 h-3 text-white" />
+                </div>
+              )}
+              <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${PROVIDER_COLORS[p.id] || 'from-gray-400 to-gray-600'} flex items-center justify-center mb-2`}>
+                <Link2 className="w-4 h-4 text-white" />
+              </div>
+              <div className="font-medium text-gray-800 text-sm">{p.name}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{p.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Configuration (when a provider is selected) */}
+      {activeProvider && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <Settings className="w-4 h-4 text-gray-500" />Конфігурація: {providers.find(p => p.id === activeProvider)?.name}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">API URL</label>
+              <input value={configForm.api_url} onChange={e => setConfigForm(f => ({ ...f, api_url: e.target.value }))}
+                placeholder="https://joinposter.com/api" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">API Key / Token</label>
+              <input type="password" value={configForm.api_key} onChange={e => setConfigForm(f => ({ ...f, api_key: e.target.value }))}
+                placeholder="••••••••••••" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Location / Spot ID</label>
+              <input value={configForm.location_id} onChange={e => setConfigForm(f => ({ ...f, location_id: e.target.value }))}
+                placeholder="1" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <button className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors">
+            Зберегти конфігурацію
+          </button>
+        </div>
+      )}
+
+      {/* Sync Actions */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+          <CloudUpload className="w-4 h-4 text-gray-500" />Синхронізація
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+          {[
+            { action: 'pull_orders', label: 'Завантажити замовлення', icon: ArrowRight },
+            { action: 'push_menu', label: 'Вивантажити меню', icon: CloudUpload },
+            { action: 'pull_menu', label: 'Завантажити меню', icon: ArrowRight },
+            { action: 'sync_all', label: 'Повна синхронізація', icon: RefreshCw },
+          ].map(a => (
+            <button key={a.action} onClick={() => runSync(a.action)} disabled={syncing}
+              className="flex items-center gap-1.5 justify-center px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50">
+              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <a.icon className="w-3.5 h-3.5" />}
+              <span className="text-xs">{a.label}</span>
+            </button>
+          ))}
+        </div>
+        {syncResult && (
+          <div className={`p-3 rounded-lg text-sm flex items-start gap-2 ${syncResult.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+            {syncResult.success ? <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+            <div>
+              <div className="font-medium">{syncResult.success ? 'Успішно' : 'Помилка'}</div>
+              <div>{syncResult.message}</div>
+              {syncResult.syncedAt && <div className="text-xs mt-1 opacity-70">{new Date(syncResult.syncedAt).toLocaleString('uk-UA')}</div>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Architecture Info */}
+      <div className="bg-slate-50 rounded-xl border border-slate-200 p-5">
+        <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+          <FileText className="w-4 h-4" />Архітектура інтеграції
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+          {[
+            { title: 'POS Adapter Layer', items: ['Generic REST interface', 'Poster API module', 'iiko connector', 'Webhook receiver'] },
+            { title: 'HMS Bridge', items: ['Room charge mapping', 'Guest identity sync', 'Breakfast flag push', 'Package inclusion check'] },
+            { title: 'Revenue Layer', items: ['Order deduplication', 'Revenue reconciliation', 'Shift reports', 'Daily Z-report'] },
+          ].map((col, i) => (
+            <div key={i} className="bg-white rounded-lg p-3 border border-slate-200">
+              <div className="font-medium text-slate-800 mb-2 text-xs uppercase tracking-wide">{col.title}</div>
+              {col.items.map((item, j) => (
+                <div key={j} className="flex items-center gap-1.5 text-slate-600 text-xs py-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
+                  {item}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN PAGE ─────────────────────────────────────────────────────────────────
 export default function RestaurantPage() {
   const [stats, setStats] = useState<any>({});
-  const [tab, setTab] = useState<'orders' | 'kitchen' | 'tables' | 'menu' | 'analytics'>('orders');
+  const [tab, setTab] = useState<'orders' | 'kitchen' | 'tables' | 'menu' | 'analytics' | 'room-charges' | 'pos-sync'>('orders');
 
   useEffect(() => {
     (async () => {
@@ -977,6 +1422,8 @@ export default function RestaurantPage() {
     { id: 'tables', label: 'Столики', icon: Grid3x3 },
     { id: 'menu', label: 'Меню', icon: UtensilsCrossed },
     { id: 'analytics', label: 'Аналітика', icon: BarChart2 },
+    { id: 'room-charges', label: 'Рахунки / Кімнати', icon: Hotel },
+    { id: 'pos-sync', label: 'POS Інтеграція', icon: Link2 },
   ];
 
   return (
@@ -1022,6 +1469,8 @@ export default function RestaurantPage() {
           {tab === 'tables' && <TablesTab />}
           {tab === 'menu' && <MenuTab />}
           {tab === 'analytics' && <AnalyticsTab />}
+          {tab === 'room-charges' && <RoomChargesTab />}
+          {tab === 'pos-sync' && <PosIntegrationTab />}
         </div>
       </div>
     </AppLayout>
