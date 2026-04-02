@@ -6,7 +6,8 @@ import {
   User, Phone, Mail, CreditCard, Sparkles, MessageSquare, ClipboardList,
   ChevronRight, Plus, Send, Copy, CheckCheck, AlertTriangle, Link2,
   Star, ShoppingBag, Waves, Bike, Zap, StickyNote, CheckCircle2, Circle,
-  BadgeCheck, TrendingUp, Smartphone,
+  BadgeCheck, TrendingUp, Smartphone, FileText, ExternalLink, Loader2,
+  Download, ChevronDown,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -194,7 +195,17 @@ function TabGuest({ b }: { b: any }) {
 function TabPayments({ b }: { b: any }) {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
+
+  // Payment link state
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  // Invoice state
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoice, setInvoice] = useState<any | null>(null);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceCopied, setInvoiceCopied] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -212,26 +223,231 @@ function TabPayments({ b }: { b: any }) {
     cash: "Готівка", card: "Картка", liqpay: "LiqPay", wayforpay: "WayForPay", bank: "Банк", other: "Інше",
   };
 
-  const copyLink = async () => {
-    const link = `${window.location.origin}${BASE}/pay/${b.id}`;
-    await navigator.clipboard.writeText(link).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  // Generate real LiqPay payment link
+  const generatePaymentLink = async () => {
+    setLinkLoading(true);
+    setPaymentLink(null);
+    try {
+      const res = await apiFetch(`${API}/bookings/${b.id}/payment-link`, { method: "POST" });
+      const data = await res.json();
+      if (data.url || data.paymentLink) {
+        setPaymentLink(data.url || data.paymentLink);
+      } else if (data.error === "liqpay_not_configured") {
+        // Fallback: generate guest portal payment URL
+        setPaymentLink(`${window.location.origin}${BASE}/guest/${b.guestAccessCode || b.id}`);
+      } else {
+        setPaymentLink(`${window.location.origin}${BASE}/guest/${b.guestAccessCode || b.id}`);
+      }
+    } catch {
+      setPaymentLink(`${window.location.origin}${BASE}/guest/${b.guestAccessCode || b.id}`);
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  const copyPaymentLink = async () => {
+    if (!paymentLink) return;
+    await navigator.clipboard.writeText(paymentLink).catch(() => {});
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2500);
+  };
+
+  // Generate invoice
+  const generateInvoice = async () => {
+    setInvoiceLoading(true);
+    try {
+      const res = await apiFetch(`${API}/bookings/${b.id}/invoice`);
+      const data = await res.json();
+      setInvoice(data);
+      setInvoiceOpen(true);
+    } catch {
+      setInvoice(null);
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  const copyInvoiceText = async () => {
+    if (!invoice) return;
+    const text = [
+      `РАХУНОК № ${invoice.invoiceNumber}`,
+      `Дата: ${invoice.date}`,
+      ``,
+      `Гість: ${invoice.booking?.guestName}`,
+      `Номер: ${invoice.booking?.unitName}`,
+      `Заїзд: ${invoice.booking?.checkIn} о ${invoice.booking?.checkinTime || "14:00"}`,
+      `Виїзд: ${invoice.booking?.checkOut} о ${invoice.booking?.checkoutTime || "12:00"}`,
+      `Ночей: ${invoice.booking?.nights}`,
+      ``,
+      `До сплати: ${uah(invoice.booking?.totalAmount)}`,
+      `Оплачено: ${uah(invoice.booking?.paidAmount)}`,
+      `Залишок: ${uah(invoice.booking?.dueAmount)}`,
+      ``,
+      invoice.seller?.name ? `Постачальник: ${invoice.seller.name}` : "",
+      invoice.seller?.edrpou ? `ЄДРПОУ: ${invoice.seller.edrpou}` : "",
+      invoice.seller?.iban ? `IBAN: ${invoice.seller.iban}` : "",
+    ].filter(Boolean).join("\n");
+    await navigator.clipboard.writeText(text).catch(() => {});
+    setInvoiceCopied(true);
+    setTimeout(() => setInvoiceCopied(false), 2500);
   };
 
   return (
     <div className="space-y-4">
       {/* Balance summary */}
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-3 gap-2.5">
+        <Tile label="Сума"     value={uah(b.totalAmount || 0)} color="text-gray-800" />
         <Tile label="Оплачено" value={uah(paid)} color="text-emerald-600" />
         <Tile label="Залишок"  value={uah(Math.max(0, balance))} color={balance > 0 ? "text-red-600" : "text-gray-400"} />
       </div>
 
-      {/* Payment list */}
+      {/* ── ACTION BUTTONS ── */}
+      <div className="grid grid-cols-2 gap-2.5">
+        {/* Invoice */}
+        <button
+          onClick={generateInvoice}
+          disabled={invoiceLoading}
+          className="flex flex-col items-center gap-1.5 py-4 rounded-2xl border-2 border-indigo-100 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors disabled:opacity-60"
+        >
+          {invoiceLoading
+            ? <Loader2 className="w-5 h-5 animate-spin" />
+            : <FileText className="w-5 h-5" />}
+          <span>Сформувати рахунок</span>
+        </button>
+
+        {/* Payment link */}
+        <button
+          onClick={generatePaymentLink}
+          disabled={linkLoading}
+          className="flex flex-col items-center gap-1.5 py-4 rounded-2xl border-2 border-violet-100 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-semibold transition-colors disabled:opacity-60"
+        >
+          {linkLoading
+            ? <Loader2 className="w-5 h-5 animate-spin" />
+            : <Link2 className="w-5 h-5" />}
+          <span>LiqPay посилання</span>
+        </button>
+      </div>
+
+      {/* ── Generated payment link ── */}
+      {paymentLink && (
+        <div className="rounded-2xl border border-violet-100 bg-violet-50 p-3.5 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-bold text-violet-700">
+            <Link2 className="w-3.5 h-3.5" /> Посилання на оплату
+          </div>
+          <div className="text-[11px] text-violet-600 bg-white border border-violet-100 rounded-xl px-3 py-2 font-mono break-all">
+            {paymentLink}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={copyPaymentLink}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold transition-colors"
+            >
+              {linkCopied ? <><CheckCheck className="w-3.5 h-3.5" /> Скопійовано!</> : <><Copy className="w-3.5 h-3.5" /> Копіювати</>}
+            </button>
+            <a
+              href={paymentLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center px-3 rounded-xl border border-violet-200 text-violet-600 hover:bg-violet-100 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* ── Generated invoice ── */}
+      {invoice && (
+        <div className="rounded-2xl border border-indigo-100 overflow-hidden">
+          <button
+            onClick={() => setInvoiceOpen(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold text-indigo-700">
+              <FileText className="w-3.5 h-3.5" />
+              Рахунок № {invoice.invoiceNumber}
+            </div>
+            <ChevronDown className={`w-4 h-4 text-indigo-500 transition-transform ${invoiceOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {invoiceOpen && (
+            <div className="p-4 bg-white space-y-3 text-xs">
+              {/* Header */}
+              <div className="flex justify-between text-gray-500">
+                <span>Дата:</span>
+                <span className="font-semibold text-gray-800">{invoice.date}</span>
+              </div>
+
+              {/* Booking details */}
+              <div className="space-y-1.5 py-3 border-y border-gray-100">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Гість</span>
+                  <span className="font-semibold text-gray-800">{invoice.booking?.guestName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Номер / юніт</span>
+                  <span className="font-semibold text-gray-800">{invoice.booking?.unitName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Заїзд</span>
+                  <span className="font-semibold text-gray-800">{invoice.booking?.checkIn} о {invoice.booking?.checkinTime || "14:00"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Виїзд</span>
+                  <span className="font-semibold text-gray-800">{invoice.booking?.checkOut} о {invoice.booking?.checkoutTime || "12:00"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Ночей</span>
+                  <span className="font-semibold text-gray-800">{invoice.booking?.nights}</span>
+                </div>
+              </div>
+
+              {/* Amounts */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-gray-500">
+                  <span>Загальна сума</span>
+                  <span className="font-bold text-gray-900 text-sm">{uah(invoice.booking?.totalAmount)}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Оплачено</span>
+                  <span className="font-semibold text-emerald-600">{uah(invoice.booking?.paidAmount)}</span>
+                </div>
+                {invoice.booking?.dueAmount > 0 && (
+                  <div className="flex justify-between font-bold border-t border-gray-100 pt-2">
+                    <span className="text-red-600">До сплати</span>
+                    <span className="text-red-600 text-sm">{uah(invoice.booking?.dueAmount)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Seller info */}
+              {invoice.seller?.name && invoice.seller.name !== "Maison HD" && (
+                <div className="pt-2 border-t border-gray-100 space-y-1 text-gray-400">
+                  <div className="font-semibold text-gray-600 text-[11px] uppercase tracking-wide mb-1">Постачальник</div>
+                  <div>{invoice.seller.name}</div>
+                  {invoice.seller.edrpou && <div>ЄДРПОУ: {invoice.seller.edrpou}</div>}
+                  {invoice.seller.iban && <div>IBAN: {invoice.seller.iban}</div>}
+                  {invoice.seller.bank && <div>Банк: {invoice.seller.bank}</div>}
+                </div>
+              )}
+
+              {/* Copy button */}
+              <button
+                onClick={copyInvoiceText}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-indigo-100 text-indigo-600 hover:bg-indigo-50 text-xs font-semibold transition-colors"
+              >
+                {invoiceCopied ? <><CheckCheck className="w-3.5 h-3.5" /> Скопійовано!</> : <><Copy className="w-3.5 h-3.5" /> Копіювати рахунок</>}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Transaction list ── */}
       <div className="rounded-2xl border border-gray-100 overflow-hidden">
-        <SectionLabel>
-          <span className="px-4 pt-3 block">Транзакції</span>
-        </SectionLabel>
+        <div className="px-4 pt-3 pb-2">
+          <SectionLabel>Транзакції</SectionLabel>
+        </div>
         {loading ? (
           <div className="p-4 text-center text-sm text-gray-400">Завантаження...</div>
         ) : payments.length === 0 ? (
@@ -257,20 +473,15 @@ function TabPayments({ b }: { b: any }) {
         )}
       </div>
 
-      {/* Actions */}
-      <div className="space-y-2">
+      {/* Send link button (if balance remains) */}
+      {balance > 0 && paymentLink && (
         <button
-          onClick={copyLink}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-indigo-200 text-indigo-600 text-sm font-semibold hover:bg-indigo-50 transition-colors"
+          onClick={() => navigator.clipboard.writeText(`Оплата за бронювання:\n${paymentLink}`).catch(() => {})}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-colors"
         >
-          {copied ? <><CheckCheck className="w-4 h-4" /> Скопійовано!</> : <><Link2 className="w-4 h-4" /> Скопіювати платіжне посилання</>}
+          <Send className="w-4 h-4" /> Скопіювати повідомлення з посиланням
         </button>
-        {balance > 0 && (
-          <button className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-colors">
-            <Send className="w-4 h-4" /> Надіслати посилання гостю
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
