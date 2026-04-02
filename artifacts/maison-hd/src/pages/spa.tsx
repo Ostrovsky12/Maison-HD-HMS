@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,8 @@ import {
   Waves, Calendar, Users, Star, Clock, Plus, CheckCircle2,
   XCircle, RefreshCw, ChevronRight, Ticket, Award, Search,
   Coffee, Dumbbell, Sparkles, Filter, Edit, Activity, DollarSign,
-  TrendingUp, BarChart2,
+  TrendingUp, BarChart2, LayoutGrid, List, Thermometer, Droplets,
+  Flame, Wind, UserCheck, AlertCircle,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
@@ -81,6 +82,9 @@ export default function SpaPage() {
   const [showNewSpecialist, setShowNewSpecialist] = useState(false);
   const [selectedAppt, setSelectedAppt] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [scheduleView, setScheduleView] = useState<"timeline"|"list">("timeline");
+  const [zoneOccupancy, setZoneOccupancy] = useState<Record<string, number>>({});
+  const timelineRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
   const loadStats = async () => {
@@ -139,7 +143,6 @@ export default function SpaPage() {
   };
 
   const todayAppts = appointments.filter(a => a.appointmentDate === selectedDate);
-  const HOURS = Array.from({ length: 12 }, (_, i) => i + 8);
 
   const filteredAppts = appointments.filter(a => {
     if (search && !a.guestName?.toLowerCase().includes(search.toLowerCase()) &&
@@ -232,19 +235,198 @@ export default function SpaPage() {
         {/* ── SCHEDULE ── */}
         {tab === "schedule" && (
           <div className="space-y-4">
-            {/* Date nav */}
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={() => setSelectedDate(d => format(addDays(new Date(d), -1), "yyyy-MM-dd"))}>←</Button>
-              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-44 text-center" />
-              <Button variant="outline" size="sm" onClick={() => setSelectedDate(d => format(addDays(new Date(d), 1), "yyyy-MM-dd"))}>→</Button>
+            {/* Date nav + view toggle */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="sm" className="px-2" onClick={() => setSelectedDate(d => format(addDays(new Date(d), -1), "yyyy-MM-dd"))}>←</Button>
+                <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-40 text-center text-sm" />
+                <Button variant="outline" size="sm" className="px-2" onClick={() => setSelectedDate(d => format(addDays(new Date(d), 1), "yyyy-MM-dd"))}>→</Button>
+              </div>
               <span className="text-sm text-gray-500 capitalize">{format(new Date(selectedDate + "T12:00:00"), "EEEE, d MMMM", { locale: uk })}</span>
               {selectedDate !== format(new Date(), "yyyy-MM-dd") && (
-                <Button variant="ghost" size="sm" onClick={() => setSelectedDate(format(new Date(), "yyyy-MM-dd"))}>Сьогодні</Button>
+                <Button variant="ghost" size="sm" className="text-xs" onClick={() => setSelectedDate(format(new Date(), "yyyy-MM-dd"))}>Сьогодні</Button>
               )}
+              <div className="ml-auto flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                <button onClick={() => setScheduleView("timeline")} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${scheduleView === "timeline" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}><LayoutGrid className="h-3.5 w-3.5" /> Сітка</button>
+                <button onClick={() => setScheduleView("list")} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${scheduleView === "list" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}><List className="h-3.5 w-3.5" /> Список</button>
+              </div>
             </div>
 
-            {/* Schedule grid */}
-            {todayAppts.length === 0 ? (
+            {/* Zone Occupancy Panel */}
+            {resources.length > 0 && (() => {
+              const ZONE_ICONS: Record<string, any> = { room: Users, jacuzzi: Droplets, pool: Waves, sauna: Flame, hammam: Wind, fitness: Dumbbell };
+              const ZONE_COLORS: Record<string, string> = { room: "bg-blue-50 border-blue-200", jacuzzi: "bg-cyan-50 border-cyan-200", pool: "bg-sky-50 border-sky-200", sauna: "bg-orange-50 border-orange-200", hammam: "bg-amber-50 border-amber-200", fitness: "bg-green-50 border-green-200" };
+              return (
+                <div className="bg-white border border-gray-200 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5"><Thermometer className="h-4 w-4 text-blue-500" /> Зони та кабінети</h3>
+                    <span className="text-xs text-gray-400">{format(new Date(selectedDate + "T12:00:00"), "d MMMM", { locale: uk })}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                    {resources.map((res: any) => {
+                      const Icon = ZONE_ICONS[res.resourceType] || Users;
+                      const resAppts = todayAppts.filter(a => a.resourceId === res.id);
+                      const activeAppt = resAppts.find(a => a.status === "in_progress" || a.status === "confirmed");
+                      const occupied = !!activeAppt;
+                      const zoneOcc = zoneOccupancy[String(res.id)] || 0;
+                      const maxCap = res.capacity || 1;
+                      const fillPct = Math.min(100, (zoneOcc / maxCap) * 100);
+                      const colorBase = ZONE_COLORS[res.resourceType] || "bg-gray-50 border-gray-200";
+                      return (
+                        <div key={res.id} className={`border rounded-xl p-2.5 ${colorBase}`}>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <Icon className="h-3.5 w-3.5 text-gray-600" />
+                              <span className="text-xs font-medium text-gray-700 truncate" title={res.name}>{res.name}</span>
+                            </div>
+                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${occupied ? "bg-red-500" : "bg-green-500"}`} />
+                          </div>
+                          {activeAppt ? (
+                            <div className="text-xs text-gray-600 leading-tight">
+                              <div className="font-medium truncate">{activeAppt.guestName}</div>
+                              <div className="text-gray-400">{activeAppt.startTime} – {activeAppt.endTime}</div>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-400">{resAppts.length > 0 ? `${resAppts.length} запис.` : "Вільно"}</div>
+                          )}
+                          {maxCap > 1 && (
+                            <div className="mt-1.5">
+                              <div className="flex justify-between text-xs text-gray-400 mb-0.5"><span>Заповн.</span><span>{zoneOcc}/{maxCap}</span></div>
+                              <div className="h-1 bg-white/60 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${fillPct}%` }} />
+                              </div>
+                              <div className="flex gap-1 mt-1.5">
+                                <button onClick={() => setZoneOccupancy(z => ({ ...z, [res.id]: Math.max(0, (z[res.id] || 0) - 1) }))} className="flex-1 text-xs bg-white/80 border border-gray-200 rounded-lg py-0.5 hover:bg-gray-50">−</button>
+                                <button onClick={() => setZoneOccupancy(z => ({ ...z, [res.id]: Math.min(maxCap, (z[res.id] || 0) + 1) }))} className="flex-1 text-xs bg-white/80 border border-gray-200 rounded-lg py-0.5 hover:bg-gray-50">+</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Timeline View */}
+            {scheduleView === "timeline" && (() => {
+              const CELL_W = 72;
+              const ROW_H = 60;
+              const LABEL_W = 128;
+              const START_H = 8;
+              const END_H = 21;
+              const HOURS = Array.from({ length: END_H - START_H + 1 }, (_, i) => i + START_H);
+              const totalW = (END_H - START_H) * CELL_W;
+
+              const timeToMin = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+              const apptLeft = (appt: any) => ((timeToMin(appt.startTime) - START_H * 60) / 60) * CELL_W;
+              const apptWidth = (appt: any) => (appt.durationMinutes / 60) * CELL_W;
+
+              const nowMin = (() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); })();
+              const nowLeft = ((nowMin - START_H * 60) / 60) * CELL_W;
+              const isToday = selectedDate === format(new Date(), "yyyy-MM-dd");
+
+              const rows: { label: string; color: string; appts: any[] }[] = [
+                ...specialists.filter(s => s.isActive).map(s => ({
+                  label: `${s.firstName} ${s.lastName}`,
+                  color: s.color || "#6366f1",
+                  appts: todayAppts.filter(a => a.specialistId === s.id),
+                })),
+                ...resources.filter(r => r.isActive && r.resourceType === "room").map(r => ({
+                  label: r.name,
+                  color: "#0ea5e9",
+                  appts: todayAppts.filter(a => a.resourceId === r.id && !a.specialistId),
+                })),
+              ];
+
+              const STATUS_BG: Record<string, string> = {
+                pending: "#fef3c7", confirmed: "#dbeafe", in_progress: "#ede9fe", completed: "#dcfce7", cancelled: "#f3f4f6", no_show: "#fee2e2",
+              };
+              const STATUS_BORDER: Record<string, string> = {
+                pending: "#f59e0b", confirmed: "#3b82f6", in_progress: "#7c3aed", completed: "#16a34a", cancelled: "#9ca3af", no_show: "#ef4444",
+              };
+
+              return (
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <div ref={timelineRef} className="overflow-x-auto">
+                    <div style={{ minWidth: LABEL_W + totalW + 16 }}>
+                      {/* Hour header */}
+                      <div className="flex border-b border-gray-100 sticky top-0 bg-white z-10">
+                        <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="flex-shrink-0 border-r border-gray-100 px-2 py-1.5">
+                          <span className="text-xs text-gray-400 font-medium">Спеціаліст / Кабінет</span>
+                        </div>
+                        <div className="flex relative" style={{ width: totalW }}>
+                          {HOURS.slice(0, -1).map(h => (
+                            <div key={h} style={{ width: CELL_W, minWidth: CELL_W }} className="border-r border-gray-100 py-1.5 text-center">
+                              <span className="text-xs text-gray-400 font-medium">{String(h).padStart(2, "0")}:00</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Rows */}
+                      {rows.length === 0 ? (
+                        <div className="py-10 text-center text-sm text-gray-400">Немає активних спеціалістів та кабінетів</div>
+                      ) : rows.map((row, ri) => (
+                        <div key={ri} className="flex border-b border-gray-50 last:border-b-0 hover:bg-gray-50/50 transition-colors" style={{ height: ROW_H }}>
+                          {/* Row label */}
+                          <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="flex-shrink-0 border-r border-gray-100 px-2 flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.color }} />
+                            <span className="text-xs font-medium text-gray-700 truncate leading-tight">{row.label}</span>
+                          </div>
+                          {/* Time grid */}
+                          <div className="relative flex" style={{ width: totalW }}>
+                            {/* Hour grid lines */}
+                            {HOURS.slice(0, -1).map(h => (
+                              <div key={h} style={{ width: CELL_W, minWidth: CELL_W }} className="border-r border-gray-50 h-full" />
+                            ))}
+                            {/* Current time line */}
+                            {isToday && nowLeft >= 0 && nowLeft <= totalW && (
+                              <div className="absolute top-0 bottom-0 w-px bg-red-400 z-10" style={{ left: nowLeft }}>
+                                <div className="absolute -top-1 -left-1 w-2 h-2 bg-red-400 rounded-full" />
+                              </div>
+                            )}
+                            {/* Appointment blocks */}
+                            {row.appts.map(appt => {
+                              const left = Math.max(0, apptLeft(appt));
+                              const width = Math.max(CELL_W * 0.4, apptWidth(appt));
+                              return (
+                                <div key={appt.id}
+                                  className="absolute top-1 bottom-1 rounded-lg border cursor-pointer hover:opacity-90 hover:shadow-sm transition-all overflow-hidden"
+                                  style={{ left, width, backgroundColor: STATUS_BG[appt.status] || "#f3f4f6", borderColor: STATUS_BORDER[appt.status] || "#9ca3af", borderLeftWidth: 3 }}
+                                  title={`${appt.guestName} · ${appt.serviceName} · ${appt.startTime}–${appt.endTime}`}
+                                  onClick={() => setSelectedAppt(appt)}>
+                                  <div className="px-1.5 py-1 h-full flex flex-col justify-center overflow-hidden">
+                                    <div className="text-xs font-semibold text-gray-800 truncate leading-tight">{appt.guestName}</div>
+                                    {width > 80 && <div className="text-xs text-gray-500 truncate leading-tight">{appt.serviceName}</div>}
+                                    {width > 120 && <div className="text-xs text-gray-400">{appt.startTime}–{appt.endTime}</div>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Legend */}
+                  <div className="px-3 py-2 border-t border-gray-100 flex flex-wrap gap-3">
+                    {Object.entries(STATUS_UA).map(([k, v]) => (
+                      <span key={k} className="flex items-center gap-1 text-xs text-gray-500">
+                        <span className="w-3 h-3 rounded-sm border" style={{ backgroundColor: STATUS_BG[k], borderColor: STATUS_BORDER[k] }} />
+                        {v}
+                      </span>
+                    ))}
+                    <span className="flex items-center gap-1 text-xs text-red-400 ml-auto"><span className="w-px h-3 bg-red-400 inline-block" /> Зараз</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* List View */}
+            {scheduleView === "list" && (todayAppts.length === 0 ? (
               <Card className="border-dashed"><CardContent className="py-12 text-center text-gray-400">
                 <Calendar className="h-10 w-10 mx-auto mb-3 opacity-40" />
                 <p>На цей день записів немає</p>
@@ -252,24 +434,29 @@ export default function SpaPage() {
               </CardContent></Card>
             ) : (
               <div className="space-y-2">
-                {todayAppts.map(appt => (
+                {todayAppts.sort((a, b) => a.startTime.localeCompare(b.startTime)).map(appt => (
                   <Card key={appt.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedAppt(appt)}>
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-3">
-                          <div className="w-1 self-stretch rounded-full mt-1" style={{ backgroundColor: appt.specialistColor || "#6366f1", minWidth: 4 }} />
+                          <div className="text-center flex-shrink-0 w-12">
+                            <div className="text-sm font-bold text-gray-800">{appt.startTime}</div>
+                            <div className="text-xs text-gray-400">{appt.durationMinutes}хв</div>
+                          </div>
+                          <div className="w-px self-stretch bg-gray-200" />
                           <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold">{appt.startTime} – {appt.endTime}</span>
+                            <div className="flex items-center gap-2 flex-wrap mb-0.5">
                               <Badge className={`text-xs border ${STATUS_COLORS[appt.status]}`}>{STATUS_UA[appt.status]}</Badge>
                               {appt.isHotelGuest && <Badge variant="outline" className="text-xs border-blue-300 text-blue-700">Гість готелю</Badge>}
                             </div>
-                            <p className="font-medium text-gray-800 mt-0.5">{appt.serviceName || "Процедура"}</p>
-                            <p className="text-sm text-gray-500">{appt.guestName} · {appt.guestPhone}</p>
+                            <p className="font-semibold text-gray-800">{appt.guestName}</p>
+                            <p className="text-sm text-gray-600">{appt.serviceName || "Процедура"}</p>
                             <p className="text-xs text-gray-400 mt-0.5">
-                              {appt.specialistName && <span>{appt.specialistName} · </span>}
-                              {appt.resourceName && <span>{appt.resourceName} · </span>}
-                              <span className="font-medium text-gray-600">{parseFloat(appt.price || 0).toLocaleString()} ₴</span>
+                              {appt.specialistName && <span className="font-medium text-gray-500">{appt.specialistName}</span>}
+                              {appt.specialistName && appt.resourceName && " · "}
+                              {appt.resourceName && <span>{appt.resourceName}</span>}
+                              {(appt.specialistName || appt.resourceName) && " · "}
+                              <span className="font-medium text-blue-700">{parseFloat(appt.price || 0).toLocaleString()} ₴</span>
                             </p>
                           </div>
                         </div>
@@ -279,7 +466,21 @@ export default function SpaPage() {
                   </Card>
                 ))}
               </div>
-            )}
+            ))}
+
+            {/* Quick Check-in panel (walk-in) */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <UserCheck className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">Walk-in чек-ін у SPA</p>
+                  <p className="text-xs text-blue-600">Швидкий запис для відвідувача без брони</p>
+                </div>
+              </div>
+              <Button className="bg-blue-600 hover:bg-blue-700 text-sm" onClick={() => setShowNewAppt(true)}>
+                <Plus className="h-4 w-4 mr-1.5" /> Записати walk-in
+              </Button>
+            </div>
           </div>
         )}
 

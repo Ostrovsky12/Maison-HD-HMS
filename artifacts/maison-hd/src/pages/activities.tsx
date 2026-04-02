@@ -59,24 +59,42 @@ function RentalTab() {
   const [availFilter, setAvailFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [showRentForm, setShowRentForm] = useState<any>(null); // item to rent
-  const [showReturn, setShowReturn] = useState<any>(null); // rental to return
+  const [showRentForm, setShowRentForm] = useState<any>(null);
+  const [showReturn, setShowReturn] = useState<any>(null);
   const [rentForm, setRentForm] = useState({ guest_name: '', guest_phone: '', duration_hours: 2, notes: '' });
   const [returnForm, setReturnForm] = useState({ damage_notes: '', damage_charge: 0, deposit_returned: true });
   const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useState<'inventory' | 'maintenance' | 'history'>('inventory');
+  const [allRentals, setAllRentals] = useState<any[]>([]);
+  const [updatingItem, setUpdatingItem] = useState<number | null>(null);
+  const [showConditionEdit, setShowConditionEdit] = useState<any>(null);
+  const [conditionForm, setConditionForm] = useState({ condition: 'good', notes: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [cRes, iRes, rRes] = await Promise.all([
+    const [cRes, iRes, rRes, allRRes] = await Promise.all([
       apiFetch('/activities/equipment/categories').then(r => r.json()),
       apiFetch('/activities/equipment/items').then(r => r.json()),
       apiFetch('/activities/equipment/rentals?active=true').then(r => r.json()),
+      apiFetch('/activities/equipment/rentals').then(r => r.json()),
     ]);
     setCategories(cRes.categories || []);
     setItems(iRes.items || []);
     setRentals(rRes.rentals || []);
+    setAllRentals(allRRes.rentals || []);
     setLoading(false);
   }, []);
+
+  const updateCondition = async (itemId: number, condition: string, notes: string) => {
+    setUpdatingItem(itemId);
+    await apiFetch(`/activities/equipment/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ condition, notes, is_available: condition !== 'under_repair' && condition !== 'retired' }),
+    });
+    setUpdatingItem(null);
+    setShowConditionEdit(null);
+    load();
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -175,79 +193,199 @@ function RentalTab() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-          <input type="text" placeholder="Пошук інвентарю..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white" />
-        </div>
+      {/* View mode toggle */}
+      <div className="flex items-center gap-2 mb-4">
         <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
-          {[['all','Весь'],['available','Вільний'],['rented','В оренді']].map(([v,l]) => (
-            <button key={v} onClick={() => setAvailFilter(v)} className={`px-3 py-1.5 rounded-md font-medium transition-colors ${availFilter === v ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{l}</button>
+          {([['inventory','📦 Інвентар'],['maintenance','🔧 Обслуговування'],['history','📋 Історія']] as [string,string][]).map(([v,l]) => (
+            <button key={v} onClick={() => setViewMode(v as any)} className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${viewMode === v ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{l}</button>
           ))}
         </div>
-        <button onClick={load} className="p-1.5 text-gray-400 hover:text-gray-700 border border-gray-200 rounded-lg bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
+        <button onClick={load} className="ml-auto p-1.5 text-gray-400 hover:text-gray-700 border border-gray-200 rounded-lg bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
       </div>
 
-      {/* Category filter tabs */}
-      <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 scrollbar-hide">
-        <button onClick={() => setSelectedCat(null)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${!selectedCat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
-          Всі ({items.length})
-        </button>
-        {categories.map((c: any) => (
-          <button key={c.id} onClick={() => setSelectedCat(c.id)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${selectedCat === c.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
-            {c.icon} {c.name} <span className="opacity-70">({c.available_items}/{c.total_items})</span>
-          </button>
-        ))}
-      </div>
+      {/* ── MAINTENANCE VIEW ── */}
+      {viewMode === 'maintenance' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+            {[['excellent','Відмінний','bg-green-100 text-green-700'],['good','Добрий','bg-blue-100 text-blue-700'],['fair','Задовільний','bg-amber-100 text-amber-700'],['poor','Поганий','bg-red-100 text-red-700']].map(([c,l,cls]) => {
+              const count = items.filter((i: any) => i.condition === c).length;
+              return <div key={c} className="bg-white border border-gray-200 rounded-xl p-2.5 text-center"><div className={`text-lg font-bold`}>{count}</div><div className={`text-xs px-2 py-0.5 rounded-full ${cls} mt-0.5`}>{l}</div></div>;
+            })}
+          </div>
 
-      {loading ? <div className="text-center py-12 text-gray-400">Завантаження...</div> : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {filteredItems.map((item: any) => {
-            const activeRental = rentals.find((r: any) => r.item_id === item.id);
-            const isAvail = item.is_available && !activeRental;
+          {(['under_repair','poor','fair','good','excellent'] as const).map(cond => {
+            const condItems = items.filter((i: any) => i.condition === cond);
+            if (condItems.length === 0) return null;
             return (
-              <div key={item.id} className={`bg-white border rounded-xl p-3 transition-all ${!isAvail ? 'opacity-70 border-gray-200' : 'border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{item.category_icon}</span>
-                    <div>
-                      <div className="font-medium text-sm text-gray-900 leading-tight">{item.name}</div>
-                      {item.serial_number && <div className="text-xs text-gray-400">{item.serial_number}</div>}
+              <div key={cond} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className={`px-3 py-2 text-xs font-semibold flex items-center gap-2 border-b border-gray-100 ${CONDITION_COLORS[cond] || 'bg-gray-50 text-gray-600'}`}>
+                  {cond === 'under_repair' && '🔧'} {cond === 'poor' && '⚠️'} {cond === 'fair' && '⚡'} {cond === 'good' && '✓'} {cond === 'excellent' && '⭐'}
+                  {CONDITION_LABELS[cond] || cond} ({condItems.length})
+                </div>
+                <div className="divide-y divide-gray-50">
+                  {condItems.map((item: any) => (
+                    <div key={item.id} className="flex items-center gap-3 px-3 py-2.5">
+                      <span className="text-xl">{item.category_icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-800 truncate">{item.name}</div>
+                        <div className="text-xs text-gray-400">{item.category_name} {item.serial_number ? `· ${item.serial_number}` : ''}</div>
+                        {item.notes && <div className="text-xs text-amber-600 mt-0.5 truncate">{item.notes}</div>}
+                        {item.last_maintenance_at && <div className="text-xs text-gray-300 mt-0.5">Обслуговування: {new Date(item.last_maintenance_at).toLocaleDateString('uk-UA')}</div>}
+                      </div>
+                      <div className="flex gap-1 flex-shrink-0">
+                        {cond === 'under_repair' && (
+                          <button onClick={() => { setShowConditionEdit(item); setConditionForm({ condition: 'good', notes: '' }); }}
+                            disabled={updatingItem === item.id}
+                            className="text-xs bg-green-50 border border-green-300 text-green-700 px-2 py-1 rounded-lg hover:bg-green-100 disabled:opacity-50">
+                            Готово
+                          </button>
+                        )}
+                        <button onClick={() => { setShowConditionEdit(item); setConditionForm({ condition: item.condition, notes: item.notes || '' }); }}
+                          className="text-xs bg-gray-50 border border-gray-200 text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-100">
+                          Змінити
+                        </button>
+                        {cond !== 'under_repair' && item.is_available && (
+                          <button onClick={() => updateCondition(item.id, 'under_repair', 'На ремонті')}
+                            disabled={updatingItem === item.id}
+                            className="text-xs bg-orange-50 border border-orange-300 text-orange-700 px-2 py-1 rounded-lg hover:bg-orange-100 disabled:opacity-50">
+                            На ремонт
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1 ${isAvail ? 'bg-green-500' : 'bg-red-500'}`} />
+                  ))}
                 </div>
-
-                {item.size_info && <div className="text-xs text-gray-500 mb-2">{item.size_info}</div>}
-
-                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${CONDITION_COLORS[item.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABELS[item.condition] || item.condition}</span>
-                </div>
-
-                <div className="text-xs text-gray-600 mb-2 space-y-0.5">
-                  {item.price_per_hour && <div className="flex justify-between"><span>За годину:</span><span className="font-medium">{Number(item.price_per_hour).toLocaleString('uk-UA')} ₴</span></div>}
-                  {item.price_per_half_day && <div className="flex justify-between"><span>Пів-дня:</span><span className="font-medium">{Number(item.price_per_half_day).toLocaleString('uk-UA')} ₴</span></div>}
-                  {item.price_per_day && <div className="flex justify-between"><span>День:</span><span className="font-medium">{Number(item.price_per_day).toLocaleString('uk-UA')} ₴</span></div>}
-                </div>
-
-                {activeRental ? (
-                  <div className="bg-amber-50 rounded-lg px-2 py-1.5 text-xs">
-                    <div className="font-medium text-amber-800">{activeRental.guest_name}</div>
-                    <div className="text-amber-600">Повернення: {new Date(activeRental.end_time).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                ) : isAvail ? (
-                  <button onClick={() => openRentForm(item)} className="w-full bg-indigo-600 text-white py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700 mt-1">
-                    Видати в оренду
-                  </button>
-                ) : (
-                  <div className="text-xs text-center text-gray-400 py-1">Недоступно</div>
-                )}
               </div>
             );
           })}
         </div>
       )}
+
+      {/* ── HISTORY VIEW ── */}
+      {viewMode === 'history' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm font-medium text-gray-700">{allRentals.length} оренд всього</div>
+            <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-400 rounded-full inline-block" />Прострочено</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-green-400 rounded-full inline-block" />Повернено</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-400 rounded-full inline-block" />Активно</span>
+            </div>
+          </div>
+          {allRentals.length === 0 ? <div className="text-center py-10 text-gray-400">Оренд ще не було</div> : (
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="divide-y divide-gray-50">
+                {[...allRentals].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((r: any) => {
+                  const statusColor = r.status === 'returned' ? 'text-green-600' : r.status === 'overdue' ? 'text-red-600' : r.status === 'active' ? 'text-amber-600' : 'text-gray-400';
+                  const statusLabel = { returned: 'Повернено', overdue: 'Прострочено', active: 'Активно', cancelled: 'Скасовано' }[r.status as string] || r.status;
+                  const hasDamage = r.damage_charge && Number(r.damage_charge) > 0;
+                  return (
+                    <div key={r.id} className="px-3 py-2.5 flex items-start gap-3">
+                      <span className="text-xl flex-shrink-0">{r.category_icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-gray-800">{r.item_name}</span>
+                          <span className={`text-xs font-medium ${statusColor}`}>{statusLabel}</span>
+                          {hasDamage && <span className="text-xs bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded-full">Пошкодження: {Number(r.damage_charge).toLocaleString('uk-UA')} ₴</span>}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {r.guest_name} {r.guest_phone && `· ${r.guest_phone}`}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          {new Date(r.start_time).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {' → '}
+                          {new Date(r.end_time).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                        {r.damage_notes && <div className="text-xs text-red-500 mt-0.5">{r.damage_notes}</div>}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-sm font-bold text-gray-800">{Number(r.price_charged).toLocaleString('uk-UA')} ₴</div>
+                        {Number(r.deposit_taken) > 0 && <div className="text-xs text-gray-400">Деп: {Number(r.deposit_taken).toLocaleString('uk-UA')} ₴</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── INVENTORY VIEW ── */}
+      {viewMode === 'inventory' && (<>
+        {/* Filters */}
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input type="text" placeholder="Пошук інвентарю..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white" />
+          </div>
+          <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
+            {[['all','Весь'],['available','Вільний'],['rented','В оренді']].map(([v,l]) => (
+              <button key={v} onClick={() => setAvailFilter(v)} className={`px-3 py-1.5 rounded-md font-medium transition-colors ${availFilter === v ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{l}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Category filter tabs */}
+        <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 scrollbar-hide">
+          <button onClick={() => setSelectedCat(null)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${!selectedCat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+            Всі ({items.length})
+          </button>
+          {categories.map((c: any) => (
+            <button key={c.id} onClick={() => setSelectedCat(c.id)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${selectedCat === c.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+              {c.icon} {c.name} <span className="opacity-70">({c.available_items}/{c.total_items})</span>
+            </button>
+          ))}
+        </div>
+
+        {loading ? <div className="text-center py-12 text-gray-400">Завантаження...</div> : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {filteredItems.map((item: any) => {
+              const activeRental = rentals.find((r: any) => r.item_id === item.id);
+              const isAvail = item.is_available && !activeRental;
+              return (
+                <div key={item.id} className={`bg-white border rounded-xl p-3 transition-all ${!isAvail ? 'opacity-70 border-gray-200' : 'border-gray-200 hover:border-indigo-300 hover:shadow-sm'}`}>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">{item.category_icon}</span>
+                      <div>
+                        <div className="font-medium text-sm text-gray-900 leading-tight">{item.name}</div>
+                        {item.serial_number && <div className="text-xs text-gray-400">{item.serial_number}</div>}
+                      </div>
+                    </div>
+                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1 ${isAvail ? 'bg-green-500' : 'bg-red-500'}`} />
+                  </div>
+
+                  {item.size_info && <div className="text-xs text-gray-500 mb-2">{item.size_info}</div>}
+
+                  <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${CONDITION_COLORS[item.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABELS[item.condition] || item.condition}</span>
+                  </div>
+
+                  <div className="text-xs text-gray-600 mb-2 space-y-0.5">
+                    {item.price_per_hour && <div className="flex justify-between"><span>За годину:</span><span className="font-medium">{Number(item.price_per_hour).toLocaleString('uk-UA')} ₴</span></div>}
+                    {item.price_per_half_day && <div className="flex justify-between"><span>Пів-дня:</span><span className="font-medium">{Number(item.price_per_half_day).toLocaleString('uk-UA')} ₴</span></div>}
+                    {item.price_per_day && <div className="flex justify-between"><span>День:</span><span className="font-medium">{Number(item.price_per_day).toLocaleString('uk-UA')} ₴</span></div>}
+                  </div>
+
+                  {activeRental ? (
+                    <div className="bg-amber-50 rounded-lg px-2 py-1.5 text-xs">
+                      <div className="font-medium text-amber-800">{activeRental.guest_name}</div>
+                      <div className="text-amber-600">Повернення: {new Date(activeRental.end_time).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                  ) : isAvail ? (
+                    <button onClick={() => openRentForm(item)} className="w-full bg-indigo-600 text-white py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700 mt-1">
+                      Видати в оренду
+                    </button>
+                  ) : (
+                    <div className="text-xs text-center text-gray-400 py-1">Недоступно</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>)}
 
       {/* Rent form modal */}
       {showRentForm && (
@@ -329,6 +467,48 @@ function RentalTab() {
               <button onClick={() => setShowReturn(null)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
               <button onClick={saveReturn} disabled={saving} className="flex-1 bg-green-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
                 {saving ? 'Збереження...' : '✓ Прийнято'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Condition Edit Modal */}
+      {showConditionEdit && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h3 className="font-semibold text-gray-900">Стан: {showConditionEdit.name}</h3>
+                <div className="text-xs text-gray-500">{showConditionEdit.category_icon} {showConditionEdit.category_name}</div>
+              </div>
+              <button onClick={() => setShowConditionEdit(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-2 block font-medium">Стан обладнання</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['excellent','good','fair','poor','under_repair','retired'] as const).map(c => (
+                    <button key={c} onClick={() => setConditionForm(f => ({ ...f, condition: c }))}
+                      className={`px-3 py-2 rounded-xl text-xs font-medium border transition-colors text-left ${conditionForm.condition === c ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <span className={`${CONDITION_COLORS[c] || 'text-gray-600'} text-xs px-1.5 py-0.5 rounded-full`}>{CONDITION_LABELS[c] || c}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <textarea placeholder="Нотатки (необхідний ремонт, пошкодження...)" value={conditionForm.notes} onChange={e => setConditionForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" />
+              {conditionForm.condition === 'under_repair' && (
+                <div className="bg-orange-50 rounded-xl p-3 text-xs text-orange-700">
+                  Обладнання буде автоматично помічено як недоступне
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 p-4 border-t">
+              <button onClick={() => setShowConditionEdit(null)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
+              <button onClick={() => updateCondition(showConditionEdit.id, conditionForm.condition, conditionForm.notes)}
+                disabled={updatingItem === showConditionEdit.id}
+                className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                {updatingItem === showConditionEdit.id ? 'Збереження...' : 'Зберегти'}
               </button>
             </div>
           </div>
