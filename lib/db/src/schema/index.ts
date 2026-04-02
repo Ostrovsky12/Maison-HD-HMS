@@ -27,3 +27,4 @@ export * from "./automation";
 export * from "./rentals";
 export * from "./ota";
 export * from "./revenue";
+export * from "./tv";

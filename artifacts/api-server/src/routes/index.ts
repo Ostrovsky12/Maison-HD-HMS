@@ -34,6 +34,7 @@ import publicBookingRouter from "./public-booking.js";
 import rentalsRouter from "./rentals.js";
 import otaRouter from "./ota.js";
 import revenueRouter from "./revenue.js";
+import tvRouter from "./tv.js";
 
 const router: IRouter = Router();
 
@@ -72,5 +73,6 @@ router.use("/public", publicBookingRouter);
 router.use("/rentals", rentalsRouter);
 router.use("/ota", otaRouter);
 router.use("/revenue", revenueRouter);
+router.use("/tv", tvRouter);
 
 export default router;

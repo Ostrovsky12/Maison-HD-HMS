@@ -29,6 +29,7 @@ import {
   Building2,
   Globe,
   Smartphone,
+  Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ const allNavItems = [
   { name: "OTA Channels", path: "/ota", icon: Globe, roles: ["super_admin", "owner", "manager"] },
   { name: "Revenue Management", path: "/revenue", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
   { name: "Guest App", path: "/guest-app", icon: Smartphone, roles: null },
+  { name: "Hotel TV", path: "/hotel-tv", icon: Monitor, roles: ["super_admin", "owner", "manager"] },
   { name: "Головна", path: "/dashboard", icon: LayoutDashboard, roles: null },
   { name: "Бронювання", path: "/bookings", icon: CalendarDays, roles: null },
   { name: "Шахматка", path: "/chess", icon: Grid3X3, roles: null },

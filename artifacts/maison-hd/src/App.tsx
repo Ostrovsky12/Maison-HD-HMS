@@ -36,6 +36,8 @@ import RentalsPage from "@/pages/rentals";
 import OtaPage from "@/pages/ota";
 import RevenuePage from "@/pages/revenue";
 import GuestAppPage from "@/pages/guest-app";
+import HotelTvPage from "@/pages/hotel-tv";
+import TvDisplayPage from "@/pages/tv-display";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -119,6 +121,8 @@ function Router() {
       <Route path="/ota"><ProtectedRoute component={OtaPage} /></Route>
       <Route path="/revenue"><ProtectedRoute component={RevenuePage} /></Route>
       <Route path="/guest-app" component={GuestAppPage} />
+      <Route path="/hotel-tv"><ProtectedRoute component={HotelTvPage} /></Route>
+      <Route path="/tv/:roomCode" component={TvDisplayPage} />
 
       <Route path="/" component={HomeRoute} />
 
