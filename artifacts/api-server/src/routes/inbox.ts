@@ -4,7 +4,7 @@ import {
   conversationsTable, messagesTable, channelConfigsTable,
   bookingsTable, guestsTable, unitsTable, propertiesTable,
 } from "@workspace/db/schema";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
@@ -99,15 +99,13 @@ async function ensureDemoData(organizationId: number) {
     .from(conversationsTable)
     .where(eq(conversationsTable.organizationId, organizationId))
     .limit(1);
-
   if (existing.length > 0) return;
-
   for (const demo of DEMO_CONVERSATIONS) {
     const [conv] = await db.insert(conversationsTable).values({
       organizationId,
       channel: demo.channel,
       guestName: demo.guestName,
-      guestPhone: demo.guestPhone || null,
+      guestPhone: (demo as any).guestPhone || null,
       guestEmail: (demo as any).guestEmail || null,
       subject: demo.subject,
       lastMessagePreview: demo.lastMessagePreview,
@@ -115,7 +113,6 @@ async function ensureDemoData(organizationId: number) {
       unreadCount: demo.unreadCount,
       lastMessageAt: demo.messages[demo.messages.length - 1].createdAt,
     }).returning();
-
     for (const msg of demo.messages) {
       await db.insert(messagesTable).values({
         conversationId: conv.id,
@@ -135,306 +132,585 @@ router.get("/conversations", async (req: any, res) => {
     const orgId = req.user.organizationId;
     await ensureDemoData(orgId);
 
-    const { status, channel, search, limit = "30", offset = "0" } = req.query as Record<string, string>;
+    const { status, channel, search, limit = "50", offset = "0", view } = req.query as Record<string, string>;
 
-    let query = db.select().from(conversationsTable).where(eq(conversationsTable.organizationId, orgId));
+    const q = await (db as any).$client.query(`
+      SELECT c.*,
+        u.name as assigned_to_name,
+        l.status as lead_status, l.id as lead_id_ref
+      FROM conversations c
+      LEFT JOIN users u ON u.id = c.assigned_to_id
+      LEFT JOIN leads l ON l.id = c.lead_id
+      WHERE c.organization_id = $1
+      ORDER BY c.last_message_at DESC
+      LIMIT 200
+    `, [orgId]);
 
-    const conversations = await db
-      .select()
-      .from(conversationsTable)
-      .where(eq(conversationsTable.organizationId, orgId))
-      .orderBy(desc(conversationsTable.lastMessageAt));
-
-    let filtered = conversations;
-    if (status) filtered = filtered.filter(c => c.status === status);
-    if (channel) filtered = filtered.filter(c => c.channel === channel);
+    let rows = q.rows;
+    if (status) rows = rows.filter((c: any) => c.status === status);
+    if (channel) rows = rows.filter((c: any) => c.channel === channel);
     if (search) {
       const s = search.toLowerCase();
-      filtered = filtered.filter(c =>
-        c.guestName?.toLowerCase().includes(s) ||
-        c.guestPhone?.includes(s) ||
+      rows = rows.filter((c: any) =>
+        c.guest_name?.toLowerCase().includes(s) ||
+        c.guest_phone?.includes(s) ||
         c.subject?.toLowerCase().includes(s) ||
-        c.lastMessagePreview?.toLowerCase().includes(s)
+        c.last_message_preview?.toLowerCase().includes(s)
       );
     }
 
-    const paginated = filtered.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
-    const totalUnread = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
+    const total = rows.length;
+    const paginated = rows.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+    const totalUnread = rows.reduce((s: number, c: any) => s + (c.unread_count || 0), 0);
 
-    res.json({ conversations: paginated, total: filtered.length, totalUnread });
-  } catch (err) {
+    const conversations = paginated.map((c: any) => ({
+      id: c.id,
+      channel: c.channel,
+      guestName: c.guest_name,
+      guestPhone: c.guest_phone,
+      guestEmail: c.guest_email,
+      subject: c.subject,
+      lastMessagePreview: c.last_message_preview,
+      lastMessageAt: c.last_message_at,
+      status: c.status,
+      unreadCount: c.unread_count || 0,
+      bookingId: c.booking_id,
+      leadId: c.lead_id,
+      leadStatus: c.lead_status,
+      tags: c.tags || [],
+      assignedToId: c.assigned_to_id,
+      assignedToName: c.assigned_to_name,
+      estimatedValue: c.estimated_value,
+    }));
+
+    res.json({ conversations, total, totalUnread });
+  } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Get conversation + messages ────────────────────────────────────────────
+// ── Get conversation + messages + context ───────────────────────────────────
 router.get("/conversations/:id", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
 
-    const [conversation] = await db.select().from(conversationsTable)
-      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.organizationId, orgId)));
-    if (!conversation) return res.status(404).json({ error: "Розмову не знайдено" });
+    const convR = await (db as any).$client.query(`
+      SELECT c.*, u.name as assigned_to_name
+      FROM conversations c
+      LEFT JOIN users u ON u.id = c.assigned_to_id
+      WHERE c.id = $1 AND c.organization_id = $2
+    `, [id, orgId]);
+    if (!convR.rows[0]) return res.status(404).json({ error: "Розмову не знайдено" });
+    const conv = convR.rows[0];
 
-    const messages = await db.select().from(messagesTable)
-      .where(eq(messagesTable.conversationId, id))
-      .orderBy(messagesTable.createdAt);
+    const msgR = await (db as any).$client.query(`
+      SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC
+    `, [id]);
 
-    // Mark as read
-    await db.update(conversationsTable).set({ unreadCount: 0 }).where(eq(conversationsTable.id, id));
-    await db.update(messagesTable).set({ isRead: true })
-      .where(and(eq(messagesTable.conversationId, id), eq(messagesTable.direction, "inbound")));
+    await (db as any).$client.query(`
+      UPDATE conversations SET unread_count = 0 WHERE id = $1
+    `, [id]);
+    await (db as any).$client.query(`
+      UPDATE messages SET is_read = true WHERE conversation_id = $1 AND direction = 'inbound'
+    `, [id]);
 
-    // If linked to booking, get booking summary
     let booking = null;
-    if (conversation.bookingId) {
-      const [b] = await db.select({
-        id: bookingsTable.id,
-        checkIn: bookingsTable.checkIn,
-        checkOut: bookingsTable.checkOut,
-        status: bookingsTable.status,
-        paymentStatus: bookingsTable.paymentStatus,
-        totalAmount: bookingsTable.totalAmount,
-        unitName: unitsTable.name,
-      }).from(bookingsTable)
-        .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
-        .where(eq(bookingsTable.id, conversation.bookingId));
-      booking = b || null;
+    if (conv.booking_id) {
+      const bR = await (db as any).$client.query(`
+        SELECT b.id, b.check_in, b.check_out, b.status, b.payment_status, b.total_amount,
+               b.first_name, b.last_name, u.name as unit_name, p.name as property_name
+        FROM bookings b
+        JOIN units u ON u.id = b.unit_id
+        JOIN properties p ON p.id = u.property_id
+        WHERE b.id = $1
+      `, [conv.booking_id]);
+      booking = bR.rows[0] || null;
     }
 
-    res.json({ conversation: { ...conversation, unreadCount: 0 }, messages, booking });
-  } catch (err) {
+    let lead = null;
+    if (conv.lead_id) {
+      const lR = await (db as any).$client.query(`
+        SELECT l.*, u.name as assigned_to_name
+        FROM leads l
+        LEFT JOIN users u ON u.id = l.assigned_to_id
+        WHERE l.id = $1
+      `, [conv.lead_id]);
+      lead = lR.rows[0] || null;
+    }
+
+    const staffR = await (db as any).$client.query(`
+      SELECT id, name, role FROM users WHERE organization_id = $1 AND role IN ('owner','manager','reception') ORDER BY name
+    `, [orgId]);
+
+    res.json({
+      conversation: {
+        ...conv,
+        unreadCount: 0,
+        assignedToName: conv.assigned_to_name,
+      },
+      messages: msgR.rows.map((m: any) => ({
+        id: m.id,
+        conversationId: m.conversation_id,
+        direction: m.direction,
+        messageType: m.message_type,
+        content: m.content,
+        mediaUrl: m.media_url,
+        senderName: m.sender_name,
+        isAiGenerated: m.is_ai_generated,
+        isInternal: !!(m.metadata?.is_internal),
+        isRead: m.is_read,
+        createdAt: m.created_at,
+        metadata: m.metadata,
+      })),
+      booking,
+      lead,
+      staff: staffR.rows,
+    });
+  } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Send reply ─────────────────────────────────────────────────────────────
+// ── Send reply ──────────────────────────────────────────────────────────────
 router.post("/conversations/:id/reply", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
-    const { content, messageType = "text" } = req.body;
+    const { content, messageType = "text", isAiGenerated = false } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: "Порожнє повідомлення" });
 
-    if (!content?.trim()) return res.status(400).json({ error: "Повідомлення не може бути порожнім" });
+    const convR = await (db as any).$client.query(
+      `SELECT id FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!convR.rows[0]) return res.status(404).json({ error: "Not found" });
 
-    const [conversation] = await db.select().from(conversationsTable)
-      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.organizationId, orgId)));
-    if (!conversation) return res.status(404).json({ error: "Розмову не знайдено" });
+    const msgR = await (db as any).$client.query(`
+      INSERT INTO messages (conversation_id, direction, message_type, content, sender_name, is_read, is_ai_generated, created_at)
+      VALUES ($1, 'outbound', $2, $3, $4, true, $5, NOW())
+      RETURNING *
+    `, [id, messageType, content.trim(), req.user.name || "Адміністратор", isAiGenerated]);
 
-    const [message] = await db.insert(messagesTable).values({
-      conversationId: id,
-      direction: "outbound",
-      messageType: messageType as any,
-      content: content.trim(),
-      senderName: req.user.name || "Адміністратор",
-      isRead: true,
-    }).returning();
+    await (db as any).$client.query(`
+      UPDATE conversations SET last_message_at = NOW(), last_message_preview = $2, status = 'pending', updated_at = NOW()
+      WHERE id = $1
+    `, [id, content.trim().slice(0, 100)]);
 
-    await db.update(conversationsTable).set({
-      lastMessageAt: new Date(),
-      lastMessagePreview: content.trim().slice(0, 100),
-      status: "pending",
-      updatedAt: new Date(),
-    }).where(eq(conversationsTable.id, id));
-
-    res.json({ success: true, message });
-  } catch (err) {
+    const m = msgR.rows[0];
+    res.json({
+      success: true,
+      message: {
+        id: m.id, conversationId: m.conversation_id, direction: m.direction,
+        messageType: m.message_type, content: m.content, senderName: m.sender_name,
+        isAiGenerated: m.is_ai_generated, isInternal: false, isRead: m.is_read, createdAt: m.created_at,
+      },
+    });
+  } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── AI reply suggestion ────────────────────────────────────────────────────
+// ── Internal note ───────────────────────────────────────────────────────────
+router.post("/conversations/:id/internal-note", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const id = parseInt(req.params.id);
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: "Порожня нотатка" });
+
+    const convR = await (db as any).$client.query(
+      `SELECT id FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!convR.rows[0]) return res.status(404).json({ error: "Not found" });
+
+    const msgR = await (db as any).$client.query(`
+      INSERT INTO messages (conversation_id, direction, message_type, content, sender_name, is_read, metadata, created_at)
+      VALUES ($1, 'outbound', 'text', $2, $3, true, '{"is_internal":true}', NOW())
+      RETURNING *
+    `, [id, content.trim(), req.user.name || "Адміністратор"]);
+
+    const m = msgR.rows[0];
+    res.json({
+      success: true,
+      message: {
+        id: m.id, conversationId: m.conversation_id, direction: m.direction,
+        messageType: m.message_type, content: m.content, senderName: m.sender_name,
+        isAiGenerated: false, isInternal: true, isRead: true, createdAt: m.created_at,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── AI reply suggestion ─────────────────────────────────────────────────────
 router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
 
-    const [conversation] = await db.select().from(conversationsTable)
-      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.organizationId, orgId)));
-    if (!conversation) return res.status(404).json({ error: "Розмову не знайдено" });
+    const convR = await (db as any).$client.query(
+      `SELECT * FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!convR.rows[0]) return res.status(404).json({ error: "Not found" });
+    const conv = convR.rows[0];
 
-    const messages = await db.select().from(messagesTable)
-      .where(eq(messagesTable.conversationId, id))
-      .orderBy(desc(messagesTable.createdAt))
-      .limit(5);
+    const msgsR = await (db as any).$client.query(`
+      SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 6
+    `, [id]);
 
-    const lastInbound = messages.find(m => m.direction === "inbound");
+    const lastInbound = msgsR.rows.find((m: any) => m.direction === "inbound");
     if (!lastInbound?.content) return res.status(400).json({ error: "Немає вхідних повідомлень" });
 
-    // Smart rule-based AI suggestions based on last message content
     const content = lastInbound.content.toLowerCase();
+    const name = conv.guest_name?.split(" ")[0] || "";
     let suggestion = "";
 
-    if (content.includes("вільн") || content.includes("є місця") || content.includes("є номер")) {
-      suggestion = `Добрий день, ${conversation.guestName?.split(" ")[0] || ""}! Так, маємо вільні об'єкти на ваші дати. Щоб підібрати найкращий варіант, уточніть, будь ласка:\n— Кількість гостей\n— Бажані дати заїзду та виїзду\n— Який тип розміщення вас цікавить?\n\nЗ радістю підготуємо пропозицію! 🌿`;
-    } else if (content.includes("ціна") || content.includes("вартість") || content.includes("скільки") || content.includes("прайс")) {
-      suggestion = `Добрий день! Вартість проживання залежить від обраного об'єкта та сезону. Наші ціни стартують від 2500 грн/ніч. До них можна додати:\n🧖 SPA-процедури\n🚲 Оренду активності\n🍳 Харчування\n\nНадішліть дати та кількість гостей — розрахуємо точну суму!`;
-    } else if (content.includes("весілля") || content.includes("весілля")) {
-      suggestion = `Дякуємо за інтерес до нашого комплексу! Ми з радістю приймаємо весілля. У нас є:\n✅ Банкетний зал до 100 гостей\n✅ Декорована альтанка для церемонії\n✅ Проживання для гостей\n✅ SPA для молодят\n\nНадішліть бажану дату та кількість гостей — підготуємо детальну КП!`;
-    } else if (content.includes("корпоратив") || content.includes("корпорат")) {
-      suggestion = `Добрий день! Ми спеціалізуємось на корпоративних заходах. Пропонуємо:\n🏢 Конференц-зал із обладнанням\n🍽️ Корпоративне харчування від шеф-кухаря\n🏊 SPA та активності для тімбілдингу\n🏠 Проживання для учасників\n\nНадішліть кількість учасників, дати та формат заходу — зробимо найкращу пропозицію!`;
+    if (content.includes("вільн") || content.includes("є місця") || content.includes("є номер") || content.includes("доступн")) {
+      suggestion = `Добрий день, ${name}! Так, маємо вільні об'єкти на ваші дати 🌿\n\nЩоб підібрати найкращий варіант, уточніть:\n— Кількість гостей\n— Бажані дати заїзду та виїзду\n— Який тип розміщення вас цікавить?\n\nВідповімо протягом 15 хвилин!`;
+    } else if (content.includes("ціна") || content.includes("вартість") || content.includes("скільки") || content.includes("прайс") || content.includes("розцінк")) {
+      suggestion = `Добрий день! Вартість проживання залежить від обраного об'єкта та сезону 🏡\n\nНаші ціни стартують від 2 500 ₴/ніч.\nДо них можна додати:\n🧖 SPA-процедури\n🚲 Оренду активності\n🍳 Харчування\n\nНадішліть дати та кількість гостей — розрахуємо точну суму!`;
+    } else if (content.includes("весілля") || content.includes("одруження")) {
+      suggestion = `Дякуємо за інтерес до нашого комплексу! Ми з радістю приймаємо весілля 💍\n\nУ нас є:\n✅ Банкетний зал до 120 гостей\n✅ Декорована альтанка для церемонії\n✅ Проживання для гостей\n✅ SPA для молодят\n✅ Власна фотозона\n\nНадішліть бажану дату та кількість гостей — підготуємо детальну КП!`;
+    } else if (content.includes("корпоратив") || content.includes("корпорат") || content.includes("конференц")) {
+      suggestion = `Добрий день! Ми спеціалізуємось на корпоративних заходах 🎯\n\nПропонуємо:\n🏢 Конференц-зал із обладнанням\n🍽️ Корпоративне харчування від шеф-кухаря\n🏊 SPA та активності для тімбілдингу\n🏠 Проживання для учасників\n\nНадішліть кількість учасників, дати та формат заходу!`;
     } else if (content.includes("spa") || content.includes("масаж") || content.includes("сауна") || content.includes("басейн")) {
-      suggestion = `Наш SPA-центр відкритий щодня! 🌿\n\nПослуги:\n🧖 Масаж від 800 грн/год\n🛁 Джакузі від 600 грн/год\n🔥 Сауна від 900 грн/2 год\n🏊 Басейн — 400 грн вхід\n\nДоступний day pass без проживання. Записати вас на конкретний час?`;
-    } else if (content.includes("сап") || content.includes("велосипед") || content.includes("оренд") || content.includes("катамаран")) {
-      suggestion = `У нас є все для активного відпочинку! 🌊\n\n🏄 SUP-дошки — 400 грн/год\n🚲 Велосипеди — 250 грн/день\n🎣 Рибальський комплект — 300 грн/день\n🛶 Каяки — 350 грн/2 год\n\nМожна взяти на пів дня або повний день. Бронювати заздалегідь не обов'язково — є в наявності!`;
+      suggestion = `Наш SPA-центр відкритий щодня! 🌿\n\nПослуги:\n🧖 Масаж — від 800 ₴/год\n🛁 Джакузі — 600 ₴/год\n🔥 Сауна — 900 ₴/2 год\n🏊 Басейн — 400 ₴ вхід\n\nDay pass без проживання доступний. Записати вас на конкретний час?`;
+    } else if (content.includes("сап") || content.includes("велосипед") || content.includes("каяк") || content.includes("риб")) {
+      suggestion = `У нас є все для активного відпочинку! 🌊\n\n🏄 SUP-дошки — 400 ₴/год\n🚲 Велосипеди — 250 ₴/день\n🎣 Рибальський комплект — 300 ₴/день\n🛶 Каяки — 350 ₴/2 год\n\nМожна взяти на пів дня або повний день. Бронювати заздалегідь не потрібно!`;
     } else if (content.includes("довгостроков") || content.includes("місяць") || content.includes("місячн")) {
-      suggestion = `Добрий день! Так, ми розглядаємо довгострокову оренду від 30 днів зі спеціальними умовами. Вартість узгоджується індивідуально і зазвичай на 25-30% нижче щоденної ставки. Укажіть об'єкт, що вас цікавить, та бажаний термін — зв'яжемося для обговорення деталей!`;
+      suggestion = `Добрий день! Так, ми розглядаємо довгострокову оренду від 30 днів зі спеціальними умовами 🏠\n\nВартість узгоджується індивідуально і зазвичай на 25-30% нижче щоденної ставки.\n\nУкажіть об'єкт та бажаний термін — зв'яжемося для обговорення деталей!`;
+    } else if (content.includes("дякую") || content.includes("дякую") || content.includes("чудово") || content.includes("відмінно")) {
+      suggestion = `Дякуємо і вам за добрі слова! 🙏\n\nЗавжди раді бачити вас знову. Якщо виникнуть будь-які питання або захочете забронювати наступний відпочинок — звертайтесь!\n\nАрт-курорт «Догода» завжди для вас відкритий! 🌿`;
     } else {
-      suggestion = `Добрий день, ${conversation.guestName?.split(" ")[0] || ""}! Дякуємо за звернення до нас. Уточніть, будь ласка, деталі вашого запиту — ми з радістю допоможемо підібрати найкращий варіант для відпочинку! 🏡`;
+      suggestion = `Добрий день, ${name}! Дякуємо за звернення до арт-курорту «Догода» 🏡\n\nМи уважно ознайомились з вашим запитом і з радістю допоможемо. Уточніть, будь ласка, деталі — підберемо найкращий варіант для вас!`;
     }
 
     res.json({ suggestion });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Update conversation status ─────────────────────────────────────────────
+// ── Update conversation ─────────────────────────────────────────────────────
 router.patch("/conversations/:id", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
-    const { status, bookingId, guestId, tags, assignedToId } = req.body;
+    const { status, bookingId, leadId, tags, assignedToId, subject, estimatedValue } = req.body;
 
-    const updates: Record<string, any> = { updatedAt: new Date() };
-    if (status) updates.status = status;
-    if (bookingId !== undefined) updates.bookingId = bookingId;
-    if (guestId !== undefined) updates.guestId = guestId;
-    if (tags !== undefined) updates.tags = tags;
-    if (assignedToId !== undefined) updates.assignedToId = assignedToId;
+    const sets: string[] = ["updated_at = NOW()"];
+    const vals: any[] = [id, orgId];
+    let i = 3;
+    if (status !== undefined) { sets.push(`status = $${i++}`); vals.push(status); }
+    if (bookingId !== undefined) { sets.push(`booking_id = $${i++}`); vals.push(bookingId); }
+    if (leadId !== undefined) { sets.push(`lead_id = $${i++}`); vals.push(leadId); }
+    if (tags !== undefined) { sets.push(`tags = $${i++}`); vals.push(JSON.stringify(tags)); }
+    if (assignedToId !== undefined) { sets.push(`assigned_to_id = $${i++}`); vals.push(assignedToId || null); }
+    if (subject !== undefined) { sets.push(`subject = $${i++}`); vals.push(subject); }
+    if (estimatedValue !== undefined) { sets.push(`estimated_value = $${i++}`); vals.push(estimatedValue); }
 
-    const [updated] = await db.update(conversationsTable)
-      .set(updates)
-      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.organizationId, orgId)))
-      .returning();
+    const r = await (db as any).$client.query(`
+      UPDATE conversations SET ${sets.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *
+    `, vals);
 
-    res.json(updated);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+    if (status) {
+      const statusLabels: Record<string, string> = {
+        open: "Відкрито", pending: "Очікує", resolved: "Вирішено", spam: "Спам",
+      };
+      await (db as any).$client.query(`
+        INSERT INTO messages (conversation_id, direction, message_type, content, sender_name, is_read, created_at)
+        VALUES ($1, 'outbound', 'system', $2, 'Система', true, NOW())
+      `, [id, `Статус змінено: ${statusLabels[status] || status}`]);
+    }
+
+    if (assignedToId) {
+      const userR = await (db as any).$client.query(`SELECT name FROM users WHERE id = $1`, [assignedToId]);
+      const userName = userR.rows[0]?.name || "Менеджер";
+      await (db as any).$client.query(`
+        INSERT INTO messages (conversation_id, direction, message_type, content, sender_name, is_read, created_at)
+        VALUES ($1, 'outbound', 'system', $2, 'Система', true, NOW())
+      `, [id, `Призначено: ${userName}`]);
+    }
+
+    res.json(r.rows[0] || {});
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Create new conversation (manual) ──────────────────────────────────────
+// ── Create conversation ─────────────────────────────────────────────────────
 router.post("/conversations", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const { channel, guestName, guestPhone, guestEmail, subject, initialMessage } = req.body;
-
     if (!guestName || !channel) return res.status(400).json({ error: "Ім'я гостя та канал обов'язкові" });
 
-    const [conversation] = await db.insert(conversationsTable).values({
-      organizationId: orgId,
-      channel: channel as any,
-      guestName,
-      guestPhone: guestPhone || null,
-      guestEmail: guestEmail || null,
-      subject: subject || null,
-      lastMessagePreview: initialMessage || null,
-      status: "open",
-      lastMessageAt: new Date(),
-    }).returning();
+    const r = await (db as any).$client.query(`
+      INSERT INTO conversations (organization_id, channel, guest_name, guest_phone, guest_email, subject, last_message_preview, status, last_message_at, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', NOW(), NOW(), NOW())
+      RETURNING *
+    `, [orgId, channel, guestName, guestPhone || null, guestEmail || null, subject || null, initialMessage || null]);
 
+    const conv = r.rows[0];
     if (initialMessage) {
-      await db.insert(messagesTable).values({
-        conversationId: conversation.id,
-        direction: "inbound",
-        content: initialMessage,
-        senderName: guestName,
-      });
+      await (db as any).$client.query(`
+        INSERT INTO messages (conversation_id, direction, content, sender_name, is_read, created_at)
+        VALUES ($1, 'inbound', $2, $3, false, NOW())
+      `, [conv.id, initialMessage, guestName]);
     }
 
-    res.json(conversation);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+    res.json(conv);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Link booking to conversation ───────────────────────────────────────────
+// ── Link booking ────────────────────────────────────────────────────────────
 router.post("/conversations/:id/link-booking/:bookingId", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
     const bookingId = parseInt(req.params.bookingId);
 
-    const [updated] = await db.update(conversationsTable)
-      .set({ bookingId, updatedAt: new Date() })
-      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.organizationId, orgId)))
-      .returning();
+    const r = await (db as any).$client.query(`
+      UPDATE conversations SET booking_id = $1, updated_at = NOW()
+      WHERE id = $2 AND organization_id = $3 RETURNING *
+    `, [bookingId, id, orgId]);
 
-    // Add system message
-    await db.insert(messagesTable).values({
-      conversationId: id,
-      direction: "outbound",
-      messageType: "system",
-      content: `📎 Прив'язано до бронювання #${bookingId}`,
-      senderName: "Система",
-    });
+    await (db as any).$client.query(`
+      INSERT INTO messages (conversation_id, direction, message_type, content, sender_name, is_read, created_at)
+      VALUES ($1, 'outbound', 'system', $2, 'Система', true, NOW())
+    `, [id, `Прив'язано до бронювання #${bookingId}`]);
 
-    res.json(updated);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+    res.json(r.rows[0] || {});
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Get channel configs ────────────────────────────────────────────────────
+// ── Leads list ──────────────────────────────────────────────────────────────
+router.get("/leads", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const { status, search } = req.query as Record<string, string>;
+
+    const r = await (db as any).$client.query(`
+      SELECT l.*,
+        u.name as assigned_to_name,
+        c.channel, c.status as conv_status, c.unread_count, c.last_message_at, c.last_message_preview
+      FROM leads l
+      LEFT JOIN users u ON u.id = l.assigned_to_id
+      LEFT JOIN conversations c ON c.id = l.conversation_id
+      WHERE l.organization_id = $1
+      ORDER BY l.updated_at DESC
+    `, [orgId]);
+
+    let rows = r.rows;
+    if (status) rows = rows.filter((l: any) => l.status === status);
+    if (search) {
+      const s = search.toLowerCase();
+      rows = rows.filter((l: any) =>
+        l.first_name?.toLowerCase().includes(s) ||
+        l.last_name?.toLowerCase().includes(s) ||
+        l.email?.toLowerCase().includes(s) ||
+        l.phone?.includes(s) ||
+        l.subject?.toLowerCase().includes(s)
+      );
+    }
+
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Lead detail ─────────────────────────────────────────────────────────────
+router.get("/leads/:id", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const id = parseInt(req.params.id);
+    const r = await (db as any).$client.query(`
+      SELECT l.*, u.name as assigned_to_name
+      FROM leads l
+      LEFT JOIN users u ON u.id = l.assigned_to_id
+      WHERE l.id = $1 AND l.organization_id = $2
+    `, [id, orgId]);
+    if (!r.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    res.json(r.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Create lead ─────────────────────────────────────────────────────────────
+router.post("/leads", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const { firstName, lastName, email, phone, source, subject, notes, estimatedValue, checkInDate, checkOutDate, guestsCount } = req.body;
+
+    const r = await (db as any).$client.query(`
+      INSERT INTO leads (organization_id, source, status, first_name, last_name, email, phone, subject, notes, estimated_value, check_in_date, check_out_date, guests_count, created_at, updated_at)
+      VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+      RETURNING *
+    `, [orgId, source || 'other', firstName || null, lastName || null, email || null, phone || null, subject || null, notes || null, estimatedValue || null, checkInDate || null, checkOutDate || null, guestsCount || 1]);
+
+    res.json(r.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Update lead ─────────────────────────────────────────────────────────────
+router.patch("/leads/:id", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const id = parseInt(req.params.id);
+    const { status, assignedToId, quotedAmount, estimatedValue, notes, lostReason, followUpAt } = req.body;
+
+    const sets: string[] = ["updated_at = NOW()"];
+    const vals: any[] = [id, orgId];
+    let i = 3;
+    if (status !== undefined) { sets.push(`status = $${i++}`); vals.push(status); }
+    if (assignedToId !== undefined) { sets.push(`assigned_to_id = $${i++}`); vals.push(assignedToId || null); }
+    if (quotedAmount !== undefined) { sets.push(`quoted_amount = $${i++}`); vals.push(quotedAmount); }
+    if (estimatedValue !== undefined) { sets.push(`estimated_value = $${i++}`); vals.push(estimatedValue); }
+    if (notes !== undefined) { sets.push(`notes = $${i++}`); vals.push(notes); }
+    if (lostReason !== undefined) { sets.push(`lost_reason = $${i++}`); vals.push(lostReason); }
+    if (followUpAt !== undefined) { sets.push(`follow_up_at = $${i++}`); vals.push(followUpAt); }
+    if (status === "quote_sent") { sets.push(`quoted_at = NOW()`); }
+    if (status === "booked") { sets.push(`booked_at = NOW()`); }
+    if (status === "contacted") { sets.push(`contacted_at = NOW()`); }
+
+    const r = await (db as any).$client.query(`
+      UPDATE leads SET ${sets.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *
+    `, vals);
+
+    res.json(r.rows[0] || {});
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Canned replies ──────────────────────────────────────────────────────────
+router.get("/canned-replies", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const { category } = req.query as Record<string, string>;
+    let q = `SELECT * FROM canned_replies WHERE organization_id = $1`;
+    const vals: any[] = [orgId];
+    if (category) { q += ` AND category = $2`; vals.push(category); }
+    q += ` ORDER BY use_count DESC, title ASC`;
+    const r = await (db as any).$client.query(q, vals);
+    res.json(r.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/canned-replies", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const { title, content, category = "general", shortcut } = req.body;
+    if (!title || !content) return res.status(400).json({ error: "Назва та текст обов'язкові" });
+    const r = await (db as any).$client.query(`
+      INSERT INTO canned_replies (organization_id, title, content, category, shortcut)
+      VALUES ($1, $2, $3, $4, $5) RETURNING *
+    `, [orgId, title, content, category, shortcut || null]);
+    res.json(r.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete("/canned-replies/:id", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    await (db as any).$client.query(
+      `DELETE FROM canned_replies WHERE id = $1 AND organization_id = $2`, [req.params.id, orgId]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/canned-replies/:id/use", async (req: any, res) => {
+  try {
+    await (db as any).$client.query(
+      `UPDATE canned_replies SET use_count = use_count + 1 WHERE id = $1`, [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.json({ success: true });
+  }
+});
+
+// ── Staff list ──────────────────────────────────────────────────────────────
+router.get("/staff", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const r = await (db as any).$client.query(`
+      SELECT id, name, role, email FROM users
+      WHERE organization_id = $1 AND role IN ('owner','manager','reception')
+      ORDER BY name
+    `, [orgId]);
+    res.json(r.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Channel configs ─────────────────────────────────────────────────────────
 router.get("/channels", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const configs = await db.select().from(channelConfigsTable)
       .where(eq(channelConfigsTable.organizationId, orgId));
-
     const channels = ["telegram", "instagram", "website", "email", "phone", "whatsapp", "viber"];
-    const result = channels.map(ch => {
+    res.json(channels.map(ch => {
       const config = configs.find(c => c.channel === ch);
-      return {
-        channel: ch,
-        isEnabled: config?.isEnabled || ch === "website",
-        config: config?.config || {},
-        webhookUrl: config?.webhookUrl || null,
-      };
-    });
-
-    res.json(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+      return { channel: ch, isEnabled: config?.isEnabled || ch === "website", config: config?.config || {} };
+    }));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Stats ──────────────────────────────────────────────────────────────────
+// ── Stats ───────────────────────────────────────────────────────────────────
 router.get("/stats", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     await ensureDemoData(orgId);
 
-    const conversations = await db.select().from(conversationsTable)
-      .where(eq(conversationsTable.organizationId, orgId));
+    const [convR, leadR] = await Promise.all([
+      (db as any).$client.query(`SELECT status, channel, unread_count FROM conversations WHERE organization_id = $1`, [orgId]),
+      (db as any).$client.query(`SELECT status, estimated_value FROM leads WHERE organization_id = $1`, [orgId]),
+    ]);
+
+    const convs = convR.rows;
+    const leads = leadR.rows;
 
     const stats = {
-      total: conversations.length,
-      open: conversations.filter(c => c.status === "open").length,
-      pending: conversations.filter(c => c.status === "pending").length,
-      resolved: conversations.filter(c => c.status === "resolved").length,
-      totalUnread: conversations.reduce((s, c) => s + c.unreadCount, 0),
+      total: convs.length,
+      open: convs.filter((c: any) => c.status === "open").length,
+      pending: convs.filter((c: any) => c.status === "pending").length,
+      resolved: convs.filter((c: any) => c.status === "resolved").length,
+      totalUnread: convs.reduce((s: number, c: any) => s + (c.unread_count || 0), 0),
       byChannel: {} as Record<string, number>,
+      leads: {
+        total: leads.length,
+        new: leads.filter((l: any) => l.status === "new").length,
+        qualified: leads.filter((l: any) => l.status === "qualified").length,
+        quoteSent: leads.filter((l: any) => l.status === "quote_sent").length,
+        booked: leads.filter((l: any) => l.status === "booked").length,
+        totalValue: leads.reduce((s: number, l: any) => s + parseFloat(l.estimated_value || 0), 0),
+      },
     };
-
-    for (const c of conversations) {
+    for (const c of convs) {
       stats.byChannel[c.channel] = (stats.byChannel[c.channel] || 0) + 1;
     }
-
     res.json(stats);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Помилка сервера" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

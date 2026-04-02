@@ -2,14 +2,15 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import {
   Search, Send, Sparkles, Link2, CheckCheck, Clock, AlertCircle,
   MessageSquare, Instagram, Mail, Phone, Globe, RefreshCw, Filter,
-  Plus, X, ChevronDown, User, Calendar, MoreVertical, Loader2,
-  Bot, Smile, Paperclip, ArrowLeft, Check,
+  Plus, X, User, Calendar, MoreVertical, Loader2, Bot, Paperclip,
+  ArrowLeft, ChevronDown, StickyNote, Tag, UserCheck, TrendingUp,
+  Building2, Hash, Inbox, Target, ChevronRight, Edit3, Check,
+  DollarSign, Star, Zap, Bell, FileText, Eye,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -17,204 +18,271 @@ import { uk } from "date-fns/locale";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api";
 const tok = () => localStorage.getItem("hms_token") || "";
-const authFetch = (url: string, opts: RequestInit = {}) =>
+const apiFetch = (url: string, opts: RequestInit = {}) =>
   fetch(url, { ...opts, headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
 
-// ── Channel meta ───────────────────────────────────────────────────────────
-const CHANNEL_META: Record<string, { label: string; icon: React.ReactNode; color: string; bg: string }> = {
+// ── Channel meta ────────────────────────────────────────────────────────────
+const CH: Record<string, { label: string; icon: React.ReactNode; color: string; bg: string; dot: string }> = {
   telegram: {
     label: "Telegram",
     icon: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.069l-2.055 9.677c-.154.678-.557.843-1.128.524l-3.1-2.285-1.497 1.44c-.165.165-.304.304-.624.304l.223-3.147 5.74-5.185c.25-.222-.054-.345-.386-.123L7.38 14.413l-3.04-.95c-.66-.205-.673-.66.138-.976l11.878-4.578c.549-.199 1.029.133.207.16z"/></svg>,
-    color: "text-blue-500",
-    bg: "bg-blue-50 border-blue-100",
+    color: "text-sky-500", bg: "bg-sky-50 border-sky-100", dot: "bg-sky-400",
   },
   instagram: {
     label: "Instagram",
     icon: <Instagram className="w-3.5 h-3.5" />,
-    color: "text-pink-500",
-    bg: "bg-pink-50 border-pink-100",
+    color: "text-pink-500", bg: "bg-pink-50 border-pink-100", dot: "bg-pink-400",
   },
   website: {
     label: "Сайт",
     icon: <Globe className="w-3.5 h-3.5" />,
-    color: "text-green-600",
-    bg: "bg-green-50 border-green-100",
+    color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-100", dot: "bg-emerald-400",
   },
   email: {
     label: "Email",
     icon: <Mail className="w-3.5 h-3.5" />,
-    color: "text-purple-500",
-    bg: "bg-purple-50 border-purple-100",
+    color: "text-violet-500", bg: "bg-violet-50 border-violet-100", dot: "bg-violet-400",
   },
   phone: {
     label: "Телефон",
     icon: <Phone className="w-3.5 h-3.5" />,
-    color: "text-gray-600",
-    bg: "bg-gray-50 border-gray-100",
+    color: "text-gray-500", bg: "bg-gray-50 border-gray-100", dot: "bg-gray-400",
   },
   whatsapp: {
     label: "WhatsApp",
-    icon: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current"><path d="M12 0C5.374 0 0 5.373 0 12c0 2.117.554 4.095 1.518 5.815L0 24l6.335-1.482A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm6.18 16.963c-.26.733-1.515 1.4-2.072 1.485-.53.08-1.197.114-1.93-.12-.445-.143-1.015-.335-1.745-.654-3.065-1.325-5.063-4.407-5.215-4.612-.152-.205-1.24-1.648-1.24-3.144 0-1.497.784-2.233 1.062-2.54.277-.305.605-.381.807-.381.201 0 .403.002.58.01.185.008.435-.07.68.519.26.619.88 2.14.958 2.297.078.157.13.34.026.549-.104.21-.156.34-.307.524-.152.183-.32.41-.456.55-.152.157-.31.328-.134.641.177.314.785 1.296 1.685 2.098 1.157 1.032 2.133 1.35 2.447 1.503.313.152.496.128.679-.077.183-.205.784-.916.993-1.23.21-.312.42-.26.707-.156.287.104 1.822.86 2.135 1.016.313.157.52.235.596.365.078.13.078.752-.182 1.488z"/></svg>,
-    color: "text-emerald-500",
-    bg: "bg-emerald-50 border-emerald-100",
+    icon: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current"><path d="M12 0C5.374 0 0 5.373 0 12c0 2.117.554 4.095 1.518 5.815L0 24l6.335-1.482A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm6.18 16.963c-.26.733-1.515 1.4-2.072 1.485-.53.08-1.197.114-1.93-.12-.445-.143-1.015-.335-1.745-.654-3.065-1.325-5.063-4.407-5.215-4.612-.152-.205-1.24-1.648-1.24-3.144 0-1.497.784-2.233 1.062-2.54.277-.305.605-.381.807-.381h.58c.185.008.435-.07.68.519.26.619.88 2.14.958 2.297.078.157.13.34.026.549-.104.21-.156.34-.307.524-.152.183-.32.41-.456.55-.152.157-.31.328-.134.641.177.314.785 1.296 1.685 2.098 1.157 1.032 2.133 1.35 2.447 1.503.313.152.496.128.679-.077.183-.205.784-.916.993-1.23.21-.312.42-.26.707-.156.287.104 1.822.86 2.135 1.016.313.157.52.235.596.365.078.13.078.752-.182 1.488z"/></svg>,
+    color: "text-green-500", bg: "bg-green-50 border-green-100", dot: "bg-green-400",
   },
   viber: {
     label: "Viber",
     icon: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current"><path d="M11.997 0C5.372 0 0 5.372 0 11.997 0 18.623 5.372 24 11.997 24 18.623 24 24 18.623 24 11.997 24 5.372 18.623 0 11.997 0zm4.13 16.463c-.213.58-.957 1.043-1.608 1.173-.43.087-.99.155-2.878-.617-2.417-.98-3.978-3.462-4.1-3.621-.12-.156-1.01-1.341-1.01-2.558 0-1.217.636-1.815.862-2.063.227-.247.494-.31.657-.31H8.2c.18 0 .35.066.48.183.14.125.26.308.39.65.35.908.673 1.573.673 1.573.128.22.09.494-.013.69-.1.197-.17.323-.338.504-.17.18-.355.402-.508.54-.158.142-.323.297-.138.58.184.28.816 1.345 1.751 2.18 1.203 1.072 2.218 1.407 2.53 1.568.313.162.497.135.68-.083.185-.218.796-.932 1.01-1.252.213-.32.425-.267.713-.161.288.105 1.836.866 2.152 1.023.316.157.527.237.603.37.078.13.078.76-.182 1.342z"/></svg>,
-    color: "text-violet-500",
-    bg: "bg-violet-50 border-violet-100",
+    color: "text-purple-500", bg: "bg-purple-50 border-purple-100", dot: "bg-purple-400",
   },
 };
 
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  open:     { label: "Відкрито",   color: "bg-green-100 text-green-700" },
-  pending:  { label: "Очікує",     color: "bg-yellow-100 text-yellow-700" },
-  resolved: { label: "Вирішено",   color: "bg-gray-100 text-gray-600" },
-  spam:     { label: "Спам",       color: "bg-red-100 text-red-700" },
+// ── Lead pipeline stages ────────────────────────────────────────────────────
+const LEAD_STAGES: Record<string, { label: string; color: string; bg: string; order: number }> = {
+  new:         { label: "Новий",         color: "text-gray-600",  bg: "bg-gray-100",   order: 0 },
+  contacted:   { label: "Контактували",  color: "text-blue-600",  bg: "bg-blue-100",   order: 1 },
+  qualified:   { label: "Кваліфік.",     color: "text-cyan-600",  bg: "bg-cyan-100",   order: 2 },
+  quote_sent:  { label: "КП надіслано",  color: "text-violet-600",bg: "bg-violet-100", order: 3 },
+  negotiating: { label: "Переговори",    color: "text-amber-600", bg: "bg-amber-100",  order: 4 },
+  booked:      { label: "Заброньовано",  color: "text-emerald-600",bg: "bg-emerald-100",order: 5 },
+  lost:        { label: "Втрачено",      color: "text-red-600",   bg: "bg-red-100",    order: 6 },
+  spam:        { label: "Спам",          color: "text-red-400",   bg: "bg-red-50",     order: 7 },
+};
+
+const CONV_STATUS: Record<string, { label: string; color: string }> = {
+  open:     { label: "Відкрито",  color: "bg-green-100 text-green-700" },
+  pending:  { label: "Очікує",    color: "bg-amber-100 text-amber-700" },
+  resolved: { label: "Вирішено",  color: "bg-gray-100 text-gray-600" },
+  spam:     { label: "Спам",      color: "bg-red-100 text-red-600" },
 };
 
 interface Conversation {
-  id: number;
-  channel: string;
-  guestName: string | null;
-  guestPhone: string | null;
-  guestEmail: string | null;
-  subject: string | null;
-  lastMessagePreview: string | null;
-  lastMessageAt: string;
-  status: string;
-  unreadCount: number;
-  bookingId: number | null;
-  tags: string[];
+  id: number; channel: string; guestName: string | null; guestPhone: string | null;
+  guestEmail: string | null; subject: string | null; lastMessagePreview: string | null;
+  lastMessageAt: string; status: string; unreadCount: number; bookingId: number | null;
+  leadId: number | null; leadStatus: string | null; tags: string[];
+  assignedToId: number | null; assignedToName: string | null; estimatedValue: string | null;
 }
 
 interface Message {
-  id: number;
-  conversationId: number;
-  direction: "inbound" | "outbound";
-  messageType: string;
-  content: string | null;
-  senderName: string | null;
-  isAiGenerated: boolean;
-  isRead: boolean;
-  createdAt: string;
+  id: number; conversationId: number; direction: "inbound" | "outbound";
+  messageType: string; content: string | null; senderName: string | null;
+  isAiGenerated: boolean; isInternal: boolean; isRead: boolean; createdAt: string;
+  mediaUrl?: string;
 }
 
-interface Stats {
-  total: number;
-  open: number;
-  pending: number;
-  resolved: number;
-  totalUnread: number;
-  byChannel: Record<string, number>;
+interface Lead {
+  id: number; source: string; status: string; first_name: string | null;
+  last_name: string | null; email: string | null; phone: string | null;
+  subject: string | null; notes: string | null; estimated_value: string | null;
+  quoted_amount: string | null; assigned_to_id: number | null; assigned_to_name: string | null;
+  check_in_date: string | null; check_out_date: string | null; guests_count: number;
+  priority: string; created_at: string; updated_at: string;
+  channel?: string; conv_status?: string; unread_count?: number;
+  last_message_at?: string; last_message_preview?: string;
 }
 
-const FILTERS = [
-  { key: "all",      label: "Всі" },
-  { key: "open",     label: "Відкриті" },
-  { key: "pending",  label: "Очікують" },
-  { key: "resolved", label: "Вирішені" },
-];
+interface CannedReply { id: number; title: string; content: string; category: string; shortcut: string | null; use_count: number; }
+interface StaffMember { id: number; name: string; role: string; }
 
-const CHANNELS = ["telegram", "instagram", "website", "email", "whatsapp", "viber", "phone"];
+const SOURCE_LABELS: Record<string, string> = {
+  phone: "Телефон", telegram: "Telegram", instagram: "Instagram", website: "Сайт",
+  booking_com: "Booking.com", airbnb: "Airbnb", expedia: "Expedia",
+  direct: "Прямо", referral: "Рефер.", repeat: "Повторний", other: "Інше",
+};
+
+function fmt(n: number | string | null | undefined, cur = "₴") {
+  if (!n) return "—";
+  return `${cur} ${Number(n).toLocaleString("uk-UA", { minimumFractionDigits: 0 })}`;
+}
+
+function initials(name: string | null) {
+  if (!name) return "?";
+  return name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
+}
+
+// ── Avatar ──────────────────────────────────────────────────────────────────
+function Avatar({ name, channel, size = "md" }: { name: string | null; channel?: string; size?: "sm" | "md" | "lg" }) {
+  const s = { sm: "w-7 h-7 text-[10px]", md: "w-9 h-9 text-xs", lg: "w-11 h-11 text-sm" }[size];
+  const ch = channel ? CH[channel] : null;
+  const colors = ["bg-indigo-100 text-indigo-700", "bg-pink-100 text-pink-700", "bg-amber-100 text-amber-700", "bg-emerald-100 text-emerald-700", "bg-purple-100 text-purple-700"];
+  const idx = name ? name.charCodeAt(0) % colors.length : 0;
+  return (
+    <div className={`${s} rounded-full flex items-center justify-center font-semibold relative flex-shrink-0 ${colors[idx]}`}>
+      {initials(name)}
+      {ch && (
+        <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border border-white flex items-center justify-center ${ch.dot}`}>
+          <span className="text-white scale-75">{ch.icon}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function InboxPage() {
+  const [view, setView] = useState<"conversations" | "leads">("conversations");
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [booking, setBooking] = useState<any>(null);
+  const [convLead, setConvLead] = useState<Lead | null>(null);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [cannedReplies, setCannedReplies] = useState<CannedReply[]>([]);
+  const [stats, setStats] = useState<any>(null);
+
   const [loading, setLoading] = useState(true);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [channelFilter, setChannelFilter] = useState("");
-  const [search, setSearch] = useState("");
-  const [replyText, setReplyText] = useState("");
+  const [msgsLoading, setMsgsLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiSuggestion, setAiSuggestion] = useState("");
-  const [linkedBooking, setLinkedBooking] = useState<any>(null);
+
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [channelFilter, setChannelFilter] = useState("");
+  const [leadStageFilter, setLeadStageFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const [replyText, setReplyText] = useState("");
+  const [isInternal, setIsInternal] = useState(false);
+  const [aiDraft, setAiDraft] = useState("");
+  const [showCanned, setShowCanned] = useState(false);
+  const [cannedSearch, setCannedSearch] = useState("");
+
   const [showLinkBooking, setShowLinkBooking] = useState(false);
   const [bookingIdInput, setBookingIdInput] = useState("");
+  const [showRightPanel, setShowRightPanel] = useState(true);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
+
+  const [editingTag, setEditingTag] = useState("");
+  const [showAssign, setShowAssign] = useState(false);
+  const [showLeadForm, setShowLeadForm] = useState(false);
+  const [newLeadForm, setNewLeadForm] = useState({ firstName: "", lastName: "", email: "", phone: "", source: "phone", subject: "", estimatedValue: "" });
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
 
-  const fetchConversations = useCallback(async () => {
+  // ── Load ────────────────────────────────────────────────────────────────
+  async function loadAll() {
+    setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (statusFilter !== "all") params.set("status", statusFilter);
-      if (channelFilter) params.set("channel", channelFilter);
-      if (search) params.set("search", search);
-      const r = await authFetch(`${API}/inbox/conversations?${params}`);
-      const d = await r.json();
-      if (d.conversations) {
-        setConversations(d.conversations);
-        setStats(prev => prev ? { ...prev, totalUnread: d.totalUnread } : null);
-      }
-    } catch {}
-  }, [statusFilter, channelFilter, search]);
-
-  useEffect(() => {
-    async function init() {
-      setLoading(true);
-      try {
-        const [statsRes, convRes] = await Promise.all([
-          authFetch(`${API}/inbox/stats`),
-          authFetch(`${API}/inbox/conversations`),
-        ]);
-        const statsData = await statsRes.json();
-        const convData = await convRes.json();
-        setStats(statsData);
-        if (convData.conversations) setConversations(convData.conversations);
-      } finally {
-        setLoading(false);
-      }
+      const [statsR, convR, leadR, cannedR, staffR] = await Promise.all([
+        apiFetch(`${API}/inbox/stats`).then(r => r.json()),
+        apiFetch(`${API}/inbox/conversations`).then(r => r.json()),
+        apiFetch(`${API}/inbox/leads`).then(r => r.json()),
+        apiFetch(`${API}/inbox/canned-replies`).then(r => r.json()),
+        apiFetch(`${API}/inbox/staff`).then(r => r.json()),
+      ]);
+      setStats(statsR);
+      if (convR.conversations) setConversations(convR.conversations);
+      if (Array.isArray(leadR)) setLeads(leadR);
+      if (Array.isArray(cannedR)) setCannedReplies(cannedR);
+      if (Array.isArray(staffR)) setStaff(staffR);
+    } finally {
+      setLoading(false);
     }
-    init();
-  }, []);
+  }
 
-  useEffect(() => { fetchConversations(); }, [fetchConversations]);
+  useEffect(() => { loadAll(); }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function openConversation(conv: Conversation) {
+  const filteredConvs = conversations.filter(c => {
+    if (statusFilter !== "all" && c.status !== statusFilter) return false;
+    if (channelFilter && c.channel !== channelFilter) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      return c.guestName?.toLowerCase().includes(s) ||
+        c.guestPhone?.includes(s) || c.subject?.toLowerCase().includes(s) ||
+        c.lastMessagePreview?.toLowerCase().includes(s);
+    }
+    return true;
+  });
+
+  const filteredLeads = leads.filter(l => {
+    if (leadStageFilter !== "all" && l.status !== leadStageFilter) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      return l.first_name?.toLowerCase().includes(s) || l.last_name?.toLowerCase().includes(s) ||
+        l.email?.toLowerCase().includes(s) || l.phone?.includes(s) || l.subject?.toLowerCase().includes(s);
+    }
+    return true;
+  });
+
+  const filteredCanned = cannedReplies.filter(c =>
+    !cannedSearch || c.title.toLowerCase().includes(cannedSearch.toLowerCase()) ||
+    c.content.toLowerCase().includes(cannedSearch.toLowerCase()) ||
+    c.shortcut?.includes(cannedSearch)
+  );
+
+  const totalUnread = conversations.reduce((s, c) => s + c.unreadCount, 0);
+
+  // ── Open conversation ───────────────────────────────────────────────────
+  async function openConv(conv: Conversation) {
     setSelectedConv(conv);
-    setMessagesLoading(true);
-    setAiSuggestion("");
-    setLinkedBooking(null);
+    setMsgsLoading(true);
+    setAiDraft("");
+    setIsInternal(false);
+    setReplyText("");
     setShowMobileDetail(true);
+    setBooking(null);
+    setConvLead(null);
     try {
-      const r = await authFetch(`${API}/inbox/conversations/${conv.id}`);
+      const r = await apiFetch(`${API}/inbox/conversations/${conv.id}`);
       const d = await r.json();
       if (d.messages) setMessages(d.messages);
-      if (d.booking) setLinkedBooking(d.booking);
+      if (d.booking) setBooking(d.booking);
+      if (d.lead) setConvLead(d.lead);
       setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unreadCount: 0 } : c));
-    } catch {
-      toast({ title: "Помилка завантаження повідомлень", variant: "destructive" });
     } finally {
-      setMessagesLoading(false);
+      setMsgsLoading(false);
     }
   }
 
-  async function sendReply(text?: string) {
-    const content = text || replyText.trim();
-    if (!content || !selectedConv) return;
+  // ── Send message ────────────────────────────────────────────────────────
+  async function sendMessage() {
+    const text = replyText.trim();
+    if (!text || !selectedConv) return;
     setSending(true);
     try {
-      const r = await authFetch(`${API}/inbox/conversations/${selectedConv.id}/reply`, {
-        method: "POST",
-        body: JSON.stringify({ content }),
-      });
+      const endpoint = isInternal
+        ? `${API}/inbox/conversations/${selectedConv.id}/internal-note`
+        : `${API}/inbox/conversations/${selectedConv.id}/reply`;
+      const body = isInternal ? { content: text } : { content: text, isAiGenerated: text === aiDraft };
+      const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify(body) });
       const d = await r.json();
       if (d.message) {
         setMessages(prev => [...prev, d.message]);
         setReplyText("");
-        setAiSuggestion("");
-        setConversations(prev => prev.map(c => c.id === selectedConv.id ? {
-          ...c, lastMessagePreview: content.slice(0, 80), lastMessageAt: new Date().toISOString(), status: "pending",
-        } : c));
+        setAiDraft("");
+        if (!isInternal) {
+          setConversations(prev => prev.map(c => c.id === selectedConv.id
+            ? { ...c, lastMessagePreview: text.slice(0, 80), lastMessageAt: new Date().toISOString(), status: "pending" }
+            : c));
+        }
       }
     } finally {
       setSending(false);
@@ -222,160 +290,246 @@ export default function InboxPage() {
     }
   }
 
-  async function getAiSuggestion() {
+  // ── AI draft ────────────────────────────────────────────────────────────
+  async function getAiDraft() {
     if (!selectedConv) return;
     setAiLoading(true);
-    setAiSuggestion("");
+    setAiDraft("");
     try {
-      const r = await authFetch(`${API}/inbox/conversations/${selectedConv.id}/ai-suggest`, { method: "POST" });
+      const r = await apiFetch(`${API}/inbox/conversations/${selectedConv.id}/ai-suggest`, { method: "POST" });
       const d = await r.json();
-      if (d.suggestion) setAiSuggestion(d.suggestion);
+      if (d.suggestion) setAiDraft(d.suggestion);
     } finally {
       setAiLoading(false);
     }
   }
 
-  async function updateStatus(status: string) {
+  // ── Update conv ──────────────────────────────────────────────────────────
+  async function updateConv(updates: Record<string, any>) {
     if (!selectedConv) return;
-    const r = await authFetch(`${API}/inbox/conversations/${selectedConv.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
+    const r = await apiFetch(`${API}/inbox/conversations/${selectedConv.id}`, {
+      method: "PATCH", body: JSON.stringify(updates),
     });
     const d = await r.json();
-    setSelectedConv(prev => prev ? { ...prev, status } : null);
-    setConversations(prev => prev.map(c => c.id === selectedConv.id ? { ...c, status } : c));
-    toast({ title: `Статус змінено на «${STATUS_META[status]?.label}»` });
+    const newConv = { ...selectedConv, ...updates };
+    setSelectedConv(newConv as any);
+    setConversations(prev => prev.map(c => c.id === selectedConv.id ? { ...c, ...updates } : c));
+    if (updates.status) {
+      toast({ title: `Статус: ${CONV_STATUS[updates.status]?.label}` });
+      const sysMsg: Message = {
+        id: Date.now(), conversationId: selectedConv.id, direction: "outbound",
+        messageType: "system", content: `Статус змінено: ${CONV_STATUS[updates.status]?.label}`,
+        senderName: "Система", isAiGenerated: false, isInternal: false, isRead: true,
+        createdAt: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, sysMsg]);
+    }
+    if (updates.assignedToId !== undefined) {
+      const staffMember = staff.find(s => s.id === updates.assignedToId);
+      setSelectedConv(prev => prev ? { ...prev, assignedToName: staffMember?.name || null, assignedToId: updates.assignedToId } : null);
+    }
   }
 
+  // ── Update lead ──────────────────────────────────────────────────────────
+  async function updateLead(id: number, updates: Record<string, any>) {
+    const r = await apiFetch(`${API}/inbox/leads/${id}`, {
+      method: "PATCH", body: JSON.stringify(updates),
+    });
+    const d = await r.json();
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, ...d } : l));
+    if (convLead?.id === id) setConvLead(prev => prev ? { ...prev, ...d } : null);
+    if (updates.status) toast({ title: `Lead: ${LEAD_STAGES[updates.status]?.label}` });
+  }
+
+  // ── Link booking ─────────────────────────────────────────────────────────
   async function linkBooking() {
     if (!selectedConv || !bookingIdInput) return;
-    const r = await authFetch(`${API}/inbox/conversations/${selectedConv.id}/link-booking/${bookingIdInput}`, { method: "POST" });
+    const r = await apiFetch(`${API}/inbox/conversations/${selectedConv.id}/link-booking/${bookingIdInput}`, { method: "POST" });
     const d = await r.json();
     if (!d.error) {
       toast({ title: "✅ Бронювання прив'язано" });
       setShowLinkBooking(false);
-      openConversation(selectedConv);
+      openConv(selectedConv);
     } else {
       toast({ title: "Помилка", description: d.error, variant: "destructive" });
     }
   }
 
-  const ch = selectedConv ? CHANNEL_META[selectedConv.channel] : null;
-  const totalUnread = conversations.reduce((s, c) => s + c.unreadCount, 0);
+  // ── Add tag ───────────────────────────────────────────────────────────────
+  async function addTag(tag: string) {
+    if (!selectedConv || !tag.trim()) return;
+    const tags = [...(selectedConv.tags || [])];
+    if (!tags.includes(tag.trim())) tags.push(tag.trim());
+    await updateConv({ tags });
+    setEditingTag("");
+  }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  async function removeTag(tag: string) {
+    if (!selectedConv) return;
+    const tags = (selectedConv.tags || []).filter(t => t !== tag);
+    await updateConv({ tags });
+  }
+
+  // ── Canned reply select ───────────────────────────────────────────────────
+  async function useCannedReply(cr: CannedReply) {
+    setReplyText(cr.content);
+    setShowCanned(false);
+    setCannedSearch("");
+    apiFetch(`${API}/inbox/canned-replies/${cr.id}/use`, { method: "POST" });
+    setTimeout(() => replyRef.current?.focus(), 100);
+  }
+
+  // ── Create lead ────────────────────────────────────────────────────────────
+  async function createLead() {
+    const r = await apiFetch(`${API}/inbox/leads`, {
+      method: "POST", body: JSON.stringify({
+        ...newLeadForm,
+        estimatedValue: newLeadForm.estimatedValue ? parseFloat(newLeadForm.estimatedValue) : null,
+      }),
+    });
+    const d = await r.json();
+    if (!d.error) {
+      setLeads(prev => [d, ...prev]);
+      setShowLeadForm(false);
+      setNewLeadForm({ firstName: "", lastName: "", email: "", phone: "", source: "phone", subject: "", estimatedValue: "" });
+      toast({ title: "✅ Лід створено" });
+    }
+  }
+
+  const ch = selectedConv ? CH[selectedConv.channel] : null;
+
+  // ────────────────────────────────────────────────────────────────────────────
   return (
     <AppLayout>
-      <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-gray-50">
+      <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-slate-50">
 
-        {/* ══ LEFT SIDEBAR ════════════════════════════════════════════════ */}
-        <div className={`flex flex-col bg-white border-r border-gray-100 w-full md:w-80 lg:w-96 flex-shrink-0 ${showMobileDetail ? "hidden md:flex" : "flex"}`}>
+        {/* ══ LEFT PANEL ═══════════════════════════════════════════════════ */}
+        <div className={`flex flex-col bg-white border-r border-gray-100 flex-shrink-0 w-full md:w-80 lg:w-[340px] ${showMobileDetail ? "hidden md:flex" : "flex"}`}>
 
           {/* Header */}
-          <div className="px-4 pt-4 pb-3 border-b border-gray-50">
+          <div className="px-4 pt-4 pb-0 border-b border-gray-50">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold text-gray-900">Inbox</h1>
+                <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+                  <Inbox className="w-4 h-4 text-white" />
+                </div>
+                <span className="font-bold text-gray-900 text-base">Comm Hub</span>
                 {totalUnread > 0 && (
-                  <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{totalUnread}</span>
+                  <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalUnread}</span>
                 )}
               </div>
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={fetchConversations}><RefreshCw className="w-3.5 h-3.5" /></Button>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={loadAll}><RefreshCw className="w-3.5 h-3.5" /></Button>
+                <Button size="sm" className="h-7 px-2 gap-1 text-xs bg-indigo-600 hover:bg-indigo-700"
+                  onClick={() => { if (view === "leads") setShowLeadForm(true); }}>
+                  <Plus className="w-3 h-3" />
+                </Button>
               </div>
             </div>
 
-            {/* Stats row */}
+            {/* Stats mini */}
             {stats && (
-              <div className="flex gap-2 mb-3">
+              <div className="grid grid-cols-4 gap-1.5 mb-3">
                 {[
-                  { label: "Відкриті", val: stats.open, color: "text-green-600" },
-                  { label: "Очікують", val: stats.pending, color: "text-yellow-600" },
-                  { label: "Вирішені", val: stats.resolved, color: "text-gray-500" },
+                  { label: "Відкриті", val: stats.open, color: "text-emerald-600" },
+                  { label: "Очікують", val: stats.pending, color: "text-amber-500" },
+                  { label: "Ліди", val: stats.leads?.total || 0, color: "text-violet-600" },
+                  { label: "Непрочит.", val: stats.totalUnread, color: "text-red-500" },
                 ].map(s => (
-                  <div key={s.label} className="flex-1 bg-gray-50 rounded-lg px-2 py-1.5 text-center">
-                    <p className={`text-lg font-bold leading-none ${s.color}`}>{s.val}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{s.label}</p>
+                  <div key={s.label} className="bg-gray-50 rounded-xl px-1.5 py-1.5 text-center">
+                    <p className={`text-sm font-bold leading-none ${s.color}`}>{s.val}</p>
+                    <p className="text-[9px] text-gray-400 mt-0.5">{s.label}</p>
                   </div>
                 ))}
               </div>
             )}
 
+            {/* View tabs */}
+            <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5 mb-3">
+              <button
+                onClick={() => setView("conversations")}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all ${view === "conversations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                <MessageSquare className="w-3 h-3" /> Inbox
+                {totalUnread > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-1 rounded-full">{totalUnread}</span>}
+              </button>
+              <button
+                onClick={() => setView("leads")}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all ${view === "leads" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                <Target className="w-3 h-3" /> Ліди
+                <span className="bg-violet-100 text-violet-700 text-[10px] font-bold px-1 rounded-full">{leads.length}</span>
+              </button>
+            </div>
+
             {/* Search */}
             <div className="relative mb-2">
               <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-gray-400" />
-              <Input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Пошук розмов…"
-                className="pl-8 h-8 text-sm bg-gray-50 border-gray-100"
-              />
+              <Input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder={view === "conversations" ? "Пошук розмов…" : "Пошук лідів…"}
+                className="pl-8 h-8 text-sm bg-gray-50 border-gray-100" />
             </div>
 
-            {/* Status filters */}
-            <div className="flex gap-1">
-              {FILTERS.map(f => (
-                <button
-                  key={f.key}
-                  onClick={() => setStatusFilter(f.key)}
-                  className={`flex-1 py-1 text-xs rounded-lg font-medium transition-all ${
-                    statusFilter === f.key ? "bg-gray-900 text-white" : "text-gray-500 hover:bg-gray-100"
-                  }`}
-                >
-                  {f.label}
+            {/* Filters */}
+            {view === "conversations" ? (
+              <>
+                <div className="flex gap-0.5 mb-2">
+                  {["all", "open", "pending", "resolved"].map(f => (
+                    <button key={f} onClick={() => setStatusFilter(f)}
+                      className={`flex-1 py-1 text-[11px] rounded-lg font-medium transition-all ${statusFilter === f ? "bg-gray-900 text-white" : "text-gray-500 hover:bg-gray-100"}`}>
+                      {f === "all" ? "Всі" : CONV_STATUS[f]?.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-1 flex-wrap pb-2">
+                  {Object.keys(CH).filter(c => stats?.byChannel?.[c] > 0).map(c => {
+                    const meta = CH[c];
+                    return (
+                      <button key={c} onClick={() => setChannelFilter(prev => prev === c ? "" : c)}
+                        className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] border transition-all ${channelFilter === c ? `${meta.bg} ${meta.color} font-semibold border-current` : "bg-white border-gray-100 text-gray-400"}`}>
+                        <span className={meta.color}>{meta.icon}</span>
+                        {stats?.byChannel?.[c] || 0}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="flex gap-0.5 flex-wrap pb-2">
+                <button onClick={() => setLeadStageFilter("all")}
+                  className={`px-2 py-0.5 text-[11px] rounded-full font-medium transition-all ${leadStageFilter === "all" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-500"}`}>
+                  Всі
                 </button>
-              ))}
-            </div>
-
-            {/* Channel filters */}
-            <div className="flex gap-1 mt-2 flex-wrap">
-              {CHANNELS.filter(ch => !stats || stats.byChannel[ch] > 0).map(ch => {
-                const meta = CHANNEL_META[ch];
-                return (
-                  <button
-                    key={ch}
-                    onClick={() => setChannelFilter(prev => prev === ch ? "" : ch)}
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border transition-all ${
-                      channelFilter === ch ? `${meta.bg} ${meta.color} font-semibold` : "bg-white border-gray-100 text-gray-400 hover:border-gray-200"
-                    }`}
-                  >
-                    <span className={meta.color}>{meta.icon}</span>
-                    {meta.label}
-                    {stats?.byChannel[ch] && <span className="font-bold">{stats.byChannel[ch]}</span>}
+                {Object.entries(LEAD_STAGES).slice(0, 6).map(([k, v]) => (
+                  <button key={k} onClick={() => setLeadStageFilter(prev => prev === k ? "all" : k)}
+                    className={`px-2 py-0.5 text-[11px] rounded-full font-medium transition-all ${leadStageFilter === k ? `${v.bg} ${v.color}` : "bg-gray-100 text-gray-500"}`}>
+                    {v.label}
                   </button>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Conversation list */}
+          {/* List */}
           <div className="flex-1 overflow-y-auto">
             {loading ? (
               <div className="flex items-center justify-center h-40"><Loader2 className="w-6 h-6 animate-spin text-gray-300" /></div>
-            ) : conversations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 text-center p-4">
-                <MessageSquare className="w-10 h-10 text-gray-200 mb-2" />
-                <p className="text-sm text-gray-400">Немає розмов</p>
-              </div>
-            ) : (
-              conversations.map(conv => {
-                const meta = CHANNEL_META[conv.channel] || CHANNEL_META.website;
+            ) : view === "conversations" ? (
+              filteredConvs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-center p-4">
+                  <MessageSquare className="w-10 h-10 text-gray-200 mb-2" />
+                  <p className="text-sm text-gray-400">Немає розмов</p>
+                </div>
+              ) : filteredConvs.map(conv => {
+                const meta = CH[conv.channel] || CH.website;
                 const isSelected = selectedConv?.id === conv.id;
                 return (
-                  <button
-                    key={conv.id}
-                    onClick={() => openConversation(conv)}
-                    className={`w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors ${
-                      isSelected ? "bg-blue-50 border-l-2 border-l-blue-500" : ""
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      {/* Avatar */}
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${meta.bg} border`}>
-                        <span className={meta.color}>{meta.icon}</span>
-                      </div>
+                  <button key={conv.id} onClick={() => openConv(conv)}
+                    className={`w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors ${isSelected ? "bg-indigo-50 border-l-2 border-l-indigo-500" : ""}`}>
+                    <div className="flex items-start gap-2.5">
+                      <Avatar name={conv.guestName} channel={conv.channel} />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                        <div className="flex items-center justify-between gap-1">
                           <span className={`text-sm font-semibold truncate ${conv.unreadCount > 0 ? "text-gray-900" : "text-gray-700"}`}>
                             {conv.guestName || "Невідомий"}
                           </span>
@@ -383,41 +537,90 @@ export default function InboxPage() {
                             {formatDistanceToNow(new Date(conv.lastMessageAt), { locale: uk, addSuffix: false })}
                           </span>
                         </div>
-                        {conv.subject && (
-                          <p className="text-xs text-gray-500 truncate mb-0.5">{conv.subject}</p>
-                        )}
-                        <div className="flex items-center gap-1.5">
+                        {conv.subject && <p className="text-[11px] text-gray-500 truncate">{conv.subject}</p>}
+                        <div className="flex items-center gap-1.5 mt-0.5">
                           <p className={`text-xs truncate flex-1 ${conv.unreadCount > 0 ? "text-gray-700 font-medium" : "text-gray-400"}`}>
                             {conv.lastMessagePreview}
                           </p>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             {conv.unreadCount > 0 && (
-                              <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{conv.unreadCount}</span>
+                              <span className="bg-indigo-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{conv.unreadCount}</span>
                             )}
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${STATUS_META[conv.status]?.color}`}>
-                              {STATUS_META[conv.status]?.label}
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${CONV_STATUS[conv.status]?.color}`}>
+                              {CONV_STATUS[conv.status]?.label}
                             </span>
                           </div>
                         </div>
+                        {conv.leadStatus && (
+                          <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full ${LEAD_STAGES[conv.leadStatus]?.bg} ${LEAD_STAGES[conv.leadStatus]?.color}`}>
+                            {LEAD_STAGES[conv.leadStatus]?.label}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </button>
+                );
+              })
+            ) : (
+              // Leads view
+              filteredLeads.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-center p-4">
+                  <Target className="w-10 h-10 text-gray-200 mb-2" />
+                  <p className="text-sm text-gray-400">Немає лідів</p>
+                  <Button size="sm" className="mt-2 h-7 text-xs" onClick={() => setShowLeadForm(true)}>
+                    <Plus className="w-3 h-3 mr-1" /> Додати лід
+                  </Button>
+                </div>
+              ) : filteredLeads.map(lead => {
+                const stage = LEAD_STAGES[lead.status] || LEAD_STAGES.new;
+                const name = [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Невідомий";
+                return (
+                  <div key={lead.id} className="px-4 py-3 border-b border-gray-50 hover:bg-gray-50">
+                    <div className="flex items-start gap-2.5">
+                      <Avatar name={name} channel={lead.channel} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-sm font-semibold text-gray-800 truncate">{name}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${stage.bg} ${stage.color}`}>{stage.label}</span>
+                        </div>
+                        {lead.subject && <p className="text-[11px] text-gray-500 truncate">{lead.subject}</p>}
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="text-[11px] text-gray-400">{SOURCE_LABELS[lead.source] || lead.source}</span>
+                          {lead.estimated_value && (
+                            <span className="text-[11px] font-semibold text-emerald-600">{fmt(lead.estimated_value)}</span>
+                          )}
+                        </div>
+                        {lead.assigned_to_name && (
+                          <p className="text-[10px] text-gray-400 mt-0.5">→ {lead.assigned_to_name}</p>
+                        )}
+                        {/* Quick stage change */}
+                        <div className="flex gap-0.5 mt-1.5 flex-wrap">
+                          {["contacted", "quote_sent", "booked", "lost"].map(s => (
+                            <button key={s} onClick={() => updateLead(lead.id, { status: s })}
+                              className={`text-[9px] px-1 py-0.5 rounded transition-all ${lead.status === s ? `${LEAD_STAGES[s].bg} ${LEAD_STAGES[s].color} font-semibold` : "bg-gray-100 text-gray-400 hover:bg-gray-200"}`}>
+                              {LEAD_STAGES[s].label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 );
               })
             )}
           </div>
         </div>
 
-        {/* ══ MAIN CHAT AREA ══════════════════════════════════════════════ */}
+        {/* ══ MAIN CHAT ═════════════════════════════════════════════════════ */}
         {!selectedConv && !showMobileDetail ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 hidden md:flex">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center mb-4">
-              <MessageSquare className="w-10 h-10 text-blue-400" />
+          <div className="flex-1 hidden md:flex flex-col items-center justify-center text-center p-8">
+            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-50 to-purple-100 flex items-center justify-center mb-6">
+              <Inbox className="w-12 h-12 text-indigo-400" />
             </div>
-            <h2 className="text-xl font-semibold text-gray-700 mb-2">Unified Inbox</h2>
-            <p className="text-sm text-gray-400 max-w-xs">Оберіть розмову зліва, щоб переглянути повідомлення та відповісти</p>
-            <div className="flex flex-wrap gap-2 mt-6 justify-center">
-              {Object.entries(CHANNEL_META).map(([k, v]) => (
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Unified Communication Hub</h2>
+            <p className="text-sm text-gray-400 max-w-sm mb-6">Всі канали комунікації, ліди та гості в одному місці. Оберіть розмову або лід зліва.</p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {Object.entries(CH).map(([k, v]) => (
                 <div key={k} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs ${v.bg} ${v.color}`}>
                   {v.icon} {v.label}
                 </div>
@@ -428,204 +631,510 @@ export default function InboxPage() {
           <div className={`flex-1 flex flex-col min-w-0 ${showMobileDetail ? "flex" : "hidden md:flex"}`}>
 
             {/* Chat header */}
-            <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center gap-3">
-              <button onClick={() => { setShowMobileDetail(false); }} className="md:hidden text-gray-400 hover:text-gray-600">
+            <div className="bg-white border-b border-gray-100 px-4 py-2.5 flex items-center gap-3 flex-shrink-0">
+              <button onClick={() => setShowMobileDetail(false)} className="md:hidden text-gray-400">
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 border ${ch?.bg}`}>
-                <span className={ch?.color}>{ch?.icon}</span>
-              </div>
+              <Avatar name={selectedConv.guestName} channel={selectedConv.channel} size="md" />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="font-semibold text-gray-900 truncate">{selectedConv.guestName || "Невідомий"}</h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="font-bold text-gray-900 truncate">{selectedConv.guestName || "Невідомий"}</h2>
                   {selectedConv.guestPhone && <span className="text-xs text-gray-400 hidden sm:block">{selectedConv.guestPhone}</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${STATUS_META[selectedConv.status]?.color}`}>
-                    {STATUS_META[selectedConv.status]?.label}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${CONV_STATUS[selectedConv.status]?.color}`}>
+                    {CONV_STATUS[selectedConv.status]?.label}
                   </span>
-                  {selectedConv.subject && <span className="text-xs text-gray-400 truncate hidden sm:block">{selectedConv.subject}</span>}
-                  {linkedBooking && (
+                  {selectedConv.leadStatus && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${LEAD_STAGES[selectedConv.leadStatus]?.bg} ${LEAD_STAGES[selectedConv.leadStatus]?.color}`}>
+                      {LEAD_STAGES[selectedConv.leadStatus]?.label}
+                    </span>
+                  )}
+                  {booking && (
                     <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full border border-blue-100">
-                      📎 Бронювання #{linkedBooking.id}
+                      📎 Бронювання #{booking.id}
                     </span>
                   )}
                 </div>
+                {selectedConv.subject && <p className="text-xs text-gray-400 truncate">{selectedConv.subject}</p>}
               </div>
 
-              {/* Actions */}
+              {/* Quick actions */}
               <div className="flex items-center gap-1 flex-shrink-0">
-                {selectedConv.status !== "resolved" && (
-                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1 hidden sm:flex" onClick={() => updateStatus("resolved")}>
+                {selectedConv.status !== "resolved" ? (
+                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1 hidden sm:flex"
+                    onClick={() => updateConv({ status: "resolved" })}>
                     <CheckCheck className="w-3 h-3" /> Вирішено
                   </Button>
-                )}
-                {selectedConv.status === "resolved" && (
-                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1 hidden sm:flex" onClick={() => updateStatus("open")}>
+                ) : (
+                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1 hidden sm:flex"
+                    onClick={() => updateConv({ status: "open" })}>
                     <RefreshCw className="w-3 h-3" /> Відкрити
                   </Button>
                 )}
-                <Button
-                  variant="outline" size="sm"
-                  className="h-7 text-xs gap-1"
-                  onClick={() => setShowLinkBooking(!showLinkBooking)}
-                >
-                  <Link2 className="w-3 h-3" />
-                  <span className="hidden sm:inline">Бронювання</span>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 hidden sm:flex"
+                  onClick={() => setShowLinkBooking(!showLinkBooking)}>
+                  <Link2 className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                  onClick={() => setShowRightPanel(!showRightPanel)}>
+                  <MoreVertical className="w-4 h-4" />
                 </Button>
               </div>
             </div>
 
             {/* Link booking panel */}
             {showLinkBooking && (
-              <div className="bg-blue-50 border-b border-blue-100 px-4 py-2 flex items-center gap-2">
-                <Link2 className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                <Input
-                  value={bookingIdInput}
-                  onChange={e => setBookingIdInput(e.target.value)}
-                  placeholder="ID бронювання (напр. 5)"
-                  className="h-7 text-xs flex-1 max-w-[160px] bg-white"
-                  onKeyDown={e => e.key === "Enter" && linkBooking()}
-                />
+              <div className="bg-blue-50 border-b border-blue-100 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+                <Link2 className="w-4 h-4 text-blue-400" />
+                <Input value={bookingIdInput} onChange={e => setBookingIdInput(e.target.value)}
+                  placeholder="ID бронювання" className="h-7 text-xs max-w-[140px] bg-white"
+                  onKeyDown={e => e.key === "Enter" && linkBooking()} />
                 <Button size="sm" className="h-7 text-xs" onClick={linkBooking}>Прив'язати</Button>
-                <button onClick={() => setShowLinkBooking(false)}><X className="w-4 h-4 text-gray-400" /></button>
-              </div>
-            )}
-
-            {/* Linked booking card */}
-            {linkedBooking && (
-              <div className="bg-blue-50 border-b border-blue-100 px-4 py-2 flex items-center gap-3 text-xs">
-                <Calendar className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                <span className="text-blue-700">
-                  <span className="font-semibold">#{linkedBooking.id}</span> — {linkedBooking.unitName} · {linkedBooking.checkIn} → {linkedBooking.checkOut}
-                </span>
-                <span className={`ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                  linkedBooking.paymentStatus === "paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                }`}>
-                  {linkedBooking.paymentStatus === "paid" ? "Оплачено" : "Не оплачено"}
-                </span>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowLinkBooking(false)}><X className="w-3 h-3" /></Button>
               </div>
             )}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-gray-50">
-              {messagesLoading ? (
-                <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-gray-300" /></div>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+              {msgsLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <MessageSquare className="w-10 h-10 text-gray-200 mb-2" />
+                  <p className="text-sm text-gray-400">Немає повідомлень</p>
+                </div>
               ) : messages.map((msg, i) => {
-                const isOut = msg.direction === "outbound";
-                const isSystem = msg.messageType === "system";
-
-                if (isSystem) {
+                if (msg.messageType === "system") {
                   return (
                     <div key={msg.id} className="flex justify-center">
-                      <span className="text-[10px] text-gray-400 bg-white border border-gray-100 px-3 py-1 rounded-full">{msg.content}</span>
+                      <span className="text-[11px] text-gray-400 bg-gray-100 px-3 py-1 rounded-full">
+                        {msg.content} · {format(new Date(msg.createdAt), "HH:mm", { locale: uk })}
+                      </span>
                     </div>
                   );
                 }
-
-                return (
-                  <div key={msg.id} className={`flex ${isOut ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[75%] ${isOut ? "items-end" : "items-start"} flex flex-col gap-0.5`}>
-                      {!isOut && (
-                        <span className="text-[10px] text-gray-400 ml-2">
-                          {msg.senderName || selectedConv.guestName}
-                        </span>
-                      )}
-                      <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                        isOut
-                          ? "bg-blue-500 text-white rounded-br-sm" + (msg.isAiGenerated ? " bg-indigo-500" : "")
-                          : "bg-white border border-gray-100 text-gray-800 rounded-bl-sm"
-                      }`}>
-                        {msg.isAiGenerated && (
-                          <div className="flex items-center gap-1 text-indigo-200 text-[10px] mb-1">
-                            <Bot className="w-3 h-3" /> AI підказка
-                          </div>
-                        )}
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-                      </div>
-                      <div className={`flex items-center gap-1 text-[10px] text-gray-400 px-1 ${isOut ? "justify-end" : ""}`}>
-                        {isOut && msg.senderName && <span>{msg.senderName}</span>}
-                        <span>{format(new Date(msg.createdAt), "HH:mm")}</span>
-                        {isOut && <CheckCheck className="w-3 h-3 text-blue-400" />}
+                if (msg.isInternal) {
+                  return (
+                    <div key={msg.id} className="flex justify-center">
+                      <div className="max-w-[80%] bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-sm">
+                        <div className="flex items-center gap-1 mb-1">
+                          <StickyNote className="w-3 h-3 text-amber-500" />
+                          <span className="text-[10px] font-semibold text-amber-600">Внутрішня нотатка · {msg.senderName}</span>
+                        </div>
+                        <p className="text-gray-700 whitespace-pre-wrap">{msg.content}</p>
+                        <p className="text-[10px] text-amber-400 mt-1 text-right">{format(new Date(msg.createdAt), "HH:mm", { locale: uk })}</p>
                       </div>
                     </div>
+                  );
+                }
+                const isOut = msg.direction === "outbound";
+                return (
+                  <div key={msg.id} className={`flex gap-2 ${isOut ? "justify-end" : "justify-start"}`}>
+                    {!isOut && <Avatar name={selectedConv.guestName} channel={selectedConv.channel} size="sm" />}
+                    <div className={`max-w-[70%] ${isOut ? "items-end" : "items-start"} flex flex-col gap-0.5`}>
+                      {!isOut && <span className="text-[11px] text-gray-400 ml-1">{msg.senderName || selectedConv.guestName}</span>}
+                      <div className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                        isOut
+                          ? `bg-indigo-600 text-white rounded-tr-md ${msg.isAiGenerated ? "ring-1 ring-violet-400" : ""}`
+                          : "bg-white border border-gray-100 text-gray-800 rounded-tl-md shadow-sm"
+                      }`}>
+                        {msg.messageType === "booking_card" ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1 font-semibold"><Building2 className="w-3.5 h-3.5" /> Картка бронювання</div>
+                            <p className="text-sm opacity-80">{msg.content}</p>
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap">{msg.content}</p>
+                        )}
+                        {msg.isAiGenerated && (
+                          <div className={`flex items-center gap-1 mt-1 ${isOut ? "text-violet-200" : "text-violet-400"}`}>
+                            <Sparkles className="w-3 h-3" /><span className="text-[10px]">AI</span>
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-gray-400 mx-1">
+                        {format(new Date(msg.createdAt), "HH:mm", { locale: uk })}
+                        {isOut && msg.isRead && " ✓✓"}
+                      </span>
+                    </div>
+                    {isOut && (
+                      <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 self-end">
+                        <User className="w-3.5 h-3.5 text-indigo-600" />
+                      </div>
+                    )}
                   </div>
                 );
               })}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* AI suggestion */}
-            {aiSuggestion && (
-              <div className="bg-indigo-50 border-t border-indigo-100 px-4 py-3">
-                <div className="flex items-start gap-2">
-                  <Bot className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-indigo-700 mb-1">AI підказка</p>
-                    <p className="text-xs text-indigo-800 whitespace-pre-wrap leading-relaxed">{aiSuggestion}</p>
+            {/* AI draft banner */}
+            {aiDraft && (
+              <div className="mx-4 mb-2 bg-violet-50 border border-violet-200 rounded-xl p-3 flex-shrink-0">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Sparkles className="w-4 h-4 text-violet-500" />
+                  <span className="text-xs font-semibold text-violet-700">AI-чернетка</span>
+                  <button onClick={() => setAiDraft("")} className="ml-auto text-violet-300 hover:text-violet-500"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <p className="text-xs text-violet-700 whitespace-pre-wrap line-clamp-3">{aiDraft}</p>
+                <div className="flex gap-2 mt-2">
+                  <Button size="sm" className="h-6 text-xs px-3 bg-violet-600 hover:bg-violet-700"
+                    onClick={() => { setReplyText(aiDraft); setAiDraft(""); setTimeout(() => replyRef.current?.focus(), 100); }}>
+                    Використати
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-violet-500" onClick={() => setAiDraft("")}>
+                    Відхилити
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Canned replies picker */}
+            {showCanned && (
+              <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-xl shadow-lg flex-shrink-0 max-h-56 overflow-hidden flex flex-col">
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="text-xs font-semibold text-gray-700">Шаблони відповідей</span>
+                  <div className="flex-1 relative">
+                    <input value={cannedSearch} onChange={e => setCannedSearch(e.target.value)}
+                      placeholder="Пошук або /ярлик…" className="w-full h-6 px-2 text-xs border border-gray-200 rounded-lg" />
                   </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <Button size="sm" className="h-6 text-[10px] bg-indigo-500 hover:bg-indigo-600 text-white gap-1" onClick={() => { setReplyText(aiSuggestion); setAiSuggestion(""); replyRef.current?.focus(); }}>
-                      Використати
-                    </Button>
-                    <button onClick={() => setAiSuggestion("")} className="text-indigo-300 hover:text-indigo-500">
-                      <X className="w-4 h-4" />
+                  <button onClick={() => setShowCanned(false)}><X className="w-3.5 h-3.5 text-gray-400" /></button>
+                </div>
+                <div className="overflow-y-auto">
+                  {filteredCanned.length === 0 ? (
+                    <p className="text-center text-xs text-gray-400 py-3">Шаблони не знайдено</p>
+                  ) : filteredCanned.map(cr => (
+                    <button key={cr.id} onClick={() => useCannedReply(cr)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-gray-50 flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold text-gray-800">{cr.title}</span>
+                          {cr.shortcut && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">{cr.shortcut}</span>}
+                        </div>
+                        <p className="text-[11px] text-gray-500 truncate mt-0.5">{cr.content}</p>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-gray-300 mt-0.5 flex-shrink-0" />
                     </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Composer */}
+            <div className="bg-white border-t border-gray-100 p-3 flex-shrink-0">
+              {/* Mode toggle */}
+              <div className="flex items-center gap-1.5 mb-2">
+                <button onClick={() => setIsInternal(false)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${!isInternal ? "bg-indigo-100 text-indigo-700" : "text-gray-400 hover:bg-gray-100"}`}>
+                  <Send className="w-3 h-3" /> Відповідь
+                </button>
+                <button onClick={() => setIsInternal(true)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${isInternal ? "bg-amber-100 text-amber-700" : "text-gray-400 hover:bg-gray-100"}`}>
+                  <StickyNote className="w-3 h-3" /> Нотатка
+                </button>
+                <div className="flex-1" />
+                <button onClick={getAiDraft} disabled={aiLoading}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 transition-all disabled:opacity-50">
+                  {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  AI Чернетка
+                </button>
+                <button onClick={() => { setShowCanned(!showCanned); setCannedSearch(""); }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${showCanned ? "bg-amber-100 text-amber-700" : "text-gray-500 hover:bg-gray-100"}`}>
+                  <Zap className="w-3 h-3" /> Шаблони
+                </button>
+              </div>
+
+              <div className="flex gap-2 items-end">
+                <div className={`flex-1 border rounded-xl overflow-hidden transition-all ${isInternal ? "border-amber-200 bg-amber-50" : "border-gray-200 bg-white"}`}>
+                  <Textarea
+                    ref={replyRef}
+                    value={replyText}
+                    onChange={e => setReplyText(e.target.value)}
+                    placeholder={isInternal ? "Внутрішня нотатка (видима лише команді)…" : `Відповідь через ${CH[selectedConv.channel]?.label || "канал"}…`}
+                    className="border-0 bg-transparent resize-none text-sm min-h-[60px] max-h-[140px] focus-visible:ring-0 p-3"
+                    onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendMessage(); }}
+                  />
+                  <div className="flex items-center gap-1 px-2 pb-1.5">
+                    <button className="p-1 text-gray-300 hover:text-gray-500 transition-colors" title="Вкласти файл (скоро)">
+                      <Paperclip className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-[10px] text-gray-300 ml-auto">⌘↵ для надсилання</span>
+                  </div>
+                </div>
+                <Button onClick={sendMessage} disabled={sending || !replyText.trim()}
+                  className={`h-10 w-10 p-0 rounded-xl flex-shrink-0 ${isInternal ? "bg-amber-500 hover:bg-amber-600" : "bg-indigo-600 hover:bg-indigo-700"}`}>
+                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* ══ RIGHT PANEL ═══════════════════════════════════════════════════ */}
+        {selectedConv && showRightPanel && (
+          <div className="hidden lg:flex flex-col w-[280px] flex-shrink-0 border-l border-gray-100 bg-white overflow-y-auto">
+
+            {/* Contact info */}
+            <div className="p-4 border-b border-gray-50">
+              <div className="flex items-center gap-3 mb-3">
+                <Avatar name={selectedConv.guestName} channel={selectedConv.channel} size="lg" />
+                <div>
+                  <p className="font-bold text-gray-900 text-sm">{selectedConv.guestName || "Невідомий"}</p>
+                  <p className="text-[11px] text-gray-400">{CH[selectedConv.channel]?.label}</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {selectedConv.guestPhone && (
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <a href={`tel:${selectedConv.guestPhone}`} className="hover:text-indigo-600">{selectedConv.guestPhone}</a>
+                  </div>
+                )}
+                {selectedConv.guestEmail && (
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <a href={`mailto:${selectedConv.guestEmail}`} className="hover:text-indigo-600 truncate">{selectedConv.guestEmail}</a>
+                  </div>
+                )}
+                {selectedConv.estimatedValue && (
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <DollarSign className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <span className="font-semibold text-emerald-600">{fmt(selectedConv.estimatedValue)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Assignment */}
+            <div className="p-4 border-b border-gray-50">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Відповідальний</p>
+              <div className="relative">
+                <button onClick={() => setShowAssign(!showAssign)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 hover:border-indigo-300 text-sm transition-all">
+                  <UserCheck className="w-4 h-4 text-gray-400" />
+                  <span className="flex-1 text-left text-gray-700 text-xs truncate">
+                    {selectedConv.assignedToName || "Не призначено"}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                </button>
+                {showAssign && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
+                    <button onClick={() => { updateConv({ assignedToId: null }); setShowAssign(false); }}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:bg-gray-50">
+                      Не призначено
+                    </button>
+                    {staff.map(s => (
+                      <button key={s.id} onClick={() => { updateConv({ assignedToId: s.id }); setShowAssign(false); }}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-[10px] font-bold text-indigo-600">
+                          {s.name.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-800">{s.name}</p>
+                          <p className="text-[10px] text-gray-400">{s.role}</p>
+                        </div>
+                        {selectedConv.assignedToId === s.id && <Check className="w-3.5 h-3.5 text-indigo-500 ml-auto" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Conv status */}
+            <div className="p-4 border-b border-gray-50">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Статус розмови</p>
+              <div className="grid grid-cols-2 gap-1">
+                {["open", "pending", "resolved", "spam"].map(s => (
+                  <button key={s} onClick={() => updateConv({ status: s })}
+                    className={`px-2 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${selectedConv.status === s ? `${CONV_STATUS[s].color} border-current` : "text-gray-500 border-gray-100 hover:border-gray-200 hover:bg-gray-50"}`}>
+                    {CONV_STATUS[s]?.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Lead pipeline */}
+            {convLead && (
+              <div className="p-4 border-b border-gray-50">
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Лід · Стадія</p>
+                <div className="space-y-1">
+                  {["new", "contacted", "qualified", "quote_sent", "negotiating", "booked"].map(s => {
+                    const stage = LEAD_STAGES[s];
+                    const isActive = convLead.status === s;
+                    const isPast = LEAD_STAGES[s].order < LEAD_STAGES[convLead.status]?.order;
+                    return (
+                      <button key={s} onClick={() => updateLead(convLead.id, { status: s })}
+                        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
+                          isActive ? `${stage.bg} ${stage.color} ring-1 ring-current` :
+                          isPast ? "bg-gray-50 text-gray-400" : "text-gray-500 hover:bg-gray-50"
+                        }`}>
+                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isActive || isPast ? stage.color.replace("text-", "bg-") : "bg-gray-200"}`} />
+                        {stage.label}
+                        {isActive && <Check className="w-3 h-3 ml-auto" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  <div>
+                    <p className="text-[10px] text-gray-400 mb-1">Очікувана сума</p>
+                    <p className="text-sm font-bold text-emerald-600">{fmt(convLead.estimated_value)}</p>
+                  </div>
+                  {convLead.quoted_amount && (
+                    <div>
+                      <p className="text-[10px] text-gray-400 mb-1">КП надіслано</p>
+                      <p className="text-sm font-bold text-violet-600">{fmt(convLead.quoted_amount)}</p>
+                    </div>
+                  )}
+                  {convLead.check_in_date && (
+                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                      <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                      {convLead.check_in_date} → {convLead.check_out_date || "?"}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Linked booking */}
+            {booking && (
+              <div className="p-4 border-b border-gray-50">
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Бронювання #{booking.id}</p>
+                <div className="bg-blue-50 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="text-xs font-medium text-blue-800">{booking.unit_name}</span>
+                  </div>
+                  {booking.property_name && <p className="text-[11px] text-blue-600 ml-5">{booking.property_name}</p>}
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="text-xs text-blue-700">
+                      {booking.check_in ? format(new Date(booking.check_in), "dd.MM", { locale: uk }) : "?"} →{" "}
+                      {booking.check_out ? format(new Date(booking.check_out), "dd.MM.yy", { locale: uk }) : "?"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-blue-100">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${booking.payment_status === "paid" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                      {booking.payment_status === "paid" ? "Оплачено" : "Не оплачено"}
+                    </span>
+                    <span className="text-xs font-bold text-blue-800">{fmt(booking.total_amount)}</span>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Reply composer */}
-            <div className="bg-white border-t border-gray-100 px-4 py-3">
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
-                  <Textarea
-                    ref={replyRef}
-                    value={replyText}
-                    onChange={e => setReplyText(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
-                    placeholder="Введіть відповідь… (Enter для відправки)"
-                    rows={2}
-                    className="resize-none text-sm border-gray-100 bg-gray-50 focus:bg-white"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Button
-                    size="sm"
-                    onClick={getAiSuggestion}
-                    disabled={aiLoading}
-                    className="h-8 bg-indigo-500 hover:bg-indigo-600 text-white gap-1 text-xs"
-                    title="AI підказка"
-                  >
-                    {aiLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                    <span className="hidden sm:inline">AI</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => sendReply()}
-                    disabled={!replyText.trim() || sending}
-                    className="h-8 bg-blue-500 hover:bg-blue-600 text-white gap-1 text-xs"
-                  >
-                    {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    <span className="hidden sm:inline">Відправити</span>
-                  </Button>
-                </div>
+            {/* Tags */}
+            <div className="p-4 border-b border-gray-50">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Теги</p>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {(selectedConv.tags || []).map(tag => (
+                  <span key={tag} className="flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[11px] rounded-full border border-indigo-100">
+                    #{tag}
+                    <button onClick={() => removeTag(tag)} className="text-indigo-300 hover:text-indigo-600"><X className="w-2.5 h-2.5" /></button>
+                  </span>
+                ))}
               </div>
-              <div className="flex items-center gap-2 mt-1.5">
-                <span className="text-[10px] text-gray-400">Shift+Enter — новий рядок</span>
-                <div className="flex gap-1 ml-auto">
-                  {["open", "pending", "resolved"].filter(s => s !== selectedConv.status).map(s => (
-                    <button key={s} onClick={() => updateStatus(s)} className={`text-[10px] px-2 py-0.5 rounded-full border transition-all hover:opacity-80 ${STATUS_META[s].color}`}>
-                      → {STATUS_META[s].label}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex gap-1">
+                <Input value={editingTag} onChange={e => setEditingTag(e.target.value)}
+                  placeholder="Додати тег…" className="h-7 text-xs flex-1"
+                  onKeyDown={e => e.key === "Enter" && addTag(editingTag)} />
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => addTag(editingTag)}>
+                  <Plus className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Mini timeline */}
+            <div className="p-4">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Timeline</p>
+              <div className="space-y-2">
+                {messages.slice().reverse().slice(0, 6).reverse().map(msg => (
+                  <div key={msg.id} className="flex gap-2 text-xs">
+                    <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
+                      msg.messageType === "system" ? "bg-gray-300" :
+                      msg.isInternal ? "bg-amber-400" :
+                      msg.direction === "inbound" ? "bg-indigo-400" : "bg-emerald-400"
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-gray-700 text-[11px] leading-tight truncate">
+                        {msg.messageType === "system" ? msg.content :
+                          msg.isInternal ? `📌 ${msg.content}` :
+                          msg.direction === "inbound" ? `← ${msg.content}` :
+                          `→ ${msg.content}`}
+                      </p>
+                      <p className="text-[10px] text-gray-400">{format(new Date(msg.createdAt), "dd.MM HH:mm", { locale: uk })}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
-        ) : null}
+        )}
       </div>
+
+      {/* ══ Lead create form modal ══════════════════════════════════════════ */}
+      {showLeadForm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-violet-600" />
+                <h3 className="font-bold text-gray-900">Новий лід</h3>
+              </div>
+              <button onClick={() => setShowLeadForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 mb-1 block">Ім'я</label>
+                  <Input value={newLeadForm.firstName} onChange={e => setNewLeadForm(p => ({ ...p, firstName: e.target.value }))} placeholder="Ім'я" className="h-9 text-sm" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 mb-1 block">Прізвище</label>
+                  <Input value={newLeadForm.lastName} onChange={e => setNewLeadForm(p => ({ ...p, lastName: e.target.value }))} placeholder="Прізвище" className="h-9 text-sm" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 mb-1 block">Телефон</label>
+                  <Input value={newLeadForm.phone} onChange={e => setNewLeadForm(p => ({ ...p, phone: e.target.value }))} placeholder="+380..." className="h-9 text-sm" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 mb-1 block">Email</label>
+                  <Input value={newLeadForm.email} onChange={e => setNewLeadForm(p => ({ ...p, email: e.target.value }))} placeholder="email@..." className="h-9 text-sm" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 mb-1 block">Джерело</label>
+                  <select value={newLeadForm.source} onChange={e => setNewLeadForm(p => ({ ...p, source: e.target.value }))}
+                    className="w-full h-9 px-3 text-sm border border-gray-200 rounded-lg bg-white">
+                    {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 mb-1 block">Сума (₴)</label>
+                  <Input value={newLeadForm.estimatedValue} onChange={e => setNewLeadForm(p => ({ ...p, estimatedValue: e.target.value }))} placeholder="50000" type="number" className="h-9 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-gray-500 mb-1 block">Тема запиту</label>
+                <Input value={newLeadForm.subject} onChange={e => setNewLeadForm(p => ({ ...p, subject: e.target.value }))} placeholder="Весілля, корпоратив, проживання…" className="h-9 text-sm" />
+              </div>
+            </div>
+            <div className="px-5 pb-5 flex gap-2">
+              <Button variant="outline" className="flex-1 h-9" onClick={() => setShowLeadForm(false)}>Скасувати</Button>
+              <Button className="flex-1 h-9 bg-violet-600 hover:bg-violet-700" onClick={createLead}>
+                <Plus className="w-4 h-4 mr-1" /> Створити лід
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }
