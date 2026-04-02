@@ -46,6 +46,7 @@ import activitiesRouter from "./activities.js";
 import accommodationRouter from "./accommodation.js";
 import consoleRouter from "./console.js";
 import paymentLayerRouter from "./payment-layer.js";
+import superAdminRouter from "./super-admin.js";
 
 const router: IRouter = Router();
 
@@ -96,5 +97,6 @@ router.use("/activities", activitiesRouter);
 router.use("/accommodation", accommodationRouter);
 router.use("/console", consoleRouter);
 router.use("/payment-layer", paymentLayerRouter);
+router.use("/super-admin", superAdminRouter);
 
 export default router;
