@@ -88,14 +88,14 @@ export default function PitchPage() {
     <div className="min-h-screen bg-[#07091a] text-white font-sans flex flex-col select-none print:min-h-0">
 
       {/* ── Control bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-6 py-3 bg-black/40 border-b border-white/5 print:hidden">
+      <div className="flex items-center justify-between px-6 py-3 bg-black/60 border-b border-white/10 print:hidden">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/admin")}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors">
-            <ArrowLeft className="w-3.5 h-3.5" /> Назад до Admin
+          <button onClick={() => window.history.back()}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-white font-medium transition-all">
+            <ArrowLeft className="w-4 h-4" /> Вийти з презентації
           </button>
-          <span className="text-white/20">|</span>
-          <span className="text-xs text-white/50">Maison HD — Презентація для клієнтів</span>
+          <span className="text-white/20 hidden sm:block">|</span>
+          <span className="text-xs text-white/40 hidden sm:block">Maison HD — Презентація для клієнтів</span>
         </div>
         <div className="flex items-center gap-2">
           {/* Slide dots */}

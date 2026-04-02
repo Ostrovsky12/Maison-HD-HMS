@@ -501,9 +501,12 @@ export default function OnboardingPage() {
           <span className="text-xs text-gray-400">Початкове налаштування закладу</span>
         </div>
         {step < 6 && (
-          <button onClick={() => { localStorage.setItem("mhd_onboarding_done", "1"); navigate("/dashboard"); }}
-            className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
-            Пропустити всі кроки →
+          <button
+            onClick={() => { localStorage.setItem("mhd_onboarding_done", "1"); navigate("/dashboard"); }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 bg-white text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-all shadow-sm"
+          >
+            <X className="w-4 h-4" />
+            Пропустити та увійти в систему
           </button>
         )}
       </div>

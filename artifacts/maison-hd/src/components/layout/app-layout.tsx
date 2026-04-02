@@ -110,6 +110,7 @@ const NAV: NavSection[] = [
       { name: "Міграція",      path: "/migration",     icon: ArrowRightLeft,roles: ["super_admin", "owner", "manager"] },
       { name: "Demo Заявки",   path: "/demo-requests", icon: ClipboardList, roles: ["super_admin"] },
       { name: "Super Admin",   path: "/admin",         icon: Crown,         roles: ["super_admin"] },
+      { name: "Презентація",   path: "/pitch",         icon: Sparkles,      roles: ["super_admin", "owner", "manager"] },
     ],
   },
 ];
