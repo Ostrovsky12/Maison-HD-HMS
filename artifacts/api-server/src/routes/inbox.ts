@@ -6,6 +6,7 @@ import {
 } from "@workspace/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { openai } from "@workspace/integrations-openai-ai-server";
 
 const router = Router();
 router.use(requireAuth);
@@ -344,47 +345,95 @@ router.post("/conversations/:id/internal-note", async (req: any, res) => {
   }
 });
 
-// ── AI reply suggestion ─────────────────────────────────────────────────────
+// ── AI reply suggestion (GPT-powered) ──────────────────────────────────────
 router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
 
+    // Fetch conversation
     const convR = await (db as any).$client.query(
       `SELECT * FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
     if (!convR.rows[0]) return res.status(404).json({ error: "Not found" });
     const conv = convR.rows[0];
 
+    // Fetch last 10 messages for context (chronological order)
     const msgsR = await (db as any).$client.query(`
-      SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 6
+      SELECT direction, content, sender_name, created_at
+      FROM messages
+      WHERE conversation_id = $1
+      ORDER BY created_at ASC
+      LIMIT 10
     `, [id]);
+    const messages = msgsR.rows;
 
-    const lastInbound = msgsR.rows.find((m: any) => m.direction === "inbound");
+    const lastInbound = [...messages].reverse().find((m: any) => m.direction === "inbound");
     if (!lastInbound?.content) return res.status(400).json({ error: "Немає вхідних повідомлень" });
 
-    const content = lastInbound.content.toLowerCase();
-    const name = conv.guest_name?.split(" ")[0] || "";
-    let suggestion = "";
+    // Fetch org name for context
+    const orgR = await (db as any).$client.query(
+      `SELECT name FROM organizations WHERE id = $1`, [orgId]);
+    const orgName = orgR.rows[0]?.name || "Готельний комплекс";
 
-    if (content.includes("вільн") || content.includes("є місця") || content.includes("є номер") || content.includes("доступн")) {
-      suggestion = `Добрий день, ${name}! Так, маємо вільні об'єкти на ваші дати 🌿\n\nЩоб підібрати найкращий варіант, уточніть:\n— Кількість гостей\n— Бажані дати заїзду та виїзду\n— Який тип розміщення вас цікавить?\n\nВідповімо протягом 15 хвилин!`;
-    } else if (content.includes("ціна") || content.includes("вартість") || content.includes("скільки") || content.includes("прайс") || content.includes("розцінк")) {
-      suggestion = `Добрий день! Вартість проживання залежить від обраного об'єкта та сезону 🏡\n\nНаші ціни стартують від 2 500 ₴/ніч.\nДо них можна додати:\n🧖 SPA-процедури\n🚲 Оренду активності\n🍳 Харчування\n\nНадішліть дати та кількість гостей — розрахуємо точну суму!`;
-    } else if (content.includes("весілля") || content.includes("одруження")) {
-      suggestion = `Дякуємо за інтерес до нашого комплексу! Ми з радістю приймаємо весілля 💍\n\nУ нас є:\n✅ Банкетний зал до 120 гостей\n✅ Декорована альтанка для церемонії\n✅ Проживання для гостей\n✅ SPA для молодят\n✅ Власна фотозона\n\nНадішліть бажану дату та кількість гостей — підготуємо детальну КП!`;
-    } else if (content.includes("корпоратив") || content.includes("корпорат") || content.includes("конференц")) {
-      suggestion = `Добрий день! Ми спеціалізуємось на корпоративних заходах 🎯\n\nПропонуємо:\n🏢 Конференц-зал із обладнанням\n🍽️ Корпоративне харчування від шеф-кухаря\n🏊 SPA та активності для тімбілдингу\n🏠 Проживання для учасників\n\nНадішліть кількість учасників, дати та формат заходу!`;
-    } else if (content.includes("spa") || content.includes("масаж") || content.includes("сауна") || content.includes("басейн")) {
-      suggestion = `Наш SPA-центр відкритий щодня! 🌿\n\nПослуги:\n🧖 Масаж — від 800 ₴/год\n🛁 Джакузі — 600 ₴/год\n🔥 Сауна — 900 ₴/2 год\n🏊 Басейн — 400 ₴ вхід\n\nDay pass без проживання доступний. Записати вас на конкретний час?`;
-    } else if (content.includes("сап") || content.includes("велосипед") || content.includes("каяк") || content.includes("риб")) {
-      suggestion = `У нас є все для активного відпочинку! 🌊\n\n🏄 SUP-дошки — 400 ₴/год\n🚲 Велосипеди — 250 ₴/день\n🎣 Рибальський комплект — 300 ₴/день\n🛶 Каяки — 350 ₴/2 год\n\nМожна взяти на пів дня або повний день. Бронювати заздалегідь не потрібно!`;
-    } else if (content.includes("довгостроков") || content.includes("місяць") || content.includes("місячн")) {
-      suggestion = `Добрий день! Так, ми розглядаємо довгострокову оренду від 30 днів зі спеціальними умовами 🏠\n\nВартість узгоджується індивідуально і зазвичай на 25-30% нижче щоденної ставки.\n\nУкажіть об'єкт та бажаний термін — зв'яжемося для обговорення деталей!`;
-    } else if (content.includes("дякую") || content.includes("дякую") || content.includes("чудово") || content.includes("відмінно")) {
-      suggestion = `Дякуємо і вам за добрі слова! 🙏\n\nЗавжди раді бачити вас знову. Якщо виникнуть будь-які питання або захочете забронювати наступний відпочинок — звертайтесь!\n\nАрт-курорт «Догода» завжди для вас відкритий! 🌿`;
-    } else {
-      suggestion = `Добрий день, ${name}! Дякуємо за звернення до арт-курорту «Догода» 🏡\n\nМи уважно ознайомились з вашим запитом і з радістю допоможемо. Уточніть, будь ласка, деталі — підберемо найкращий варіант для вас!`;
+    // Fetch linked booking if any
+    let bookingContext = "";
+    if (conv.booking_id) {
+      const bkR = await (db as any).$client.query(`
+        SELECT b.check_in, b.check_out, b.status, b.total_amount, b.payment_status,
+               u.name as unit_name
+        FROM bookings b
+        LEFT JOIN units u ON u.id = b.unit_id
+        WHERE b.id = $1
+      `, [conv.booking_id]);
+      if (bkR.rows[0]) {
+        const bk = bkR.rows[0];
+        bookingContext = `\nПов'язане бронювання: ${bk.unit_name}, заїзд ${bk.check_in} → виїзд ${bk.check_out}, статус: ${bk.status}, сума: ${bk.total_amount} UAH (оплата: ${bk.payment_status}).`;
+      }
     }
+
+    // Build conversation history for GPT
+    const chatHistory: { role: "user" | "assistant" | "system"; content: string }[] = messages
+      .filter((m: any) => m.content && m.content.trim())
+      .map((m: any) => ({
+        role: m.direction === "inbound" ? "user" : "assistant",
+        content: m.content,
+      }));
+
+    const guestName = conv.guest_name?.split(" ")[0] || "гість";
+    const channel = conv.channel || "chat";
+    const channelLabel: Record<string, string> = {
+      telegram: "Telegram", whatsapp: "WhatsApp", sms: "SMS",
+      email: "Email", phone: "телефон", direct: "прямий",
+    };
+
+    const systemPrompt = `Ти — AI-асистент ресепшена для готельного об'єкту "${orgName}".
+Твоя задача: скласти чернетку відповіді ресепшеніста гостю.
+
+Канал комунікації: ${channelLabel[channel] || channel}.
+Ім'я гостя: ${guestName}.${bookingContext}
+
+Правила:
+1. Відповідай ТІЛЬКИ українською мовою.
+2. Тон — теплий, професійний, гостинний. Не занадто формальний.
+3. Якщо питання стосується бронювання — уточнюй деталі (дати, кількість гостей, тип номеру).
+4. Якщо питання про ціни — пропонуй уточнити дати для точного розрахунку.
+5. Для складних питань — пропонуй зателефонувати або надіслати КП.
+6. Можна використовувати 1-2 емодзі. Не перевантажуй текст.
+7. Відповідь має бути готова до відправки — ресепшеніст лише перевіряє і може підкоригувати.
+8. Максимум 4-5 речень або 4-5 коротких рядків. Не пиши довгих полотен тексту.
+9. НЕ додавай фраз "Чернетка:", "AI:", "Пропонована відповідь:" — одразу текст відповіді.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      max_completion_tokens: 400,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...chatHistory,
+      ],
+    });
+
+    const suggestion = completion.choices[0]?.message?.content?.trim() || "";
+    if (!suggestion) return res.status(500).json({ error: "AI не повернув відповідь" });
 
     res.json({ suggestion });
   } catch (err: any) {
