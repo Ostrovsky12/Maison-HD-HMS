@@ -41,6 +41,7 @@ import financeRouter from "./finance.js";
 import salesRouter from "./sales.js";
 import maintenanceRouter from "./maintenance.js";
 import restaurantRouter from "./restaurant.js";
+import activitiesRouter from "./activities.js";
 
 const router: IRouter = Router();
 
@@ -86,5 +87,6 @@ router.use("/finance", financeRouter);
 router.use("/sales", salesRouter);
 router.use("/maintenance", maintenanceRouter);
 router.use("/restaurant", restaurantRouter);
+router.use("/activities", activitiesRouter);
 
 export default router;

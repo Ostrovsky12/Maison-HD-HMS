@@ -844,6 +844,48 @@ Returns: `{ kpi{…}, arrivals[], departures[], inHouse[], hk{…}, spaToday[], 
 - **Tab 3 — Аналітика**: monthly cost bar chart, category breakdown bars, priority breakdown cards, financial summary
 - **Tab 4 — Деталі заявки**: full detail with info grid, status change buttons, actual cost/time inputs, resolution notes, activity log with comment input, financial summary panel
 
+## Stage 60 — Rentals & Activities Module (Equipment Rental + Activity Management)
+
+### DB Tables
+- `equipment_categories` — 12 categories (Велосипеди, SUP-борди, Катамарани, Самокати, Риболовля, Теніс, Пінг-понг, Бадмінтон, Настільні ігри, Художній, Спортивний, Дитячий); fields: rental_unit (hour/day/half_day), deposit_required, deposit_amount
+- `equipment_items` — 39 items; condition ENUM (excellent/good/fair/poor/under_repair/retired); price_per_hour/half_day/day; is_available; serial_number
+- `equipment_rentals` — uses existing rental_status ENUM (added returned/overdue/cancelled values); start_time, end_time, actual_return_time, duration_hours, deposit_taken, deposit_returned, damage_notes
+- `activity_types` — 8 types; category (water/sport/creative/kids/wellness/tour); difficulty ENUM; instructor_required, equipment_included, location, tags JSONB
+- `activity_sessions` — scheduled occurrences; session_date, start_time, end_time, instructor_name, current_participants, status (scheduled/in_progress/completed/cancelled)
+- `activity_bookings` — uses booking_status ENUM; participant_count, price_charged, special_requirements
+
+Seed: 12 eq. categories, 39 eq. items, 8 activity types, 12 sessions (today + upcoming), 8 rentals, 8 activity bookings
+
+### API Routes (`/api/activities/*`) — requireAuth
+- `GET /activities/stats` — KPI: total_items, available, active_rentals, today_sessions, today_participants, sessions_in_progress, today_total_revenue
+- `GET /activities/equipment/categories` — with total_items/available_items counts via JOIN
+- `POST /activities/equipment/categories`
+- `GET /activities/equipment/items?category_id=&available=&condition=&search=` — with active_rental_id/rented_by/rented_until JOIN
+- `POST /activities/equipment/items`
+- `PATCH /activities/equipment/items/:id` — update condition/availability/pricing
+- `GET /activities/equipment/rentals?active=true|status=|date=` — with is_overdue calculation
+- `POST /activities/equipment/rentals` — validates availability, marks item unavailable
+- `PATCH /activities/equipment/rentals/:id/return` — returns item, marks available, records damage
+- `GET /activities/types?category=&search=`
+- `POST /activities/types`
+- `PATCH /activities/types/:id`
+- `GET /activities/sessions?date_from=&date_to=&status=&activity_type_id=` — with spots_left, booking_count
+- `GET /activities/sessions/:id` — with bookings[]
+- `POST /activities/sessions` — auto-calculates end_time from duration_min
+- `PATCH /activities/sessions/:id` — update status/instructor/participants
+- `POST /activities/sessions/:id/book` — validates spots, updates current_participants
+- `PATCH /activities/bookings/:id/cancel` — restores spots
+- `GET /activities/analytics?period=7|14|30` — rentalByCategory, activityByType, dailyRevenue chart data, topItems
+
+### Frontend (`/maison-hd/activities`)
+- 8-KPI strip: items, available, active rentals, needs attention, today sessions, participants, in progress, today revenue
+- **Tab 1 — Оренда інвентарю**: active rentals bar (time-left countdown, overdue in red); category tabs filter; availability filter (Весь/Вільний/В оренді); item cards with condition badge, pricing, availability dot; "Видати в оренду" → modal (guest name/phone, duration slider 1-8h, auto-price calc, deposit notice); "Повернути" → return modal (damage notes, damage charge, deposit confirmation)
+- **Tab 2 — Активності**: category filter tabs (water/sport/creative/kids/wellness/tour); type cards with sessions timeline; "Записати" → booking modal (guest info, participant counter, price calculation); "+" → add session modal; Start/End session buttons
+- **Tab 3 — Розклад**: date range picker; sessions grouped by day with expand-on-click to see bookings; color-coded session status; spots availability indicator
+- **Tab 4 — Аналітика**: period selector (7/14/30 days); stacked bar chart (rental + activity revenue); horizontal progress bars by category; top rented items grid
+
+Navigation: "Оренди та Активності" with Bike icon added to sidebar (all roles)
+
 ## Running the App
 
 The API server and HMS frontend run automatically via Replit workflows.
