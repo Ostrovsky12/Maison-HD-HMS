@@ -36,6 +36,7 @@ import {
   Wallet,
   Target,
   Wrench,
+  ChefHat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,7 +66,8 @@ const allNavItems = [
   { name: "SPA & Wellness", path: "/spa", icon: Waves, roles: null },
   { name: "Events & Banquet", path: "/events", icon: PartyPopper, roles: null },
   { name: "Технічна служба", path: "/maintenance", icon: Wrench, roles: null },
-  { name: "F&B / Ресторан", path: "/fb", icon: UtensilsCrossed, roles: null },
+  { name: "Ресторан & POS", path: "/restaurant", icon: ChefHat, roles: null },
+  { name: "F&B / Ресторан (legacy)", path: "/fb", icon: UtensilsCrossed, roles: null },
   { name: "Продажі та CRM", path: "/sales", icon: Target, roles: ["super_admin", "owner", "manager", "reception"] },
   { name: "Inbox", path: "/inbox", icon: MessageSquare, roles: null },
   { name: "Оплати та фінанси", path: "/finance", icon: Wallet, roles: ["super_admin", "owner", "manager", "reception"] },

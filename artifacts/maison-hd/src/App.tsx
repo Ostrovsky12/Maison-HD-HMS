@@ -44,6 +44,7 @@ import AccountingPage from "@/pages/accounting";
 import FinancePage from "@/pages/finance";
 import SalesPage from "@/pages/sales";
 import MaintenancePage from "@/pages/maintenance";
+import RestaurantPage from "@/pages/restaurant";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -134,6 +135,7 @@ function Router() {
       <Route path="/finance"><ProtectedRoute component={FinancePage} /></Route>
       <Route path="/sales"><ProtectedRoute component={SalesPage} /></Route>
       <Route path="/maintenance"><ProtectedRoute component={MaintenancePage} /></Route>
+      <Route path="/restaurant"><ProtectedRoute component={RestaurantPage} /></Route>
       <Route path="/tv/:roomCode" component={TvDisplayPage} />
 
       <Route path="/" component={HomeRoute} />
