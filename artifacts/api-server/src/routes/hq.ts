@@ -624,4 +624,342 @@ router.put("/budget/:id", requireAuth, async (req: any, res) => {
   }
 });
 
+// ─── OWNER DASHBOARD — Premium comprehensive analytics ───────────────────────
+router.get("/owner-dashboard", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const DB = (db as any).$client;
+    const now = new Date();
+    const todayStr = now.toISOString().split("T")[0];
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+    const yearStart  = `${now.getFullYear()}-01-01`;
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split("T")[0];
+    const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split("T")[0];
+    const lastYearStart  = `${now.getFullYear() - 1}-01-01`;
+    const lastYearEnd    = `${now.getFullYear() - 1}-12-31`;
+    const next30         = new Date(now.getTime() + 30 * 86400000).toISOString().split("T")[0];
+    const next90         = new Date(now.getTime() + 90 * 86400000).toISOString().split("T")[0];
+
+    // Unit IDs for the org
+    const { rows: props } = await DB.query(`SELECT id FROM properties WHERE organization_id = $1`, [orgId]);
+    const propIds = props.map((p: any) => p.id);
+    const { rows: units } = propIds.length > 0
+      ? await DB.query(`SELECT id, property_id FROM units WHERE property_id = ANY($1)`, [propIds])
+      : { rows: [] };
+    const unitIds = units.map((u: any) => u.id);
+    const totalUnits = unitIds.length;
+    if (totalUnits === 0) return res.json({ error: "No units configured" });
+
+    const uids = unitIds;
+
+    // ── Run all queries in parallel ─────────────────────────────────────────
+    const [
+      // Revenue (payments linked via bookings -> units -> properties)
+      mtdRev, ytdRev, lastMonthRev, lastYearRev,
+      // Bookings for occupancy
+      occupiedNow, arrivalsToday, departuresToday,
+      // Monthly trend (last 12 months)
+      monthlyTrend,
+      // By source
+      sourcePerf,
+      // Outstanding balances
+      balanceSummary, topDebtors,
+      // Reservations pipeline 90 days
+      pipeline,
+      // Staff performance
+      staffPerf,
+      // Property comparison
+      propComparison,
+      // SPA revenue
+      spaRevMTD,
+      // Events revenue
+      eventsRevMTD,
+      // F&B revenue
+      fbRevMTD,
+      // Rental revenue
+      rentalRevMTD,
+      // Folio breakdown by category
+      folioByCategory,
+      // ADR & RevPAR
+      adrData,
+      // Forecast 30 days
+      forecastData,
+      // Payment session stats
+      paymentStats,
+      // Alerts: overdue payments
+      overduePayments, lowOccupancyProps,
+    ] = await Promise.all([
+      // MTD Revenue from payments (join via bookings -> unit_id)
+      DB.query(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.unit_id=ANY($1) AND p.status='completed' AND p.created_at>=$2`, [uids, monthStart]),
+      // YTD Revenue
+      DB.query(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.unit_id=ANY($1) AND p.status='completed' AND p.created_at>=$2`, [uids, yearStart]),
+      // Last month Revenue
+      DB.query(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.unit_id=ANY($1) AND p.status='completed' AND p.created_at BETWEEN $2 AND $3`, [uids, lastMonthStart, lastMonthEnd]),
+      // Last year Revenue
+      DB.query(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.unit_id=ANY($1) AND p.status='completed' AND p.created_at BETWEEN $2 AND $3`, [uids, lastYearStart, lastYearEnd]),
+      // In-house now
+      DB.query(`SELECT COUNT(*) c FROM bookings WHERE unit_id=ANY($1) AND status='checked_in'`, [uids]),
+      // Arrivals today
+      DB.query(`SELECT COUNT(*) c FROM bookings WHERE unit_id=ANY($1) AND check_in=$2 AND status IN ('confirmed','pending')`, [uids, todayStr]),
+      // Departures today
+      DB.query(`SELECT COUNT(*) c FROM bookings WHERE unit_id=ANY($1) AND check_out=$2 AND status='checked_in'`, [uids, todayStr]),
+      // Monthly revenue trend 12M (payments via bookings)
+      DB.query(`
+        SELECT TO_CHAR(DATE_TRUNC('month',p.created_at),'YYYY-MM') AS month,
+               COALESCE(SUM(p.amount),0) AS total,
+               COUNT(DISTINCT b.id) AS bookings
+        FROM payments p
+        JOIN bookings b ON b.id = p.booking_id
+        WHERE b.unit_id=ANY($1) AND p.status='completed'
+          AND p.created_at >= NOW() - INTERVAL '12 months'
+        GROUP BY 1 ORDER BY 1`, [uids]),
+      // Source performance
+      DB.query(`
+        SELECT COALESCE(source,'direct') AS source,
+               COUNT(*) AS bookings,
+               COALESCE(SUM(total_amount),0) AS revenue,
+               COALESCE(AVG(total_amount),0) AS avg_value
+        FROM bookings WHERE unit_id=ANY($1)
+          AND check_in >= NOW() - INTERVAL '6 months'
+        GROUP BY 1 ORDER BY revenue DESC`, [uids]),
+      // Balance summary
+      DB.query(`
+        SELECT
+          SUM(CASE WHEN payment_status='paid' THEN total_amount ELSE 0 END) AS paid,
+          SUM(CASE WHEN payment_status!='paid' THEN total_amount ELSE 0 END) AS unpaid,
+          COUNT(CASE WHEN payment_status!='paid' THEN 1 END) AS unpaid_count,
+          SUM(CASE WHEN payment_status!='paid' AND check_in < NOW() THEN total_amount ELSE 0 END) AS overdue
+        FROM bookings WHERE unit_id=ANY($1) AND status NOT IN ('cancelled')`, [uids]),
+      // Top debtors
+      DB.query(`
+        SELECT CONCAT(first_name,' ',last_name) AS guest_name,
+               COALESCE(total_amount,0)-COALESCE(paid_amount,0) AS owed,
+               check_in, check_out, booking_ref
+        FROM bookings WHERE unit_id=ANY($1)
+          AND payment_status!='paid' AND status NOT IN ('cancelled')
+          AND total_amount > 0
+        ORDER BY owed DESC LIMIT 10`, [uids]),
+      // Pipeline — next 90 days by date
+      DB.query(`
+        SELECT check_in AS date,
+               COUNT(*) AS arrivals,
+               COALESCE(SUM(total_amount),0) AS revenue,
+               COALESCE(SUM(total_amount / GREATEST(check_out::date - check_in::date,1)),0) AS daily_rev
+        FROM bookings WHERE unit_id=ANY($1)
+          AND check_in BETWEEN $2 AND $3
+          AND status IN ('confirmed','pending')
+        GROUP BY 1 ORDER BY 1 LIMIT 90`, [uids, todayStr, next90]),
+      // Staff performance (payments by staff, HK by assigned_to_id)
+      DB.query(`
+        SELECT u.name, u.role,
+               COUNT(DISTINCT p.id) AS bookings_handled,
+               COALESCE(SUM(p.amount),0) AS revenue_processed,
+               COUNT(DISTINCT ht.id) AS hk_tasks
+        FROM users u
+        LEFT JOIN payments p ON p.staff_id = u.id AND p.created_at >= $2
+        LEFT JOIN housekeeping_tasks ht ON ht.assigned_to_id = u.id AND ht.status='completed' AND ht.updated_at >= $2
+        WHERE u.organization_id=$1 AND u.is_active=true
+        GROUP BY u.id, u.name, u.role
+        ORDER BY revenue_processed DESC LIMIT 15`, [orgId, monthStart]),
+      // Property comparison (payments via bookings)
+      DB.query(`
+        SELECT p.id, p.name, p.type,
+               COUNT(DISTINCT u.id) AS total_units,
+               COUNT(DISTINCT CASE WHEN b.status='checked_in' THEN b.id END) AS in_house,
+               COALESCE(SUM(CASE WHEN py.created_at>=$2 THEN py.amount ELSE 0 END),0) AS rev_mtd,
+               COALESCE(SUM(CASE WHEN py.created_at>=$3 THEN py.amount ELSE 0 END),0) AS rev_ytd,
+               COALESCE(AVG(CASE WHEN b.check_in>=$2 THEN b.total_amount/GREATEST(b.check_out::date-b.check_in::date,1) END),0) AS adr
+        FROM properties p
+        JOIN units u ON u.property_id = p.id
+        LEFT JOIN bookings b ON b.unit_id = u.id AND b.status NOT IN ('cancelled')
+        LEFT JOIN payments py ON py.booking_id = b.id AND py.status='completed'
+        WHERE p.organization_id=$1
+        GROUP BY p.id, p.name, p.type ORDER BY rev_ytd DESC`, [orgId, monthStart, yearStart]),
+      // SPA revenue MTD/YTD
+      DB.query(`SELECT COALESCE(SUM(CASE WHEN sa.appointment_date>=$2 THEN ss.price ELSE 0 END),0) mtd, COALESCE(SUM(CASE WHEN sa.appointment_date>=$3 THEN ss.price ELSE 0 END),0) ytd FROM spa_appointments sa JOIN spa_services ss ON ss.id=sa.service_id WHERE sa.organization_id=$1 AND sa.status='completed'`, [orgId, monthStart, yearStart]),
+      // Events revenue MTD/YTD
+      DB.query(`SELECT COALESCE(SUM(CASE WHEN event_date>=$2 THEN grand_total ELSE 0 END),0) mtd, COALESCE(SUM(CASE WHEN event_date>=$3 THEN grand_total ELSE 0 END),0) ytd FROM events WHERE organization_id=$1 AND status IN ('confirmed','deposit_paid','completed')`, [orgId, monthStart, yearStart]),
+      // F&B revenue (orders)
+      DB.query(`SELECT COALESCE(SUM(CASE WHEN fo.created_at>=$2 THEN fo.total_amount ELSE 0 END),0) mtd, COALESCE(SUM(CASE WHEN fo.created_at>=$3 THEN fo.total_amount ELSE 0 END),0) ytd FROM fb_orders fo WHERE fo.organization_id=$1 AND fo.status IN ('served','billed')`, [orgId, monthStart, yearStart]),
+      // Rental revenue (folio entries tagged as rental)
+      DB.query(`SELECT COALESCE(SUM(fe.total_amount),0) mtd FROM folio_entries fe WHERE fe.organization_id=$1 AND fe.entry_type='charge' AND fe.description ILIKE '%рент%' AND fe.created_at>=$2`, [orgId, monthStart]),
+      // Folio entries by category
+      DB.query(`SELECT rc.name AS category, rc.type, COALESCE(SUM(fe.total_amount),0) AS total FROM folio_entries fe LEFT JOIN revenue_categories rc ON rc.id=fe.revenue_category_id WHERE fe.organization_id=$1 AND fe.created_at>=$2 AND fe.entry_type='charge' GROUP BY rc.name, rc.type ORDER BY total DESC LIMIT 10`, [orgId, monthStart]),
+      // ADR (avg daily rate from confirmed/checked-in bookings this month)
+      DB.query(`SELECT COALESCE(AVG(total_amount/GREATEST(check_out::date-check_in::date,1)),0) adr, COALESCE(SUM(total_amount),0) total FROM bookings WHERE unit_id=ANY($1) AND check_in>=$2 AND status NOT IN ('cancelled')`, [uids, monthStart]),
+      // Forecast: next 30 days arrivals + booked revenue
+      DB.query(`
+        SELECT b.check_in::date AS date,
+               COUNT(*) AS arrivals,
+               COALESCE(SUM(b.total_amount/GREATEST(b.check_out::date-b.check_in::date,1)),0) AS projected_rev,
+               COUNT(*) * 100.0 / GREATEST($3,1) AS occ_pct
+        FROM bookings b
+        WHERE b.unit_id=ANY($1) AND b.check_in::date BETWEEN $2::date AND ($2::date + INTERVAL '30 days')::date
+          AND b.status IN ('confirmed','pending')
+        GROUP BY 1 ORDER BY 1`, [uids, todayStr, totalUnits]),
+      // Payment session overview
+      DB.query(`SELECT status, COUNT(*) cnt, COALESCE(SUM(amount),0) total FROM payment_sessions WHERE organization_id=$1 GROUP BY status`, [orgId]),
+      // Overdue payments (bookings with outstanding balance + past check-out)
+      DB.query(`SELECT CONCAT(first_name,' ',last_name) AS guest_name, booking_ref, check_out, COALESCE(total_amount,0)-COALESCE(paid_amount,0) owed FROM bookings WHERE unit_id=ANY($1) AND payment_status!='paid' AND check_out<$2 AND status NOT IN ('cancelled') ORDER BY owed DESC LIMIT 5`, [uids, todayStr]),
+      // Low occupancy properties
+      DB.query(`SELECT p.name, COUNT(DISTINCT u.id) total, COUNT(DISTINCT CASE WHEN b.status='checked_in' THEN b.unit_id END) occ FROM properties p JOIN units u ON u.property_id=p.id LEFT JOIN bookings b ON b.unit_id=u.id WHERE p.organization_id=$1 GROUP BY p.id, p.name HAVING COUNT(DISTINCT CASE WHEN b.status='checked_in' THEN b.unit_id END)*100.0/GREATEST(COUNT(DISTINCT u.id),1) < 20 LIMIT 5`, [orgId]),
+    ]);
+
+    // ── Compute derived KPIs ─────────────────────────────────────────────────
+    const revenueTotal = parseFloat(mtdRev.rows[0]?.total || 0);
+    const revenueYTD   = parseFloat(ytdRev.rows[0]?.total || 0);
+    const revenueLM    = parseFloat(lastMonthRev.rows[0]?.total || 0);
+    const revenueLY    = parseFloat(lastYearRev.rows[0]?.total || 0);
+    const occupiedCount = parseInt(occupiedNow.rows[0]?.c || 0);
+    const occupancyPct  = totalUnits > 0 ? Math.round((occupiedCount / totalUnits) * 100) : 0;
+    const adr           = parseFloat(adrData.rows[0]?.adr || 0);
+    const revpar        = totalUnits > 0 ? (adr * occupancyPct) / 100 : 0;
+    const spaMtd    = parseFloat(spaRevMTD.rows[0]?.mtd || 0);
+    const spaYtd    = parseFloat(spaRevMTD.rows[0]?.ytd || 0);
+    const eventsMtd = parseFloat(eventsRevMTD.rows[0]?.mtd || 0);
+    const eventsYtd = parseFloat(eventsRevMTD.rows[0]?.ytd || 0);
+    const fbMtd     = parseFloat(fbRevMTD.rows[0]?.mtd || 0);
+    const fbYtd     = parseFloat(fbRevMTD.rows[0]?.ytd || 0);
+    const rentalMtd = parseFloat(rentalRevMTD.rows[0]?.mtd || 0);
+    const accMtd    = Math.max(0, revenueTotal - spaMtd - eventsMtd - fbMtd - rentalMtd);
+
+    const totalRevAllUnits = accMtd + spaMtd + eventsMtd + fbMtd + rentalMtd;
+
+    const byUnit = {
+      accommodation: { revenue: accMtd,    ytd: 0,        share: totalRevAllUnits > 0 ? Math.round(accMtd/totalRevAllUnits*100) : 0,    label: "Проживання",    color: "#4F46E5" },
+      spa:           { revenue: spaMtd,    ytd: spaYtd,   share: totalRevAllUnits > 0 ? Math.round(spaMtd/totalRevAllUnits*100) : 0,    label: "SPA & Велнес", color: "#0EA5E9" },
+      restaurant:    { revenue: fbMtd,     ytd: fbYtd,    share: totalRevAllUnits > 0 ? Math.round(fbMtd/totalRevAllUnits*100) : 0,     label: "Ресторан",      color: "#F97316" },
+      events:        { revenue: eventsMtd, ytd: eventsYtd,share: totalRevAllUnits > 0 ? Math.round(eventsMtd/totalRevAllUnits*100) : 0, label: "Events",        color: "#EC4899" },
+      rental:        { revenue: rentalMtd, ytd: 0,        share: totalRevAllUnits > 0 ? Math.round(rentalMtd/totalRevAllUnits*100) : 0, label: "Оренда",        color: "#10B981" },
+    };
+
+    // Balances
+    const bal = balanceSummary.rows[0] || {};
+    const balances = {
+      paid:       parseFloat(bal.paid   || 0),
+      unpaid:     parseFloat(bal.unpaid || 0),
+      overdue:    parseFloat(bal.overdue || 0),
+      unpaidCount: parseInt(bal.unpaid_count || 0),
+      topDebtors:  topDebtors.rows.map((d: any) => ({ ...d, owed: parseFloat(d.owed || 0) })),
+    };
+
+    // Monthly trend: fill months with 0 if missing
+    const trend12 = monthlyTrend.rows.map((r: any) => ({
+      month: r.month, revenue: parseFloat(r.total), bookings: parseInt(r.bookings)
+    }));
+
+    // Sources
+    const totalBookings = sourcePerf.rows.reduce((acc: number, r: any) => acc + parseInt(r.bookings), 0);
+    const sources = sourcePerf.rows.map((r: any) => ({
+      source:   r.source,
+      bookings: parseInt(r.bookings),
+      revenue:  parseFloat(r.revenue),
+      avgValue: parseFloat(r.avg_value),
+      share:    totalBookings > 0 ? Math.round(parseInt(r.bookings)/totalBookings*100) : 0,
+      label:    ({ airbnb: "Airbnb", booking: "Booking.com", direct: "Прямий", walk_in: "Walk-in", expedia: "Expedia", other: "Інше" } as any)[r.source] || r.source,
+    }));
+
+    // Pipeline grouped by week
+    const pipelineByDay = pipeline.rows.map((r: any) => ({
+      date:     r.date, arrivals: parseInt(r.arrivals),
+      revenue:  parseFloat(r.revenue), dailyRev: parseFloat(r.daily_rev),
+    }));
+
+    // Property comparison
+    const properties = propComparison.rows.map((r: any) => {
+      const revpar = r.total_units > 0 ? parseFloat(r.rev_mtd) / parseInt(r.total_units) : 0;
+      const occ = parseInt(r.total_units) > 0 ? Math.round(parseInt(r.in_house)/parseInt(r.total_units)*100) : 0;
+      return { id: r.id, name: r.name, type: r.type, totalUnits: parseInt(r.total_units), inHouse: parseInt(r.in_house), occupancy: occ, revMTD: parseFloat(r.rev_mtd), revYTD: parseFloat(r.rev_ytd), adr: parseFloat(r.adr), revpar };
+    });
+
+    // Staff
+    const staff = staffPerf.rows.map((r: any) => ({
+      name: r.name, role: r.role,
+      bookings: parseInt(r.bookings_handled || 0),
+      revenue:  parseFloat(r.revenue_processed || 0),
+      hkTasks:  parseInt(r.hk_tasks || 0),
+    }));
+
+    // Forecast
+    const forecast = forecastData.rows.map((r: any) => ({
+      date: r.date, arrivals: parseInt(r.arrivals),
+      projectedRev: parseFloat(r.projected_rev),
+      occupancyPct: parseFloat(r.occ_pct),
+    }));
+
+    // Alerts
+    const alerts: any[] = [];
+    overduePayments.rows.forEach((d: any) => {
+      if (parseFloat(d.owed) > 0) alerts.push({ type: "payment", severity: "high", message: `Прострочений баланс ${Math.round(parseFloat(d.owed)).toLocaleString()} ₴ — ${d.guest_name || d.booking_ref}`, action: "/finance" });
+    });
+    lowOccupancyProps.rows.forEach((p: any) => {
+      alerts.push({ type: "occupancy", severity: "medium", message: `Низька завантаженість у "${p.name}": ${Math.round(parseInt(p.occ)/Math.max(parseInt(p.total),1)*100)}%`, action: "/chess" });
+    });
+    if (occupancyPct < 30) alerts.push({ type: "occupancy", severity: "medium", message: `Загальна завантаженість ${occupancyPct}% — нижче норми`, action: "/chess" });
+    if (balances.unpaid > 50000) alerts.push({ type: "payment", severity: "high", message: `Неоплачені рахунки на ${Math.round(balances.unpaid).toLocaleString()} ₴`, action: "/finance" });
+
+    // Payment session stats
+    const sessionsByStatus: Record<string,any> = {};
+    paymentStats.rows.forEach((r: any) => { sessionsByStatus[r.status] = { count: parseInt(r.cnt), total: parseFloat(r.total) }; });
+
+    // Period comparison
+    const mtdPct = revenueLM > 0 ? Math.round(((revenueTotal - revenueLM) / revenueLM) * 100) : 0;
+    const ytdPct = revenueLY > 0 ? Math.round(((revenueYTD - revenueLY) / revenueLY) * 100) : 0;
+
+    // Folio breakdown
+    const folio = folioByCategory.rows.map((r: any) => ({ category: r.category || "Інше", type: r.type, total: parseFloat(r.total) }));
+
+    // AI Summary — generate health score and text
+    const healthScore = Math.min(100, Math.max(0,
+      (occupancyPct > 60 ? 30 : occupancyPct > 30 ? 15 : 5) +
+      (mtdPct > 0 ? 25 : mtdPct > -10 ? 15 : 5) +
+      (alerts.filter((a:any) => a.severity==="high").length === 0 ? 20 : 10) +
+      (balances.unpaid / Math.max(revenueTotal,1) < 0.2 ? 15 : 8) +
+      (sources.length > 2 ? 10 : 5)
+    ));
+
+    const aiSummary = {
+      healthScore,
+      headline: healthScore >= 80 ? "Бізнес у чудовому стані 🟢" : healthScore >= 60 ? "Бізнес стабільний, є зони росту 🟡" : "Потрібна увага власника 🔴",
+      bullets: [
+        `Доходи MTD: ${Math.round(revenueTotal).toLocaleString()} ₴ (${mtdPct >= 0 ? "+" : ""}${mtdPct}% vs минулого місяця)`,
+        `Завантаженість: ${occupancyPct}%, ADR: ${Math.round(adr).toLocaleString()} ₴, RevPAR: ${Math.round(revpar).toLocaleString()} ₴`,
+        `Неоплачені баланси: ${Math.round(balances.unpaid).toLocaleString()} ₴ (${balances.unpaidCount} бронювань)`,
+        sources.length > 0 ? `Топ-канал: ${sources[0]?.label} — ${sources[0]?.share}% бронювань` : "Немає даних по каналах",
+        alerts.length === 0 ? "Активних тривог немає" : `${alerts.length} активних тривог потребують уваги`,
+      ],
+      recommendations: [
+        occupancyPct < 40 ? "🎯 Запустіть промо-кампанію або знизьте ціни на вільні номери" : null,
+        balances.unpaid > 30000 ? "💳 Надішліть нагадування про оплату невирішеним гостям" : null,
+        sources.length < 3 ? "🌐 Диверсифікуйте канали продажів — підключіть Booking.com або Airbnb" : null,
+        spaMtd < 5000 ? "💆 SPA-виручка низька — розгляньте акції на пакети" : null,
+      ].filter(Boolean),
+    };
+
+    res.json({
+      meta: { generatedAt: new Date(), orgId, period: { mtd: monthStart, ytd: yearStart } },
+      kpi: {
+        totalRevenueMTD: revenueTotal, revenueYTD, revenueLM, revenueLY,
+        mtdPct, ytdPct, occupancy: occupancyPct, occupiedUnits: occupiedCount, totalUnits,
+        adr: Math.round(adr), revpar: Math.round(revpar), arrivalsToday: parseInt(arrivalsToday.rows[0]?.c||0), departuresToday: parseInt(departuresToday.rows[0]?.c||0),
+        avgCheck: revenueTotal > 0 && staff.length > 0 ? Math.round(revenueTotal / Math.max(totalBookings,1)) : 0,
+      },
+      byUnit,
+      balances,
+      monthlyTrend: trend12,
+      sources,
+      pipeline: pipelineByDay,
+      forecast,
+      staff,
+      properties,
+      folio,
+      paymentSessions: sessionsByStatus,
+      alerts,
+      aiSummary,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;
