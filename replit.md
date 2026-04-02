@@ -497,6 +497,62 @@ Always use `extractJSON(raw, arrayMode)` instead of manual regex matching.
 
 ---
 
+## Stage 53 — Guest Experience (Повний Life Cycle гостя)
+
+### Нові DB таблиці (`lib/db/src/schema/guest-experience.ts`)
+- `guest_loyalty` — loyalty програма: email, organizationId, tier (bronze/silver/gold/platinum), points, totalPoints, totalSpend, visitsCount, lastVisitDate
+- `loyalty_transactions` — log нарахувань: loyaltyId, bookingId, type (earn/redeem/bonus/expiry), points, description
+- `guest_reviews` — відгуки: overallRating, cleanlinessRating, serviceRating, locationRating, valueRating, reviewText, npsScore, wouldReturn, recommendToFriend, isPublished, staffResponse
+- `guest_portal_messages` — двосторонній чат: bookingId, direction (guest_to_hotel/hotel_to_guest), senderName, message, isRead
+- `guest_special_offers` — промо акції: title, promoCode, discountPct, validFrom/Until, targetAudience (all/returning/vip/new), minNights
+- `guest_communication_log` — лог всіх комунікацій: type, channel, sentAt, openedAt, clickedAt
+
+### API Routes (розширено `/api/guest/*`)
+
+**Staff (requireAuth):**
+- `GET /summary` — KPI summary (loyaltyAccounts, reviewsCount, avgRating, activeOffers, unreadMessages)
+- `GET /loyalty-overview` — всі loyalty accounts організації
+- `GET /reviews` + `PATCH /reviews/:id` — управління відгуками (isPublished, staffResponse)
+- `GET /offers` + `POST /offers` + `PATCH /offers/:id` + `DELETE /offers/:id` — CRUD спецпропозицій
+- `POST /communicate/:bookingId` — log комунікації
+- `POST /message/:bookingId` — повідомлення гостю від персоналу
+- `POST /review-request/:bookingId` — надсилання запиту на відгук
+- `GET /communications/:bookingId` — history повідомлень
+
+**Public (guest portal, no auth):**
+- `GET /:code` — тепер також повертає loyalty, messages, review, offers
+- `POST /:code/message` — гість надсилає повідомлення готелю
+- `POST /:code/review` — гість залишає відгук (+100 loyalty pts)
+- `GET /:code/documents` — список цифрових документів
+- `POST /:code/checkin` — тепер також auto-creates loyalty account (+50 pts)
+
+### Guest Portal UI (`/maison-hd/guest/:code`) — 8 вкладок
+1. **Резервація** — деталі бронювання + Room amenities + Спецпропозиції
+2. **Чекін** — онлайн форма заїзду (+50 loyalty pts), pre-populated fields
+3. **Послуги** — каталог з category filter, service ordering modal + Мої замовлення + Запит виїзду
+4. **Чат** — real-time двосторонній чат з готелем, quick reply buttons, badge з кількістю непрочитаних
+5. **Бонуси** — loyalty картка (visual card з градієнтом за рівнем), progress bar до next tier, stats, привілеї
+6. **Відгук** — star picker (global + 4 categories), NPS (0-10), wouldReturn/recommendToFriend, +100 pts
+7. **Документи** — підтвердження/рахунок/реєстраційна картка/квитанція
+8. **Оплата** — balance + payment link + service orders breakdown
+
+### Admin Page (`/maison-hd/guest-experience`) — 4 вкладки
+1. **Лояльність** — tier summary (Bronze/Silver/Gold/Platinum), accounts table, правила нарахування
+2. **Відгуки** — review cards з rating/NPS, publish/unpublish, staff response modal
+3. **Пропозиції** — CRUD спецпропозицій з audience targeting, promo codes, validity dates
+4. **Workflow** — Guest Journey timeline (8 etapів від бронювання до +30 днів), metrics, tier ladder
+
+### Loyalty Tier System
+- **Bronze**: 0+ pts — базові нарахування
+- **Silver**: 500+ pts — 5% знижка, late checkout 13:00
+- **Gold**: 2000+ pts — 10% SPA, free parking, breakfast included
+- **Platinum**: 5000+ pts — personal butler, VIP lounge, airport transfer
+
+### Navigation
+- "Гостьовий досвід" (Heart icon) — roles: super_admin/owner/manager/reception
+
+---
+
 ## Stage 44 (Rev 2) — Owner/HQ Command Center Dashboard — EXPANDED
 
 ### New DB Table: `monthly_budgets`

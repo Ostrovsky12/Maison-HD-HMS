@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
-import { format, differenceInCalendarDays, parseISO, isAfter } from "date-fns";
+import { format, differenceInCalendarDays, parseISO, isAfter, isBefore, isToday } from "date-fns";
 import { uk } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,12 +13,14 @@ import {
   CalendarDays, MapPin, Users, Star, CheckCircle2, Clock, CreditCard,
   Wifi, Coffee, Car, Sparkles, ChevronRight, Phone, Loader2, AlertCircle,
   ShoppingBag, Home, UserCheck, Send, Heart, MessageSquare, ArrowLeft,
+  Award, FileText, Download, Crown, Gift, Tag, MessageCircle, ThumbsUp,
+  RefreshCw, ChevronDown, Building2, Shield,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api";
 
-type Tab = "reservation" | "checkin" | "services" | "payment";
+type Tab = "reservation" | "checkin" | "services" | "messages" | "loyalty" | "review" | "documents" | "payment";
 
 interface BookingData {
   booking: {
@@ -37,11 +39,13 @@ interface BookingData {
     firstName: string | null;
     lastName: string | null;
     phone: string | null;
+    email: string | null;
     notes: string | null;
     paymentLink: string | null;
     checkinFormSubmitted: boolean;
     checkinFormData: Record<string, string>;
     selectedAddons: Record<string, boolean | string>;
+    bookingRef: string | null;
     unitName: string;
     unitCategory: string;
     unitDescription: string | null;
@@ -52,30 +56,28 @@ interface BookingData {
     propertyName: string;
     propertyAddress: string | null;
     orgName: string;
+    orgId: number;
   };
   orders: any[];
+  loyalty: any | null;
+  messages: any[];
+  review: any | null;
+  offers: any[];
 }
 
 interface Service {
-  id: string;
-  type: string;
-  icon: string;
-  name: string;
-  description: string;
-  price: number;
-  currency: string;
-  available: boolean;
-  slots?: string[];
-  perDay?: boolean;
+  id: string; type: string; icon: string; name: string;
+  description: string; price: number; currency: string; available: boolean;
+  slots?: string[]; perDay?: boolean;
 }
 
 const statusMap: Record<string, { label: string; color: string }> = {
-  pending:    { label: "Очікує підтвердження", color: "bg-yellow-100 text-yellow-800" },
-  confirmed:  { label: "Підтверджено",         color: "bg-green-100 text-green-800" },
-  checked_in: { label: "Ви в готелі",          color: "bg-blue-100 text-blue-800" },
-  checked_out:{ label: "Виїзд завершено",      color: "bg-gray-100 text-gray-700" },
-  cancelled:  { label: "Скасовано",            color: "bg-red-100 text-red-700" },
-  draft:      { label: "Чернетка",             color: "bg-gray-100 text-gray-600" },
+  pending:     { label: "Очікує підтвердження", color: "bg-yellow-100 text-yellow-800" },
+  confirmed:   { label: "Підтверджено",         color: "bg-green-100 text-green-800" },
+  checked_in:  { label: "Ви в готелі",          color: "bg-blue-100 text-blue-800" },
+  checked_out: { label: "Виїзд завершено",      color: "bg-gray-100 text-gray-700" },
+  cancelled:   { label: "Скасовано",            color: "bg-red-100 text-red-700" },
+  draft:       { label: "Чернетка",             color: "bg-gray-100 text-gray-600" },
 };
 
 const paymentStatusMap: Record<string, { label: string; color: string }> = {
@@ -84,23 +86,34 @@ const paymentStatusMap: Record<string, { label: string; color: string }> = {
   paid:    { label: "Оплачено",    color: "bg-green-100 text-green-800" },
 };
 
+const TIER_CONFIG: Record<string, { label: string; color: string; icon: string; next: number }> = {
+  bronze:   { label: "Bronze",   color: "text-orange-600", icon: "🥉", next: 500 },
+  silver:   { label: "Silver",   color: "text-gray-600",   icon: "🥈", next: 2000 },
+  gold:     { label: "Gold",     color: "text-yellow-600", icon: "🥇", next: 5000 },
+  platinum: { label: "Platinum", color: "text-purple-600", icon: "💎", next: 99999 },
+};
+
 const serviceTypeLabels: Record<string, string> = {
-  spa: "SPA & Wellness",
-  rental: "Оренда",
-  activity: "Активності",
-  food: "Харчування",
-  service: "Сервіс",
+  spa: "SPA & Wellness", rental: "Оренда", activity: "Активності", food: "Харчування", service: "Сервіс",
 };
 
 const ADDON_LABELS: Record<string, string> = {
-  animal_cat: "З кішкою 🐱",
-  animal_dog: "З собакою 🐶",
-  baby_cot: "Дитяче ліжечко 🛏",
-  baby_chair: "Дитячий стілець 🪑",
-  extra_pillows: "Додаткові подушки 🛋",
-  extra_blanket: "Додаткова ковдра 🛌",
-  double_bed: "Суцільне ліжко 🛏",
+  animal_cat: "З кішкою 🐱", animal_dog: "З собакою 🐶", baby_cot: "Дитяче ліжечко 🛏",
+  baby_chair: "Дитячий стілець 🪑", extra_pillows: "Додаткові подушки 🛋",
+  extra_blanket: "Додаткова ковдра 🛌", double_bed: "Суцільне ліжко 🛏",
 };
+
+function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map(i => (
+        <button key={i} onClick={() => onChange(i)} className="focus:outline-none transition-transform hover:scale-110">
+          <Star className={`h-7 w-7 ${i <= value ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function GuestPortalPage() {
   const params = useParams<{ code: string }>();
@@ -112,7 +125,7 @@ export default function GuestPortalPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("reservation");
 
-  // Check-in form state
+  // Check-in form
   const [checkinForm, setCheckinForm] = useState({
     firstName: "", lastName: "", middleName: "", phone: "", email: "",
     passportType: "passport", passportNumber: "", nationality: "UA",
@@ -121,21 +134,38 @@ export default function GuestPortalPage() {
   const [checkinSubmitting, setCheckinSubmitting] = useState(false);
   const [checkinDone, setCheckinDone] = useState(false);
 
-  // Service ordering state
+  // Service ordering
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [serviceQty, setServiceQty] = useState(1);
   const [serviceTime, setServiceTime] = useState("");
   const [serviceNotes, setServiceNotes] = useState("");
   const [orderingService, setOrderingService] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string>("all");
 
-  // Checkout request state
+  // Checkout
   const [showCheckoutForm, setShowCheckoutForm] = useState(false);
   const [checkoutTime, setCheckoutTime] = useState("12:00");
   const [luggageStorage, setLuggageStorage] = useState(false);
-  const [feedbackRating, setFeedbackRating] = useState(0);
-  const [feedbackComment, setFeedbackComment] = useState("");
   const [checkoutSubmitting, setCheckoutSubmitting] = useState(false);
   const [checkoutDone, setCheckoutDone] = useState(false);
+
+  // Messages
+  const [newMessage, setNewMessage] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messages, setMessages] = useState<any[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Review
+  const [reviewForm, setReviewForm] = useState({
+    overallRating: 0, cleanlinessRating: 0, serviceRating: 0,
+    locationRating: 0, valueRating: 0, reviewText: "", npsScore: 0,
+    wouldReturn: true, recommendToFriend: true,
+  });
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewDone, setReviewDone] = useState(false);
+
+  // Documents
+  const [documents, setDocuments] = useState<any[]>([]);
 
   useEffect(() => {
     if (!code) return;
@@ -144,6 +174,7 @@ export default function GuestPortalPage() {
       .then(d => {
         if (d.error) { setError(d.error); return; }
         setData(d);
+        setMessages(d.messages || []);
         if (d.booking.checkinFormSubmitted) {
           setCheckinDone(true);
           const fd = d.booking.checkinFormData || {};
@@ -154,9 +185,11 @@ export default function GuestPortalPage() {
             firstName: d.booking.firstName || "",
             lastName: d.booking.lastName || "",
             phone: d.booking.phone || "",
+            email: d.booking.email || "",
             arrivalTime: d.booking.checkinTime || "14:00",
           }));
         }
+        if (d.review?.submittedAt) { setReviewDone(true); }
       })
       .catch(() => setError("Не вдалося завантажити дані бронювання"))
       .finally(() => setLoading(false));
@@ -165,30 +198,41 @@ export default function GuestPortalPage() {
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setServices(d); })
       .catch(() => {});
+
+    fetch(`${API}/guest/${code}/documents`)
+      .then(r => r.json())
+      .then(d => { if (d.documents) setDocuments(d.documents); })
+      .catch(() => {});
   }, [code]);
 
-  const nights = data
-    ? differenceInCalendarDays(parseISO(data.booking.checkOut), parseISO(data.booking.checkIn))
-    : 0;
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const nights = data ? differenceInCalendarDays(parseISO(data.booking.checkOut), parseISO(data.booking.checkIn)) : 0;
+  const now = new Date();
+  const checkInDate = data ? parseISO(data.booking.checkIn) : null;
+  const checkOutDate = data ? parseISO(data.booking.checkOut) : null;
+  const daysUntilCheckIn = checkInDate ? differenceInCalendarDays(checkInDate, now) : 0;
+  const isBeforeStay = checkInDate ? isBefore(now, checkInDate) : false;
+  const isDuringStay = checkInDate && checkOutDate ? !isBefore(now, checkInDate) && !isAfter(now, checkOutDate) : false;
+  const isAfterStay = checkOutDate ? isAfter(now, checkOutDate) : false;
 
   async function submitCheckin() {
     setCheckinSubmitting(true);
     try {
       const r = await fetch(`${API}/guest/${code}/checkin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(checkinForm),
       });
       const d = await r.json();
       if (d.success) {
         setCheckinDone(true);
-        toast({ title: "✅ Форму подано!", description: "Дякуємо! Ваші дані збережено." });
+        toast({ title: "✅ Форму подано!", description: d.message || "Дякуємо! Ваші дані збережено." });
       } else {
         toast({ title: "Помилка", description: d.error, variant: "destructive" });
       }
-    } finally {
-      setCheckinSubmitting(false);
-    }
+    } finally { setCheckinSubmitting(false); }
   }
 
   async function orderService() {
@@ -196,588 +240,483 @@ export default function GuestPortalPage() {
     setOrderingService(true);
     try {
       const r = await fetch(`${API}/guest/${code}/service-order`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          serviceId: selectedService.id,
-          serviceName: selectedService.name,
-          serviceType: selectedService.type,
-          quantity: serviceQty,
-          requestedTime: serviceTime,
-          guestNotes: serviceNotes,
-          price: selectedService.price,
+          serviceId: selectedService.id, serviceName: selectedService.name,
+          serviceType: selectedService.type, quantity: serviceQty,
+          requestedTime: serviceTime || null, guestNotes: serviceNotes, price: selectedService.price,
         }),
       });
       const d = await r.json();
       if (d.success) {
-        toast({ title: "✅ Замовлення прийнято!", description: `${selectedService.name} — очікуйте підтвердження від персоналу.` });
-        setSelectedService(null);
-        setServiceQty(1);
-        setServiceTime("");
-        setServiceNotes("");
-        // Refresh orders
-        fetch(`${API}/guest/${code}/orders`).then(r => r.json()).then(d => {
-          if (Array.isArray(d)) setData(prev => prev ? { ...prev, orders: d } : prev);
-        });
+        toast({ title: "✅ Замовлення прийнято!", description: `${selectedService.name} — очікуйте підтвердження` });
+        setSelectedService(null); setServiceQty(1); setServiceTime(""); setServiceNotes("");
       } else {
         toast({ title: "Помилка", description: d.error, variant: "destructive" });
       }
-    } finally {
-      setOrderingService(false);
-    }
+    } finally { setOrderingService(false); }
   }
 
-  async function submitCheckout() {
+  async function requestCheckout() {
     setCheckoutSubmitting(true);
     try {
       const r = await fetch(`${API}/guest/${code}/checkout-request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preferredTime: checkoutTime, luggageStorage, feedbackRating, feedbackComment }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferredTime: checkoutTime, luggageStorage }),
       });
       const d = await r.json();
       if (d.success) {
         setCheckoutDone(true);
-        toast({ title: "✅ Запит надіслано", description: "Адміністратор підготує все до вашого виїзду." });
+        toast({ title: "Запит прийнято", description: "Адміністратор зв'яжеться з вами незабаром" });
       }
-    } finally {
-      setCheckoutSubmitting(false);
+    } finally { setCheckoutSubmitting(false); }
+  }
+
+  async function sendMessage() {
+    if (!newMessage.trim()) return;
+    setSendingMessage(true);
+    try {
+      const r = await fetch(`${API}/guest/${code}/message`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: newMessage }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setMessages(prev => [...prev, d.message]);
+        setNewMessage("");
+      } else {
+        toast({ title: "Помилка", description: d.error, variant: "destructive" });
+      }
+    } finally { setSendingMessage(false); }
+  }
+
+  async function submitReview() {
+    if (reviewForm.overallRating === 0) {
+      toast({ title: "Оцінка обов'язкова", description: "Будь ласка, оцініть ваше перебування", variant: "destructive" });
+      return;
     }
+    setSubmittingReview(true);
+    try {
+      const r = await fetch(`${API}/guest/${code}/review`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reviewForm),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setReviewDone(true);
+        toast({ title: "🌟 Дякуємо за відгук!", description: d.message });
+      } else {
+        toast({ title: "Помилка", description: d.error, variant: "destructive" });
+      }
+    } finally { setSubmittingReview(false); }
   }
 
-  // ── Loading / Error ────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-stone-50 to-amber-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-10 h-10 animate-spin text-amber-500 mx-auto mb-4" />
-          <p className="text-stone-500 text-sm">Завантажуємо ваше бронювання…</p>
-        </div>
+  const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "reservation", label: "Резервація", icon: <CalendarDays className="h-3.5 w-3.5" /> },
+    { id: "checkin",     label: "Чекін",      icon: <UserCheck className="h-3.5 w-3.5" /> },
+    { id: "services",    label: "Послуги",    icon: <Sparkles className="h-3.5 w-3.5" /> },
+    { id: "messages",    label: "Чат",        icon: <MessageSquare className="h-3.5 w-3.5" /> },
+    { id: "loyalty",     label: "Бонуси",     icon: <Crown className="h-3.5 w-3.5" /> },
+    { id: "review",      label: "Відгук",     icon: <Star className="h-3.5 w-3.5" /> },
+    { id: "documents",   label: "Документи",  icon: <FileText className="h-3.5 w-3.5" /> },
+    { id: "payment",     label: "Оплата",     icon: <CreditCard className="h-3.5 w-3.5" /> },
+  ];
+
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
+      <div className="text-center">
+        <Loader2 className="h-10 w-10 animate-spin text-blue-500 mx-auto mb-3" />
+        <p className="text-gray-500">Завантаження…</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  if (error || !data) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-stone-50 to-amber-50 flex items-center justify-center p-6">
-        <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center">
-          <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-stone-800 mb-2">Посилання недійсне</h2>
-          <p className="text-stone-500 text-sm">{error || "Бронювання не знайдено. Перевірте посилання або зверніться до адміністратора."}</p>
-        </div>
+  if (error) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center">
+        <AlertCircle className="h-12 w-12 text-red-400 mx-auto mb-3" />
+        <h2 className="text-xl font-semibold text-gray-800">Помилка</h2>
+        <p className="text-gray-500 mt-2">{error}</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  const { booking, orders } = data;
-  const bookingStatus = statusMap[booking.status] || { label: booking.status, color: "bg-gray-100 text-gray-700" };
-  const paymentStatus = paymentStatusMap[booking.paymentStatus] || { label: booking.paymentStatus, color: "bg-gray-100 text-gray-700" };
-  const total = parseFloat(booking.totalAmount);
-  const paid = parseFloat(booking.paidAmount);
-  const remaining = total - paid;
-  const guestName = [booking.lastName, booking.firstName].filter(Boolean).join(" ");
-  const activeAddons = Object.entries(booking.selectedAddons || {})
-    .filter(([_, v]) => v === true || v === "true")
-    .map(([k]) => ADDON_LABELS[k] || k);
+  if (!data) return null;
+  const { booking, orders, loyalty, offers } = data;
+  const tierCfg = TIER_CONFIG[loyalty?.tier || "bronze"] || TIER_CONFIG.bronze;
 
-  const servicesByType = services.reduce((acc, s) => {
-    if (!acc[s.type]) acc[s.type] = [];
-    acc[s.type].push(s);
-    return acc;
-  }, {} as Record<string, Service[]>);
-
-  const pendingOrders = orders.filter(o => o.status === "pending" || o.status === "confirmed");
+  const categories = ["all", ...Array.from(new Set(services.map(s => s.type)))];
+  const filteredServices = activeCategory === "all" ? services : services.filter(s => s.type === activeCategory);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-stone-50 to-amber-50">
-      {/* ── Header ──────────────────────────────────────────── */}
-      <div className="bg-white border-b border-stone-100 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-xs font-bold">M</span>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      {/* Header */}
+      <div className="bg-white border-b sticky top-0 z-10 shadow-sm">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400">{booking.orgName}</p>
+            <p className="font-bold text-gray-800 text-sm">{booking.propertyName}</p>
           </div>
-          <div className="min-w-0">
-            <p className="text-xs text-stone-400 font-medium uppercase tracking-wide leading-none">{booking.orgName}</p>
-            <p className="text-sm font-semibold text-stone-800 truncate leading-tight">{booking.propertyName}</p>
-          </div>
-          <div className="ml-auto">
-            <span className={`text-xs font-medium px-2 py-1 rounded-full ${bookingStatus.color}`}>{bookingStatus.label}</span>
+          <div className="text-right">
+            <Badge className={statusMap[booking.status]?.color || "bg-gray-100 text-gray-600"}>
+              {statusMap[booking.status]?.label || booking.status}
+            </Badge>
           </div>
         </div>
       </div>
 
-      {/* ── Hero ────────────────────────────────────────────── */}
-      <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-white">
-        <div className="max-w-lg mx-auto px-4 py-6">
-          <p className="text-amber-100 text-sm mb-1">Вітаємо, {guestName || "Гість"}!</p>
-          <h1 className="text-2xl font-bold mb-1">{booking.unitCategory} «{booking.unitName}»</h1>
-          {booking.propertyAddress && (
-            <div className="flex items-center gap-1 text-amber-100 text-xs mt-1">
-              <MapPin className="w-3 h-3" />
-              <span>{booking.propertyAddress}</span>
+      <div className="max-w-2xl mx-auto px-4 py-4">
+        {/* Stay summary */}
+        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-400 font-medium">Ваше бронювання</p>
+              <h1 className="text-lg font-bold text-gray-900">{booking.unitName}</h1>
+              <div className="flex items-center gap-1 text-gray-500 text-xs mt-0.5">
+                <Building2 className="h-3 w-3" />{booking.unitCategory}
+                {booking.unitSquareMeters && <span>· {booking.unitSquareMeters} м²</span>}
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-400">{booking.bookingRef || `#${booking.id}`}</p>
+              <p className="text-2xl font-bold text-blue-600">{nights}</p>
+              <p className="text-xs text-gray-500">ночей</p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 mt-3">
+            <div className="flex-1 bg-green-50 rounded-xl p-2 text-center">
+              <p className="text-xs text-gray-500">Заїзд</p>
+              <p className="font-bold text-gray-800 text-sm">{format(parseISO(booking.checkIn), "dd MMM", { locale: uk })}</p>
+              <p className="text-xs text-green-600">{booking.checkinTime || "14:00"}</p>
+            </div>
+            <div className="flex items-center text-gray-300">→</div>
+            <div className="flex-1 bg-orange-50 rounded-xl p-2 text-center">
+              <p className="text-xs text-gray-500">Виїзд</p>
+              <p className="font-bold text-gray-800 text-sm">{format(parseISO(booking.checkOut), "dd MMM", { locale: uk })}</p>
+              <p className="text-xs text-orange-600">{booking.checkoutTime || "12:00"}</p>
+            </div>
+          </div>
+
+          {isBeforeStay && daysUntilCheckIn > 0 && (
+            <div className="mt-3 bg-blue-50 rounded-xl p-3 text-center">
+              <p className="text-blue-700 font-semibold text-sm">До вашого заїзду залишилося</p>
+              <p className="text-3xl font-bold text-blue-600">{daysUntilCheckIn}</p>
+              <p className="text-blue-500 text-xs">днів</p>
             </div>
           )}
-          <div className="flex flex-wrap gap-3 mt-4">
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-amber-100" />
-              <div>
-                <p className="text-[10px] text-amber-100 uppercase tracking-wide">Заїзд</p>
-                <p className="text-sm font-semibold">
-                  {format(parseISO(booking.checkIn), "d MMM", { locale: uk })}
-                  <span className="text-amber-200 text-xs ml-1">{booking.checkinTime}</span>
-                </p>
-              </div>
+          {isDuringStay && (
+            <div className="mt-3 bg-green-50 rounded-xl p-3 text-center">
+              <p className="text-green-700 font-bold">Ласкаво просимо! 🏨</p>
+              <p className="text-green-600 text-xs">Приємного відпочинку у {booking.propertyName}</p>
             </div>
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-amber-100" />
-              <div>
-                <p className="text-[10px] text-amber-100 uppercase tracking-wide">Виїзд</p>
-                <p className="text-sm font-semibold">
-                  {format(parseISO(booking.checkOut), "d MMM", { locale: uk })}
-                  <span className="text-amber-200 text-xs ml-1">{booking.checkoutTime}</span>
-                </p>
-              </div>
+          )}
+          {isAfterStay && (
+            <div className="mt-3 bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-gray-600 font-medium text-sm">Дякуємо за ваш візит 🙏</p>
+              <p className="text-gray-400 text-xs">Залиште відгук та отримайте 100 бонусних балів</p>
             </div>
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-100" />
-              <div>
-                <p className="text-[10px] text-amber-100 uppercase tracking-wide">Ночей</p>
-                <p className="text-sm font-semibold">{nights}</p>
-              </div>
-            </div>
+          )}
+        </div>
+
+        {/* Tabs */}
+        <div className="overflow-x-auto pb-1 mb-4">
+          <div className="flex gap-1.5 min-w-max">
+            {TABS.map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all ${
+                  activeTab === tab.id
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-white text-gray-500 hover:bg-gray-50 border border-gray-100"
+                }`}>
+                {tab.icon}{tab.label}
+                {tab.id === "messages" && messages.filter(m => m.direction === "hotel_to_guest" && !m.isRead).length > 0 && (
+                  <span className="bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
+                    {messages.filter(m => m.direction === "hotel_to_guest" && !m.isRead).length}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
         </div>
-      </div>
 
-      {/* ── Tab Navigation ──────────────────────────────────── */}
-      <div className="bg-white border-b border-stone-100 sticky top-[56px] z-10">
-        <div className="max-w-lg mx-auto flex">
-          {([
-            { id: "reservation" as Tab, label: "Бронювання", icon: Home },
-            { id: "checkin" as Tab, label: "Заїзд", icon: UserCheck },
-            { id: "services" as Tab, label: "Послуги", icon: Sparkles },
-            { id: "payment" as Tab, label: "Оплата", icon: CreditCard },
-          ] as { id: Tab; label: string; icon: any }[]).map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-3 text-center transition-all relative ${
-                activeTab === tab.id ? "text-amber-600" : "text-stone-400 hover:text-stone-600"
-              }`}
-            >
-              <tab.icon className={`w-4 h-4 mx-auto mb-0.5 ${activeTab === tab.id ? "text-amber-500" : ""}`} />
-              <span className="text-[10px] font-medium block">{tab.label}</span>
-              {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500 rounded-full" />
-              )}
-              {tab.id === "services" && pendingOrders.length > 0 && (
-                <span className="absolute top-1.5 right-2 bg-amber-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
-                  {pendingOrders.length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Content ─────────────────────────────────────────── */}
-      <div className="max-w-lg mx-auto px-4 py-5 pb-16">
-
-        {/* ━━━━ RESERVATION TAB ━━━━ */}
+        {/* ═══════════════ RESERVATION ═══════════════ */}
         {activeTab === "reservation" && (
-          <div className="space-y-4">
-            {/* Booking card */}
-            <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
-              <h3 className="font-semibold text-stone-800 text-sm">Деталі проживання</h3>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <p className="text-xs text-stone-400 mb-0.5">Заїзд</p>
-                  <p className="font-medium text-stone-800">
-                    {format(parseISO(booking.checkIn), "d MMMM yyyy", { locale: uk })}
-                  </p>
-                  <p className="text-xs text-amber-600">з {booking.checkinTime}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-stone-400 mb-0.5">Виїзд</p>
-                  <p className="font-medium text-stone-800">
-                    {format(parseISO(booking.checkOut), "d MMMM yyyy", { locale: uk })}
-                  </p>
-                  <p className="text-xs text-amber-600">до {booking.checkoutTime}</p>
-                </div>
-              </div>
-              <div className="border-t border-stone-50 pt-3 flex flex-wrap gap-3">
-                <div className="flex items-center gap-1.5 text-sm text-stone-600">
-                  <Users className="w-4 h-4 text-amber-400" />
-                  <span>
-                    {booking.adults} дор.
-                    {booking.childrenOver6 > 0 && `, ${booking.childrenOver6} дit. (6+)`}
-                    {booking.childrenUnder6 > 0 && `, ${booking.childrenUnder6} дit. (до 6)`}
-                  </span>
-                </div>
-                {booking.unitSquareMeters && (
-                  <span className="text-xs text-stone-500 bg-stone-50 px-2 py-0.5 rounded-full">
-                    {booking.unitSquareMeters} м²
-                  </span>
-                )}
-                {booking.unitHasBalcony && (
-                  <span className="text-xs text-stone-500 bg-stone-50 px-2 py-0.5 rounded-full">🏡 Балкон</span>
-                )}
-                {booking.unitHasView && (
-                  <span className="text-xs text-stone-500 bg-stone-50 px-2 py-0.5 rounded-full">🌅 {booking.unitHasView}</span>
-                )}
+          <div className="space-y-3">
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-blue-500" />Деталі бронювання
+              </h3>
+              <div className="space-y-2">
+                {[
+                  { label: "Гість", value: [booking.firstName, booking.lastName].filter(Boolean).join(" ") || "—" },
+                  { label: "Телефон", value: booking.phone || "—" },
+                  { label: "Email", value: booking.email || "—" },
+                  { label: "Гостей", value: `${booking.adults} дор.${booking.childrenOver6 ? ` + ${booking.childrenOver6} діт.` : ""}${booking.childrenUnder6 ? ` + ${booking.childrenUnder6} малят.` : ""}` },
+                  { label: "Адреса", value: booking.propertyAddress || "—" },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between text-sm border-b border-gray-50 pb-1 last:border-0">
+                    <span className="text-gray-500">{label}</span>
+                    <span className="font-medium text-gray-800 text-right max-w-[60%]">{value}</span>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Unit description */}
-            {booking.unitDescription && (
-              <div className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-stone-800 text-sm mb-2">Про ваш номер</h3>
-                <p className="text-sm text-stone-600 leading-relaxed">{booking.unitDescription}</p>
+            {/* Room details */}
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <h3 className="font-semibold text-sm mb-3">Ваш номер</h3>
+              {booking.unitDescription && <p className="text-xs text-gray-500 mb-3">{booking.unitDescription}</p>}
+              <div className="flex flex-wrap gap-2">
+                {booking.unitHasBalcony && <Badge className="bg-blue-50 text-blue-700 text-xs">🌿 Балкон</Badge>}
+                {booking.unitHasView && <Badge className="bg-green-50 text-green-700 text-xs">🏞️ {booking.unitHasView}</Badge>}
+                {booking.unitSquareMeters && <Badge className="bg-gray-100 text-gray-600 text-xs">📐 {booking.unitSquareMeters} м²</Badge>}
+                <Badge className="bg-gray-100 text-gray-600 text-xs">👥 до {booking.unitCapacity} ос.</Badge>
+                <Badge className="bg-purple-50 text-purple-700 text-xs">📶 WiFi</Badge>
+                <Badge className="bg-orange-50 text-orange-700 text-xs">☕ Сніданок</Badge>
               </div>
-            )}
+              {booking.selectedAddons && Object.keys(booking.selectedAddons).filter(k => booking.selectedAddons[k]).length > 0 && (
+                <div className="mt-3 pt-3 border-t">
+                  <p className="text-xs text-gray-500 mb-1">Додаткові опції:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(booking.selectedAddons).filter(([, v]) => v).map(([k]) => (
+                      <Badge key={k} className="bg-purple-50 text-purple-700 text-xs">{ADDON_LABELS[k] || k}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
 
-            {/* Addons */}
-            {activeAddons.length > 0 && (
+            {/* Special offers */}
+            {offers && offers.length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-stone-800 text-sm mb-2">Включено в бронювання</h3>
-                <div className="flex flex-wrap gap-2">
-                  {activeAddons.map(a => (
-                    <span key={a} className="text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full border border-amber-100">{a}</span>
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <Gift className="h-4 w-4 text-pink-500" />Спецпропозиції для вас
+                </h3>
+                <div className="space-y-2">
+                  {offers.map((offer: any) => (
+                    <div key={offer.id} className="bg-gradient-to-r from-pink-50 to-orange-50 rounded-xl p-3 flex justify-between items-center">
+                      <div>
+                        <p className="font-medium text-sm text-gray-800">{offer.title}</p>
+                        {offer.description && <p className="text-xs text-gray-500">{offer.description}</p>}
+                      </div>
+                      <div className="text-right shrink-0 ml-3">
+                        {offer.discountPct && <p className="font-bold text-pink-600">-{offer.discountPct}%</p>}
+                        {offer.promoCode && <Badge className="bg-pink-100 text-pink-700 font-mono text-xs">{offer.promoCode}</Badge>}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
-
-            {/* Notes */}
-            {booking.notes && (
-              <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100">
-                <div className="flex items-start gap-2">
-                  <MessageSquare className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
-                  <p className="text-sm text-amber-800">{booking.notes}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Quick actions */}
-            <div className="bg-white rounded-2xl shadow-sm p-4">
-              <h3 className="font-semibold text-stone-800 text-sm mb-3">Швидкі дії</h3>
-              <div className="space-y-2">
-                {!booking.checkinFormSubmitted && (
-                  <button
-                    onClick={() => setActiveTab("checkin")}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl bg-green-50 hover:bg-green-100 transition-colors text-left"
-                  >
-                    <UserCheck className="w-5 h-5 text-green-500" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-green-800">Online Check-in</p>
-                      <p className="text-xs text-green-600">Заповніть форму заздалегідь — заощадите час</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-green-400" />
-                  </button>
-                )}
-                <button
-                  onClick={() => setActiveTab("services")}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-50 hover:bg-amber-100 transition-colors text-left"
-                >
-                  <Sparkles className="w-5 h-5 text-amber-500" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-amber-800">Замовити послуги</p>
-                    <p className="text-xs text-amber-600">SPA, оренда, харчування, активності</p>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-amber-400" />
-                </button>
-                {booking.paymentStatus !== "paid" && booking.paymentLink && (
-                  <a
-                    href={booking.paymentLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-50 hover:bg-blue-100 transition-colors"
-                  >
-                    <CreditCard className="w-5 h-5 text-blue-500" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-blue-800">Оплатити онлайн</p>
-                      <p className="text-xs text-blue-600">Залишок: {remaining.toFixed(0)} грн</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-blue-400" />
-                  </a>
-                )}
-              </div>
-            </div>
           </div>
         )}
 
-        {/* ━━━━ CHECK-IN TAB ━━━━ */}
+        {/* ═══════════════ CHECK-IN ═══════════════ */}
         {activeTab === "checkin" && (
-          <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm p-4">
             {checkinDone ? (
-              <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
-                <CheckCircle2 className="w-14 h-14 text-green-400 mx-auto mb-4" />
-                <h3 className="text-lg font-bold text-stone-800 mb-2">Дані подані!</h3>
-                <p className="text-sm text-stone-500 mb-4">
-                  Ваша форма online check-in заповнена. Персонал вже бачить вашу інформацію.<br />
-                  Заїзд буде ще швидшим та комфортнішим.
-                </p>
-                <div className="bg-stone-50 rounded-xl p-3 text-left space-y-1.5 text-sm">
-                  {checkinForm.firstName && <p><span className="text-stone-400">Ім'я:</span> <span className="font-medium">{[checkinForm.lastName, checkinForm.firstName, checkinForm.middleName].filter(Boolean).join(" ")}</span></p>}
-                  {checkinForm.arrivalTime && <p><span className="text-stone-400">Планований час заїзду:</span> <span className="font-medium">{checkinForm.arrivalTime}</span></p>}
-                  {checkinForm.passportNumber && <p><span className="text-stone-400">Документ:</span> <span className="font-medium">•••• {checkinForm.passportNumber.slice(-4)}</span></p>}
-                  {checkinForm.specialRequests && <p><span className="text-stone-400">Побажання:</span> <span className="font-medium">{checkinForm.specialRequests}</span></p>}
+              <div className="text-center py-6">
+                <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" />
+                <h3 className="text-lg font-bold text-gray-800">Форму подано!</h3>
+                <p className="text-gray-500 text-sm mt-2">Дякуємо! Нараховано 50 бонусних балів 🎉</p>
+                <div className="mt-4 bg-gray-50 rounded-xl p-4 text-left">
+                  <p className="text-xs text-gray-400 mb-2 font-medium">Дані для заїзду:</p>
+                  {[
+                    { l: "Ім'я", v: checkinForm.firstName },
+                    { l: "Прізвище", v: checkinForm.lastName },
+                    { l: "По-батькові", v: checkinForm.middleName },
+                    { l: "Телефон", v: checkinForm.phone },
+                    { l: "Email", v: checkinForm.email },
+                    { l: "Час приїзду", v: checkinForm.arrivalTime },
+                    { l: "Нотатки", v: checkinForm.specialRequests },
+                  ].filter(x => x.v).map(({ l, v }) => (
+                    <div key={l} className="flex justify-between text-sm py-1 border-b border-gray-50 last:border-0">
+                      <span className="text-gray-500">{l}</span>
+                      <span className="font-medium">{v}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : (
-              <>
-                <div className="bg-green-50 rounded-2xl p-4 border border-green-100">
-                  <div className="flex items-start gap-2">
-                    <UserCheck className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-semibold text-green-800">Online Check-in</p>
-                      <p className="text-xs text-green-600 mt-0.5">
-                        Заповніть форму заздалегідь — ваш заїзд пройде без черг і паперів.
-                      </p>
-                    </div>
-                  </div>
+              <div className="space-y-4">
+                <div className="bg-blue-50 rounded-xl p-3">
+                  <p className="text-blue-700 text-sm font-medium">🏨 Онлайн заїзд</p>
+                  <p className="text-blue-600 text-xs mt-1">Заповніть форму заздалегідь — економте час на рецепції та отримайте 50 бонусних балів</p>
                 </div>
 
-                <div className="bg-white rounded-2xl shadow-sm p-4 space-y-4">
-                  <h3 className="font-semibold text-stone-800 text-sm">Особисті дані</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2">
-                      <Label className="text-xs text-stone-500">Прізвище *</Label>
-                      <Input value={checkinForm.lastName} onChange={e => setCheckinForm(p => ({...p, lastName: e.target.value}))} placeholder="Іваненко" className="mt-1 h-9 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs text-stone-500">Ім'я *</Label>
-                      <Input value={checkinForm.firstName} onChange={e => setCheckinForm(p => ({...p, firstName: e.target.value}))} placeholder="Олег" className="mt-1 h-9 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs text-stone-500">По батькові</Label>
-                      <Input value={checkinForm.middleName} onChange={e => setCheckinForm(p => ({...p, middleName: e.target.value}))} placeholder="Петрович" className="mt-1 h-9 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs text-stone-500">Телефон</Label>
-                      <Input value={checkinForm.phone} onChange={e => setCheckinForm(p => ({...p, phone: e.target.value}))} placeholder="+380" className="mt-1 h-9 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs text-stone-500">Email</Label>
-                      <Input value={checkinForm.email} onChange={e => setCheckinForm(p => ({...p, email: e.target.value}))} placeholder="email@domain.com" type="email" className="mt-1 h-9 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs text-stone-500">Дата народження</Label>
-                      <Input value={checkinForm.birthDate} onChange={e => setCheckinForm(p => ({...p, birthDate: e.target.value}))} type="date" className="mt-1 h-9 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs text-stone-500">Громадянство</Label>
-                      <Select value={checkinForm.nationality} onValueChange={v => setCheckinForm(p => ({...p, nationality: v}))}>
-                        <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="UA">🇺🇦 Україна</SelectItem>
-                          <SelectItem value="PL">🇵🇱 Польща</SelectItem>
-                          <SelectItem value="DE">🇩🇪 Германія</SelectItem>
-                          <SelectItem value="US">🇺🇸 США</SelectItem>
-                          <SelectItem value="OTHER">Інше</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label className="text-xs">Ім'я *</Label><Input value={checkinForm.firstName} onChange={e => setCheckinForm(p => ({ ...p, firstName: e.target.value }))} placeholder="Іван" /></div>
+                  <div><Label className="text-xs">Прізвище *</Label><Input value={checkinForm.lastName} onChange={e => setCheckinForm(p => ({ ...p, lastName: e.target.value }))} placeholder="Петренко" /></div>
                 </div>
-
-                <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
-                  <h3 className="font-semibold text-stone-800 text-sm">Документ</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs text-stone-500">Тип</Label>
-                      <Select value={checkinForm.passportType} onValueChange={v => setCheckinForm(p => ({...p, passportType: v}))}>
-                        <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="passport">Паспорт</SelectItem>
-                          <SelectItem value="id_card">ID-картка</SelectItem>
-                          <SelectItem value="foreign_passport">Закордонний паспорт</SelectItem>
-                          <SelectItem value="other">Інший</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-stone-500">Номер документа</Label>
-                      <Input value={checkinForm.passportNumber} onChange={e => setCheckinForm(p => ({...p, passportNumber: e.target.value}))} placeholder="AA123456" className="mt-1 h-9 text-sm" />
-                    </div>
-                  </div>
+                <div><Label className="text-xs">По-батькові</Label><Input value={checkinForm.middleName} onChange={e => setCheckinForm(p => ({ ...p, middleName: e.target.value }))} placeholder="Олександрович" /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label className="text-xs">Телефон *</Label><Input value={checkinForm.phone} onChange={e => setCheckinForm(p => ({ ...p, phone: e.target.value }))} placeholder="+380XXXXXXXXX" /></div>
+                  <div><Label className="text-xs">Email</Label><Input value={checkinForm.email} onChange={e => setCheckinForm(p => ({ ...p, email: e.target.value }))} placeholder="email@gmail.com" /></div>
                 </div>
-
-                <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
-                  <h3 className="font-semibold text-stone-800 text-sm">Прибуття та побажання</h3>
+                <div><Label className="text-xs">Дата народження</Label><Input type="date" value={checkinForm.birthDate} onChange={e => setCheckinForm(p => ({ ...p, birthDate: e.target.value }))} /></div>
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label className="text-xs text-stone-500">Планований час заїзду</Label>
-                    <Select value={checkinForm.arrivalTime} onValueChange={v => setCheckinForm(p => ({...p, arrivalTime: v}))}>
-                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <Label className="text-xs">Тип документа</Label>
+                    <Select value={checkinForm.passportType} onValueChange={v => setCheckinForm(p => ({ ...p, passportType: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {["12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00"].map(t => (
-                          <SelectItem key={t} value={t}>{t}</SelectItem>
-                        ))}
+                        <SelectItem value="passport">Паспорт</SelectItem>
+                        <SelectItem value="id_card">ID-картка</SelectItem>
+                        <SelectItem value="international">Закордонний паспорт</SelectItem>
+                        <SelectItem value="other">Інше</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label className="text-xs text-stone-500">Особливі побажання (необов'язково)</Label>
-                    <Textarea
-                      value={checkinForm.specialRequests}
-                      onChange={e => setCheckinForm(p => ({...p, specialRequests: e.target.value}))}
-                      placeholder="Алергія, дієта, особливі побажання до номеру…"
-                      className="mt-1 text-sm resize-none"
-                      rows={3}
-                    />
-                  </div>
+                  <div><Label className="text-xs">Номер документа</Label><Input value={checkinForm.passportNumber} onChange={e => setCheckinForm(p => ({ ...p, passportNumber: e.target.value }))} placeholder="АА123456" /></div>
                 </div>
-
-                <Button
-                  onClick={submitCheckin}
-                  disabled={!checkinForm.firstName || !checkinForm.lastName || checkinSubmitting}
-                  className="w-full bg-green-500 hover:bg-green-600 text-white h-12 text-sm font-semibold rounded-xl"
-                >
-                  {checkinSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
-                  Подати форму заїзду
+                <div>
+                  <Label className="text-xs">Очікуваний час заїзду</Label>
+                  <Select value={checkinForm.arrivalTime} onValueChange={v => setCheckinForm(p => ({ ...p, arrivalTime: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00","23:00"].map(t => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label className="text-xs">Особливі побажання</Label><Textarea value={checkinForm.specialRequests} onChange={e => setCheckinForm(p => ({ ...p, specialRequests: e.target.value }))} placeholder="Алергія на пух, ліжко до вікна, тощо…" rows={3} /></div>
+                <Button onClick={submitCheckin} disabled={checkinSubmitting || !checkinForm.firstName || !checkinForm.lastName} className="w-full">
+                  {checkinSubmitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Подаємо…</> : <><UserCheck className="h-4 w-4 mr-2" />Підтвердити онлайн заїзд</>}
                 </Button>
-              </>
+              </div>
             )}
           </div>
         )}
 
-        {/* ━━━━ SERVICES TAB ━━━━ */}
+        {/* ═══════════════ SERVICES ═══════════════ */}
         {activeTab === "services" && (
-          <div className="space-y-4">
-            {/* Active orders */}
-            {pendingOrders.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-stone-800 text-sm mb-3 flex items-center gap-2">
-                  <ShoppingBag className="w-4 h-4 text-amber-500" />
-                  Ваші замовлення
-                </h3>
-                <div className="space-y-2">
-                  {pendingOrders.map(o => (
-                    <div key={o.id} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-stone-800 truncate">{o.serviceName}</p>
-                        <p className="text-xs text-stone-400">
-                          {o.quantity > 1 && `${o.quantity}x `}
-                          {parseFloat(o.totalPrice) > 0 && `${parseFloat(o.totalPrice).toFixed(0)} грн`}
-                        </p>
-                      </div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        o.status === "confirmed" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                      }`}>
-                        {o.status === "confirmed" ? "Підтверджено" : "Обробляється"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+          <div className="space-y-3">
+            {/* Category filter */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {categories.map(cat => (
+                <button key={cat} onClick={() => setActiveCategory(cat)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                    activeCategory === cat ? "bg-blue-600 text-white" : "bg-white text-gray-500 border border-gray-100 hover:bg-gray-50"
+                  }`}>
+                  {cat === "all" ? "Всі" : serviceTypeLabels[cat] || cat}
+                </button>
+              ))}
+            </div>
 
-            {/* Service selection modal */}
+            <div className="grid grid-cols-1 gap-3">
+              {filteredServices.map(service => (
+                <div key={service.id} className="bg-white rounded-2xl shadow-sm p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{service.icon}</span>
+                        <div>
+                          <h4 className="font-semibold text-sm">{service.name}</h4>
+                          <p className="text-xs text-gray-500">{service.description}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <p className="font-bold text-blue-600">{service.price.toLocaleString("uk")} ₴</p>
+                      {service.perDay && <p className="text-xs text-gray-400">/ день</p>}
+                    </div>
+                  </div>
+                  <Button size="sm" className="w-full mt-3 h-8 text-xs"
+                    onClick={() => { setSelectedService(service); setServiceTime(""); setServiceQty(1); setServiceNotes(""); }}>
+                    Замовити
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {/* Order modal */}
             {selectedService && (
-              <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4">
-                <div className="bg-white rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl">
-                  <div className="flex items-start gap-3">
-                    <span className="text-3xl">{selectedService.icon}</span>
-                    <div>
-                      <h3 className="font-bold text-stone-800">{selectedService.name}</h3>
-                      <p className="text-sm text-stone-500">{selectedService.description}</p>
-                      <p className="text-sm font-semibold text-amber-600 mt-1">{selectedService.price} грн{selectedService.perDay ? "/день" : ""}</p>
-                    </div>
+              <div className="fixed inset-0 bg-black/40 z-50 flex items-end justify-center p-4">
+                <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold">{selectedService.icon} {selectedService.name}</h3>
+                    <button onClick={() => setSelectedService(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs text-stone-500">Кількість</Label>
-                      <div className="flex items-center gap-2 mt-1">
-                        <button onClick={() => setServiceQty(q => Math.max(1, q-1))} className="w-8 h-8 rounded-lg bg-stone-100 flex items-center justify-center text-stone-700 font-bold">−</button>
-                        <span className="w-8 text-center text-sm font-semibold">{serviceQty}</span>
-                        <button onClick={() => setServiceQty(q => q+1)} className="w-8 h-8 rounded-lg bg-stone-100 flex items-center justify-center text-stone-700 font-bold">+</button>
-                      </div>
-                    </div>
-                    {selectedService.slots && (
-                      <div>
-                        <Label className="text-xs text-stone-500">Час</Label>
-                        <Select value={serviceTime} onValueChange={setServiceTime}>
-                          <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue placeholder="Обрати…" /></SelectTrigger>
-                          <SelectContent>
-                            {selectedService.slots.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </div>
+                  <p className="text-gray-500 text-sm">{selectedService.description}</p>
                   <div>
-                    <Label className="text-xs text-stone-500">Коментар (необов'язково)</Label>
-                    <Textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} placeholder="Побажання…" rows={2} className="mt-1 text-sm resize-none" />
+                    <Label className="text-xs">Кількість</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => setServiceQty(q => Math.max(1, q-1))}>−</Button>
+                      <span className="w-8 text-center font-bold">{serviceQty}</span>
+                      <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => setServiceQty(q => q+1)}>+</Button>
+                      <span className="text-sm text-gray-500 ml-2">× {selectedService.price} ₴ = <strong>{(serviceQty * selectedService.price).toLocaleString("uk")} ₴</strong></span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between text-sm font-semibold text-stone-800 border-t border-stone-50 pt-3">
-                    <span>Сума:</span>
-                    <span className="text-amber-600">{(selectedService.price * serviceQty).toFixed(0)} грн</span>
+                  {selectedService.slots && (
+                    <div>
+                      <Label className="text-xs">Час</Label>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {selectedService.slots.map(slot => (
+                          <button key={slot} onClick={() => setServiceTime(slot)}
+                            className={`px-3 py-1 rounded-lg text-xs font-medium border ${serviceTime === slot ? "bg-blue-600 text-white border-blue-600" : "bg-gray-50 text-gray-600 border-gray-100"}`}>
+                            {slot}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <Label className="text-xs">Нотатки</Label>
+                    <Textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} placeholder="Побажання…" rows={2} className="mt-1" />
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setSelectedService(null)} className="flex-1 h-11 rounded-xl text-sm">Скасувати</Button>
-                    <Button onClick={orderService} disabled={orderingService} className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold">
-                      {orderingService ? <Loader2 className="w-4 h-4 animate-spin" /> : "Замовити"}
+                    <Button variant="outline" onClick={() => setSelectedService(null)} className="flex-1">Скасувати</Button>
+                    <Button onClick={orderService} disabled={orderingService} className="flex-1">
+                      {orderingService ? <Loader2 className="h-4 w-4 animate-spin" /> : "Замовити"}
                     </Button>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Service catalog */}
-            {Object.entries(servicesByType).map(([type, svcs]) => (
-              <div key={type} className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-stone-700 text-xs uppercase tracking-wide mb-3">{serviceTypeLabels[type] || type}</h3>
+            {/* My orders */}
+            {orders.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm p-4">
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <ShoppingBag className="h-4 w-4 text-purple-500" />Мої замовлення
+                </h3>
                 <div className="space-y-2">
-                  {svcs.map(s => (
-                    <button
-                      key={s.id}
-                      onClick={() => { setSelectedService(s); setServiceQty(1); setServiceTime(""); setServiceNotes(""); }}
-                      className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-amber-50 transition-colors text-left"
-                    >
-                      <span className="text-2xl flex-shrink-0">{s.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-stone-800">{s.name}</p>
-                        <p className="text-xs text-stone-400 truncate">{s.description}</p>
+                  {orders.filter(o => (o.metadata as any)?.type !== "checkout_request").map((order: any) => (
+                    <div key={order.id} className="flex justify-between items-center text-sm py-2 border-b border-gray-50 last:border-0">
+                      <div>
+                        <p className="font-medium">{order.serviceName}</p>
+                        <p className="text-xs text-gray-400">{order.quantity} × {parseFloat(order.pricePerUnit || 0).toLocaleString("uk")} ₴</p>
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-semibold text-amber-600">{s.price} грн</p>
-                        {s.perDay && <p className="text-[10px] text-stone-400">/день</p>}
-                      </div>
-                    </button>
+                      <Badge className={order.status === "pending" ? "bg-yellow-100 text-yellow-700" : order.status === "completed" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}>
+                        {order.status === "pending" ? "Очікує" : order.status === "confirmed" ? "Підтверджено" : order.status === "completed" ? "Виконано" : order.status}
+                      </Badge>
+                    </div>
                   ))}
                 </div>
               </div>
-            ))}
+            )}
 
-            {/* Checkout request */}
-            {(booking.status === "checked_in" || booking.status === "confirmed") && (
+            {/* Checkout section */}
+            {(isDuringStay || isAfterStay) && (
               <div className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-stone-700 text-xs uppercase tracking-wide mb-3">Виїзд</h3>
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <Car className="h-4 w-4 text-orange-500" />Запит на виїзд
+                </h3>
                 {checkoutDone ? (
-                  <div className="text-center py-4">
-                    <CheckCircle2 className="w-10 h-10 text-green-400 mx-auto mb-2" />
-                    <p className="text-sm text-stone-600">Запит на виїзд надіслано. Ми готуємося!</p>
+                  <div className="text-center py-3">
+                    <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto mb-2" />
+                    <p className="text-sm text-gray-600">Запит прийнято! Зустрічаємо вас на рецепції.</p>
                   </div>
-                ) : !showCheckoutForm ? (
-                  <button
-                    onClick={() => setShowCheckoutForm(true)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors text-left"
-                  >
-                    <ArrowLeft className="w-5 h-5 text-stone-500 rotate-180" />
-                    <div>
-                      <p className="text-sm font-medium text-stone-800">Запит на виїзд</p>
-                      <p className="text-xs text-stone-400">Повідомте про час виїзду та залиште відгук</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-stone-400 ml-auto" />
-                  </button>
                 ) : (
                   <div className="space-y-3">
                     <div>
-                      <Label className="text-xs text-stone-500">Час виїзду</Label>
+                      <Label className="text-xs">Час виїзду</Label>
                       <Select value={checkoutTime} onValueChange={setCheckoutTime}>
-                        <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {["09:00","10:00","11:00","12:00","13:00","14:00","15:00"].map(t => (
+                          {["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00"].map(t => (
                             <SelectItem key={t} value={t}>{t}</SelectItem>
                           ))}
                         </SelectContent>
@@ -785,21 +724,11 @@ export default function GuestPortalPage() {
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={luggageStorage} onChange={e => setLuggageStorage(e.target.checked)} className="rounded" />
-                      <span className="text-sm text-stone-600">Потрібне тимчасове зберігання багажу</span>
+                      <span className="text-sm">Потрібне зберігання багажу</span>
                     </label>
-                    <div>
-                      <Label className="text-xs text-stone-500">Ваш відгук</Label>
-                      <div className="flex gap-1 mt-1 mb-2">
-                        {[1,2,3,4,5].map(n => (
-                          <button key={n} onClick={() => setFeedbackRating(n)} className="text-2xl">
-                            <Star className={`w-6 h-6 ${n <= feedbackRating ? "fill-amber-400 text-amber-400" : "text-stone-200"}`} />
-                          </button>
-                        ))}
-                      </div>
-                      <Textarea value={feedbackComment} onChange={e => setFeedbackComment(e.target.value)} placeholder="Що вам сподобалось? Що можна покращити?" rows={2} className="text-sm resize-none" />
-                    </div>
-                    <Button onClick={submitCheckout} disabled={checkoutSubmitting} className="w-full h-10 bg-stone-800 hover:bg-stone-900 text-white rounded-xl text-sm">
-                      {checkoutSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Надіслати запит на виїзд"}
+                    <Button onClick={requestCheckout} disabled={checkoutSubmitting} className="w-full">
+                      {checkoutSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Надіслати запит на виїзд
                     </Button>
                   </div>
                 )}
@@ -808,97 +737,428 @@ export default function GuestPortalPage() {
           </div>
         )}
 
-        {/* ━━━━ PAYMENT TAB ━━━━ */}
-        {activeTab === "payment" && (
-          <div className="space-y-4">
+        {/* ═══════════════ MESSAGES ═══════════════ */}
+        {activeTab === "messages" && (
+          <div className="space-y-3">
             <div className="bg-white rounded-2xl shadow-sm p-4">
-              <h3 className="font-semibold text-stone-800 text-sm mb-4">Стан оплати</h3>
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-stone-500 text-sm">Статус</span>
-                <span className={`text-xs font-semibold px-3 py-1 rounded-full ${paymentStatus.color}`}>{paymentStatus.label}</span>
+              <div className="flex items-center gap-2 mb-3">
+                <MessageSquare className="h-4 w-4 text-blue-500" />
+                <h3 className="font-semibold text-sm">Чат з готелем</h3>
+                <Badge className="bg-green-100 text-green-700 text-xs">Онлайн</Badge>
               </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-stone-500">Загальна сума</span>
-                  <span className="font-semibold text-stone-800">{total.toFixed(2)} грн</span>
-                </div>
-                {paid > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-stone-500">Сплачено</span>
-                    <span className="font-semibold text-green-600">−{paid.toFixed(2)} грн</span>
+
+              {/* Messages */}
+              <div className="space-y-2 min-h-[200px] max-h-[400px] overflow-y-auto mb-4 pr-1">
+                {messages.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400">
+                    <MessageCircle className="h-8 w-8 mx-auto mb-2 text-gray-200" />
+                    <p className="text-sm">Поки немає повідомлень</p>
+                    <p className="text-xs">Задайте будь-яке запитання!</p>
                   </div>
-                )}
-                {remaining > 0 && (
-                  <>
-                    <div className="border-t border-stone-50 pt-2 flex justify-between">
-                      <span className="font-semibold text-stone-700">До сплати</span>
-                      <span className="font-bold text-red-600">{remaining.toFixed(2)} грн</span>
+                ) : messages.map((msg: any) => (
+                  <div key={msg.id} className={`flex ${msg.direction === "guest_to_hotel" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3 py-2 ${
+                      msg.direction === "guest_to_hotel"
+                        ? "bg-blue-600 text-white rounded-br-sm"
+                        : "bg-gray-100 text-gray-800 rounded-bl-sm"
+                    }`}>
+                      {msg.direction === "hotel_to_guest" && (
+                        <p className="text-xs text-gray-500 mb-0.5">{msg.senderName || "Готель"}</p>
+                      )}
+                      <p className="text-sm">{msg.message}</p>
+                      <p className={`text-[10px] mt-1 ${msg.direction === "guest_to_hotel" ? "text-blue-200" : "text-gray-400"}`}>
+                        {new Date(msg.createdAt).toLocaleTimeString("uk", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
                     </div>
-                    {/* Progress bar */}
-                    <div className="h-2 bg-stone-100 rounded-full overflow-hidden mt-2">
-                      <div className="h-full bg-green-400 rounded-full transition-all" style={{ width: `${total > 0 ? (paid/total)*100 : 0}%` }} />
-                    </div>
-                  </>
-                )}
-                {remaining <= 0 && paid > 0 && (
-                  <div className="flex items-center gap-2 mt-3 bg-green-50 rounded-xl p-3">
-                    <CheckCircle2 className="w-5 h-5 text-green-500" />
-                    <p className="text-sm text-green-700 font-medium">Оплата отримана в повному обсязі!</p>
                   </div>
-                )}
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input */}
+              <div className="flex gap-2">
+                <Input
+                  value={newMessage}
+                  onChange={e => setNewMessage(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  placeholder="Напишіть повідомлення…"
+                  className="flex-1"
+                />
+                <Button onClick={sendMessage} disabled={sendingMessage || !newMessage.trim()} size="icon">
+                  {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {["Яка WiFi-мережа?", "Де ресторан?", "Можна пізно виїхати?", "Замовте прибирання"].map(q => (
+                  <button key={q} onClick={() => setNewMessage(q)} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2.5 py-1 rounded-full transition-colors">
+                    {q}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {remaining > 0 && (
-              <div className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-stone-800 text-sm mb-3">Способи оплати</h3>
-                {booking.paymentLink ? (
-                  <a href={booking.paymentLink} target="_blank" rel="noreferrer">
-                    <Button className="w-full h-12 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold flex items-center gap-2">
-                      <CreditCard className="w-5 h-5" />
-                      Оплатити {remaining.toFixed(0)} грн онлайн
-                    </Button>
-                  </a>
-                ) : (
-                  <div className="bg-stone-50 rounded-xl p-4 text-center">
-                    <Phone className="w-6 h-6 text-stone-400 mx-auto mb-2" />
-                    <p className="text-sm text-stone-600">Оплата готівкою або терміналом на рецепції</p>
-                    <p className="text-xs text-stone-400 mt-1">Зверніться до адміністратора</p>
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <h3 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                <Phone className="h-4 w-4 text-green-500" />Контакти
+              </h3>
+              <div className="space-y-1">
+                <p className="text-sm text-gray-600">📞 Рецепція: <a href="tel:+380501234567" className="font-medium text-blue-600">+380 50 123 45 67</a></p>
+                <p className="text-sm text-gray-600">🆘 Екстрений: <a href="tel:112" className="font-medium text-red-600">112</a></p>
+                <p className="text-xs text-gray-400 mt-1">{booking.propertyAddress}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════ LOYALTY ═══════════════ */}
+        {activeTab === "loyalty" && (
+          <div className="space-y-3">
+            {loyalty ? (
+              <>
+                {/* Loyalty card */}
+                <div className={`rounded-2xl p-5 text-white shadow-lg ${
+                  loyalty.tier === "platinum" ? "bg-gradient-to-br from-purple-600 to-purple-800" :
+                  loyalty.tier === "gold" ? "bg-gradient-to-br from-yellow-500 to-orange-500" :
+                  loyalty.tier === "silver" ? "bg-gradient-to-br from-gray-500 to-gray-700" :
+                  "bg-gradient-to-br from-orange-400 to-orange-600"
+                }`}>
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <p className="text-white/70 text-xs">Учасник програми лояльності</p>
+                      <p className="font-bold text-lg">{[loyalty.firstName, loyalty.lastName].filter(Boolean).join(" ") || "Наш гість"}</p>
+                    </div>
+                    <div className="text-3xl">{tierCfg.icon}</div>
+                  </div>
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <p className="text-white/70 text-xs">Доступних балів</p>
+                      <p className="text-3xl font-bold">{loyalty.points.toLocaleString("uk")}</p>
+                    </div>
+                    <div className="text-right">
+                      <Badge className="bg-white/20 text-white text-sm font-bold">{tierCfg.label}</Badge>
+                      <p className="text-white/70 text-xs mt-1">{loyalty.visitsCount} візитів</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress to next tier */}
+                {loyalty.tier !== "platinum" && (
+                  <div className="bg-white rounded-2xl shadow-sm p-4">
+                    <h3 className="font-semibold text-sm mb-2">До наступного рівня</h3>
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>{loyalty.totalPoints.toLocaleString("uk")} балів</span>
+                      <span>потрібно {tierCfg.next.toLocaleString("uk")}</span>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all"
+                        style={{ width: `${Math.min(100, (loyalty.totalPoints / tierCfg.next) * 100)}%` }} />
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Ще {Math.max(0, tierCfg.next - loyalty.totalPoints).toLocaleString("uk")} балів до {
+                        loyalty.tier === "bronze" ? "Silver 🥈" : loyalty.tier === "silver" ? "Gold 🥇" : "Platinum 💎"
+                      }
+                    </p>
+                  </div>
+                )}
+
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: "Балів всього", value: loyalty.totalPoints.toLocaleString("uk") },
+                    { label: "Витрат загалом", value: `${parseFloat(loyalty.totalSpend || 0).toLocaleString("uk")} ₴` },
+                    { label: "Візитів", value: loyalty.visitsCount },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-white rounded-xl shadow-sm p-3 text-center">
+                      <p className="font-bold text-gray-800">{value}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* How to earn */}
+                <div className="bg-white rounded-2xl shadow-sm p-4">
+                  <h3 className="font-semibold text-sm mb-3">Як заробити бали</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { icon: "✅", action: "Онлайн чекін", pts: "+50" },
+                      { icon: "🏨", action: "Проживання", pts: "+100–500" },
+                      { icon: "⭐", action: "Відгук", pts: "+100" },
+                      { icon: "👥", action: "Рекомендація", pts: "+200" },
+                      { icon: "🧖", action: "SPA послуги", pts: "+50" },
+                      { icon: "🍷", action: "Ресторан", pts: "+25" },
+                    ].map(({ icon, action, pts }) => (
+                      <div key={action} className="bg-gray-50 rounded-xl p-2 flex items-center gap-2">
+                        <span>{icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium">{action}</p>
+                        </div>
+                        <span className="text-xs font-bold text-purple-600 shrink-0">{pts}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tier benefits */}
+                <div className="bg-white rounded-2xl shadow-sm p-4">
+                  <h3 className="font-semibold text-sm mb-3">Привілеї вашого рівня</h3>
+                  <div className="space-y-2">
+                    {(loyalty.tier === "platinum" ? [
+                      "💎 Особистий дворецький", "🅿️ VIP паркінг", "🥂 Вітальний шампанський",
+                      "⬆️ Апгрейд номеру (за наявності)", "🕐 Ранній заїзд + пізній виїзд безкоштовно",
+                      "🎁 Подарунок до дня народження", "🔑 Ексклюзивний доступ до VIP-лаунжу",
+                    ] : loyalty.tier === "gold" ? [
+                      "🥇 Пріоритетне бронювання", "🅿️ Безкоштовний паркінг", "☕ Сніданок включено",
+                      "⬆️ Апгрейд номеру (за наявності)", "🕐 Пізній виїзд до 14:00 безкоштовно",
+                      "🎁 Подарунок на годовщину", "10% знижка на SPA",
+                    ] : loyalty.tier === "silver" ? [
+                      "🥈 5% знижка на послуги", "⬆️ Апгрейд номеру при наявності",
+                      "🕐 Пізній виїзд до 13:00", "☕ Безкоштовна кава при заїзді",
+                      "🎉 Привітання на День народження",
+                    ] : [
+                      "🥉 Нарахування балів за кожне бронювання",
+                      "💡 Доступ до спецпропозицій для учасників",
+                      "🎁 Бонус за онлайн чекін",
+                    ]).map(b => (
+                      <div key={b} className="flex items-center gap-2 text-sm">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                        <span className="text-gray-700">{b}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="bg-white rounded-2xl shadow-sm p-8 text-center">
+                <Crown className="h-12 w-12 text-purple-300 mx-auto mb-3" />
+                <h3 className="font-bold text-gray-800 mb-2">Програма лояльності</h3>
+                <p className="text-sm text-gray-500 mb-4">Заповніть форму онлайн чекіну щоб приєднатись та отримати перші 50 балів!</p>
+                <Button onClick={() => setActiveTab("checkin")} variant="outline">
+                  Перейти до чекіну
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════ REVIEW ═══════════════ */}
+        {activeTab === "review" && (
+          <div className="space-y-3">
+            {reviewDone || (data.review?.submittedAt) ? (
+              <div className="bg-white rounded-2xl shadow-sm p-8 text-center">
+                <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" />
+                <h3 className="text-xl font-bold text-gray-800">Дякуємо за відгук! 🌟</h3>
+                <p className="text-gray-500 mt-2 text-sm">Ваш відгук допомагає нам ставати кращими</p>
+                <p className="text-purple-600 font-medium mt-2">+100 бонусних балів нараховано</p>
+                {data.review?.overallRating && (
+                  <div className="mt-4 bg-gray-50 rounded-xl p-4">
+                    <div className="flex justify-center gap-1 mb-2">
+                      {[1,2,3,4,5].map(i => (
+                        <Star key={i} className={`h-6 w-6 ${i <= (data.review?.overallRating || 0) ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+                      ))}
+                    </div>
+                    {data.review.reviewText && <p className="text-sm text-gray-600 italic">"{data.review.reviewText}"</p>}
                   </div>
                 )}
               </div>
-            )}
+            ) : (
+              <div className="bg-white rounded-2xl shadow-sm p-4 space-y-4">
+                <div>
+                  <h3 className="font-bold text-gray-800 mb-1">Ваш відгук</h3>
+                  <p className="text-xs text-gray-500">Оцініть ваше перебування у {booking.propertyName}</p>
+                </div>
 
-            {/* Service orders payment */}
-            {orders.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-stone-800 text-sm mb-3">Замовлені послуги</h3>
-                <div className="space-y-2">
-                  {orders.map(o => (
-                    <div key={o.id} className="flex items-center justify-between text-sm">
-                      <span className="text-stone-600">{o.serviceName} {o.quantity > 1 && `×${o.quantity}`}</span>
-                      <span className="font-medium text-stone-800">{parseFloat(o.totalPrice).toFixed(0)} грн</span>
+                {!isAfterStay && !isDuringStay && (
+                  <div className="bg-yellow-50 rounded-xl p-3">
+                    <p className="text-yellow-700 text-sm">Форма відгуку стане доступна після вашого виїзду</p>
+                  </div>
+                )}
+
+                {/* Overall rating */}
+                <div>
+                  <Label className="text-sm font-semibold">Загальна оцінка *</Label>
+                  <div className="mt-2"><StarPicker value={reviewForm.overallRating} onChange={v => setReviewForm(p => ({ ...p, overallRating: v }))} /></div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {reviewForm.overallRating === 5 ? "Відмінно! Ви наші зірки ⭐" : reviewForm.overallRating === 4 ? "Добре, дякуємо!" : reviewForm.overallRating === 3 ? "Можна краще — розкажіть що не сподобалось" : reviewForm.overallRating > 0 ? "Вибачаємось. Розкажіть де ми підвели" : "Оцініть загальне враження"}
+                  </p>
+                </div>
+
+                {/* Category ratings */}
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { field: "cleanlinessRating", label: "🧹 Чистота" },
+                    { field: "serviceRating", label: "🤝 Сервіс" },
+                    { field: "locationRating", label: "📍 Локація" },
+                    { field: "valueRating", label: "💰 Цінність" },
+                  ].map(({ field, label }) => (
+                    <div key={field}>
+                      <Label className="text-xs">{label}</Label>
+                      <div className="mt-1">
+                        <div className="flex gap-0.5">
+                          {[1,2,3,4,5].map(i => (
+                            <button key={i} onClick={() => setReviewForm(p => ({ ...p, [field]: i }))}>
+                              <Star className={`h-5 w-5 ${i <= (reviewForm as any)[field] ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   ))}
-                  <div className="border-t border-stone-50 pt-2 flex justify-between font-semibold text-sm">
-                    <span>Разом за послуги</span>
-                    <span>{orders.reduce((s, o) => s + parseFloat(o.totalPrice || "0"), 0).toFixed(0)} грн</span>
+                </div>
+
+                {/* Text review */}
+                <div>
+                  <Label className="text-xs">Відгук</Label>
+                  <Textarea value={reviewForm.reviewText} onChange={e => setReviewForm(p => ({ ...p, reviewText: e.target.value }))} placeholder="Поділіться вашими враженнями…" rows={4} className="mt-1" />
+                </div>
+
+                {/* NPS */}
+                <div>
+                  <Label className="text-xs">Наскільки ви рекомендували б нас друзям? (0-10)</Label>
+                  <div className="flex gap-1 mt-2 flex-wrap">
+                    {[0,1,2,3,4,5,6,7,8,9,10].map(n => (
+                      <button key={n} onClick={() => setReviewForm(p => ({ ...p, npsScore: n }))}
+                        className={`w-8 h-8 rounded-lg text-sm font-medium transition-all ${
+                          reviewForm.npsScore === n
+                            ? n >= 9 ? "bg-green-500 text-white" : n >= 7 ? "bg-yellow-500 text-white" : "bg-red-400 text-white"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                        }`}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">0 — точно ні · 10 — абсолютно рекомендую</p>
+                </div>
+
+                {/* Yes/No */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Повернетесь знову?</Label>
+                    <div className="flex gap-2 mt-1">
+                      <button onClick={() => setReviewForm(p => ({ ...p, wouldReturn: true }))} className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${reviewForm.wouldReturn ? "bg-green-500 text-white" : "bg-gray-100 text-gray-600"}`}>Так ✓</button>
+                      <button onClick={() => setReviewForm(p => ({ ...p, wouldReturn: false }))} className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${!reviewForm.wouldReturn ? "bg-red-400 text-white" : "bg-gray-100 text-gray-600"}`}>Ні</button>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Рекомендуєте друзям?</Label>
+                    <div className="flex gap-2 mt-1">
+                      <button onClick={() => setReviewForm(p => ({ ...p, recommendToFriend: true }))} className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${reviewForm.recommendToFriend ? "bg-green-500 text-white" : "bg-gray-100 text-gray-600"}`}>Так ✓</button>
+                      <button onClick={() => setReviewForm(p => ({ ...p, recommendToFriend: false }))} className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${!reviewForm.recommendToFriend ? "bg-red-400 text-white" : "bg-gray-100 text-gray-600"}`}>Ні</button>
+                    </div>
+                  </div>
+                </div>
+
+                <Button onClick={submitReview} disabled={submittingReview || reviewForm.overallRating === 0} className="w-full">
+                  {submittingReview ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Надсилаємо…</> : <><Star className="h-4 w-4 mr-2" />Залишити відгук</>}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════ DOCUMENTS ═══════════════ */}
+        {activeTab === "documents" && (
+          <div className="space-y-3">
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                <FileText className="h-4 w-4 text-blue-500" />Ваші документи
+              </h3>
+              {documents.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">Документи завантажуються…</p>
+              ) : (
+                <div className="space-y-3">
+                  {documents.map(doc => (
+                    <div key={doc.id} className={`flex items-center gap-3 p-3 rounded-xl ${doc.available ? "bg-gray-50 hover:bg-gray-100" : "bg-gray-50 opacity-50"}`}>
+                      <span className="text-2xl">{doc.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{doc.title}</p>
+                        <p className="text-xs text-gray-500 truncate">{doc.description}</p>
+                        {doc.generatedAt && <p className="text-xs text-gray-400">{new Date(doc.generatedAt).toLocaleDateString("uk")}</p>}
+                      </div>
+                      {doc.available ? (
+                        <Button size="sm" variant="outline" className="h-8 text-xs shrink-0">
+                          <Download className="h-3.5 w-3.5 mr-1" />Скачати
+                        </Button>
+                      ) : (
+                        <Badge className="bg-gray-100 text-gray-400 text-xs shrink-0">Недоступно</Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-blue-50 rounded-2xl p-4">
+              <div className="flex items-start gap-3">
+                <Shield className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-blue-800 text-sm">Захист даних</p>
+                  <p className="text-blue-600 text-xs mt-1">Ваші документи зберігаються у захищеному хмарному середовищі та доступні тільки вам протягом 90 днів після виїзду.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════ PAYMENT ═══════════════ */}
+        {activeTab === "payment" && (
+          <div className="space-y-3">
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-green-500" />Оплата
+              </h3>
+              <div className="space-y-2">
+                {[
+                  { label: "Всього за проживання", value: `${parseFloat(booking.totalAmount || "0").toLocaleString("uk")} ₴` },
+                  { label: "Оплачено", value: `${parseFloat(booking.paidAmount || "0").toLocaleString("uk")} ₴` },
+                  { label: "Залишок", value: `${Math.max(0, parseFloat(booking.totalAmount || "0") - parseFloat(booking.paidAmount || "0")).toLocaleString("uk")} ₴` },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between text-sm border-b border-gray-50 pb-2 last:border-0">
+                    <span className="text-gray-500">{label}</span>
+                    <span className="font-bold text-gray-800">{value}</span>
+                  </div>
+                ))}
+                <div className="pt-1">
+                  <Badge className={paymentStatusMap[booking.paymentStatus]?.color || "bg-gray-100"}>
+                    {paymentStatusMap[booking.paymentStatus]?.label || booking.paymentStatus}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+
+            {booking.paymentStatus !== "paid" && booking.paymentLink && (
+              <a href={booking.paymentLink} target="_blank" rel="noopener noreferrer">
+                <Button className="w-full bg-green-600 hover:bg-green-700">
+                  <CreditCard className="h-4 w-4 mr-2" />Сплатити онлайн
+                </Button>
+              </a>
+            )}
+
+            {/* Service orders breakdown */}
+            {orders.filter(o => parseFloat(o.totalPrice || 0) > 0).length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm p-4">
+                <h3 className="font-semibold text-sm mb-3">Додаткові послуги</h3>
+                <div className="space-y-2">
+                  {orders.filter(o => parseFloat(o.totalPrice || 0) > 0).map((order: any) => (
+                    <div key={order.id} className="flex justify-between text-sm border-b border-gray-50 pb-1 last:border-0">
+                      <span className="text-gray-600">{order.serviceName} × {order.quantity}</span>
+                      <span className="font-medium">{parseFloat(order.totalPrice || 0).toLocaleString("uk")} ₴</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-sm font-bold pt-1">
+                    <span>Разом послуги</span>
+                    <span>{orders.filter(o => parseFloat(o.totalPrice || 0) > 0).reduce((s, o) => s + parseFloat(o.totalPrice || 0), 0).toLocaleString("uk")} ₴</span>
                   </div>
                 </div>
               </div>
             )}
           </div>
         )}
-      </div>
 
-      {/* ── Footer ──────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-100 px-4 py-3">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
-          <p className="text-[10px] text-stone-400">Powered by <span className="font-semibold text-stone-600">Maison HD</span></p>
-          <div className="flex items-center gap-1">
-            <Heart className="w-3 h-3 text-red-400 fill-red-400" />
-            <p className="text-[10px] text-stone-400">Приємного відпочинку!</p>
-          </div>
+        {/* Footer */}
+        <div className="mt-6 text-center text-xs text-gray-400 pb-4">
+          <p>🏨 {booking.orgName} · {booking.propertyName}</p>
+          <p className="mt-1">Гостьовий портал — приємного відпочинку!</p>
         </div>
       </div>
     </div>
