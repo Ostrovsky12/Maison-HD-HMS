@@ -42,6 +42,7 @@ import AiHubPage from "@/pages/ai-hub";
 import GuestExperiencePage from "@/pages/guest-experience";
 import AccountingPage from "@/pages/accounting";
 import FinancePage from "@/pages/finance";
+import PaymentsLayerPage from "@/pages/payments";
 import SalesPage from "@/pages/sales";
 import MaintenancePage from "@/pages/maintenance";
 import RestaurantPage from "@/pages/restaurant";
@@ -136,6 +137,7 @@ function Router() {
       <Route path="/guest-experience"><ProtectedRoute component={GuestExperiencePage} /></Route>
       <Route path="/accounting"><ProtectedRoute component={AccountingPage} /></Route>
       <Route path="/finance"><ProtectedRoute component={FinancePage} /></Route>
+      <Route path="/payments-layer"><ProtectedRoute component={PaymentsLayerPage} /></Route>
       <Route path="/sales"><ProtectedRoute component={SalesPage} /></Route>
       <Route path="/maintenance"><ProtectedRoute component={MaintenancePage} /></Route>
       <Route path="/restaurant"><ProtectedRoute component={RestaurantPage} /></Route>

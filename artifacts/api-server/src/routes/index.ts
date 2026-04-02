@@ -44,6 +44,7 @@ import restaurantRouter from "./restaurant.js";
 import activitiesRouter from "./activities.js";
 import accommodationRouter from "./accommodation.js";
 import consoleRouter from "./console.js";
+import paymentLayerRouter from "./payment-layer.js";
 
 const router: IRouter = Router();
 
@@ -92,5 +93,6 @@ router.use("/restaurant", restaurantRouter);
 router.use("/activities", activitiesRouter);
 router.use("/accommodation", accommodationRouter);
 router.use("/console", consoleRouter);
+router.use("/payment-layer", paymentLayerRouter);
 
 export default router;

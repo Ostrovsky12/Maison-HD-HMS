@@ -77,6 +77,7 @@ const allNavItems = [
   { name: "Продажі та CRM", path: "/sales", icon: Target, roles: ["super_admin", "owner", "manager", "reception"] },
   { name: "Inbox", path: "/inbox", icon: MessageSquare, roles: null },
   { name: "Оплати та фінанси", path: "/finance", icon: Wallet, roles: ["super_admin", "owner", "manager", "reception"] },
+  { name: "Платіжний шар", path: "/payments-layer", icon: CreditCard, roles: ["super_admin", "owner", "manager"] },
   { name: "Бухгалтерія", path: "/accounting", icon: Landmark, roles: ["super_admin", "owner", "manager"] },
   { name: "Рахунки", path: "/invoices", icon: FileText, roles: null },
   { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },
