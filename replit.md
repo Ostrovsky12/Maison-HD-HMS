@@ -59,17 +59,99 @@ artifacts-monorepo/
 
 ## Database Schema
 
-- **organizations** — Multi-tenant organizations (SaaS model)
-- **users** — Users with roles: super_admin, owner, manager, reception, housekeeping
-- **properties** — Properties per org (hotel, house, spa, pool, bungalow, other)
-- **units** — Rentable units: `hasView` (park/sea/city/garden/mountain/pool), `hasBalcony`, `squareMeters`, `maxCapacity`
-- **guests** — Guest CRM: `middleName`, `passportNumber`, `nationality`, `birthDate`, `address`, `loyaltyLevel` (bronze/silver/gold/platinum), `loyaltyPoints`, `totalNights`, `totalSpent`, `preferences[]`, `tags[]`, `lastVisit`
-- **bookings** — Bookings with status and payment tracking
-- **housekeeping_tasks** — Task management for housekeeping staff
-- **rates** — Rate plans with seasonality and promo codes
-- **addons** — Additional services (bicycle, fishing rod, etc.)
-- **booking_addons** — Add-ons attached to bookings
-- **payments** — Payment records per booking
+**Migration**: `artifacts/api-server/migrations/001_proper_schema.sql` — applied. 172 total tables.
+**Drizzle schema**: `artifacts/api-server/src/db/schema/` — organized by domain.
+**DB connection**: `artifacts/api-server/src/db/index.ts`
+
+### Domain Architecture (11 modules)
+
+#### PLATFORM
+- **organizations** (`tenants`) — Multi-tenant SaaS organizations
+- **tenant_settings** — Per-tenant key-value module settings
+- **subscriptions** — One active subscription per tenant (tier, period, modules[])
+- **feature_flags** — Per-tenant feature toggle overrides with rollout %
+
+#### IAM — Identity & Access Management
+- **roles** — System roles (NULL tenant) + custom roles per tenant
+- **permissions** — Granular resource×action×scope permission catalog (31 seeded)
+- **role_permissions** — M:M roles↔permissions
+- **user_roles** — M:M users↔roles, scoped to tenant+optionally property
+- **user_permissions** — Direct permission overrides per user
+- **users** — Staff accounts with tenant membership
+
+#### PROPERTY
+- **legal_entities** — LLC/FOP per tenant for invoice issuance
+- **properties** — Physical locations (hotel, resort, villa)
+- **unit_types** — Room category templates (Standard, Suite, Glamping)
+- **units** (`property_units`) — Physical rooms, now has `unit_type_id`
+- **amenities** — Amenity catalog, 17 global entries seeded
+- **unit_type_amenities** — M:M unit_types↔amenities
+- **business_units** — Revenue centers (Accommodation, F&B, Spa, Events)
+
+#### GUESTS
+- **guests** — Core PII identity (passport, contacts, LTV)
+- **guest_profiles** — Behavioral profile (preferences, loyalty, AI segments)
+
+#### RESERVATIONS
+- **reservation_sources** — OTA/channel config per tenant
+- **bookings** (`reservations`) — Extended: organization_id backfilled, 18 new columns added
+- **reservation_items** — Line items per reservation (room nights, addons, taxes)
+- **reservation_guests** — M:M reservations↔guests (multi-person)
+- **reservation_status_history** — Immutable audit trail of status changes
+
+#### RATES
+- **rates** — Base rate plans (BAR, NR, BB, HB, FB)
+- **rate_rules** — Restrictions + adjustments (min_stay, early_bird, day_multiplier, los_discount)
+- **addons** — À la carte services
+- **packages** — Bundled room + services
+- **offers** — Promotions + promo codes
+- **quotes** — Pre-booking proposals → convertible to reservations
+- **quote_items** — Quote line items
+- **availability_blocks** — Manual stop-sell / allotment overrides
+- **maintenance_blocks** — Operational unit blocks linked to tickets
+
+#### FINANCIALS
+- **payment_providers** — Per-tenant payment gateway configs (LiqPay, Wayforpay, Stripe)
+- **folios** — Guest bill header (line items in folio_entries)
+- **invoices** — Formal tax documents (invoice, credit_note, act, receipt)
+- **payments** — Money movement records
+- **payment_attempts** — Individual gateway API call log with request/response
+
+#### HOSPITALITY
+- **spa_services** — Spa treatment catalog
+- **spa_resources** — Bookable resources (rooms, therapists, equipment)
+- **spa_bookings** — Spa appointment reservations
+- **rental_items** — Rental equipment catalog (bikes, kayaks)
+- **rental_bookings** — Equipment rental reservations
+- **event_leads** — Event sales pipeline (wedding, conference, corporate)
+- **event_bookings** — Confirmed event reservations
+- **restaurant_charges** — F&B charges posted to room folios
+- **pos_sync_logs** — POS↔PMS synchronization history
+
+#### COMMUNICATIONS
+- **communication_channels** — Per-tenant channel configs (WhatsApp, Email, SMS, Viber)
+- **conversations** — Guest↔property conversation threads
+- **messages** — Individual messages with direction, delivery status, AI flag
+- **ai_summaries** — AI-generated entity summaries (guest, reservation, conversation)
+
+#### OPERATIONS
+- **tasks** — Generic staff task management
+- **housekeeping_tasks** — Unit cleaning/inspection workflow with checklist + photos
+- **maintenance_tickets** — Issue tracking with SLA, cost, work log
+
+#### INTEGRATIONS
+- **integration_accounts** — Per-tenant external system credentials (OTA, POS, Accounting, CRM)
+- **integration_logs** — Per-call sync log with request/response payloads
+- **audit_logs** — Immutable entity mutation audit trail
+
+#### CONTENT & GUEST JOURNEY
+- **tv_content** — In-room entertainment content library
+- **tv_devices** — One per physical room TV/tablet
+- **checkin_forms** — Pre-arrival form templates + submissions
+- **checkout_requests** — Express/late/early checkout requests
+- **documents** — Internal document storage (contracts, scans)
+- **exported_documents** — Export/send registry
+- **accounting_exports** — Accounting system export jobs (BAS, Checkbox, 1C)
 
 ## API Routes
 
