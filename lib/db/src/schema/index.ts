@@ -28,6 +28,7 @@ export * from "./rentals";
 export * from "./ota";
 export * from "./revenue";
 export * from "./tv";
+export * from "./accommodation";
 export * from "./ai-knowledge";
 export * from "./budgets";
 export * from "./guest-experience";
