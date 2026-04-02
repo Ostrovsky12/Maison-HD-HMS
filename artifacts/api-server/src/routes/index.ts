@@ -32,6 +32,8 @@ import hqRouter from "./hq.js";
 import automationRouter from "./automation.js";
 import publicBookingRouter from "./public-booking.js";
 import rentalsRouter from "./rentals.js";
+import otaRouter from "./ota.js";
+import revenueRouter from "./revenue.js";
 
 const router: IRouter = Router();
 
@@ -68,5 +70,7 @@ router.use("/hq", hqRouter);
 router.use("/automation", automationRouter);
 router.use("/public", publicBookingRouter);
 router.use("/rentals", rentalsRouter);
+router.use("/ota", otaRouter);
+router.use("/revenue", revenueRouter);
 
 export default router;

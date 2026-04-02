@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "wouter";
+import { useLocation } from "wouter";
 import {
   Hotel, TrendingUp, Users, UtensilsCrossed, Waves, PartyPopper,
   Sparkles, MessageSquare, LogIn, LogOut, ArrowUp, ArrowDown,
@@ -95,7 +95,7 @@ export default function HqPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const navigate = useNavigate();
+  const [, navigate] = useLocation();
 
   const load = useCallback(async () => {
     setLoading(true);

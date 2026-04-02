@@ -272,6 +272,92 @@ Stage 6 Sidebar role-based nav:
 - **Step 7 — Cutover**: 8-item checklist, activates isCutoverMode on connection
 - Sidebar nav: "Міграція" (ArrowRightLeft icon), roles: super_admin/owner/manager
 
+## Stage 50 — Guest App (Гостьовий портал / PWA)
+
+### UI (`/maison-hd/guest-app`) — Standalone mobile-first app (no auth needed)
+**Lookup screen**: Enter booking ref (DOG-NNNNNN) → calls `/api/public/bookings/:ref`
+
+**Home screen** (after lookup):
+- Welcome card: guest name, room name, checkIn/checkOut dates, nights remaining progress bar
+- Quick info grid: WiFi SSID/password, checkout time
+- Services menu: SPA & Wellness / Ресторан Рум-сервіс / Зв'язок з ресепшн / Заходи
+
+**Screens accessible from home**:
+- **Food/Room-service**: categorized menu (Сніданок/Обід/Піца/Напої), add/remove to cart, "Замовити" confirms with toast (25 min delivery)
+- **Chat**: real-time chat UI with hotel reception (auto-response bot simulation)
+- **Services**: SPA treatments + active recreation + today's events list
+
+**Features**: Dark/Light mode toggle · Sticky cart button when items added · Responds to real bookings from DB
+
+### Navigation
+- "Guest App" (Smartphone icon) in sidebar — roles: all (public page, no auth guard)
+- Direct URL: `/maison-hd/guest-app`
+
+---
+
+## Stage 49 — Revenue Management
+
+### New DB Tables
+- `rate_plans` — rate plan configs: name, description, baseModifier (multiplier), status, isDefault, cancellationPolicy, minStay, maxStay, includesBreakfast
+- `pricing_rules` — dynamic pricing rules: ruleType enum (occupancy/season/day_of_week/event/last_minute/early_bird), conditions JSONB, modifierType, modifierValue (%), priority, isActive, validFrom/validTo
+- `pricing_overrides` — date-level price overrides per unit: overrideDate, customPrice, minStay, isClosed (stop-sell), reason
+
+### API Routes (`/api/revenue/*`) — requireAuth
+- `GET /stats` — totalPlans, activePlans, totalRules, activeRules, totalOverrides, closedDates
+- `GET /plans` — all rate plans ordered (default first)
+- `POST /plans` — create rate plan
+- `PATCH /plans/:id` — toggle status / update fields
+- `GET /rules` — all pricing rules with rate plan JOIN, ordered by priority desc
+- `PATCH /rules/:id` — toggle isActive / update
+- `GET /overrides` — all overrides with unit JOIN, ordered by date
+- `POST /overrides` — create (upserts on conflict by date)
+- `DELETE /overrides/:id` — remove override
+
+### UI (`/maison-hd/revenue`) — 3-tab layout
+- **Тарифні плани**: plan cards with baseModifier, cancellation policy, min stay, breakfast badge; activate/deactivate toggle
+- **Правила цін**: rule cards with emoji icon (📊🌿📅🎉⚡🐦), modifier %, priority badge; toggle active/inactive
+- **Перевизначення**: date overrides list with closed/price indicators; delete button; "Нове виключення" dialog
+- **Navigation**: "Revenue Management" (TrendingUp icon), roles: super_admin/owner/manager
+
+### Demo Data
+- 4 rate plans (Стандартний/Тариф з сніданком/Невідмовний/Довгостроковий 7+)
+- 8 pricing rules (висока/низька завантаженість, літній сезон, вихідні, last minute, early bird, День незалежності, Новий рік)
+- Price overrides: +₴2800 for 2 event dates, stop-sell for 1 maintenance date
+
+---
+
+## Stage 48 — OTA Channel Manager
+
+### New DB Tables
+- `ota_channel_configs` — channel connections: organizationId FK, channel enum (booking_com/airbnb/expedia/agoda/ostrovok/direct), status enum (active/inactive/error/pending), displayName, apiKey, propertyIdExt, webhookSecret, lastSyncAt, lastError, settings JSONB
+- `ota_unit_mappings` — unit↔channel room mapping: channelId FK, unitId FK, extRoomId, extRoomName, markupPercent
+- `ota_webhook_logs` — all incoming webhook events: channelId FK, eventType enum, payload JSONB, status, bookingRef, errorMessage
+
+**Note**: Legacy `ota_channels` table exists from integrations module (different schema). New OTA manager uses `ota_channel_configs`.
+
+### API Routes (`/api/ota/*`) — requireAuth (except webhook receiver)
+- `GET /stats` — totalChannels, activeChannels, errorChannels, totalEvents, newReservations, cancelledReservations, errors
+- `GET /channels` — all channel configs with channelMeta
+- `POST /channels` — create channel config (status=pending)
+- `PATCH /channels/:id` — update status/fields (activating clears lastError + sets lastSyncAt)
+- `POST /channels/:id/sync` — manual sync (only active channels; logs event)
+- `GET /logs?channelId=` — webhook event history with channel JOIN
+- `GET /mappings` — unit↔room mappings with unit+channel JOIN
+- `POST /webhook/:channelSecret` — PUBLIC receiver (no auth); logs event to ota_webhook_logs
+
+### UI (`/maison-hd/ota`) — 3-tab layout
+- **Канали tab**: channel cards with logo emoji, status badge (active/error/inactive/pending), last sync time, error message; "Синхр." / "Вимкнути"/"Увімкнути" buttons; "Додати канал" dialog
+- **Журнал подій tab**: event log with event type emoji label, booking ref badge, guest/amount details, timestamp
+- **Маппінг номерів tab**: unit-to-room mapping table showing internal unit → external room ID/name + markup %
+- **Navigation**: "OTA Channels" (Globe icon), roles: super_admin/owner/manager
+
+### Demo Data
+- 4 channels: Booking.com (active, 15min ago), Airbnb (active, 45min ago), Expedia (error), Ostrovok (inactive)
+- 5 unit mappings (3 for Booking.com, 2 for Airbnb)
+- 7 webhook log events (3 created, 1 cancelled, 1 modified, 1 availability, 1 error ping)
+
+---
+
 ## Stage 47 — Rentals (Оренда)
 
 ### New DB Tables (lib/db/src/schema/rentals.ts)

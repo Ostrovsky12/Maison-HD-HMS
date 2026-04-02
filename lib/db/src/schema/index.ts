@@ -25,3 +25,5 @@ export * from "./events";
 export * from "./fb";
 export * from "./automation";
 export * from "./rentals";
+export * from "./ota";
+export * from "./revenue";

@@ -27,6 +27,8 @@ import {
   Zap,
   Bot,
   Building2,
+  Globe,
+  Smartphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +43,9 @@ const allNavItems = [
   { name: "AI Automation", path: "/automation", icon: Bot, roles: ["super_admin", "owner", "manager"] },
   { name: "Онлайн-бронювання", path: "/book", icon: Sparkles, roles: ["super_admin", "owner", "manager", "reception"] },
   { name: "Оренда", path: "/rentals", icon: Building2, roles: ["super_admin", "owner", "manager"] },
+  { name: "OTA Channels", path: "/ota", icon: Globe, roles: ["super_admin", "owner", "manager"] },
+  { name: "Revenue Management", path: "/revenue", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
+  { name: "Guest App", path: "/guest-app", icon: Smartphone, roles: null },
   { name: "Головна", path: "/dashboard", icon: LayoutDashboard, roles: null },
   { name: "Бронювання", path: "/bookings", icon: CalendarDays, roles: null },
   { name: "Шахматка", path: "/chess", icon: Grid3X3, roles: null },

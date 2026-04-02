@@ -33,6 +33,9 @@ import HqPage from "@/pages/hq";
 import AutomationPage from "@/pages/automation";
 import BookPage from "@/pages/book";
 import RentalsPage from "@/pages/rentals";
+import OtaPage from "@/pages/ota";
+import RevenuePage from "@/pages/revenue";
+import GuestAppPage from "@/pages/guest-app";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -113,6 +116,9 @@ function Router() {
       <Route path="/automation"><ProtectedRoute component={AutomationPage} /></Route>
       <Route path="/book" component={BookPage} />
       <Route path="/rentals"><ProtectedRoute component={RentalsPage} /></Route>
+      <Route path="/ota"><ProtectedRoute component={OtaPage} /></Route>
+      <Route path="/revenue"><ProtectedRoute component={RevenuePage} /></Route>
+      <Route path="/guest-app" component={GuestAppPage} />
 
       <Route path="/" component={HomeRoute} />
 
