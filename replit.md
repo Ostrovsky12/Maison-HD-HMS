@@ -6,6 +6,49 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 
 HMS (Hotel Management System) — повноцінна SaaS PMS платформа для управління готельно-ресторанним комплексом "Dogoda Resort".
 
+## MVP Foundation Status ✅
+
+All 12 foundation components are LIVE:
+
+| Component | Status | Notes |
+|---|---|---|
+| Multi-tenant core | ✅ Live | DB schema with org_id isolation |
+| Auth + roles | ✅ Live | JWT, 5 roles, role-based routes |
+| Properties + units | ✅ Live | 64 units across 6 properties in demo |
+| Chessboard / reservation grid | ✅ Live | `chess.tsx` (970 lines, real API) |
+| Reservation creation | ✅ Live | `/bookings` + `/book` pages |
+| Quote / invoice generation | ✅ Live | invoices API + quotes seeded |
+| LiqPay payment layer | ✅ Live | `payment-layer.ts` route + webhooks |
+| Owner dashboard | ✅ Live | Real analytics: 277K UAH, 31 bookings |
+| Unified inbox skeleton | ✅ Live | `inbox.tsx` (1,140 lines) |
+| Guest cabinet skeleton | ✅ Live | `guest-portal.tsx` (1,281 lines) |
+| Accounting export abstraction | ✅ Live | `accounting.tsx` (2,117 lines) |
+| Integration layer foundation | ✅ Live | `integrations` page + 5 integration accounts seeded |
+
+## DOGODA DEMO GROUP — Demo Tenant
+
+**Seed command**: `pnpm --filter @workspace/api-server run seed:demo`
+
+**Tenant ID**: 37 | **Slug**: dogoda-demo | **Plan**: enterprise
+
+**Login credentials** (password: `demo123`):
+- `owner@dogoda-demo.ua` — role: owner
+- `manager@dogoda-demo.ua` — role: manager
+- `reception@dogoda-demo.ua` — role: reception
+- `hk@dogoda-demo.ua` — role: housekeeping
+
+**Demo data created (as of 2026-04-02)**:
+- **6 properties**: DOGODA COTTAGES, DOGODA HOTEL, DOGODA SPA, DOGODA RESTAURANT, DOGODA POOL, DOGODA EVENTS
+- **64 units**: 6×1-bed cottages, 6×2-bed cottages, 3×3-bed cottages, 8×std hotel rooms, 8×DBL hotel rooms, 2×suites, 9 spa cabins, 20 pool loungers, 3 event spaces
+- **20 guests**: platinum/gold/silver/bronze loyalty tiers, real Ukrainian names
+- **31 reservations**: 5 check-in today, 7 currently checked-in, 3 checkout today, 7 upcoming, 2 pending, 5 historical, 2 cancelled
+- **8 invoices** + **15 payments** (cash/card/liqpay)
+- **8 spa bookings**: 4 today, 4 future
+- **5 rental bookings**: bike, kayak, SUP, BBQ, fishing rod
+- **5 event leads** + **1 event booking** (Nova Poshta)
+- **5 maintenance tickets**, **5 HK tasks**, **5 tasks**
+- **3 quotes**, **5 integrations**, **4 payment providers**, **4 comm. channels**
+
 ## Pages / Routes
 
 - `/dashboard` — аналітика, KPI карти, Revenue, Occupancy
