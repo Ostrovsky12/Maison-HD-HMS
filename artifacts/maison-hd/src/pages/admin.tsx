@@ -119,29 +119,31 @@ export default function AdminPage() {
                 <p className="text-slate-300 text-sm">Maison HD SaaS — повне управління платформою</p>
               </div>
             </div>
-            {platform && (
-              <div className="flex items-center gap-6">
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-amber-300">{fmtMoney(platform.mrr || 0)}</div>
-                  <div className="text-xs text-slate-400">MRR</div>
+            <div className="flex items-center gap-4 flex-wrap">
+              {platform && (
+                <div className="flex items-center gap-6">
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-amber-300">{fmtMoney(platform.mrr || 0)}</div>
+                    <div className="text-xs text-slate-400">MRR</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-emerald-300">{platform.orgs?.total || 0}</div>
+                    <div className="text-xs text-slate-400">Тенантів</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-blue-300">{platform.users?.total_users || 0}</div>
+                    <div className="text-xs text-slate-400">Юзерів</div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={loadPlatform} disabled={loadingPlatform} className="text-white/70 hover:text-white">
+                    <RefreshCw className={`w-4 h-4 ${loadingPlatform ? "animate-spin" : ""}`} />
+                  </Button>
                 </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-emerald-300">{platform.orgs?.total || 0}</div>
-                  <div className="text-xs text-slate-400">Тенантів</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-blue-300">{platform.users?.total_users || 0}</div>
-                  <div className="text-xs text-slate-400">Юзерів</div>
-                </div>
-                <Button variant="ghost" size="sm" onClick={loadPlatform} disabled={loadingPlatform} className="text-white/70 hover:text-white">
-                  <RefreshCw className={`w-4 h-4 ${loadingPlatform ? "animate-spin" : ""}`} />
-                </Button>
-                <Button size="sm" onClick={() => navigate("/pitch")}
-                  className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 hover:text-white gap-1.5 text-xs">
-                  <Zap className="w-3.5 h-3.5" /> Презентація для клієнтів
-                </Button>
-              </div>
-            )}
+              )}
+              <Button size="sm" onClick={() => navigate("/pitch")}
+                className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 hover:text-white gap-1.5 text-xs font-semibold">
+                <Zap className="w-3.5 h-3.5" /> 🎯 Презентація для клієнтів
+              </Button>
+            </div>
           </div>
         </div>
 
