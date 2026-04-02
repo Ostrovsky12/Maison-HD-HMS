@@ -1,114 +1,131 @@
 import { useLocation } from "wouter";
-import { 
-  LayoutDashboard, 
-  CalendarDays, 
-  KeyRound, 
-  Users, 
-  Sparkles, 
-  BarChart3, 
-  Settings,
-  LogOut,
-  Building,
-  Grid3X3,
-  Bell,
-  CheckCheck,
-  X,
-  FileText,
-  TrendingUp,
-  Plug,
-  Crown,
-  CreditCard,
-  ClipboardList,
-  ArrowRightLeft,
-  MessageSquare,
-  Waves,
-  PartyPopper,
-  UtensilsCrossed,
-  Zap,
-  Bot,
-  Building2,
-  Globe,
-  Smartphone,
-  Monitor,
-  Brain,
-  Heart,
-  Landmark,
-  Wallet,
-  Target,
-  Wrench,
-  ChefHat,
-  Bike,
-  BedDouble,
-  Activity,
-  Layers,
+import {
+  LayoutDashboard, CalendarDays, KeyRound, Users, BarChart3, Settings,
+  LogOut, Building, Grid3X3, Bell, CheckCheck, X, FileText, TrendingUp,
+  Plug, Crown, CreditCard, ArrowRightLeft, MessageSquare, Waves,
+  PartyPopper, UtensilsCrossed, Zap, Bot, Building2, Globe,
+  Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
+  Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
+  ChevronRight, Menu, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useLogout, useGetMe, useListNotifications, useMarkAllNotificationsRead, useMarkNotificationRead } from "@workspace/api-client-react";
+import {
+  useLogout, useGetMe, useListNotifications,
+  useMarkAllNotificationsRead, useMarkNotificationRead,
+} from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { ReactNode, useState, useRef, useEffect } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { uk } from "date-fns/locale";
 
-const allNavItems = [
-  { name: "Staff Console", path: "/console", icon: Activity, roles: null },
-  { name: "Command Center", path: "/hq", icon: Zap, roles: ["super_admin", "owner", "manager"] },
-  { name: "AI Automation", path: "/automation", icon: Bot, roles: ["super_admin", "owner", "manager"] },
-  { name: "AI Hub", path: "/ai-hub", icon: Brain, roles: ["super_admin", "owner", "manager"] },
-  { name: "Гостьовий досвід", path: "/guest-experience", icon: Heart, roles: ["super_admin", "owner", "manager", "reception"] },
-  { name: "Онлайн-бронювання", path: "/book", icon: Sparkles, roles: ["super_admin", "owner", "manager", "reception"] },
-  { name: "Оренда", path: "/rentals", icon: Building2, roles: ["super_admin", "owner", "manager"] },
-  { name: "OTA Channels", path: "/ota", icon: Globe, roles: ["super_admin", "owner", "manager"] },
-  { name: "Revenue Management", path: "/revenue", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
-  { name: "Guest App", path: "/guest-app", icon: Smartphone, roles: null },
-  { name: "Hotel TV", path: "/hotel-tv", icon: Monitor, roles: ["super_admin", "owner", "manager"] },
-  { name: "Головна", path: "/dashboard", icon: LayoutDashboard, roles: null },
-  { name: "Бронювання", path: "/bookings", icon: CalendarDays, roles: null },
-  { name: "Шахматка", path: "/chess", icon: Grid3X3, roles: null },
-  { name: "Номери", path: "/units", icon: KeyRound, roles: null },
-  { name: "Гості", path: "/guests", icon: Users, roles: null },
-  { name: "Операції (Internal)", path: "/operations", icon: Layers, roles: null },
-  { name: "Прибирання", path: "/housekeeping", icon: Sparkles, roles: null },
-  { name: "SPA & Wellness", path: "/spa", icon: Waves, roles: null },
-  { name: "Events & Banquet", path: "/events", icon: PartyPopper, roles: null },
-  { name: "Технічна служба", path: "/maintenance", icon: Wrench, roles: null },
-  { name: "Ресторан & POS", path: "/restaurant", icon: ChefHat, roles: null },
-  { name: "Оренди та Активності", path: "/activities", icon: Bike, roles: null },
-  { name: "Проживання", path: "/accommodation", icon: BedDouble, roles: null },
-  { name: "F&B / Ресторан (legacy)", path: "/fb", icon: UtensilsCrossed, roles: null },
-  { name: "Продажі та CRM", path: "/sales", icon: Target, roles: ["super_admin", "owner", "manager", "reception"] },
-  { name: "Inbox", path: "/inbox", icon: MessageSquare, roles: null },
-  { name: "Оплати та фінанси", path: "/finance", icon: Wallet, roles: ["super_admin", "owner", "manager", "reception"] },
-  { name: "Платіжний шар", path: "/payments-layer", icon: CreditCard, roles: ["super_admin", "owner", "manager"] },
-  { name: "Бухгалтерія", path: "/accounting", icon: Landmark, roles: ["super_admin", "owner", "manager"] },
-  { name: "Рахунки", path: "/invoices", icon: FileText, roles: null },
-  { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },
-  { name: "Аналітика", path: "/analytics", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
-  { name: "Інтеграції", path: "/integrations", icon: Plug, roles: ["super_admin", "owner", "manager"] },
-  { name: "Міграція", path: "/migration", icon: ArrowRightLeft, roles: ["super_admin", "owner", "manager"] },
-  { name: "Підписка", path: "/subscription", icon: CreditCard, roles: ["owner", "super_admin"] },
-  { name: "Demo Заявки", path: "/demo-requests", icon: ClipboardList, roles: ["super_admin"] },
-  { name: "Super Admin", path: "/admin", icon: Crown, roles: ["super_admin"] },
+// ── NAV STRUCTURE ─────────────────────────────────────────────────────────────
+type NavItem = { name: string; path: string; icon: any; roles?: string[] | null; badge?: string };
+type NavSection = { label: string; items: NavItem[] };
+
+const NAV: NavSection[] = [
+  {
+    label: "Cockpit",
+    items: [
+      { name: "Головна",        path: "/dashboard",  icon: LayoutDashboard, roles: null },
+      { name: "Staff Console",  path: "/console",    icon: Activity,        roles: null },
+      { name: "Command Center", path: "/hq",         icon: Zap,             roles: ["super_admin", "owner", "manager"] },
+    ],
+  },
+  {
+    label: "Резервації",
+    items: [
+      { name: "Бронювання",  path: "/bookings",    icon: CalendarDays, roles: null },
+      { name: "Шахматка",    path: "/chess",        icon: Grid3X3,      roles: null },
+      { name: "Номери",      path: "/units",        icon: KeyRound,     roles: null },
+      { name: "Гості",       path: "/guests",       icon: Users,        roles: null },
+      { name: "Бронювати онлайн", path: "/book",    icon: Sparkles,     roles: null },
+    ],
+  },
+  {
+    label: "Операції",
+    items: [
+      { name: "Прибирання",     path: "/housekeeping", icon: Sparkles, roles: null },
+      { name: "Тех. служба",    path: "/maintenance",  icon: Wrench,   roles: null },
+      { name: "Активності",     path: "/activities",   icon: Bike,     roles: null },
+      { name: "Проживання",     path: "/accommodation",icon: BedDouble,roles: null },
+      { name: "Внутрішні операції", path: "/operations",icon: Layers, roles: null },
+    ],
+  },
+  {
+    label: "Дохід",
+    items: [
+      { name: "Revenue Mgmt",  path: "/revenue", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
+      { name: "OTA Канали",    path: "/ota",     icon: Globe,      roles: ["super_admin", "owner", "manager"] },
+      { name: "Оренда",        path: "/rentals", icon: Building2,  roles: ["super_admin", "owner", "manager"] },
+    ],
+  },
+  {
+    label: "Гостьовий досвід",
+    items: [
+      { name: "Inbox",           path: "/inbox",            icon: MessageSquare, roles: null },
+      { name: "Guest Experience",path: "/guest-experience", icon: Heart,         roles: ["super_admin", "owner", "manager", "reception"] },
+      { name: "Hotel TV",        path: "/hotel-tv",         icon: Monitor,       roles: ["super_admin", "owner", "manager"] },
+    ],
+  },
+  {
+    label: "Гостинність",
+    items: [
+      { name: "SPA & Wellness",  path: "/spa",        icon: Waves,         roles: null },
+      { name: "Events & Банкети",path: "/events",     icon: PartyPopper,   roles: null },
+      { name: "Ресторан & POS",  path: "/restaurant", icon: ChefHat,       roles: null },
+      { name: "F&B",             path: "/fb",         icon: UtensilsCrossed, roles: null },
+    ],
+  },
+  {
+    label: "AI & Автоматизація",
+    items: [
+      { name: "AI Hub",       path: "/ai-hub",     icon: Brain, roles: ["super_admin", "owner", "manager"] },
+      { name: "Автоматизація",path: "/automation", icon: Bot,   roles: ["super_admin", "owner", "manager"] },
+    ],
+  },
+  {
+    label: "Фінанси",
+    items: [
+      { name: "Фінанси",      path: "/finance",    icon: Wallet,   roles: ["super_admin", "owner", "manager", "reception"] },
+      { name: "Рахунки",      path: "/invoices",   icon: FileText, roles: null },
+      { name: "Бухгалтерія",  path: "/accounting", icon: Landmark, roles: ["super_admin", "owner", "manager"] },
+      { name: "Продажі & CRM",path: "/sales",      icon: Target,   roles: ["super_admin", "owner", "manager", "reception"] },
+    ],
+  },
+  {
+    label: "Аналітика",
+    items: [
+      { name: "Аналітика", path: "/analytics", icon: BarChart3,  roles: ["super_admin", "owner", "manager"] },
+      { name: "Звіти",     path: "/reports",   icon: FileText,   roles: null },
+    ],
+  },
+  {
+    label: "Платформа",
+    items: [
+      { name: "Інтеграції",    path: "/integrations",  icon: Plug,          roles: ["super_admin", "owner", "manager"] },
+      { name: "Тарифи",        path: "/pricing",       icon: Tag,           roles: ["super_admin", "owner"] },
+      { name: "Підписка",      path: "/subscription",  icon: CreditCard,    roles: ["owner", "super_admin"] },
+      { name: "Міграція",      path: "/migration",     icon: ArrowRightLeft,roles: ["super_admin", "owner", "manager"] },
+      { name: "Demo Заявки",   path: "/demo-requests", icon: ClipboardList, roles: ["super_admin"] },
+      { name: "Super Admin",   path: "/admin",         icon: Crown,         roles: ["super_admin"] },
+    ],
+  },
 ];
 
-const NOTIF_TYPE_COLORS: Record<string, string> = {
+// ── NOTIFICATION BELL ─────────────────────────────────────────────────────────
+const NOTIF_COLORS: Record<string, string> = {
   booking_created: "bg-blue-100 text-blue-700",
-  checkin: "bg-green-100 text-green-700",
+  checkin:  "bg-emerald-100 text-emerald-700",
   checkout: "bg-amber-100 text-amber-700",
   cancellation: "bg-red-100 text-red-700",
   alert: "bg-orange-100 text-orange-700",
-  housekeeping: "bg-purple-100 text-purple-700",
+  housekeeping: "bg-violet-100 text-violet-700",
   report: "bg-gray-100 text-gray-700",
 };
-
-const NOTIF_TYPE_LABELS: Record<string, string> = {
-  booking_created: "Бронювання",
-  checkin: "Заселення",
-  checkout: "Виселення",
-  cancellation: "Скасування",
-  alert: "Увага",
-  housekeeping: "Прибирання",
-  report: "Звіт",
+const NOTIF_LABELS: Record<string, string> = {
+  booking_created: "Бронювання", checkin: "Заїзд", checkout: "Виїзд",
+  cancellation: "Скасування", alert: "Увага", housekeeping: "Прибирання", report: "Звіт",
 };
 
 function NotificationBell() {
@@ -117,98 +134,73 @@ function NotificationBell() {
   const { data, refetch } = useListNotifications({ limit: 20 });
   const markAll = useMarkAllNotificationsRead();
   const markOne = useMarkNotificationRead();
-
   const notifications = data?.notifications || [];
   const unread = data?.unreadCount || 0;
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    if (open) document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    if (open) document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, [open]);
-
-  const handleMarkAll = () => {
-    markAll.mutate(undefined, { onSuccess: () => refetch() });
-  };
-
-  const handleMarkOne = (id: number) => {
-    markOne.mutate({ notificationId: id }, { onSuccess: () => refetch() });
-  };
 
   return (
     <div ref={ref} className="relative">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="relative h-9 w-9"
+      <button
         onClick={() => setOpen(!open)}
+        className="relative w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
       >
-        <Bell className="h-4 w-4" />
+        <Bell className="w-4 h-4" />
         {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold leading-none">
+          <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
-      </Button>
+      </button>
 
       {open && (
-        <div className="absolute right-0 top-11 w-80 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="font-semibold text-sm">Сповіщення</span>
-            <div className="flex items-center gap-1">
+        <div className="absolute right-0 top-11 w-80 bg-white border border-gray-200 rounded-2xl shadow-xl z-50 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <span className="font-semibold text-sm text-gray-800">Сповіщення</span>
+            <div className="flex gap-1">
               {unread > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={handleMarkAll}
-                >
-                  <CheckCheck className="w-3 h-3 mr-1" />
-                  Всі прочитано
-                </Button>
+                <button onClick={() => markAll.mutate(undefined, { onSuccess: () => refetch() })}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded-lg hover:bg-indigo-50 flex items-center gap-1">
+                  <CheckCheck className="w-3 h-3" /> Всі
+                </button>
               )}
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOpen(false)}>
-                <X className="w-3 h-3" />
-              </Button>
+              <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100">
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
-
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-96 overflow-y-auto divide-y divide-gray-50">
             {notifications.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Немає сповіщень
+              <div className="py-10 text-center">
+                <Bell className="w-8 h-8 text-gray-200 mx-auto mb-2" />
+                <p className="text-sm text-gray-400">Немає сповіщень</p>
               </div>
-            ) : (
-              notifications.map((n) => (
-                <div
-                  key={n.id}
-                  className={`px-4 py-3 border-b last:border-b-0 cursor-pointer hover:bg-accent/50 transition-colors ${!n.isRead ? "bg-blue-50/50" : ""}`}
-                  onClick={() => !n.isRead && handleMarkOne(n.id)}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${NOTIF_TYPE_COLORS[n.type] || "bg-gray-100 text-gray-700"}`}>
-                          {NOTIF_TYPE_LABELS[n.type] || n.type}
-                        </span>
-                        {!n.isRead && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-                        )}
-                      </div>
-                      <p className="text-sm font-medium leading-tight">{n.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{n.message}</p>
-                      <p className="text-[10px] text-muted-foreground/70 mt-1">
-                        {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true, locale: uk })}
-                      </p>
+            ) : notifications.map((n) => (
+              <div key={n.id}
+                className={`px-4 py-3 cursor-pointer hover:bg-gray-50/80 transition-colors ${!n.isRead ? "bg-indigo-50/40" : ""}`}
+                onClick={() => !n.isRead && markOne.mutate({ notificationId: n.id }, { onSuccess: () => refetch() })}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${NOTIF_COLORS[n.type] || "bg-gray-100 text-gray-700"}`}>
+                        {NOTIF_LABELS[n.type] || n.type}
+                      </span>
+                      {!n.isRead && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0" />}
                     </div>
+                    <p className="text-sm font-medium leading-tight text-gray-800">{n.title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-snug">{n.message}</p>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true, locale: uk })}
+                    </p>
                   </div>
                 </div>
-              ))
-            )}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -216,8 +208,10 @@ function NotificationBell() {
   );
 }
 
+// ── MAIN LAYOUT ───────────────────────────────────────────────────────────────
 export function AppLayout({ children }: { children: ReactNode }) {
   const [location, navigate] = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { data: user } = useGetMe();
   const logout = useLogout();
   const { toast } = useToast();
@@ -225,114 +219,165 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const handleLogout = () => {
     logout.mutate(undefined, {
-      onSuccess: () => {
-        localStorage.removeItem("hms_token");
-        navigate(`~${BASE}/login`);
-      },
-      onError: () => {
-        toast({
-          title: "Помилка",
-          description: "Не вдалося вийти з системи",
-          variant: "destructive",
-        });
-      }
+      onSuccess: () => { localStorage.removeItem("hms_token"); navigate(`~${BASE}/login`); },
+      onError: () => toast({ title: "Помилка виходу", variant: "destructive" }),
     });
   };
 
-  return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      {/* Sidebar */}
-      <aside className="w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col hidden md:flex">
-        <div className="p-6 flex items-center gap-3 border-b border-sidebar-border/50">
-          <div className="bg-sidebar-primary text-sidebar-primary-foreground p-2 rounded-md">
-            <Building className="w-5 h-5" />
+  const goTo = (path: string) => {
+    navigate(`~${BASE}${path}`);
+    setMobileOpen(false);
+  };
+
+  const isActive = (path: string) => {
+    if (path === "/dashboard") return location === "/dashboard" || location === "/";
+    return location.startsWith(path);
+  };
+
+  const isSuperAdmin = user?.role === "super_admin";
+  const userRole = user?.role || "";
+
+  const SidebarContent = () => (
+    <div className="flex flex-col h-full">
+      {/* Brand header */}
+      <div className="px-5 pt-6 pb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+            <Building className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-tight tracking-tight">Maison HD</h1>
-            <p className="text-xs text-sidebar-foreground/60">Cockpit</p>
+            <div className="font-bold text-base text-white tracking-tight leading-tight">Maison HD</div>
+            <div className="text-[11px] text-white/40 tracking-widest uppercase">Hospitality OS</div>
           </div>
         </div>
-        
-        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
-          {allNavItems
-            .filter(item => !item.roles || item.roles.includes(user?.role || ""))
-            .map((item) => {
-              const isActive = location.startsWith(item.path);
-              const Icon = item.icon;
-              const isAdmin = item.path === "/admin";
-              return (
-                <a
-                  key={item.path}
-                  href={`${BASE}${item.path}`}
-                  onClick={(e) => { e.preventDefault(); navigate(`~${BASE}${item.path}`); }}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${
-                    isActive 
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
-                      : isAdmin
-                        ? "text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
-                        : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span className="text-sm">{item.name}</span>
-                </a>
-              );
-            })}
-        </nav>
-
-        <div className="p-4 border-t border-sidebar-border/50 space-y-2">
-          <a
-            href={`${BASE}/settings`}
-            onClick={(e) => { e.preventDefault(); navigate(`~${BASE}/settings`); }}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${
-              location.startsWith("/settings") 
-                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
-                : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            <span className="text-sm">Налаштування</span>
-          </a>
-          <div 
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="text-sm">Вийти</span>
+        {isSuperAdmin && (
+          <div className="mt-3 flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/15 border border-amber-500/20 rounded-lg">
+            <Crown className="w-3 h-3 text-amber-400" />
+            <span className="text-xs text-amber-300 font-medium">Super Admin</span>
           </div>
-          <div className="px-3 pt-4 pb-2">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-bold text-sidebar-accent-foreground uppercase">
-                {user?.name?.[0] || "U"}
+        )}
+      </div>
+
+      {/* Nav sections */}
+      <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-5">
+        {NAV.map(section => {
+          const visibleItems = section.items.filter(item =>
+            !item.roles || item.roles.includes(userRole)
+          );
+          if (!visibleItems.length) return null;
+          return (
+            <div key={section.label}>
+              <div className="px-3 mb-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-white/25">
+                  {section.label}
+                </span>
               </div>
-              <div className="overflow-hidden">
-                <p className="text-sm font-medium truncate">{user?.name || "Користувач"}</p>
-                <p className="text-xs text-sidebar-foreground/60 truncate">{user?.email}</p>
+              <div className="space-y-0.5">
+                {visibleItems.map(item => {
+                  const active = isActive(item.path);
+                  const Icon = item.icon;
+                  const isAdminItem = item.path === "/admin";
+                  return (
+                    <button
+                      key={item.path}
+                      onClick={() => goTo(item.path)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all group ${
+                        active
+                          ? "bg-white/12 text-white font-medium shadow-sm"
+                          : isAdminItem
+                            ? "text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300"
+                            : "text-white/50 hover:bg-white/7 hover:text-white/80"
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 shrink-0 ${active ? "text-indigo-300" : isAdminItem ? "text-amber-400" : "text-white/35 group-hover:text-white/60"}`} />
+                      <span className="truncate text-left">{item.name}</span>
+                      {active && <ChevronRight className="w-3 h-3 ml-auto text-white/30 shrink-0" />}
+                    </button>
+                  );
+                })}
               </div>
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* Bottom user section */}
+      <div className="p-3 border-t border-white/8 space-y-0.5">
+        <button
+          onClick={() => goTo("/settings")}
+          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all ${
+            isActive("/settings") ? "bg-white/12 text-white" : "text-white/50 hover:bg-white/7 hover:text-white/80"
+          }`}
+        >
+          <Settings className="w-4 h-4" />
+          <span>Налаштування</span>
+        </button>
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-white/50 hover:bg-white/7 hover:text-white/80 transition-all"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Вийти</span>
+        </button>
+
+        {/* User card */}
+        <div className="mt-2 px-3 py-2.5 rounded-xl bg-white/6 border border-white/8">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-xs font-bold text-white uppercase shrink-0">
+              {user?.name?.[0] || "U"}
+            </div>
+            <div className="overflow-hidden flex-1">
+              <p className="text-sm font-medium text-white/85 truncate">{user?.name || "Користувач"}</p>
+              <p className="text-[11px] text-white/35 truncate">{user?.role || "—"}</p>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex min-h-screen bg-[#F7F8FC] text-foreground">
+      {/* Desktop sidebar */}
+      <aside className="w-60 shrink-0 hidden md:flex flex-col bg-[#1a1d2e] border-r border-white/5 fixed top-0 left-0 h-screen z-30 overflow-hidden">
+        <SidebarContent />
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background">
-        {/* Top Header (desktop) — notification bell lives here */}
-        <header className="hidden md:flex items-center justify-end px-6 py-3 border-b bg-card/50 backdrop-blur-sm gap-2">
-          <NotificationBell />
-        </header>
+      {/* Mobile sidebar overlay */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <aside className="relative w-64 bg-[#1a1d2e] h-full overflow-hidden flex flex-col">
+            <SidebarContent />
+          </aside>
+        </div>
+      )}
 
-        {/* Mobile Header */}
-        <header className="md:hidden flex items-center justify-between p-4 border-b bg-card">
-          <div className="flex items-center gap-2">
-            <div className="bg-primary text-primary-foreground p-1.5 rounded-md">
-              <Building className="w-4 h-4" />
-            </div>
-            <h1 className="font-bold text-lg">Maison HD</h1>
+      {/* Main content — offset for fixed sidebar */}
+      <main className="flex-1 flex flex-col min-w-0 md:ml-60">
+        {/* Top bar */}
+        <header className="sticky top-0 z-20 flex items-center justify-between px-5 py-3 bg-white/80 backdrop-blur-xl border-b border-gray-200/60">
+          {/* Mobile menu toggle */}
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="md:hidden w-9 h-9 rounded-xl flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          {/* Current page breadcrumb — desktop */}
+          <div className="hidden md:flex items-center gap-2 text-sm text-gray-500">
+            <span className="font-medium text-gray-800">
+              {NAV.flatMap(s => s.items).find(i => isActive(i.path))?.name || "Maison HD"}
+            </span>
           </div>
-          <NotificationBell />
+
+          <div className="flex items-center gap-2 ml-auto">
+            <NotificationBell />
+          </div>
         </header>
 
-        {/* Page Content */}
+        {/* Page content */}
         <div className="flex-1 overflow-auto">
           {children}
         </div>

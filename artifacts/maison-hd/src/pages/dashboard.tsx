@@ -1,208 +1,337 @@
-import { useGetDashboardAnalytics, useListBookings } from "@workspace/api-client-react";
+import { useGetDashboardAnalytics, useListBookings, useGetMe } from "@workspace/api-client-react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
-import { 
-  Users, 
-  CreditCard, 
-  TrendingUp, 
-  CalendarCheck,
-  ArrowRightLeft,
-  ArrowRight,
-  ArrowLeft,
-  Loader2
+import {
+  TrendingUp, CreditCard, ArrowRight, ArrowLeft, Users,
+  CalendarCheck, BedDouble, Loader2, Sparkles, ChevronRight,
+  BarChart2, Clock, CheckCircle,
 } from "lucide-react";
-
 import { AppLayout } from "@/components/layout/app-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from "recharts";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip,
+  ResponsiveContainer, AreaChart, Area,
+} from "recharts";
+import { useLocation } from "wouter";
+
+function KpiCard({
+  label, value, sub, icon: Icon, iconBg, iconColor, trend, accent,
+}: {
+  label: string; value: string; sub?: string; icon: any;
+  iconBg: string; iconColor: string; trend?: string; accent?: boolean;
+}) {
+  return (
+    <div className={`relative bg-white rounded-2xl border border-gray-200/80 p-5 overflow-hidden shadow-sm hover:shadow-md transition-shadow ${accent ? "ring-2 ring-indigo-500/20" : ""}`}>
+      <div className="flex items-start justify-between mb-4">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${iconBg}`}>
+          <Icon className={`w-5 h-5 ${iconColor}`} />
+        </div>
+        {trend && (
+          <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">{trend}</span>
+        )}
+      </div>
+      <div className="font-bold text-2xl text-gray-900 tracking-tight mb-0.5 font-display">{value}</div>
+      <div className="text-sm text-gray-500 font-medium">{label}</div>
+      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function StatusDot({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    confirmed: "bg-emerald-500",
+    pending: "bg-amber-400",
+    cancelled: "bg-red-400",
+    checked_in: "bg-blue-500",
+    checked_out: "bg-gray-400",
+  };
+  return <span className={`inline-block w-2 h-2 rounded-full ${map[status] || "bg-gray-300"}`} />;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  confirmed: "Підтверджено",
+  pending: "Очікує",
+  cancelled: "Скасовано",
+  checked_in: "Заселено",
+  checked_out: "Виселено",
+};
 
 export default function DashboardPage() {
   const { data: analytics, isLoading: analyticsLoading } = useGetDashboardAnalytics({});
-  
-  // Today's arrivals and departures
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const { data: todayBookings, isLoading: bookingsLoading } = useListBookings({
-    dateFrom: today,
-    dateTo: today
-  });
+  const { data: user } = useGetMe();
+  const today = format(new Date(), "yyyy-MM-dd");
+  const { data: todayBookings } = useListBookings({ dateFrom: today, dateTo: today });
+  const [, navigate] = useLocation();
+  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
 
-  if (analyticsLoading || bookingsLoading) {
+  if (analyticsLoading) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center h-full">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <div className="flex items-center justify-center h-full min-h-[50vh]">
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-indigo-500 mx-auto mb-3" />
+            <p className="text-sm text-gray-400">Завантаження...</p>
+          </div>
         </div>
       </AppLayout>
     );
   }
 
-  const formatCurrency = (amount: number = 0) => {
-    return new Intl.NumberFormat("uk-UA", {
-      style: "currency",
-      currency: "UAH",
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+  const fmt = (n: number = 0) =>
+    new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", maximumFractionDigits: 0 }).format(n);
 
-  const checkins = todayBookings?.filter(b => b.checkIn.startsWith(today)) || [];
-  const checkouts = todayBookings?.filter(b => b.checkOut.startsWith(today)) || [];
+  const occupancy = Math.round(analytics?.occupancyRate || 0);
+  const checkins = analytics?.checkedInToday || 0;
+  const checkouts = analytics?.checkingOutToday || 0;
+  const totalGuests = analytics?.totalGuests || 0;
+  const revenue = analytics?.totalRevenue || 0;
+  const revenueData = analytics?.revenueByMonth || [];
+  const bookingsByDay = analytics?.bookingsByDay || [];
+  const recent = todayBookings?.slice(0, 8) || [];
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Доброго ранку" : hour < 18 ? "Доброго дня" : "Доброго вечора";
+  const firstName = user?.name?.split(" ")[0] || "Команда";
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-7xl mx-auto space-y-8">
-        <div className="flex items-center justify-between">
+      <div className="p-6 max-w-7xl mx-auto space-y-6">
+
+        {/* ── Page header ── */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4 justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Головна панель</h1>
-            <p className="text-muted-foreground mt-1">Огляд показників на сьогодні, {format(new Date(), 'd MMMM yyyy', { locale: uk })}</p>
+            <p className="text-sm text-gray-400 font-medium mb-1">
+              {format(new Date(), "EEEE, d MMMM yyyy", { locale: uk })}
+            </p>
+            <h1 className="text-2xl font-bold text-gray-900 font-display">
+              {greeting}, {firstName} 👋
+            </h1>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate(`~${BASE}/bookings`)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-500/30"
+            >
+              <Sparkles className="w-4 h-4" />
+              Нове бронювання
+            </button>
           </div>
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Завантаженість</CardTitle>
-              <TrendingUp className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{Math.round(analytics?.occupancyRate || 0)}%</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Поточний стан номерного фонду
-              </p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Дохід за місяць</CardTitle>
-              <CreditCard className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(analytics?.totalRevenue)}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Загальна сума з {format(new Date(), 'MMMM', { locale: uk })}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Заїзди сьогодні</CardTitle>
-              <ArrowRight className="h-4 w-4 text-emerald-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{analytics?.checkedInToday || 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Гостей очікується
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Виїзди сьогодні</CardTitle>
-              <ArrowLeft className="h-4 w-4 text-amber-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{analytics?.checkingOutToday || 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Гостей покидають готель
-              </p>
-            </CardContent>
-          </Card>
+        {/* ── KPI row ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard
+            label="Завантаженість"
+            value={`${occupancy}%`}
+            sub="Поточний день"
+            icon={BedDouble}
+            iconBg="bg-indigo-100"
+            iconColor="text-indigo-600"
+            accent={true}
+          />
+          <KpiCard
+            label="Дохід за місяць"
+            value={fmt(revenue)}
+            icon={CreditCard}
+            iconBg="bg-emerald-100"
+            iconColor="text-emerald-600"
+          />
+          <KpiCard
+            label="Заїзди сьогодні"
+            value={String(checkins)}
+            sub="Очікується"
+            icon={ArrowRight}
+            iconBg="bg-sky-100"
+            iconColor="text-sky-600"
+          />
+          <KpiCard
+            label="Виїзди сьогодні"
+            value={String(checkouts)}
+            sub="Гостей виїжджає"
+            icon={ArrowLeft}
+            iconBg="bg-amber-100"
+            iconColor="text-amber-600"
+          />
         </div>
 
-        {/* Charts & Lists */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Дохід за джерелами</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px] w-full">
-                {analytics?.bookingsBySource && analytics.bookingsBySource.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analytics.bookingsBySource}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                      <XAxis dataKey="source" axisLine={false} tickLine={false} tick={{fill: 'hsl(var(--muted-foreground))', fontSize: 12}} />
-                      <YAxis axisLine={false} tickLine={false} tick={{fill: 'hsl(var(--muted-foreground))', fontSize: 12}} />
-                      <RechartsTooltip 
-                        cursor={{fill: 'hsl(var(--muted))'}}
-                        contentStyle={{backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))'}}
-                      />
-                      <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex h-full items-center justify-center text-muted-foreground text-sm">Немає даних для відображення</div>
-                )}
+        {/* ── Secondary stats ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: "Всього гостей", value: totalGuests, icon: Users, color: "text-violet-600", bg: "bg-violet-100" },
+            { label: "Бронювань сьогодні", value: todayBookings?.length || 0, icon: CalendarCheck, color: "text-rose-600", bg: "bg-rose-100" },
+            { label: "Активних резервацій", value: analytics?.activeBookings || 0, icon: CheckCircle, color: "text-teal-600", bg: "bg-teal-100" },
+            { label: "Середнє перебування", value: `${(analytics?.avgStayLength || 0).toFixed(1)} н`, icon: Clock, color: "text-orange-600", bg: "bg-orange-100" },
+          ].map(s => (
+            <div key={s.label} className="bg-white rounded-2xl border border-gray-200/80 p-4 flex items-center gap-3 shadow-sm">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${s.bg} shrink-0`}>
+                <s.icon className={`w-5 h-5 ${s.color}`} />
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="flex flex-col">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ArrowRightLeft className="w-5 h-5" /> Рух гостей
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-auto">
-              <div className="space-y-6">
-                <div>
-                  <h3 className="font-semibold text-sm text-muted-foreground mb-3 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    Заїзди ({checkins.length})
-                  </h3>
-                  {checkins.length > 0 ? (
-                    <div className="space-y-3">
-                      {checkins.map(booking => (
-                        <div key={booking.id} className="flex justify-between items-center text-sm border-b pb-2 last:border-0">
-                          <div>
-                            <div className="font-medium">{booking.guestName || `Гість #${booking.guestId}`}</div>
-                            <div className="text-muted-foreground text-xs">{booking.unitName || `Номер #${booking.unitId}`}</div>
-                          </div>
-                          <Badge variant={booking.status === 'checked_in' ? 'default' : 'outline'}>
-                            {booking.status === 'checked_in' ? 'Заїхав' : 'Очікується'}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">На сьогодні заїздів немає.</p>
-                  )}
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-sm text-muted-foreground mb-3 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    Виїзди ({checkouts.length})
-                  </h3>
-                  {checkouts.length > 0 ? (
-                    <div className="space-y-3">
-                      {checkouts.map(booking => (
-                        <div key={booking.id} className="flex justify-between items-center text-sm border-b pb-2 last:border-0">
-                          <div>
-                            <div className="font-medium">{booking.guestName || `Гість #${booking.guestId}`}</div>
-                            <div className="text-muted-foreground text-xs">{booking.unitName || `Номер #${booking.unitId}`}</div>
-                          </div>
-                          <Badge variant={booking.status === 'checked_out' ? 'secondary' : 'outline'}>
-                            {booking.status === 'checked_out' ? 'Виїхав' : 'Проживає'}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">На сьогодні виїздів немає.</p>
-                  )}
-                </div>
+              <div>
+                <div className="font-bold text-xl text-gray-900 font-display leading-tight">{s.value}</div>
+                <div className="text-xs text-gray-500">{s.label}</div>
               </div>
-            </CardContent>
-          </Card>
-          
+            </div>
+          ))}
         </div>
+
+        {/* ── Charts + Arrivals ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+          {/* Revenue chart */}
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200/80 p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="font-semibold text-gray-800">Дохід по місяцях</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Динаміка за поточний рік</p>
+              </div>
+              <BarChart2 className="w-4 h-4 text-gray-300" />
+            </div>
+            {revenueData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={revenueData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4F46E5" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#4F46E5" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
+                    tickFormatter={v => (v / 1000).toFixed(0) + "к"} />
+                  <ReTooltip
+                    contentStyle={{ borderRadius: "12px", border: "1px solid #E5E7EB", boxShadow: "0 4px 12px rgba(0,0,0,0.08)", fontSize: 12 }}
+                    formatter={(v: any) => [fmt(v), "Дохід"]}
+                  />
+                  <Area type="monotone" dataKey="revenue" stroke="#4F46E5" strokeWidth={2} fill="url(#rev)" dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-44 flex items-center justify-center text-sm text-gray-400">
+                Недостатньо даних для графіка
+              </div>
+            )}
+          </div>
+
+          {/* Occupancy / quick stats */}
+          <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-sm flex flex-col">
+            <h3 className="font-semibold text-gray-800 mb-4">Статус сьогодні</h3>
+
+            {/* Occupancy gauge */}
+            <div className="flex-1 flex flex-col items-center justify-center py-4">
+              <div className="relative w-28 h-28 mb-3">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#F3F4F6" strokeWidth="2.5" />
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#4F46E5" strokeWidth="2.5"
+                    strokeDasharray={`${(occupancy / 100) * 100} 100`}
+                    strokeLinecap="round" className="transition-all duration-700" />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-2xl font-bold text-gray-900 font-display">{occupancy}%</span>
+                  <span className="text-[10px] text-gray-400">Зайнятість</span>
+                </div>
+              </div>
+
+              <div className="w-full space-y-2 mt-2">
+                {[
+                  { label: "Заїздів", value: checkins, color: "bg-sky-500" },
+                  { label: "Виїздів", value: checkouts, color: "bg-amber-500" },
+                  { label: "Гостей", value: totalGuests, color: "bg-violet-500" },
+                ].map(r => (
+                  <div key={r.label} className="flex items-center gap-2.5 text-sm">
+                    <div className={`w-2 h-2 rounded-full ${r.color} shrink-0`} />
+                    <span className="text-gray-500 flex-1">{r.label}</span>
+                    <span className="font-semibold text-gray-800">{r.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Today's arrivals table ── */}
+        <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div>
+              <h3 className="font-semibold text-gray-800">Бронювання сьогодні</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {format(new Date(), "d MMMM", { locale: uk })} · {todayBookings?.length || 0} бронювань
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(`~${BASE}/bookings`)}
+              className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors"
+            >
+              Всі бронювання <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {recent.length === 0 ? (
+            <div className="py-12 text-center">
+              <CalendarCheck className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+              <p className="text-sm text-gray-400">Бронювань на сьогодні немає</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {recent.map(b => (
+                <div key={b.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50/60 transition-colors">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                    {(b.guestName || "?")[0].toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm text-gray-800 truncate">{b.guestName || "—"}</div>
+                    <div className="text-xs text-gray-400">#{b.id} · Кімната {b.unitName || "—"}</div>
+                  </div>
+                  <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 shrink-0">
+                    <ArrowRight className="w-3 h-3 text-emerald-500" />
+                    {format(new Date(b.checkIn), "d MMM", { locale: uk })}
+                    <span className="text-gray-300">→</span>
+                    {format(new Date(b.checkOut), "d MMM", { locale: uk })}
+                  </div>
+                  <div className="shrink-0">
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
+                      b.status === "confirmed" ? "bg-emerald-50 text-emerald-700" :
+                      b.status === "checked_in" ? "bg-blue-50 text-blue-700" :
+                      b.status === "cancelled" ? "bg-red-50 text-red-600" :
+                      "bg-gray-100 text-gray-600"
+                    }`}>
+                      <StatusDot status={b.status} />
+                      {STATUS_LABELS[b.status] || b.status}
+                    </span>
+                  </div>
+                  <div className="hidden sm:block text-sm font-semibold text-gray-800 shrink-0">
+                    {new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", maximumFractionDigits: 0 }).format(b.totalAmount || 0)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Booking activity chart ── */}
+        {bookingsByDay.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="font-semibold text-gray-800">Активність бронювань</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Кількість бронювань по днях</p>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={120}>
+              <BarChart data={bookingsByDay} margin={{ top: 0, right: 0, left: -25, bottom: 0 }} barSize={8}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
+                  tickFormatter={d => format(new Date(d), "d MMM", { locale: uk })} />
+                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                <ReTooltip
+                  contentStyle={{ borderRadius: "12px", border: "1px solid #E5E7EB", boxShadow: "0 4px 12px rgba(0,0,0,0.08)", fontSize: 12 }}
+                  formatter={(v: any) => [v, "Бронювань"]}
+                />
+                <Bar dataKey="bookings" fill="#4F46E5" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
     </AppLayout>
   );

@@ -50,6 +50,7 @@ import RestaurantPage from "@/pages/restaurant";
 import ActivitiesPage from "@/pages/activities";
 import AccommodationPage from "@/pages/accommodation";
 import StaffConsolePage from "@/pages/staff-console";
+import PricingPage from "@/pages/pricing";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -147,6 +148,7 @@ function Router() {
       <Route path="/accommodation"><ProtectedRoute component={AccommodationPage} /></Route>
       <Route path="/console"><ProtectedRoute component={StaffConsolePage} /></Route>
       <Route path="/tv/:roomCode" component={TvDisplayPage} />
+      <Route path="/pricing"><ProtectedRoute component={PricingPage} /></Route>
 
       <Route path="/" component={HomeRoute} />
 
