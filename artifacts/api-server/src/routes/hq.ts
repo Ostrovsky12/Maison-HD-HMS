@@ -7,8 +7,9 @@ import {
   eventsTable, eventSpacesTable,
   fbOrdersTable, fbTablesTable,
   conversationsTable,
+  monthlyBudgetsTable,
 } from "@workspace/db";
-import { eq, and, sql, gte, lte, lt, ne, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, gte, lte, lt, ne, desc, asc, inArray, or } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
@@ -25,44 +26,79 @@ router.get("/overview", requireAuth, async (req: any, res) => {
     const tomorrowStr = tomorrow.toISOString().split("T")[0];
     const nextWeek = new Date(today); nextWeek.setDate(nextWeek.getDate() + 14);
     const nextWeekStr = nextWeek.toISOString().split("T")[0];
+    const next30Days = new Date(today); next30Days.setDate(next30Days.getDate() + 30);
+    const next30Str = next30Days.toISOString().split("T")[0];
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
     const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    const yearStart = new Date(today.getFullYear(), 0, 1);
 
-    // Step 1: get unit IDs for this org (units → properties → org)
-    const orgUnits = await db.select({ id: unitsTable.id })
-      .from(unitsTable)
-      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
-      .where(eq(propertiesTable.organizationId, orgId));
-    const unitIds = orgUnits.map(u => u.id);
+    // Get all properties for this org
+    const orgProperties = await db.select({ id: propertiesTable.id, name: propertiesTable.name })
+      .from(propertiesTable).where(eq(propertiesTable.organizationId, orgId));
+
+    const propIds = orgProperties.map(p => p.id);
+
+    // Get all units for these properties
+    const orgUnitsWithProp = propIds.length > 0
+      ? await db.select({ id: unitsTable.id, propertyId: unitsTable.propertyId })
+          .from(unitsTable).where(inArray(unitsTable.propertyId, propIds))
+      : [];
+
+    const unitIds = orgUnitsWithProp.map(u => u.id);
 
     if (unitIds.length === 0) {
       return res.json({
-        kpi: { occupancy: 0, totalUnits: 0, inHouseCount: 0, arrivalsToday: 0, departuresToday: 0, revenueToday: 0, revenueThisMonth: 0, revenueLastMonth: 0, fbRevenueToday: 0, spaRevenueToday: 0, fbOpenOrders: 0, spaTodayCount: 0, eventsThisWeek: 0, hkPending: 0, hkInProgress: 0, inboxUnread: 0 },
+        kpi: { occupancy: 0, totalUnits: 0, inHouseCount: 0, arrivalsToday: 0, departuresToday: 0, revenueToday: 0, revenueThisMonth: 0, revenueLastMonth: 0, fbRevenueToday: 0, spaRevenueToday: 0, fbOpenOrders: 0, spaTodayCount: 0, eventsThisWeek: 0, hkPending: 0, hkInProgress: 0, inboxUnread: 0, adr: 0, totalDebt: 0, paidThisMonth: 0, revenueYTD: 0 },
         arrivals: [], departures: [], inHouse: [], hk: { pending: 0, inProgress: 0, high: 0 },
         spaToday: [], eventsUpcoming: [], fbOpenOrders: [], fbTables: { total: 0, free: 0, occupied: 0 },
-        inbox: [], sevenDayRevenue: [],
+        inbox: [], sevenDayRevenue: [], byProperty: [], byDepartment: {}, financials: {}, debtors: [], forecast: [], budget: null,
       });
     }
 
-    // Step 2: parallel fetches
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1;
+
+    // Parallel fetches - existing + new
     const [
-      allBookings, hkTasks, spaTodayAppts, spaRevToday,
-      eventsUpcoming, fbOpenOrders, fbStats, inboxData,
-      revenueThisMonth, revenueLastMonth, fbRevenueToday,
+      allBookings,
+      hkTasks,
+      spaTodayAppts,
+      spaRevToday,
+      eventsUpcoming,
+      fbOpenOrders,
+      fbStats,
+      inboxData,
+      revenueThisMonth,
+      revenueLastMonth,
+      fbRevenueToday,
+      // NEW: extended data
+      allMonthBookings,
+      fbMonthRevenue,
+      spaMonthRevenue,
+      eventsMonthRevenue,
+      allYearBookings,
+      spaRevMonth,
+      eventsRevMonth,
+      debtorBookings,
+      forecast30,
+      budgetRow,
     ] = await Promise.all([
-      // Bookings: upcoming and current
+      // Bookings: active/upcoming
       db.select({
         id: bookingsTable.id, checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
         status: bookingsTable.status, totalAmount: bookingsTable.totalAmount,
+        paidAmount: bookingsTable.paidAmount, paymentStatus: bookingsTable.paymentStatus,
         firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
-        guestCount: bookingsTable.guestsCount,
+        guestCount: bookingsTable.guestsCount, unitId: bookingsTable.unitId,
+        bookingRef: bookingsTable.bookingRef,
       }).from(bookingsTable).where(and(
         inArray(bookingsTable.unitId, unitIds),
         gte(bookingsTable.checkOut, todayStr as any),
         ne(bookingsTable.status, "cancelled" as any),
       )),
 
-      // Housekeeping tasks (via unit join)
+      // HK tasks
       db.select({ id: housekeepingTasksTable.id, status: housekeepingTasksTable.status, priority: housekeepingTasksTable.priority })
         .from(housekeepingTasksTable)
         .where(and(
@@ -72,7 +108,7 @@ router.get("/overview", requireAuth, async (req: any, res) => {
           ne(housekeepingTasksTable.status, "cancelled" as any),
         )),
 
-      // SPA appointments today
+      // SPA today
       db.select({
         id: spaAppointmentsTable.id, status: spaAppointmentsTable.status,
         guestName: spaAppointmentsTable.guestName, startTime: spaAppointmentsTable.startTime,
@@ -124,11 +160,11 @@ router.get("/overview", requireAuth, async (req: any, res) => {
           ne(fbOrdersTable.status, "cancelled" as any),
         )).orderBy(asc(fbOrdersTable.openedAt)),
 
-      // F&B tables summary
+      // F&B tables
       db.select({ status: fbTablesTable.status }).from(fbTablesTable)
         .where(and(eq(fbTablesTable.organizationId, orgId), eq(fbTablesTable.isActive, true))),
 
-      // Inbox unread conversations
+      // Inbox unread
       db.select({
         id: conversationsTable.id, unreadCount: conversationsTable.unreadCount,
         subject: conversationsTable.subject, channel: conversationsTable.channel,
@@ -137,7 +173,7 @@ router.get("/overview", requireAuth, async (req: any, res) => {
         .where(and(eq(conversationsTable.organizationId, orgId), gte(conversationsTable.unreadCount, 1)))
         .orderBy(desc(conversationsTable.updatedAt)).limit(5),
 
-      // Revenue this month (via unit IDs)
+      // Rooms revenue this month
       db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
         .from(bookingsTable).where(and(
           inArray(bookingsTable.unitId, unitIds),
@@ -145,7 +181,7 @@ router.get("/overview", requireAuth, async (req: any, res) => {
           ne(bookingsTable.status, "cancelled" as any),
         )),
 
-      // Revenue last month
+      // Rooms revenue last month
       db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
         .from(bookingsTable).where(and(
           inArray(bookingsTable.unitId, unitIds),
@@ -161,58 +197,336 @@ router.get("/overview", requireAuth, async (req: any, res) => {
           eq(fbOrdersTable.status, "billed" as any),
           gte(fbOrdersTable.createdAt, today),
         )),
+
+      // NEW: All bookings this month (for per-property breakdown)
+      db.select({
+        id: bookingsTable.id, unitId: bookingsTable.unitId,
+        checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
+        totalAmount: bookingsTable.totalAmount, paidAmount: bookingsTable.paidAmount,
+        paymentStatus: bookingsTable.paymentStatus, status: bookingsTable.status,
+        firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
+        bookingRef: bookingsTable.bookingRef,
+      }).from(bookingsTable).where(and(
+        inArray(bookingsTable.unitId, unitIds),
+        gte(bookingsTable.createdAt, monthStart),
+        ne(bookingsTable.status, "cancelled" as any),
+      )),
+
+      // F&B revenue this month
+      db.execute(
+        sql`SELECT COALESCE(SUM(total_amount), 0) as total FROM fb_orders WHERE organization_id = ${orgId} AND status = 'billed' AND created_at >= ${monthStart}`
+      ),
+
+      // SPA revenue this month
+      db.execute(
+        sql`SELECT COALESCE(SUM(price), 0) as total FROM spa_appointments WHERE organization_id = ${orgId} AND status = 'completed' AND appointment_date >= ${todayStr}::date - 30`
+      ),
+
+      // Events revenue this month
+      db.execute(
+        sql`SELECT COALESCE(SUM(total_price), 0) as total FROM events WHERE organization_id = ${orgId} AND status IN ('confirmed','deposit_paid','completed') AND event_date >= ${monthStart.toISOString().split("T")[0]}::date`
+      ),
+
+      // YTD rooms revenue
+      db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
+        .from(bookingsTable).where(and(
+          inArray(bookingsTable.unitId, unitIds),
+          gte(bookingsTable.createdAt, yearStart),
+          ne(bookingsTable.status, "cancelled" as any),
+        )),
+
+      // SPA revenue this month (exact)
+      db.execute(
+        sql`SELECT COALESCE(SUM(price), 0) as total FROM spa_appointments WHERE organization_id = ${orgId} AND status = 'completed' AND appointment_date >= ${monthStart.toISOString().split("T")[0]}::date`
+      ),
+
+      // Events revenue this month (exact)
+      db.execute(
+        sql`SELECT COALESCE(SUM(total_price), 0) as total FROM events WHERE organization_id = ${orgId} AND status IN ('confirmed','deposit_paid','completed') AND event_date >= ${monthStart.toISOString().split("T")[0]}::date`
+      ),
+
+      // Debtors — bookings with outstanding balance (not paid, not cancelled)
+      db.select({
+        id: bookingsTable.id, bookingRef: bookingsTable.bookingRef,
+        firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
+        checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
+        totalAmount: bookingsTable.totalAmount, paidAmount: bookingsTable.paidAmount,
+        paymentStatus: bookingsTable.paymentStatus,
+      }).from(bookingsTable).where(and(
+        inArray(bookingsTable.unitId, unitIds),
+        ne(bookingsTable.paymentStatus, "paid" as any),
+        ne(bookingsTable.status, "cancelled" as any),
+        ne(bookingsTable.status, "checked_out" as any),
+      )).orderBy(desc(bookingsTable.checkOut)).limit(20),
+
+      // Forecast: upcoming bookings next 30 days
+      db.select({
+        checkIn: bookingsTable.checkIn,
+        cnt: sql<string>`COUNT(*)`,
+        guests: sql<string>`SUM(guests_count)`,
+      }).from(bookingsTable).where(and(
+        inArray(bookingsTable.unitId, unitIds),
+        gte(bookingsTable.checkIn, todayStr as any),
+        lte(bookingsTable.checkIn, next30Str as any),
+        ne(bookingsTable.status, "cancelled" as any),
+      )).groupBy(bookingsTable.checkIn).orderBy(asc(bookingsTable.checkIn)),
+
+      // Budget for current month
+      db.select().from(monthlyBudgetsTable).where(and(
+        eq(monthlyBudgetsTable.organizationId, orgId),
+        eq(monthlyBudgetsTable.year, currentYear),
+        eq(monthlyBudgetsTable.month, currentMonth),
+      )).limit(1),
     ]);
 
-    // Process bookings
+    // --- Process existing data ---
     const arrivalsToday = allBookings.filter(b => b.checkIn === todayStr);
     const departuresToday = allBookings.filter(b => b.checkOut === todayStr);
-    const inHouse = allBookings.filter(b => {
-      return b.checkIn <= todayStr && b.checkOut > todayStr &&
-        ["confirmed", "checked_in", "pending"].includes(b.status);
-    });
-    const occupancy = orgUnits.length > 0 ? Math.round((inHouse.length / orgUnits.length) * 100) : 0;
+    const inHouse = allBookings.filter(b =>
+      b.checkIn <= todayStr && b.checkOut > todayStr &&
+      ["confirmed", "checked_in", "pending"].includes(b.status)
+    );
+    const occupancy = unitIds.length > 0 ? Math.round((inHouse.length / unitIds.length) * 100) : 0;
     const revenueToday = allBookings.filter(b => b.checkOut === todayStr).reduce((s, b) => s + parseFloat(b.totalAmount), 0);
 
-    // 7-day revenue trend
+    // 7-day revenue
     const sevenDayRevenue = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today); d.setDate(d.getDate() - i);
       const dStr = d.toISOString().split("T")[0];
-      const dayRev = allBookings.filter(b => b.checkOut === dStr).reduce((s, b) => s + parseFloat(b.totalAmount), 0);
-      sevenDayRevenue.push({
-        date: dStr,
-        label: d.toLocaleDateString("uk", { weekday: "short" }),
-        rooms: dayRev,
-      });
+      const dayRev = allMonthBookings.filter(b => b.checkOut === dStr).reduce((s, b) => s + parseFloat(b.totalAmount), 0);
+      sevenDayRevenue.push({ date: dStr, label: d.toLocaleDateString("uk", { weekday: "short" }), rooms: dayRev });
     }
 
-    // HK summary
     const hkPending = hkTasks.filter(t => t.status === "pending").length;
     const hkInProgress = hkTasks.filter(t => t.status === "in_progress").length;
     const hkHigh = hkTasks.filter(t => t.priority === "high").length;
-
     const totalUnread = inboxData.reduce((s, c) => s + (c.unreadCount || 0), 0);
     const revMonth = Math.round(parseFloat(revenueThisMonth[0]?.total || "0"));
     const revLastMonth = Math.round(parseFloat(revenueLastMonth[0]?.total || "0"));
+    const fbRevToday = Math.round(parseFloat(fbRevenueToday[0]?.total || "0"));
+    const spaRevTodayVal = Math.round(parseFloat(spaRevToday[0]?.total || "0"));
+
+    // --- NEW: Department breakdown ---
+    const fbMonthRev = Math.round(parseFloat((fbMonthRevenue.rows[0] as any)?.total || "0"));
+    const spaMonthRev = Math.round(parseFloat((spaRevMonth.rows[0] as any)?.total || "0"));
+    const eventsMonthRev = Math.round(parseFloat((eventsRevMonth.rows[0] as any)?.total || "0"));
+    const totalMonthRevenue = revMonth + fbMonthRev + spaMonthRev + eventsMonthRev;
+
+    const byDepartment = {
+      accommodation: {
+        revenue: revMonth,
+        share: totalMonthRevenue > 0 ? Math.round((revMonth / totalMonthRevenue) * 100) : 0,
+        bookings: allMonthBookings.length,
+        label: "Проживання",
+        color: "blue",
+      },
+      fb: {
+        revenue: fbMonthRev,
+        share: totalMonthRevenue > 0 ? Math.round((fbMonthRev / totalMonthRevenue) * 100) : 0,
+        label: "F&B",
+        color: "orange",
+      },
+      spa: {
+        revenue: spaMonthRev,
+        share: totalMonthRevenue > 0 ? Math.round((spaMonthRev / totalMonthRevenue) * 100) : 0,
+        label: "SPA & Велнес",
+        color: "teal",
+      },
+      events: {
+        revenue: eventsMonthRev,
+        share: totalMonthRevenue > 0 ? Math.round((eventsMonthRev / totalMonthRevenue) * 100) : 0,
+        label: "Events",
+        color: "pink",
+      },
+    };
+
+    // --- By Property breakdown ---
+    const propMap = new Map<number, { name: string; unitIds: number[] }>();
+    for (const prop of orgProperties) {
+      propMap.set(prop.id, { name: prop.name, unitIds: [] });
+    }
+    for (const u of orgUnitsWithProp) {
+      if (propMap.has(u.propertyId)) {
+        propMap.get(u.propertyId)!.unitIds.push(u.id);
+      }
+    }
+
+    const byProperty = Array.from(propMap.entries()).map(([propId, prop]) => {
+      const propUnitIds = prop.unitIds;
+      const propInHouse = inHouse.filter(b => propUnitIds.includes(b.unitId));
+      const propMonthBookings = allMonthBookings.filter(b => propUnitIds.includes(b.unitId));
+      const propRevMonth = propMonthBookings.reduce((s, b) => s + parseFloat(b.totalAmount), 0);
+      const propOccupancy = propUnitIds.length > 0 ? Math.round((propInHouse.length / propUnitIds.length) * 100) : 0;
+      const propArrivals = arrivalsToday.filter(b => propUnitIds.includes(b.unitId)).length;
+      const propDepartures = departuresToday.filter(b => propUnitIds.includes(b.unitId)).length;
+
+      // ADR (Average Daily Rate) for this month
+      const occupiedNights = propMonthBookings.reduce((s, b) => {
+        const ci = new Date(b.checkIn); const co = new Date(b.checkOut);
+        const nights = Math.max(0, Math.round((co.getTime() - ci.getTime()) / 86400000));
+        return s + nights;
+      }, 0);
+      const adr = occupiedNights > 0 ? Math.round(propRevMonth / occupiedNights) : 0;
+
+      return {
+        id: propId,
+        name: prop.name,
+        totalUnits: propUnitIds.length,
+        inHouse: propInHouse.length,
+        occupancy: propOccupancy,
+        revenueMonth: Math.round(propRevMonth),
+        bookingsMonth: propMonthBookings.length,
+        arrivalsToday: propArrivals,
+        departuresToday: propDepartures,
+        adr,
+      };
+    });
+
+    // --- Financials: ADR, Payments, Debts ---
+    const totalOccupiedNights = allMonthBookings.reduce((s, b) => {
+      const ci = new Date(b.checkIn); const co = new Date(b.checkOut);
+      const nights = Math.max(0, Math.round((co.getTime() - ci.getTime()) / 86400000));
+      return s + nights;
+    }, 0);
+    const adr = totalOccupiedNights > 0 ? Math.round(revMonth / totalOccupiedNights) : 0;
+
+    const paidBookings = allMonthBookings.filter(b => b.paymentStatus === "paid");
+    const partialBookings = allMonthBookings.filter(b => b.paymentStatus === "partial");
+    const unpaidBookings = allMonthBookings.filter(b => b.paymentStatus === "unpaid");
+
+    const paidAmount = paidBookings.reduce((s, b) => s + parseFloat(b.paidAmount || "0"), 0);
+    const partialPaidAmount = partialBookings.reduce((s, b) => s + parseFloat(b.paidAmount || "0"), 0);
+    const totalDebt = debtorBookings.reduce((s, b) => {
+      const debt = parseFloat(b.totalAmount) - parseFloat(b.paidAmount || "0");
+      return s + Math.max(0, debt);
+    }, 0);
+
+    const ytdRev = Math.round(parseFloat(allYearBookings[0]?.total || "0"));
+
+    const financials = {
+      adr,
+      totalDebt: Math.round(totalDebt),
+      paidThisMonth: Math.round(paidAmount + partialPaidAmount),
+      unpaidCount: unpaidBookings.length,
+      partialCount: partialBookings.length,
+      paidCount: paidBookings.length,
+      revenueYTD: ytdRev,
+      totalMonthRevenue,
+      fbMonthRevenue: fbMonthRev,
+      spaMonthRevenue: spaMonthRev,
+      eventsMonthRevenue: eventsMonthRev,
+    };
+
+    // --- Budget/Plan vs Actual ---
+    const budgetData = budgetRow[0] || null;
+    let budget = null;
+    if (budgetData) {
+      const totalActual = totalMonthRevenue;
+      const totalTarget = parseFloat(budgetData.totalTarget as string);
+      const accTarget = parseFloat(budgetData.accommodationTarget as string);
+      const fbTarget = parseFloat(budgetData.fbTarget as string);
+      const spaTarget = parseFloat(budgetData.spaTarget as string);
+      const evTarget = parseFloat(budgetData.eventsTarget as string);
+      const occTarget = parseFloat(budgetData.occupancyTarget as string);
+      const adrTarget = parseFloat(budgetData.adrTarget as string);
+
+      budget = {
+        year: budgetData.year,
+        month: budgetData.month,
+        targets: {
+          total: Math.round(totalTarget),
+          accommodation: Math.round(accTarget),
+          fb: Math.round(fbTarget),
+          spa: Math.round(spaTarget),
+          events: Math.round(evTarget),
+          occupancy: occTarget,
+          adr: Math.round(adrTarget),
+        },
+        actuals: {
+          total: totalActual,
+          accommodation: revMonth,
+          fb: fbMonthRev,
+          spa: spaMonthRev,
+          events: eventsMonthRev,
+          occupancy,
+          adr,
+        },
+        pct: {
+          total: totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0,
+          accommodation: accTarget > 0 ? Math.round((revMonth / accTarget) * 100) : 0,
+          fb: fbTarget > 0 ? Math.round((fbMonthRev / fbTarget) * 100) : 0,
+          spa: spaTarget > 0 ? Math.round((spaMonthRev / spaTarget) * 100) : 0,
+          events: evTarget > 0 ? Math.round((eventsMonthRev / evTarget) * 100) : 0,
+          occupancy: occTarget > 0 ? Math.round((occupancy / occTarget) * 100) : 0,
+          adr: adrTarget > 0 ? Math.round((adr / adrTarget) * 100) : 0,
+        },
+      };
+    }
+
+    // --- Forecast 30 days ---
+    const forecastMap = new Map<string, { arrivals: number; guests: number }>();
+    for (const row of forecast30 as any[]) {
+      forecastMap.set(row.checkIn, { arrivals: parseInt(row.cnt || "0"), guests: parseInt(row.guests || "0") });
+    }
+    const forecast = [];
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(today); d.setDate(d.getDate() + i);
+      const dStr = d.toISOString().split("T")[0];
+      const f = forecastMap.get(dStr);
+      // Count in-house for that date (simplified: check bookings that span that date)
+      const inHouseOnDay = allBookings.filter(b =>
+        b.checkIn <= dStr && b.checkOut > dStr && !["cancelled"].includes(b.status)
+      ).length;
+      const projectedOcc = unitIds.length > 0 ? Math.round((inHouseOnDay / unitIds.length) * 100) : 0;
+      forecast.push({
+        date: dStr,
+        label: d.toLocaleDateString("uk", { day: "numeric", month: "short" }),
+        weekday: d.toLocaleDateString("uk", { weekday: "short" }),
+        arrivals: f?.arrivals || 0,
+        inHouse: inHouseOnDay,
+        occupancy: projectedOcc,
+        isToday: dStr === todayStr,
+        isWeekend: [0, 6].includes(d.getDay()),
+      });
+    }
+
+    // --- Debtors list ---
+    const debtorsList = debtorBookings.map(b => ({
+      id: b.id,
+      bookingRef: b.bookingRef,
+      name: [b.firstName, b.lastName].filter(Boolean).join(" ") || "Гість",
+      checkIn: b.checkIn,
+      checkOut: b.checkOut,
+      totalAmount: parseFloat(b.totalAmount),
+      paidAmount: parseFloat(b.paidAmount || "0"),
+      debt: Math.max(0, parseFloat(b.totalAmount) - parseFloat(b.paidAmount || "0")),
+      paymentStatus: b.paymentStatus,
+    })).filter(d => d.debt > 0);
 
     res.json({
       kpi: {
         occupancy,
-        totalUnits: orgUnits.length,
+        totalUnits: unitIds.length,
         inHouseCount: inHouse.length,
         arrivalsToday: arrivalsToday.length,
         departuresToday: departuresToday.length,
         revenueToday: Math.round(revenueToday),
         revenueThisMonth: revMonth,
         revenueLastMonth: revLastMonth,
-        fbRevenueToday: Math.round(parseFloat(fbRevenueToday[0]?.total || "0")),
-        spaRevenueToday: Math.round(parseFloat(spaRevToday[0]?.total || "0")),
+        fbRevenueToday: fbRevToday,
+        spaRevenueToday: spaRevTodayVal,
         fbOpenOrders: fbOpenOrders.length,
         spaTodayCount: spaTodayAppts.length,
         eventsThisWeek: eventsUpcoming.length,
         hkPending,
         hkInProgress,
         inboxUnread: totalUnread,
+        adr,
+        totalDebt: Math.round(totalDebt),
+        paidThisMonth: Math.round(paidAmount + partialPaidAmount),
+        revenueYTD: ytdRev,
+        totalMonthRevenue,
       },
       arrivals: arrivalsToday.slice(0, 6).map(b => ({
         id: b.id, name: [b.firstName, b.lastName].filter(Boolean).join(" ") || "Гість",
@@ -237,9 +551,75 @@ router.get("/overview", requireAuth, async (req: any, res) => {
       },
       inbox: inboxData,
       sevenDayRevenue,
+      // New
+      byProperty,
+      byDepartment,
+      financials,
+      debtors: debtorsList,
+      forecast,
+      budget,
     });
   } catch (e: any) {
-    console.error("HQ overview error:", e.message);
+    console.error("HQ overview error:", e.message, e.stack?.slice(0, 500));
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Budget CRUD
+router.get("/budget", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const rows = await db.select().from(monthlyBudgetsTable)
+      .where(eq(monthlyBudgetsTable.organizationId, orgId))
+      .orderBy(desc(monthlyBudgetsTable.year), desc(monthlyBudgetsTable.month))
+      .limit(12);
+    res.json({ budgets: rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/budget", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { year, month, accommodationTarget, fbTarget, spaTarget, eventsTarget, totalTarget, occupancyTarget, adrTarget, notes } = req.body;
+    const inserted = await db.insert(monthlyBudgetsTable).values({
+      organizationId: orgId, year, month,
+      accommodationTarget: accommodationTarget?.toString() || "0",
+      fbTarget: fbTarget?.toString() || "0",
+      spaTarget: spaTarget?.toString() || "0",
+      eventsTarget: eventsTarget?.toString() || "0",
+      totalTarget: totalTarget?.toString() || "0",
+      occupancyTarget: occupancyTarget?.toString() || "0",
+      adrTarget: adrTarget?.toString() || "0",
+      notes,
+    }).returning();
+    res.json({ budget: inserted[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put("/budget/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const { accommodationTarget, fbTarget, spaTarget, eventsTarget, totalTarget, occupancyTarget, adrTarget, notes } = req.body;
+    const updated = await db.update(monthlyBudgetsTable)
+      .set({
+        accommodationTarget: accommodationTarget?.toString(),
+        fbTarget: fbTarget?.toString(),
+        spaTarget: spaTarget?.toString(),
+        eventsTarget: eventsTarget?.toString(),
+        totalTarget: totalTarget?.toString(),
+        occupancyTarget: occupancyTarget?.toString(),
+        adrTarget: adrTarget?.toString(),
+        notes,
+      })
+      .where(and(eq(monthlyBudgetsTable.id, id), eq(monthlyBudgetsTable.organizationId, orgId)))
+      .returning();
+    res.json({ budget: updated[0] });
+  } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });

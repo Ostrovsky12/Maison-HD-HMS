@@ -497,6 +497,36 @@ Always use `extractJSON(raw, arrayMode)` instead of manual regex matching.
 
 ---
 
+## Stage 44 (Rev 2) — Owner/HQ Command Center Dashboard — EXPANDED
+
+### New DB Table: `monthly_budgets`
+- organizationId, year, month
+- accommodationTarget, fbTarget, spaTarget, eventsTarget, totalTarget (NUMERIC)
+- occupancyTarget, adrTarget
+- notes TEXT
+- Seeded: Jan-Apr 2026 budgets for Dogoda Resort
+
+### Extended API `/hq/overview` — new fields:
+- `byProperty[]` — per property: name, totalUnits, inHouse, occupancy%, revenueMonth, ADR, arrivalsToday, departuresToday, bookingsMonth
+- `byDepartment` — {accommodation, fb, spa, events}: revenue, share%, label, color
+- `financials` — ADR, RevPAR, totalDebt, paidThisMonth, unpaidCount, partialCount, paidCount, revenueYTD, totalMonthRevenue
+- `debtors[]` — bookings with outstanding balance: name, bookingRef, checkIn/Out, totalAmount, paidAmount, debt, paymentStatus
+- `forecast[]` — 30-day array: date, label, weekday, arrivals, inHouse, occupancy%, isToday, isWeekend
+- `budget` — plan vs actual: targets + actuals + pct for all departments, occupancy, ADR
+- `kpi` extended: adr, totalDebt, paidThisMonth, revenueYTD, totalMonthRevenue
+
+### Budget API Routes (`/api/hq/budget`)
+- `GET /budget` — list last 12 months budgets
+- `POST /budget` — create budget for a month
+- `PUT /budget/:id` — update budget
+
+### HQ Frontend — 5 tabs:
+1. **Зараз** — Operational: arrivals, departures, HK, F&B orders, SPA, Events, Inbox, 7-day revenue bar chart (Recharts)
+2. **По об'єктах** — Property cards: occupancy bar, revenue, ADR, today movements + comparison table
+3. **Підрозділи** — Accommodation/F&B/SPA/Events revenue breakdown: cards, Recharts bar chart, structure bars, occupancy per property
+4. **Фінанси** — Payments breakdown (paid/partial/unpaid counts), Key metrics (ADR, RevPAR, YTD, collection rate), Plan/Actual progress bars, Debtors table with debt amounts
+5. **Прогноз** — 30-day forecast: summary cards, AreaChart (Recharts), color-coded calendar grid (green=80%+, blue=60-79%, yellow=40-59%, orange=20-39%)
+
 ## Stage 44 — Owner/HQ Command Center Dashboard
 
 ### API Route (`/api/hq/overview`) — requireAuth
