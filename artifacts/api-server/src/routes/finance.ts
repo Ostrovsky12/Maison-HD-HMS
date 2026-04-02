@@ -635,4 +635,502 @@ router.get("/booking-payments", async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── FOLIO / GUEST LEDGER ─────────────────────────────────────────────────────
+router.get("/folio/:bookingId", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const bookingId = parseInt(req.params.bookingId);
+
+    const [booking, entries, payments, deposits, installments] = await Promise.all([
+      db.execute(sql`
+        SELECT b.*, TRIM(COALESCE(b.first_name,'') || ' ' || COALESCE(b.last_name,'')) as guest_name,
+          u.name as unit_name, p.name as property_name
+        FROM bookings b
+        JOIN units u ON u.id = b.unit_id
+        JOIN properties p ON p.id = u.property_id
+        WHERE b.id = ${bookingId} AND p.organization_id = ${orgId}
+      `),
+      db.execute(sql`
+        SELECT fe.*, rc.name as revenue_category_name, bu.name as business_unit_name
+        FROM folio_entries fe
+        LEFT JOIN revenue_categories rc ON rc.id = fe.revenue_category_id
+        LEFT JOIN business_units bu ON bu.id = fe.business_unit_id
+        WHERE fe.booking_id = ${bookingId} AND fe.organization_id = ${orgId}
+        ORDER BY fe.created_at ASC
+      `),
+      db.execute(sql`
+        SELECT * FROM payments WHERE booking_id = ${bookingId} ORDER BY created_at ASC
+      `),
+      db.execute(sql`
+        SELECT * FROM deposits WHERE booking_id = ${bookingId} ORDER BY created_at ASC
+      `),
+      db.execute(sql`
+        SELECT * FROM payment_installments WHERE booking_id = ${bookingId} ORDER BY installment_number
+      `),
+    ]);
+
+    const bk = booking.rows[0] as any;
+    if (!bk) return res.status(404).json({ error: "Бронювання не знайдено" });
+
+    const totalCharges = entries.rows.reduce((s: number, e: any) =>
+      e.entry_type === 'charge' ? s + parseFloat(e.total_amount || 0) : s, 0);
+    const totalCredits = entries.rows.reduce((s: number, e: any) =>
+      e.entry_type === 'credit' ? s + parseFloat(e.total_amount || 0) : s, 0);
+    const totalPaid = payments.rows.reduce((s: number, p: any) =>
+      (p as any).payment_type !== 'refund' ? s + parseFloat((p as any).amount || 0) : s, 0);
+    const totalRefunded = payments.rows.reduce((s: number, p: any) =>
+      (p as any).payment_type === 'refund' ? s + parseFloat((p as any).amount || 0) : s, 0);
+    const balance = parseFloat(bk.total_amount || 0) - totalPaid + totalRefunded;
+
+    res.json({
+      booking: bk,
+      entries: entries.rows,
+      payments: payments.rows,
+      deposits: deposits.rows,
+      installments: installments.rows,
+      summary: { totalCharges, totalCredits, totalPaid, totalRefunded, balance },
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/folio", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const userId: number = req.user?.id;
+    const { bookingId, entryType = "charge", description, quantity = 1, unitPrice, revenueCategoryId, businessUnitId, referenceType, referenceId, notes, vatRate = "20" } = req.body;
+    if (!bookingId || !description || unitPrice === undefined) return res.status(400).json({ error: "bookingId, description та unitPrice обов'язкові" });
+
+    const qty = parseFloat(quantity) || 1;
+    const price = parseFloat(unitPrice) || 0;
+    const total = qty * price;
+    const vatMult = parseFloat(vatRate) / 100;
+    const vatAmt = Math.round(total * vatMult / (1 + vatMult) * 100) / 100;
+
+    const r = await db.execute(sql`
+      INSERT INTO folio_entries (organization_id, booking_id, entry_type, description, quantity, unit_price, total_amount, vat_rate, vat_amount, currency, revenue_category_id, business_unit_id, reference_type, reference_id, notes, is_posted, posted_at, posted_by, created_at)
+      VALUES (${orgId}, ${bookingId}, ${entryType}, ${description}, ${qty}, ${price}, ${total}, ${vatRate}, ${vatAmt}, 'UAH', ${revenueCategoryId ?? null}, ${businessUnitId ?? null}, ${referenceType ?? null}, ${referenceId ?? null}, ${notes ?? null}, TRUE, NOW(), ${userId}, NOW())
+      RETURNING *
+    `);
+    res.json({ entry: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete("/folio/entry/:id", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    await db.execute(sql`DELETE FROM folio_entries WHERE id = ${parseInt(req.params.id)} AND organization_id = ${orgId}`);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── CASHBOX SESSIONS ─────────────────────────────────────────────────────────
+router.get("/cashbox", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { status } = req.query as any;
+    const cond = status ? sql`AND cs.status = ${status}` : sql``;
+    const sessions = await db.execute(sql`
+      SELECT cs.*, u.name as cashier_name, p.name as property_name, bu.name as business_unit_name
+      FROM cashbox_sessions cs
+      LEFT JOIN users u ON u.id = cs.cashier_id
+      LEFT JOIN properties p ON p.id = cs.property_id
+      LEFT JOIN business_units bu ON bu.id = cs.business_unit_id
+      WHERE cs.organization_id = ${orgId} ${cond}
+      ORDER BY cs.opened_at DESC LIMIT 100
+    `);
+    const open = await db.execute(sql`
+      SELECT cs.*, u.name as cashier_name
+      FROM cashbox_sessions cs LEFT JOIN users u ON u.id = cs.cashier_id
+      WHERE cs.organization_id = ${orgId} AND cs.status = 'open'
+      ORDER BY cs.opened_at DESC LIMIT 1
+    `);
+    res.json({ sessions: sessions.rows, activeSession: open.rows[0] || null });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/cashbox/open", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const userId: number = req.user?.id;
+    const { openingBalance = 0, cashboxName = "Каса", propertyId, businessUnitId } = req.body;
+    const existing = await db.execute(sql`SELECT id FROM cashbox_sessions WHERE organization_id = ${orgId} AND status = 'open' LIMIT 1`);
+    if (existing.rows.length) return res.status(400).json({ error: "Вже є відкрита каса" });
+    const r = await db.execute(sql`
+      INSERT INTO cashbox_sessions (organization_id, property_id, business_unit_id, cashbox_name, cashier_id, opened_at, opening_balance, cash_in, cash_out, status, created_at)
+      VALUES (${orgId}, ${propertyId ?? null}, ${businessUnitId ?? null}, ${cashboxName}, ${userId}, NOW(), ${openingBalance}, 0, 0, 'open', NOW())
+      RETURNING *
+    `);
+    res.json({ session: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/cashbox/:id/close", async (req: any, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const orgId: number = req.user?.organizationId;
+    const { closingBalance, notes } = req.body;
+    const sess = await db.execute(sql`SELECT * FROM cashbox_sessions WHERE id = ${id} AND organization_id = ${orgId}`);
+    const s = sess.rows[0] as any;
+    if (!s) return res.status(404).json({ error: "Сесія не знайдена" });
+    const expected = parseFloat(s.opening_balance || 0) + parseFloat(s.cash_in || 0) - parseFloat(s.cash_out || 0);
+    const closing = closingBalance !== undefined ? parseFloat(closingBalance) : expected;
+    const discrepancy = closing - expected;
+    await db.execute(sql`
+      UPDATE cashbox_sessions SET status = 'closed', closed_at = NOW(), closing_balance = ${closing}, expected_balance = ${expected}, discrepancy = ${discrepancy}, notes = ${notes ?? null}
+      WHERE id = ${id}
+    `);
+    res.json({ success: true, expected, closing, discrepancy });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/cashbox/:id/cash-movement", async (req: any, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { type, amount } = req.body;
+    if (type === 'in') await db.execute(sql`UPDATE cashbox_sessions SET cash_in = cash_in + ${parseFloat(amount)} WHERE id = ${id}`);
+    else await db.execute(sql`UPDATE cashbox_sessions SET cash_out = cash_out + ${parseFloat(amount)} WHERE id = ${id}`);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── REFUND REQUESTS ──────────────────────────────────────────────────────────
+router.get("/refund-requests", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { status } = req.query as any;
+    const cond = status ? sql`AND rr.status = ${status}` : sql``;
+    const requests = await db.execute(sql`
+      SELECT rr.*, u1.name as requested_by_name, u2.name as approved_by_name,
+        b.booking_ref, TRIM(COALESCE(b.first_name,'') || ' ' || COALESCE(b.last_name,'')) as guest_name,
+        p.receipt_number as original_receipt
+      FROM refund_requests rr
+      LEFT JOIN users u1 ON u1.id = rr.requested_by
+      LEFT JOIN users u2 ON u2.id = rr.approved_by
+      LEFT JOIN bookings b ON b.id = rr.booking_id
+      LEFT JOIN payments p ON p.id = rr.payment_id
+      WHERE rr.organization_id = ${orgId} ${cond}
+      ORDER BY rr.created_at DESC
+    `);
+    res.json({ requests: requests.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/refund-requests", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const userId: number = req.user?.id;
+    const { paymentId, invoiceId, bookingId, amount, reason, refundMethod = "cash" } = req.body;
+    if (!amount || !reason) return res.status(400).json({ error: "amount та reason обов'язкові" });
+    const r = await db.execute(sql`
+      INSERT INTO refund_requests (organization_id, payment_id, invoice_id, booking_id, requested_by, amount, currency, reason, status, refund_method, created_at, updated_at)
+      VALUES (${orgId}, ${paymentId ?? null}, ${invoiceId ?? null}, ${bookingId ?? null}, ${userId}, ${parseFloat(amount)}, 'UAH', ${reason}, 'pending', ${refundMethod}, NOW(), NOW())
+      RETURNING *
+    `);
+    res.json({ request: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch("/refund-requests/:id", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const userId: number = req.user?.id;
+    const id = parseInt(req.params.id);
+    const { action, notes } = req.body;
+
+    if (action === 'approve') {
+      await db.execute(sql`UPDATE refund_requests SET status = 'approved', approved_by = ${userId}, notes = ${notes ?? null}, updated_at = NOW() WHERE id = ${id} AND organization_id = ${orgId}`);
+    } else if (action === 'reject') {
+      await db.execute(sql`UPDATE refund_requests SET status = 'rejected', approved_by = ${userId}, notes = ${notes ?? null}, updated_at = NOW() WHERE id = ${id} AND organization_id = ${orgId}`);
+    } else if (action === 'process') {
+      const rr = await db.execute(sql`SELECT * FROM refund_requests WHERE id = ${id} AND organization_id = ${orgId}`);
+      const req2 = rr.rows[0] as any;
+      if (!req2) return res.status(404).json({ error: "Заявку не знайдено" });
+      if (req2.payment_id) {
+        const receipt = `REF-RQ-${Date.now()}`;
+        const orig = await db.execute(sql`SELECT * FROM payments WHERE id = ${req2.payment_id}`);
+        const origP = orig.rows[0] as any;
+        if (origP) {
+          const [refund] = await db.insert(paymentsTable).values({
+            bookingId: origP.booking_id, amount: req2.amount.toString(),
+            method: origP.method, status: "refunded", paymentType: "refund" as any,
+            refundOfId: req2.payment_id, receiptNumber: receipt, processedAt: new Date(),
+            staffId: userId, currency: "UAH", description: `Повернення (заявка #${id}): ${req2.reason}`,
+            netAmount: req2.amount.toString(),
+          } as any).returning();
+          await db.execute(sql`UPDATE payments SET status = 'refunded' WHERE id = ${req2.payment_id}`);
+          await updateBookingPayment(origP.booking_id, parseFloat(req2.amount), "refund");
+          await db.execute(sql`UPDATE refund_requests SET status = 'processed', refund_payment_id = ${refund.id}, processed_at = NOW(), updated_at = NOW() WHERE id = ${id}`);
+        }
+      }
+    }
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── REVENUE CATEGORIES ───────────────────────────────────────────────────────
+router.get("/revenue-categories", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const cats = await db.execute(sql`SELECT * FROM revenue_categories WHERE organization_id = ${orgId} AND is_active = true ORDER BY sort_order, name`);
+    res.json({ categories: cats.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/revenue-categories", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { name, code, type = "accommodation", description, vatRate = "20", sortOrder = 0 } = req.body;
+    const r = await db.execute(sql`
+      INSERT INTO revenue_categories (organization_id, name, code, type, description, vat_rate, sort_order, is_active, created_at)
+      VALUES (${orgId}, ${name}, ${code ?? null}, ${type}, ${description ?? null}, ${vatRate}, ${sortOrder}, true, NOW())
+      RETURNING *
+    `);
+    res.json({ category: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch("/revenue-categories/:id", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { name, code, type, description, vatRate, sortOrder, isActive } = req.body;
+    const updates: string[] = [];
+    if (name !== undefined) updates.push(`name = '${name}'`);
+    if (code !== undefined) updates.push(`code = ${code ? `'${code}'` : 'NULL'}`);
+    if (type !== undefined) updates.push(`type = '${type}'`);
+    if (vatRate !== undefined) updates.push(`vat_rate = '${vatRate}'`);
+    if (isActive !== undefined) updates.push(`is_active = ${isActive}`);
+    if (updates.length === 0) return res.json({ success: true });
+    await db.execute(sql`UPDATE revenue_categories SET ${sql.raw(updates.join(', '))} WHERE id = ${parseInt(req.params.id)} AND organization_id = ${orgId}`);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── BUSINESS UNITS ───────────────────────────────────────────────────────────
+router.get("/business-units", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const units = await db.execute(sql`
+      SELECT bu.*, p.name as property_name FROM business_units bu
+      LEFT JOIN properties p ON p.id = bu.property_id
+      WHERE bu.organization_id = ${orgId} AND bu.is_active = true ORDER BY bu.name
+    `);
+    res.json({ units: units.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/business-units", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { name, code, type = "department", propertyId, managerName, costCenter } = req.body;
+    const r = await db.execute(sql`
+      INSERT INTO business_units (organization_id, property_id, name, code, type, manager_name, cost_center, is_active, created_at)
+      VALUES (${orgId}, ${propertyId ?? null}, ${name}, ${code ?? null}, ${type}, ${managerName ?? null}, ${costCenter ?? null}, true, NOW())
+      RETURNING *
+    `);
+    res.json({ unit: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── TAX CATEGORIES ───────────────────────────────────────────────────────────
+router.get("/tax-categories", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const cats = await db.execute(sql`SELECT * FROM tax_categories WHERE organization_id = ${orgId} AND is_active = true ORDER BY name`);
+    res.json({ categories: cats.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/tax-categories", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { name, code, rate = 20, type = "vat", appliesTo = "all", notes } = req.body;
+    const r = await db.execute(sql`
+      INSERT INTO tax_categories (organization_id, name, code, rate, type, applies_to, notes, is_active, created_at)
+      VALUES (${orgId}, ${name}, ${code ?? null}, ${parseFloat(rate)}, ${type}, ${appliesTo}, ${notes ?? null}, true, NOW())
+      RETURNING *
+    `);
+    res.json({ category: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── LEGAL ENTITY PAYMENT ROUTING ────────────────────────────────────────────
+router.get("/legal-entities", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const entities = await db.execute(sql`
+      SELECT le.*,
+        (SELECT COUNT(*) FROM payments p WHERE p.legal_entity_id = le.id) as payments_count,
+        (SELECT COALESCE(SUM(amount),0) FROM payments p WHERE p.legal_entity_id = le.id AND p.status::text = 'completed' AND p.payment_type::text != 'refund') as total_collected
+      FROM legal_entities le
+      WHERE le.organization_id = ${orgId}
+      ORDER BY le.is_default DESC, le.name
+    `);
+    res.json({ entities: entities.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/legal-entities", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { name, type = "fop", edrpou, iban, bank, mfo, ipn, vatNumber, isVatPayer = false, director, accountant, address, liqpayPublicKey, liqpayPrivateKey, fondyMerchantId, fondySecretKey } = req.body;
+    const r = await db.execute(sql`
+      INSERT INTO legal_entities (organization_id, name, type, edrpou, iban, bank, mfo, ipn, vat_number, is_vat_payer, director, accountant, address, liqpay_public_key, liqpay_private_key, fondy_merchant_id, fondy_secret_key, is_default, is_active, created_at, updated_at)
+      VALUES (${orgId}, ${name}, ${type}, ${edrpou ?? null}, ${iban ?? null}, ${bank ?? null}, ${mfo ?? null}, ${ipn ?? null}, ${vatNumber ?? null}, ${isVatPayer}, ${director ?? null}, ${accountant ?? null}, ${address ?? null}, ${liqpayPublicKey ?? null}, ${liqpayPrivateKey ?? null}, ${fondyMerchantId ?? null}, ${fondySecretKey ?? null}, FALSE, TRUE, NOW(), NOW())
+      RETURNING *
+    `);
+    res.json({ entity: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch("/legal-entities/:id", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { name, edrpou, iban, bank, mfo, ipn, vatNumber, isVatPayer, director, accountant, address, liqpayPublicKey, liqpayPrivateKey, fondyMerchantId, fondySecretKey, isDefault, isActive } = req.body;
+    const fields: string[] = ['updated_at = NOW()'];
+    if (name !== undefined) fields.push(`name = ${db.execute(sql`${name}`).then ? `'${name}'` : 'NULL'}`);
+    // Use raw sql for safe update
+    const setClauses: ReturnType<typeof sql>[] = [sql`updated_at = NOW()`];
+    if (name !== undefined) setClauses.push(sql`name = ${name}`);
+    if (edrpou !== undefined) setClauses.push(sql`edrpou = ${edrpou}`);
+    if (iban !== undefined) setClauses.push(sql`iban = ${iban}`);
+    if (bank !== undefined) setClauses.push(sql`bank = ${bank}`);
+    if (mfo !== undefined) setClauses.push(sql`mfo = ${mfo}`);
+    if (ipn !== undefined) setClauses.push(sql`ipn = ${ipn}`);
+    if (vatNumber !== undefined) setClauses.push(sql`vat_number = ${vatNumber}`);
+    if (isVatPayer !== undefined) setClauses.push(sql`is_vat_payer = ${isVatPayer}`);
+    if (director !== undefined) setClauses.push(sql`director = ${director}`);
+    if (accountant !== undefined) setClauses.push(sql`accountant = ${accountant}`);
+    if (address !== undefined) setClauses.push(sql`address = ${address}`);
+    if (liqpayPublicKey !== undefined) setClauses.push(sql`liqpay_public_key = ${liqpayPublicKey}`);
+    if (liqpayPrivateKey !== undefined) setClauses.push(sql`liqpay_private_key = ${liqpayPrivateKey}`);
+    if (isDefault !== undefined) {
+      if (isDefault) await db.execute(sql`UPDATE legal_entities SET is_default = FALSE WHERE organization_id = ${orgId}`);
+      setClauses.push(sql`is_default = ${isDefault}`);
+    }
+    if (isActive !== undefined) setClauses.push(sql`is_active = ${isActive}`);
+
+    const setStr = setClauses.reduce((acc, s, i) => i === 0 ? s : sql`${acc}, ${s}`, sql``);
+    await db.execute(sql`UPDATE legal_entities SET ${setStr} WHERE id = ${id} AND organization_id = ${orgId}`);
+    const updated = await db.execute(sql`SELECT * FROM legal_entities WHERE id = ${id}`);
+    res.json({ entity: updated.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── EXPORT TO ACCOUNTING ─────────────────────────────────────────────────────
+router.get("/export", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const { from, to, format = "json", type = "payments" } = req.query as any;
+
+    const dateCond = from && to
+      ? sql`AND created_at >= ${from}::date AND created_at < ${to}::date + interval '1 day'`
+      : sql`AND created_at >= CURRENT_DATE - interval '30 days'`;
+
+    let data: any[] = [];
+
+    if (type === "payments") {
+      const r = await db.execute(sql`
+        SELECT p.id, p.created_at::date as date, p.receipt_number, p.amount, p.currency,
+          p.method::text as method, p.payment_type::text as type, p.status::text as status,
+          p.description, p.fee_amount, p.net_amount,
+          b.booking_ref, TRIM(COALESCE(b.first_name,'') || ' ' || COALESCE(b.last_name,'')) as guest,
+          le.name as legal_entity, le.edrpou
+        FROM payments p
+        JOIN bookings b ON b.id = p.booking_id
+        ${ORG_JOIN}
+        LEFT JOIN legal_entities le ON le.id = p.legal_entity_id
+        WHERE _p.organization_id = ${orgId}
+        ${dateCond}
+        ORDER BY p.created_at
+      `);
+      data = r.rows as any[];
+    } else if (type === "invoices") {
+      const r = await db.execute(sql`
+        SELECT i.id, i.created_at::date as date, i.invoice_number, i.amount, i.vat_amount, i.currency,
+          i.status::text as status, i.invoice_type::text as type, i.counterparty_name, i.counterparty_edrpou,
+          b.booking_ref, le.name as legal_entity
+        FROM invoices i
+        JOIN bookings b ON b.id = i.booking_id
+        ${ORG_JOIN}
+        LEFT JOIN legal_entities le ON le.id = i.legal_entity_id
+        WHERE _p.organization_id = ${orgId}
+        ${dateCond}
+        ORDER BY i.created_at
+      `);
+      data = r.rows as any[];
+    } else if (type === "folio") {
+      const r = await db.execute(sql`
+        SELECT fe.id, fe.created_at::date as date, fe.entry_type, fe.description, fe.quantity,
+          fe.unit_price, fe.total_amount, fe.vat_rate, fe.vat_amount, fe.currency,
+          b.booking_ref, TRIM(COALESCE(b.first_name,'') || ' ' || COALESCE(b.last_name,'')) as guest,
+          rc.name as revenue_category, rc.code as revenue_code, bu.name as business_unit
+        FROM folio_entries fe
+        JOIN bookings b ON b.id = fe.booking_id
+        ${ORG_JOIN}
+        LEFT JOIN revenue_categories rc ON rc.id = fe.revenue_category_id
+        LEFT JOIN business_units bu ON bu.id = fe.business_unit_id
+        WHERE _p.organization_id = ${orgId}
+        ${dateCond}
+        ORDER BY fe.created_at
+      `);
+      data = r.rows as any[];
+    }
+
+    if (format === "csv") {
+      if (!data.length) return res.type("text/csv").send("no data");
+      const headers = Object.keys(data[0]).join(",");
+      const rows = data.map(row => Object.values(row).map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+      res.type("text/csv")
+         .header("Content-Disposition", `attachment; filename="finance-${type}-export.csv"`)
+         .send([headers, ...rows].join("\n"));
+    } else {
+      res.json({ data, count: data.length, exportedAt: new Date().toISOString() });
+    }
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── FINANCIAL CONTROLS / STAFF VISIBILITY ───────────────────────────────────
+router.get("/controls/overview", async (req: any, res) => {
+  try {
+    const orgId: number = req.user?.organizationId;
+    const role = req.user?.role;
+    const restrictedRoles = ["reception", "housekeeping"];
+    const isRestricted = restrictedRoles.includes(role);
+
+    const [todayStats, openCashbox, pendingRefunds, overdueInvoices] = await Promise.all([
+      db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE p.payment_type::text != 'refund') as tx_today,
+          COALESCE(SUM(p.amount) FILTER (WHERE p.payment_type::text = 'payment' AND p.status::text = 'completed'), 0) as collected_today,
+          COALESCE(SUM(p.amount) FILTER (WHERE p.method::text = 'cash'), 0) as cash_today,
+          COALESCE(SUM(p.amount) FILTER (WHERE p.method::text = 'card'), 0) as card_today,
+          COALESCE(SUM(p.amount) FILTER (WHERE p.method::text IN ('liqpay','stripe')), 0) as online_today,
+          COALESCE(SUM(p.amount) FILTER (WHERE p.method::text = 'bank_transfer'), 0) as transfer_today
+        FROM payments p
+        JOIN bookings b ON b.id = p.booking_id
+        ${ORG_JOIN}
+        WHERE _p.organization_id = ${orgId} AND p.created_at::date = CURRENT_DATE AND p.status::text = 'completed'
+      `),
+      db.execute(sql`SELECT cs.*, u.name as cashier_name FROM cashbox_sessions cs LEFT JOIN users u ON u.id = cs.cashier_id WHERE cs.organization_id = ${orgId} AND cs.status = 'open' LIMIT 1`),
+      isRestricted ? Promise.resolve({ rows: [] }) : db.execute(sql`SELECT COUNT(*) as cnt, SUM(amount) as amt FROM refund_requests WHERE organization_id = ${orgId} AND status = 'pending'`),
+      isRestricted ? Promise.resolve({ rows: [] }) : db.execute(sql`
+        SELECT COUNT(*) as cnt, SUM(i.amount - i.paid_amount) as overdue_amt
+        FROM invoices i JOIN bookings b ON b.id = i.booking_id ${ORG_JOIN}
+        WHERE _p.organization_id = ${orgId} AND i.status::text IN ('pending','overdue') AND i.due_date < NOW()
+      `),
+    ]);
+
+    res.json({
+      today: todayStats.rows[0] || {},
+      openCashbox: openCashbox.rows[0] || null,
+      pendingRefunds: isRestricted ? null : (pendingRefunds.rows[0] || {}),
+      overdueInvoices: isRestricted ? null : (overdueInvoices.rows[0] || {}),
+      userRole: role,
+      isRestricted,
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
+
