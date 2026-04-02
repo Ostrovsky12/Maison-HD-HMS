@@ -130,7 +130,10 @@ export default function GuestPortalPage() {
     firstName: "", lastName: "", middleName: "", phone: "", email: "",
     passportType: "passport", passportNumber: "", nationality: "UA",
     birthDate: "", arrivalTime: "14:00", specialRequests: "",
+    carNumber: "", hasPet: false, petType: "", petName: "",
+    coGuests: [] as Array<{ firstName: string; lastName: string; passportNumber: string }>,
   });
+  const [checkinStep, setCheckinStep] = useState(1);
   const [checkinSubmitting, setCheckinSubmitting] = useState(false);
   const [checkinDone, setCheckinDone] = useState(false);
 
@@ -540,51 +543,163 @@ export default function GuestPortalPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="bg-blue-50 rounded-xl p-3">
-                  <p className="text-blue-700 text-sm font-medium">🏨 Онлайн заїзд</p>
-                  <p className="text-blue-600 text-xs mt-1">Заповніть форму заздалегідь — економте час на рецепції та отримайте 50 бонусних балів</p>
+                {/* Header */}
+                <div className="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl p-4 text-white">
+                  <p className="font-bold">🏨 Онлайн реєстрація</p>
+                  <p className="text-xs opacity-80 mt-0.5">Заповніть заздалегідь — економте час на рецепції та отримайте 50 бонусних балів</p>
+                  {/* Steps */}
+                  <div className="flex items-center gap-1 mt-3">
+                    {[1,2,3,4].map(s => (
+                      <div key={s} className="flex items-center">
+                        <div className={`w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center transition-all ${s===checkinStep?"bg-white text-blue-600":s<checkinStep?"bg-white/40 text-white":"bg-white/20 text-white/60"}`}>
+                          {s < checkinStep ? "✓" : s}
+                        </div>
+                        {s < 4 && <div className={`w-6 h-0.5 ${s < checkinStep ? "bg-white/60" : "bg-white/20"}`} />}
+                      </div>
+                    ))}
+                    <span className="text-[10px] opacity-70 ml-2">
+                      {checkinStep===1?"Особисті дані":checkinStep===2?"Документ та заїзд":checkinStep===3?"Супутники та авто":"Підтвердження"}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div><Label className="text-xs">Ім'я *</Label><Input value={checkinForm.firstName} onChange={e => setCheckinForm(p => ({ ...p, firstName: e.target.value }))} placeholder="Іван" /></div>
-                  <div><Label className="text-xs">Прізвище *</Label><Input value={checkinForm.lastName} onChange={e => setCheckinForm(p => ({ ...p, lastName: e.target.value }))} placeholder="Петренко" /></div>
-                </div>
-                <div><Label className="text-xs">По-батькові</Label><Input value={checkinForm.middleName} onChange={e => setCheckinForm(p => ({ ...p, middleName: e.target.value }))} placeholder="Олександрович" /></div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><Label className="text-xs">Телефон *</Label><Input value={checkinForm.phone} onChange={e => setCheckinForm(p => ({ ...p, phone: e.target.value }))} placeholder="+380XXXXXXXXX" /></div>
-                  <div><Label className="text-xs">Email</Label><Input value={checkinForm.email} onChange={e => setCheckinForm(p => ({ ...p, email: e.target.value }))} placeholder="email@gmail.com" /></div>
-                </div>
-                <div><Label className="text-xs">Дата народження</Label><Input type="date" value={checkinForm.birthDate} onChange={e => setCheckinForm(p => ({ ...p, birthDate: e.target.value }))} /></div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Тип документа</Label>
-                    <Select value={checkinForm.passportType} onValueChange={v => setCheckinForm(p => ({ ...p, passportType: v }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="passport">Паспорт</SelectItem>
-                        <SelectItem value="id_card">ID-картка</SelectItem>
-                        <SelectItem value="international">Закордонний паспорт</SelectItem>
-                        <SelectItem value="other">Інше</SelectItem>
-                      </SelectContent>
-                    </Select>
+                {/* STEP 1: Personal info */}
+                {checkinStep === 1 && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><Label className="text-xs">Ім'я *</Label><Input value={checkinForm.firstName} onChange={e => setCheckinForm(p => ({ ...p, firstName: e.target.value }))} placeholder="Іван" /></div>
+                      <div><Label className="text-xs">Прізвище *</Label><Input value={checkinForm.lastName} onChange={e => setCheckinForm(p => ({ ...p, lastName: e.target.value }))} placeholder="Петренко" /></div>
+                    </div>
+                    <div><Label className="text-xs">По-батькові</Label><Input value={checkinForm.middleName} onChange={e => setCheckinForm(p => ({ ...p, middleName: e.target.value }))} placeholder="Олександрович" /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><Label className="text-xs">Телефон *</Label><Input value={checkinForm.phone} onChange={e => setCheckinForm(p => ({ ...p, phone: e.target.value }))} placeholder="+380…" /></div>
+                      <div><Label className="text-xs">Email</Label><Input type="email" value={checkinForm.email} onChange={e => setCheckinForm(p => ({ ...p, email: e.target.value }))} placeholder="email@gmail.com" /></div>
+                    </div>
+                    <div><Label className="text-xs">Дата народження</Label><Input type="date" value={checkinForm.birthDate} onChange={e => setCheckinForm(p => ({ ...p, birthDate: e.target.value }))} /></div>
+                    <Button className="w-full" disabled={!checkinForm.firstName || !checkinForm.lastName} onClick={() => setCheckinStep(2)}>Далі →</Button>
                   </div>
-                  <div><Label className="text-xs">Номер документа</Label><Input value={checkinForm.passportNumber} onChange={e => setCheckinForm(p => ({ ...p, passportNumber: e.target.value }))} placeholder="АА123456" /></div>
-                </div>
-                <div>
-                  <Label className="text-xs">Очікуваний час заїзду</Label>
-                  <Select value={checkinForm.arrivalTime} onValueChange={v => setCheckinForm(p => ({ ...p, arrivalTime: v }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00","23:00"].map(t => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                )}
+
+                {/* STEP 2: Document + arrival */}
+                {checkinStep === 2 && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-xs">Тип документа</Label>
+                        <Select value={checkinForm.passportType} onValueChange={v => setCheckinForm(p => ({ ...p, passportType: v }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="passport">Паспорт</SelectItem>
+                            <SelectItem value="id_card">ID-картка</SelectItem>
+                            <SelectItem value="international">Закордонний паспорт</SelectItem>
+                            <SelectItem value="other">Інше</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div><Label className="text-xs">Номер документа</Label><Input value={checkinForm.passportNumber} onChange={e => setCheckinForm(p => ({ ...p, passportNumber: e.target.value }))} placeholder="АА123456" /></div>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Очікуваний час заїзду</Label>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {["10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00","23:00"].map(t => (
+                          <button key={t} onClick={() => setCheckinForm(p => ({ ...p, arrivalTime: t }))}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${checkinForm.arrivalTime===t?"bg-blue-600 text-white border-blue-600":"bg-gray-50 border-gray-200 text-gray-600 hover:border-blue-300"}`}>{t}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div><Label className="text-xs">Особливі побажання (поверх, тип ліжка, алергії…)</Label><Textarea value={checkinForm.specialRequests} onChange={e => setCheckinForm(p => ({ ...p, specialRequests: e.target.value }))} rows={2} className="mt-1 resize-none" /></div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1" onClick={() => setCheckinStep(1)}>← Назад</Button>
+                      <Button className="flex-1" onClick={() => setCheckinStep(3)}>Далі →</Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 3: Co-guests, car, pet */}
+                {checkinStep === 3 && (
+                  <div className="space-y-3">
+                    {/* Car */}
+                    <div className="bg-gray-50 rounded-xl p-3">
+                      <Label className="text-xs font-semibold text-gray-700">🚗 Автомобіль</Label>
+                      <Input className="mt-1" value={checkinForm.carNumber} onChange={e => setCheckinForm(p => ({ ...p, carNumber: e.target.value }))} placeholder="AA 1234 BB (номерний знак)" />
+                    </div>
+
+                    {/* Pet */}
+                    <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" id="hasPet" checked={checkinForm.hasPet} onChange={e => setCheckinForm(p => ({ ...p, hasPet: e.target.checked }))} className="accent-blue-600" />
+                        <Label htmlFor="hasPet" className="text-xs font-semibold text-gray-700 cursor-pointer">🐾 Із домашнім вихованцем</Label>
+                      </div>
+                      {checkinForm.hasPet && (
+                        <div className="grid grid-cols-2 gap-2 mt-1">
+                          <div><Label className="text-xs">Тип</Label><Input value={checkinForm.petType} onChange={e => setCheckinForm(p => ({ ...p, petType: e.target.value }))} placeholder="Собака / Кіт…" /></div>
+                          <div><Label className="text-xs">Кличка</Label><Input value={checkinForm.petName} onChange={e => setCheckinForm(p => ({ ...p, petName: e.target.value }))} placeholder="Барсик" /></div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Co-guests */}
+                    <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold text-gray-700">👨‍👩‍👧 Супутники (co-guests)</Label>
+                        <button onClick={() => setCheckinForm(p => ({ ...p, coGuests: [...p.coGuests, { firstName: "", lastName: "", passportNumber: "" }] }))}
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-0.5">+ Додати</button>
+                      </div>
+                      {checkinForm.coGuests.map((cg, idx) => (
+                        <div key={idx} className="bg-white rounded-lg p-2 space-y-1.5 border border-gray-200">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-gray-400 font-medium">Гість {idx + 2}</span>
+                            <button onClick={() => setCheckinForm(p => ({ ...p, coGuests: p.coGuests.filter((_, i) => i !== idx) }))} className="text-red-400 text-xs hover:text-red-600">✕</button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <Input className="text-xs h-7" placeholder="Ім'я" value={cg.firstName} onChange={e => setCheckinForm(p => ({ ...p, coGuests: p.coGuests.map((c, i) => i===idx?{...c,firstName:e.target.value}:c) }))} />
+                            <Input className="text-xs h-7" placeholder="Прізвище" value={cg.lastName} onChange={e => setCheckinForm(p => ({ ...p, coGuests: p.coGuests.map((c, i) => i===idx?{...c,lastName:e.target.value}:c) }))} />
+                          </div>
+                          <Input className="text-xs h-7" placeholder="Номер паспорту" value={cg.passportNumber} onChange={e => setCheckinForm(p => ({ ...p, coGuests: p.coGuests.map((c, i) => i===idx?{...c,passportNumber:e.target.value}:c) }))} />
+                        </div>
                       ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div><Label className="text-xs">Особливі побажання</Label><Textarea value={checkinForm.specialRequests} onChange={e => setCheckinForm(p => ({ ...p, specialRequests: e.target.value }))} placeholder="Алергія на пух, ліжко до вікна, тощо…" rows={3} /></div>
-                <Button onClick={submitCheckin} disabled={checkinSubmitting || !checkinForm.firstName || !checkinForm.lastName} className="w-full">
-                  {checkinSubmitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Подаємо…</> : <><UserCheck className="h-4 w-4 mr-2" />Підтвердити онлайн заїзд</>}
-                </Button>
+                      {checkinForm.coGuests.length === 0 && <p className="text-xs text-gray-400">Якщо подорожуєте самі — залиште порожнім</p>}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1" onClick={() => setCheckinStep(2)}>← Назад</Button>
+                      <Button className="flex-1" onClick={() => setCheckinStep(4)}>Далі →</Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 4: Review + submit */}
+                {checkinStep === 4 && (
+                  <div className="space-y-3">
+                    <div className="bg-gray-50 rounded-xl p-4 space-y-1.5 text-sm">
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Підтвердіть дані</p>
+                      {[
+                        ["Ім'я", `${checkinForm.firstName} ${checkinForm.lastName}`],
+                        ["По-батькові", checkinForm.middleName],
+                        ["Телефон", checkinForm.phone],
+                        ["Документ", `${checkinForm.passportType} ${checkinForm.passportNumber}`],
+                        ["Час заїзду", checkinForm.arrivalTime],
+                        ["Авто", checkinForm.carNumber],
+                        ["Вихованець", checkinForm.hasPet ? `${checkinForm.petType} (${checkinForm.petName})` : "—"],
+                        ["Супутників", String(checkinForm.coGuests.length)],
+                      ].filter(([,v]) => v).map(([l, v]) => (
+                        <div key={l} className="flex justify-between border-b border-gray-100 pb-1 last:border-0">
+                          <span className="text-gray-500">{l}</span>
+                          <span className="font-medium text-gray-800">{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+                      ✅ Форма буде надіслана готелю та підтверджена за 2 год до заїзду.
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1" onClick={() => setCheckinStep(3)}>← Назад</Button>
+                      <Button onClick={submitCheckin} disabled={checkinSubmitting || !checkinForm.firstName || !checkinForm.lastName} className="flex-1 bg-emerald-600 hover:bg-emerald-700">
+                        {checkinSubmitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Подаємо…</> : <><UserCheck className="h-4 w-4 mr-2" />Підтвердити заїзд</>}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
