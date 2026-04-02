@@ -32,6 +32,7 @@ import {
   Monitor,
   Brain,
   Heart,
+  Landmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -62,6 +63,7 @@ const allNavItems = [
   { name: "Events & Banquet", path: "/events", icon: PartyPopper, roles: null },
   { name: "F&B / Ресторан", path: "/fb", icon: UtensilsCrossed, roles: null },
   { name: "Inbox", path: "/inbox", icon: MessageSquare, roles: null },
+  { name: "Бухгалтерія", path: "/accounting", icon: Landmark, roles: ["super_admin", "owner", "manager"] },
   { name: "Рахунки", path: "/invoices", icon: FileText, roles: null },
   { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },
   { name: "Аналітика", path: "/analytics", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
