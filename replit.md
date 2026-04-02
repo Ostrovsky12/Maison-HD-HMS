@@ -446,6 +446,57 @@ send_inbox_message | create_hk_task | create_notification | upsell_spa | upsell_
 
 ---
 
+## Stage 52 — AI Hub (8 AI модулів)
+
+### OpenAI Integration
+- Uses Replit AI Integrations proxy (`AI_INTEGRATIONS_OPENAI_BASE_URL` + `AI_INTEGRATIONS_OPENAI_API_KEY`)
+- Model: `gpt-5.2` for all modules (switched from gpt-5-mini for better JSON instruction following)
+- Packages: `@workspace/integrations-openai-ai-server`, `@workspace/integrations-openai-ai-react`
+
+### New DB Tables (lib/db/src/schema/ai-knowledge.ts)
+- `ai_knowledge_articles` — organizationId, category (general/procedures/faq/policies/services/emergencies/local-info), title, content, tags
+- `ai_insights_cache` — organizationId, insightType, content, generatedAt
+- 7 seed articles: check-in/check-out procedures, Wi-Fi info, hotel policies, SPA services, fire emergency, local attractions
+
+### API Routes (`/api/ai/*`) — requireAuth
+- `POST /chat-reply` — AI generates reply for inbox conversation (uses messagesTable for history)
+- `POST /sales-suggest` — AI upsell recommendations based on guest+booking context
+- `POST /guest-summary/:guestId` — AI guest profile analysis (summary, preferences, risks, recommendations)
+- `GET /admin-tips` — AI admin tips for today (uses live hotel stats: check-ins, check-outs, HK, inbox)
+- `GET /owner-insights` — AI strategic insights with KPI analysis, opportunities, strategic recommendations
+- `GET /knowledge` — list knowledge base articles
+- `POST /knowledge` — create article
+- `PUT /knowledge/:id` — update article
+- `DELETE /knowledge/:id` — delete article
+- `POST /knowledge/search` — AI-powered semantic search over knowledge base
+- `POST /route-task` — AI task routing with department, priority, assignTo, deadline, reasoning
+- `POST /copilot` — streaming SSE chat for staff internal AI assistant
+
+### JSON Parsing (extractJSON helper)
+CRITICAL: GPT models often return markdown code fences or wrapped objects. `extractJSON(raw, arrayMode)` handles:
+1. Strip ```json fences
+2. Try direct JSON.parse
+3. If arrayMode + object returned → extract first array value
+4. Fallback regex for embedded arrays/objects
+
+### UI (`/maison-hd/ai-hub`) — 8 tabs
+- **Copilot tab**: streaming chat UI with quick question buttons, clear chat
+- **AI Чат tab**: select inbox conversation → generate AI reply → copy to clipboard
+- **Sales AI tab**: select guest → AI generates 3-5 upsell suggestions with priority and revenue estimate
+- **Гість AI tab**: select guest → AI profile (summary, preferences, risks, recommendations, VIP notes)
+- **Поради tab**: auto-loaded admin tips on open, refresh button, live stats cards + tip cards by priority
+- **Insights tab**: auto-loaded owner insights, executive summary, KPI analysis, opportunities, strategic recommendations
+- **База знань tab**: CRUD articles, AI semantic search bar, category filter, tag display
+- **Routing tab**: describe task → AI routes to department with priority/deadline/steps, history sidebar
+- **Navigation**: "AI Hub" (Brain icon), roles: super_admin/owner/manager
+
+### CRITICAL: gpt-5.2 vs gpt-5-mini for JSON output
+When using gpt-5-mini, models tend to return `[]` or `{}` for JSON-format prompts.
+Use `gpt-5.2` for any endpoint that requires structured JSON output.
+Always use `extractJSON(raw, arrayMode)` instead of manual regex matching.
+
+---
+
 ## Stage 44 — Owner/HQ Command Center Dashboard
 
 ### API Route (`/api/hq/overview`) — requireAuth

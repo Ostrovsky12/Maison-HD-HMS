@@ -28,3 +28,4 @@ export * from "./rentals";
 export * from "./ota";
 export * from "./revenue";
 export * from "./tv";
+export * from "./ai-knowledge";

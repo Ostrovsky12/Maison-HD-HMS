@@ -30,6 +30,7 @@ import {
   Globe,
   Smartphone,
   Monitor,
+  Brain,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,7 @@ import { uk } from "date-fns/locale";
 const allNavItems = [
   { name: "Command Center", path: "/hq", icon: Zap, roles: ["super_admin", "owner", "manager"] },
   { name: "AI Automation", path: "/automation", icon: Bot, roles: ["super_admin", "owner", "manager"] },
+  { name: "AI Hub", path: "/ai-hub", icon: Brain, roles: ["super_admin", "owner", "manager"] },
   { name: "Онлайн-бронювання", path: "/book", icon: Sparkles, roles: ["super_admin", "owner", "manager", "reception"] },
   { name: "Оренда", path: "/rentals", icon: Building2, roles: ["super_admin", "owner", "manager"] },
   { name: "OTA Channels", path: "/ota", icon: Globe, roles: ["super_admin", "owner", "manager"] },
