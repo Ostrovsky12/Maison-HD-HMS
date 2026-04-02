@@ -51,6 +51,7 @@ import ActivitiesPage from "@/pages/activities";
 import AccommodationPage from "@/pages/accommodation";
 import StaffConsolePage from "@/pages/staff-console";
 import PricingPage from "@/pages/pricing";
+import PitchPage from "@/pages/pitch";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -126,6 +127,7 @@ function Router() {
       <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
       <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} /></Route>
       <Route path="/admin"><ProtectedRoute component={AdminPage} roles={["super_admin"]} /></Route>
+      <Route path="/pitch"><ProtectedRoute component={PitchPage} roles={["super_admin"]} /></Route>
       <Route path="/demo-requests"><ProtectedRoute component={DemoRequestsPage} roles={["super_admin"]} /></Route>
       <Route path="/migration"><ProtectedRoute component={MigrationPage} roles={["super_admin", "owner", "manager"]} /></Route>
       <Route path="/demo" component={DemoPage} />

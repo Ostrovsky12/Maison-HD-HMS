@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -82,6 +83,7 @@ function daysSince(d: string) {
 
 // ── MAIN EXPORT ───────────────────────────────────────────────────────────────
 export default function AdminPage() {
+  const [, navigate] = useLocation();
   const [tab, setTab] = useState("overview");
   const [platform, setPlatform] = useState<any>(null);
   const [loadingPlatform, setLoadingPlatform] = useState(false);
@@ -133,6 +135,10 @@ export default function AdminPage() {
                 </div>
                 <Button variant="ghost" size="sm" onClick={loadPlatform} disabled={loadingPlatform} className="text-white/70 hover:text-white">
                   <RefreshCw className={`w-4 h-4 ${loadingPlatform ? "animate-spin" : ""}`} />
+                </Button>
+                <Button size="sm" onClick={() => navigate("/pitch")}
+                  className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 hover:text-white gap-1.5 text-xs">
+                  <Zap className="w-3.5 h-3.5" /> Презентація для клієнтів
                 </Button>
               </div>
             )}
