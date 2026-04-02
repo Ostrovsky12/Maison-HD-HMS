@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { format, differenceInDays } from "date-fns";
 import { uk } from "date-fns/locale";
 import { BookingDialog } from "@/components/booking/booking-dialog";
+import { BookingPanel } from "@/components/booking/booking-panel";
 import {
-  Search, Plus, CalendarCheck, X, ArrowRight, Loader2,
-  CreditCard, Clock, BedDouble, LogIn, LogOut,
-  Trash2, FileEdit, PhoneCall, Mail,
+  Search, Plus, CalendarCheck, ArrowRight, Loader2,
+  CreditCard, Clock, BedDouble,
 } from "lucide-react";
 import {
   useListBookings, useDeleteBooking,
@@ -54,132 +54,6 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-// ── Detail Drawer ─────────────────────────────────────────────────────────────
-function BookingDrawer({
-  booking, open, onClose, onCheckin, onCheckout, onCancel, onEdit, onDelete,
-}: {
-  booking: any; open: boolean; onClose: () => void;
-  onCheckin: (id: number) => void; onCheckout: (id: number) => void;
-  onCancel: (id: number) => void; onEdit: (b: any) => void; onDelete: (id: number) => void;
-}) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    if (open) window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [open, onClose]);
-
-  if (!booking) return null;
-
-  const nights = differenceInDays(new Date(booking.checkOut), new Date(booking.checkIn));
-
-  return (
-    <>
-      <div
-        onClick={onClose}
-        className={`fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] transition-opacity duration-200 ${open ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-      />
-      <div className={`fixed top-0 right-0 h-screen w-[400px] max-w-full z-50 bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-out ${open ? "translate-x-0" : "translate-x-full"}`}>
-
-        {/* Header */}
-        <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-gray-100">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
-            {(booking.guestName || "?")[0].toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-gray-900 truncate">{booking.guestName || "—"}</div>
-            <div className="text-xs text-gray-400">Бронювання #{booking.id}</div>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {/* Status row */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusPill status={booking.status} />
-            <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${PAY_CFG[booking.paymentStatus]?.color || ""}`}>
-              {PAY_CFG[booking.paymentStatus]?.label || "—"}
-            </span>
-          </div>
-
-          {/* Stay tiles */}
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { label: "Заїзд",  value: format(new Date(booking.checkIn),  "d MMM", { locale: uk }), icon: LogIn,  c: "text-emerald-600" },
-              { label: "Виїзд",  value: format(new Date(booking.checkOut), "d MMM", { locale: uk }), icon: LogOut, c: "text-amber-600" },
-              { label: "Ночей",  value: String(nights), icon: Clock, c: "text-indigo-600" },
-            ].map(f => (
-              <div key={f.label} className="bg-gray-50 rounded-xl p-3 text-center">
-                <f.icon className={`w-4 h-4 ${f.c} mx-auto mb-1`} />
-                <div className="font-bold text-gray-900 text-sm">{f.value}</div>
-                <div className="text-[11px] text-gray-400">{f.label}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Details */}
-          <div className="space-y-0">
-            {[
-              { icon: BedDouble,  label: "Номер",   value: booking.unitName || `#${booking.unitId}` },
-              { icon: CreditCard, label: "Сума",    value: fmtUAH(booking.totalAmount), bold: true },
-              booking.guestEmail && { icon: Mail,      label: "Email",   value: booking.guestEmail },
-              booking.guestPhone && { icon: PhoneCall, label: "Тел.",    value: booking.guestPhone },
-            ].filter(Boolean).map((f: any, i) => (
-              <div key={i} className="flex items-center gap-3 py-2.5 border-b border-gray-50 last:border-0">
-                <f.icon className="w-4 h-4 text-gray-300 shrink-0" />
-                <span className="text-xs text-gray-400 w-14 shrink-0">{f.label}</span>
-                <span className={`text-sm flex-1 ${f.bold ? "font-bold text-indigo-600" : "text-gray-800"}`}>{f.value}</span>
-              </div>
-            ))}
-          </div>
-
-          {booking.notes && (
-            <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-sm text-amber-800">
-              <p className="text-xs font-semibold text-amber-600 mb-1">Примітки</p>
-              {booking.notes}
-            </div>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className="px-5 pb-5 pt-4 border-t border-gray-100 space-y-2">
-          {booking.status === "confirmed" && (
-            <button onClick={() => { onCheckin(booking.id); onClose(); }}
-              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors">
-              <LogIn className="w-4 h-4" /> Check-in
-            </button>
-          )}
-          {booking.status === "checked_in" && (
-            <button onClick={() => { onCheckout(booking.id); onClose(); }}
-              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors">
-              <LogOut className="w-4 h-4" /> Check-out
-            </button>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => { onEdit(booking); onClose(); }}
-              className="py-2 rounded-xl border border-gray-200 text-sm text-gray-700 font-medium hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors">
-              <FileEdit className="w-3.5 h-3.5" /> Редагувати
-            </button>
-            {(booking.status === "confirmed" || booking.status === "pending") && (
-              <button onClick={() => { onCancel(booking.id); onClose(); }}
-                className="py-2 rounded-xl border border-red-200 text-sm text-red-600 font-medium hover:bg-red-50 flex items-center justify-center gap-1.5 transition-colors">
-                <X className="w-3.5 h-3.5" /> Скасувати
-              </button>
-            )}
-            {(booking.status === "checked_out" || booking.status === "cancelled") && (
-              <button onClick={() => { onDelete(booking.id); onClose(); }}
-                className="py-2 rounded-xl border border-red-200 text-sm text-red-600 font-medium hover:bg-red-50 flex items-center justify-center gap-1.5 transition-colors">
-                <Trash2 className="w-3.5 h-3.5" /> Видалити
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
 
 // ── Booking Card ──────────────────────────────────────────────────────────────
 function BookingCard({ booking, onClick, isSelected }: { booking: any; onClick: () => void; isSelected: boolean }) {
@@ -393,7 +267,7 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <BookingDrawer
+      <BookingPanel
         booking={drawerBooking}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
