@@ -41,6 +41,7 @@ import TvDisplayPage from "@/pages/tv-display";
 import AiHubPage from "@/pages/ai-hub";
 import GuestExperiencePage from "@/pages/guest-experience";
 import AccountingPage from "@/pages/accounting";
+import FinancePage from "@/pages/finance";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -128,6 +129,7 @@ function Router() {
       <Route path="/ai-hub"><ProtectedRoute component={AiHubPage} /></Route>
       <Route path="/guest-experience"><ProtectedRoute component={GuestExperiencePage} /></Route>
       <Route path="/accounting"><ProtectedRoute component={AccountingPage} /></Route>
+      <Route path="/finance"><ProtectedRoute component={FinancePage} /></Route>
       <Route path="/tv/:roomCode" component={TvDisplayPage} />
 
       <Route path="/" component={HomeRoute} />

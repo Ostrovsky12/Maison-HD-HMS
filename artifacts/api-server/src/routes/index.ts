@@ -37,6 +37,7 @@ import revenueRouter from "./revenue.js";
 import tvRouter from "./tv.js";
 import aiRouter from "./ai.js";
 import accountingRouter from "./accounting.js";
+import financeRouter from "./finance.js";
 
 const router: IRouter = Router();
 
@@ -78,5 +79,6 @@ router.use("/revenue", revenueRouter);
 router.use("/tv", tvRouter);
 router.use("/ai", aiRouter);
 router.use("/accounting", accountingRouter);
+router.use("/finance", financeRouter);
 
 export default router;

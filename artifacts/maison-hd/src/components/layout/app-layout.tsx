@@ -33,6 +33,7 @@ import {
   Brain,
   Heart,
   Landmark,
+  Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +64,7 @@ const allNavItems = [
   { name: "Events & Banquet", path: "/events", icon: PartyPopper, roles: null },
   { name: "F&B / Ресторан", path: "/fb", icon: UtensilsCrossed, roles: null },
   { name: "Inbox", path: "/inbox", icon: MessageSquare, roles: null },
+  { name: "Оплати та фінанси", path: "/finance", icon: Wallet, roles: ["super_admin", "owner", "manager", "reception"] },
   { name: "Бухгалтерія", path: "/accounting", icon: Landmark, roles: ["super_admin", "owner", "manager"] },
   { name: "Рахунки", path: "/invoices", icon: FileText, roles: null },
   { name: "Звіти", path: "/reports", icon: BarChart3, roles: null },
