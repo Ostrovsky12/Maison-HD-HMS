@@ -6,7 +6,7 @@ import {
   PartyPopper, UtensilsCrossed, Zap, Bot, Building2, Globe,
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
-  ChevronRight, Menu, Sparkles,
+  ChevronRight, Menu, Sparkles, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ReactNode, useState, useRef, useEffect } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { uk } from "date-fns/locale";
+import { CommandPalette, useCommandPalette } from "@/components/command-palette";
 
 // ── NAV STRUCTURE ─────────────────────────────────────────────────────────────
 type NavItem = { name: string; path: string; icon: any; roles?: string[] | null; badge?: string };
@@ -216,6 +217,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const logout = useLogout();
   const { toast } = useToast();
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const { open: cmdOpen, setOpen: setCmdOpen } = useCommandPalette();
 
   const handleLogout = () => {
     logout.mutate(undefined, {
@@ -373,6 +375,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
+            {/* Cmd+K trigger */}
+            <button
+              onClick={() => setCmdOpen(true)}
+              className="hidden md:flex items-center gap-2 h-8 px-3 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs text-gray-400 transition-colors"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Пошук</span>
+              <kbd className="text-[10px] bg-white border border-gray-200 px-1 py-0.5 rounded font-mono ml-1">⌘K</kbd>
+            </button>
             <NotificationBell />
           </div>
         </header>
@@ -382,6 +393,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
+
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
     </div>
   );
 }
