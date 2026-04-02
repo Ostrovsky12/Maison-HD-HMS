@@ -24,6 +24,8 @@ import {
   Send, Pen, CreditCard, Search, RefreshCw, ChevronRight, Loader2,
   FileCheck, FileX, Link2, Unlink, Landmark, Receipt, Scale,
   FileClock, FileWarning,
+  Archive, Cpu, PenSquare, FolderOpen, Code2, ExternalLink,
+  ShieldCheck, Shuffle, UserPlus, BookOpen, BadgeCheck, Server,
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
@@ -107,7 +109,8 @@ const INTEGRATION_INFO: Record<string, { label: string; desc: string; color: str
 };
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
-type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrations";
+type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrations"
+         | "tax-invoices" | "bas" | "signing" | "archive";
 
 export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -119,9 +122,9 @@ export default function AccountingPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Бухгалтерія та документи</h1>
+            <h1 className="text-2xl font-bold font-display text-gray-900">Бухгалтерія та документообіг</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Договори · Рахунки · Акти · Податкові накладні · BAS · M.E.Doc · Вчасно
+              Договори · Рахунки · Акти · ПН · BAS · M.E.Doc · Вчасно · КЕП · Архів
             </p>
           </div>
           <div className="flex gap-2">
@@ -130,19 +133,25 @@ export default function AccountingPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-gray-200">
+        <div className="flex gap-0.5 border-b border-gray-200 overflow-x-auto pb-px">
           {([
             { id: "overview",      label: "Огляд",          icon: BarChart3 },
             { id: "documents",     label: "Документи",      icon: FileText },
+            { id: "tax-invoices",  label: "Подат. накладні",icon: Landmark },
+            { id: "bas",           label: "BAS / 1C",       icon: Cpu },
+            { id: "signing",       label: "Підписання",     icon: PenSquare },
+            { id: "archive",       label: "Архів",          icon: Archive },
             { id: "counterparties",label: "Контрагенти",    icon: Users },
-            { id: "entities",      label: "Юридичні особи", icon: Building2 },
+            { id: "entities",      label: "Юр. особи",      icon: Building2 },
             { id: "integrations",  label: "Інтеграції",     icon: Settings },
           ] as { id: Tab; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                tab === id ? "border-blue-600 text-blue-600" : "border-transparent text-gray-600 hover:text-gray-900"
+              className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                tab === id
+                  ? "border-[--mhd-primary] text-[--mhd-primary]"
+                  : "border-transparent text-gray-500 hover:text-gray-900"
               }`}>
-              <Icon className="h-4 w-4" />{label}
+              <Icon className="h-3.5 w-3.5" />{label}
             </button>
           ))}
         </div>
@@ -150,6 +159,10 @@ export default function AccountingPage() {
         {/* Tab content */}
         {tab === "overview"       && <OverviewTab />}
         {tab === "documents"      && <DocumentsTab filter={docFilter} setFilter={setDocFilter} />}
+        {tab === "tax-invoices"   && <TaxInvoicesTab />}
+        {tab === "bas"            && <BasExportTab />}
+        {tab === "signing"        && <SigningTab />}
+        {tab === "archive"        && <ArchiveTab />}
         {tab === "counterparties" && <CounterpartiesTab />}
         {tab === "entities"       && <LegalEntitiesTab />}
         {tab === "integrations"   && <IntegrationsTab />}
@@ -1434,6 +1447,670 @@ function IntegrationsTab() {
             </div>
           </DialogContent>
         </Dialog>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UKRAINIAN ACCOUNTING LAYER TABS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const accFetch = (path: string, opts?: RequestInit) => {
+  const t = localStorage.getItem("hms_token") || "";
+  const API_BASE2 = (import.meta.env.VITE_API_URL ?? "");
+  return fetch(`${API_BASE2}/api/accounting/${path}`, {
+    ...opts,
+    headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json", ...(opts?.headers || {}) },
+  }).then(r => r.json());
+};
+const fmtNum2 = (n: any) => n ? new Intl.NumberFormat("uk-UA", { minimumFractionDigits: 2 }).format(Number(n)) : "0,00";
+const fmtCur2 = (n: any) => `${fmtNum2(n)} ₴`;
+
+// ─── TAX INVOICES TAB (Податкові накладні) ────────────────────────────────────
+function TaxInvoicesTab() {
+  const qc = useQueryClient();
+  const [filter, setFilter] = useState("all");
+  const [newOpen, setNewOpen] = useState(false);
+  const [selected, setSelected] = useState<any>(null);
+  const [form, setForm] = useState({ sellerEntityId: "", buyerCounterpartyId: "", taxableAmount: "", vatAmount: "", totalAmount: "", vatRate: "20", operationCode: "07", pnType: "standard", notes: "" });
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["ua-tax-invoices", filter],
+    queryFn: () => accFetch(`tax-invoices${filter !== "all" ? `?status=${filter}` : ""}`), staleTime: 15_000,
+  });
+  const { data: entitiesData } = useQuery({ queryKey: ["acc-entities-sel"], queryFn: () => accFetch("legal-entities"), staleTime: 60_000 });
+  const { data: cpData } = useQuery({ queryKey: ["acc-counterparties-sel"], queryFn: () => accFetch("counterparties"), staleTime: 60_000 });
+
+  const createMut = useMutation({
+    mutationFn: (body: any) => accFetch("tax-invoices", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); setNewOpen(false); },
+  });
+
+  const genXmlMut = useMutation({
+    mutationFn: (id: number) => accFetch(`tax-invoices/${id}/generate-xml`, { method: "POST" }),
+    onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); if (d.xml) alert("XML ПН згенеровано успішно!"); },
+  });
+
+  const medocMut = useMutation({
+    mutationFn: (id: number) => accFetch(`tax-invoices/${id}/submit-medoc`, { method: "POST" }),
+    onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); alert(d.message); },
+  });
+
+  const vchasnoMut = useMutation({
+    mutationFn: (id: number) => accFetch(`tax-invoices/${id}/submit-vchasno`, { method: "POST" }),
+    onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); alert(d.message); },
+  });
+
+  const invoices = data?.invoices || [];
+  const STATUS_CFG: Record<string, { label: string; color: string }> = {
+    draft:     { label: "Чернетка",  color: "bg-gray-100 text-gray-600" },
+    ready:     { label: "Готова",    color: "bg-blue-100 text-blue-700" },
+    submitted: { label: "Відправлена", color: "bg-amber-100 text-amber-700" },
+    registered: { label: "Зареєстрована", color: "bg-green-100 text-green-700" },
+    rejected:  { label: "Відхилена", color: "bg-red-100 text-red-700" },
+  };
+
+  const handleVatCalc = (taxable: string, rate: string) => {
+    const t = parseFloat(taxable) || 0;
+    const r = parseFloat(rate) || 20;
+    const vat = (t * r / 100);
+    setForm(f => ({ ...f, taxableAmount: taxable, vatAmount: vat.toFixed(2), totalAmount: (t + vat).toFixed(2) }));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Податкові накладні (ПН)</h2>
+          <p className="text-xs text-gray-400">XML J1201009 · M.E.Doc · Вчасно.КЕП · ДПС реєстр</p>
+        </div>
+        <div className="flex gap-2">
+          <div className="flex bg-gray-100 rounded-lg p-1">
+            {["all","draft","ready","submitted","registered","rejected"].map(s => (
+              <button key={s} onClick={() => setFilter(s)} className={`text-xs px-2.5 py-1 rounded-md transition-colors ${filter === s ? "bg-white shadow text-indigo-600 font-medium" : "text-gray-500"}`}>
+                {s === "all" ? "Всі" : STATUS_CFG[s]?.label || s}
+              </button>
+            ))}
+          </div>
+          <Button size="sm" variant="outline" onClick={() => refetch()}><RefreshCw className="h-3.5 w-3.5" /></Button>
+          <Dialog open={newOpen} onOpenChange={setNewOpen}>
+            <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-1" />Нова ПН</Button></DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Нова Податкова Накладна</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-xs">Постачальник (юр. особа)</Label>
+                  <Select value={form.sellerEntityId} onValueChange={v => setForm(f => ({ ...f, sellerEntityId: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Оберіть юр. особу" /></SelectTrigger>
+                    <SelectContent>{(entitiesData?.entities || []).map((e: any) => <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Покупець (контрагент)</Label>
+                  <Select value={form.buyerCounterpartyId} onValueChange={v => setForm(f => ({ ...f, buyerCounterpartyId: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Оберіть контрагента" /></SelectTrigger>
+                    <SelectContent>{(cpData?.counterparties || []).map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Тип ПН</Label>
+                  <Select value={form.pnType} onValueChange={v => setForm(f => ({ ...f, pnType: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="standard">Стандартна</SelectItem>
+                      <SelectItem value="correction">Коригуюча</SelectItem>
+                      <SelectItem value="zero_rate">0% ставка</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label className="text-xs">Ставка ПДВ %</Label>
+                    <Select value={form.vatRate} onValueChange={v => { setForm(f => ({ ...f, vatRate: v })); handleVatCalc(form.taxableAmount, v); }}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="20">20%</SelectItem><SelectItem value="7">7%</SelectItem><SelectItem value="0">0%</SelectItem></SelectContent>
+                    </Select>
+                  </div>
+                  <div><Label className="text-xs">Код операції</Label>
+                    <Select value={form.operationCode} onValueChange={v => setForm(f => ({ ...f, operationCode: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="07">07 - послуги</SelectItem>
+                        <SelectItem value="01">01 - товари</SelectItem>
+                        <SelectItem value="14">14 - ОЗ/НА</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div><Label className="text-xs">База оподаткування ₴ *</Label><Input type="number" value={form.taxableAmount} onChange={e => handleVatCalc(e.target.value, form.vatRate)} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label className="text-xs">Сума ПДВ ₴</Label><Input type="number" value={form.vatAmount} readOnly className="bg-gray-50" /></div>
+                  <div><Label className="text-xs">Разом ₴</Label><Input type="number" value={form.totalAmount} readOnly className="bg-gray-50" /></div>
+                </div>
+                <div><Label className="text-xs">Примітки</Label><Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+                <Button className="w-full" onClick={() => createMut.mutate({ ...form, sellerEntityId: form.sellerEntityId ? parseInt(form.sellerEntityId) : undefined, buyerCounterpartyId: form.buyerCounterpartyId ? parseInt(form.buyerCounterpartyId) : undefined })} disabled={!form.taxableAmount || createMut.isPending}>
+                  {createMut.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Створити ПН
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Integration status bar */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: "BAS/1C XML", icon: Cpu, color: "bg-blue-50 border-blue-200 text-blue-700", status: "Адаптер готовий" },
+          { label: "M.E.Doc", icon: FolderOpen, color: "bg-violet-50 border-violet-200 text-violet-700", status: "Файловий обмін" },
+          { label: "Вчасно.КЕП", icon: ShieldCheck, color: "bg-green-50 border-green-200 text-green-700", status: "REST API" },
+          { label: "ДПС реєстр", icon: Server, color: "bg-amber-50 border-amber-200 text-amber-700", status: "Через M.E.Doc" },
+        ].map(({ label, icon: Icon, color, status }) => (
+          <div key={label} className={`border rounded-xl p-3 flex items-center gap-2 ${color}`}>
+            <Icon className="h-4 w-4 shrink-0" />
+            <div><p className="text-xs font-semibold">{label}</p><p className="text-xs opacity-70">{status}</p></div>
+          </div>
+        ))}
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-indigo-600" /></div> : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader><TableRow className="bg-gray-50 text-xs">
+              <TableHead>Номер</TableHead><TableHead>Тип</TableHead><TableHead>Дата</TableHead>
+              <TableHead>Продавець</TableHead><TableHead>Покупець</TableHead>
+              <TableHead className="text-right">База ₴</TableHead><TableHead className="text-right">ПДВ ₴</TableHead><TableHead className="text-right">Разом ₴</TableHead>
+              <TableHead>Статус</TableHead><TableHead>Дії</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {invoices.map((inv: any) => {
+                const cfg = STATUS_CFG[inv.status] || { label: inv.status, color: "bg-gray-100 text-gray-500" };
+                return (
+                  <TableRow key={inv.id} className="hover:bg-gray-50">
+                    <TableCell className="font-mono text-xs font-semibold">{inv.pn_series}{inv.pn_number}</TableCell>
+                    <TableCell><span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{inv.pn_type === "correction" ? "Корегуюча" : "Стандартна"}</span></TableCell>
+                    <TableCell className="text-xs">{inv.pn_date}</TableCell>
+                    <TableCell className="text-xs max-w-[120px] truncate">{inv.seller_name || inv.seller_name_entity || "—"}</TableCell>
+                    <TableCell className="text-xs max-w-[120px] truncate">{inv.buyer_name || inv.buyer_name_cp || "—"}</TableCell>
+                    <TableCell className="text-right text-xs">{fmtNum2(inv.taxable_amount)}</TableCell>
+                    <TableCell className="text-right text-xs text-indigo-600">{fmtNum2(inv.vat_amount)}</TableCell>
+                    <TableCell className="text-right font-semibold text-sm">{fmtNum2(inv.total_amount)}</TableCell>
+                    <TableCell><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.color}`}>{cfg.label}</span></TableCell>
+                    <TableCell>
+                      <div className="flex gap-1 flex-wrap">
+                        {inv.status === "draft" && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => genXmlMut.mutate(inv.id)} disabled={genXmlMut.isPending}><Code2 className="h-3 w-3 mr-1" />XML</Button>}
+                        {(inv.status === "ready" || inv.status === "submitted") && <>
+                          <Button size="sm" variant="outline" className="h-7 text-xs text-violet-600" onClick={() => medocMut.mutate(inv.id)} disabled={medocMut.isPending}><FolderOpen className="h-3 w-3 mr-1" />MEDoc</Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs text-green-600" onClick={() => vchasnoMut.mutate(inv.id)} disabled={vchasnoMut.isPending}><ShieldCheck className="h-3 w-3 mr-1" />Вчасно</Button>
+                        </>}
+                        {inv.xml_content && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const blob = new Blob([inv.xml_content], { type: "application/xml" }); const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = `PN_${inv.pn_number}.xml`; a.click(); URL.revokeObjectURL(u); }}><Download className="h-3 w-3" /></Button>}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!invoices.length && <TableRow><TableCell colSpan={10} className="text-center text-xs text-gray-400 py-8">Немає податкових накладних</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-800">
+        <p className="font-semibold mb-2">Workflow реєстрації ПН в Україні:</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {["1. Створити ПН", "→", "2. Генерувати XML (J1201009)", "→", "3. Підписати КЕП", "→", "4. Відправити в MEDoc / Вчасно", "→", "5. Реєстрація в ДПС"].map((s, i) => (
+            <span key={i} className={s === "→" ? "text-blue-400" : "bg-blue-100 px-2 py-1 rounded font-medium"}>{s}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BAS / 1C EXPORT TAB ─────────────────────────────────────────────────────
+function BasExportTab() {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({ dateFrom: "", dateTo: "", format: "bas_xml" });
+  const [result, setResult] = useState<any>(null);
+
+  const { data: historyData, isLoading: histLoading } = useQuery({
+    queryKey: ["bas-history"], queryFn: () => accFetch("export/bas/history"), staleTime: 30_000,
+  });
+
+  const exportMut = useMutation({
+    mutationFn: (body: any) => accFetch("export/bas", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["bas-history"] }); setResult(d); },
+  });
+
+  const markMut = useMutation({
+    mutationFn: (id: number) => accFetch(`export/bas/${id}/mark-imported`, { method: "PATCH" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["bas-history"] }),
+  });
+
+  const handleDownload = (xml: string, fileName: string) => {
+    const blob = new Blob([xml], { type: "application/xml" });
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = u; a.download = fileName; a.click(); URL.revokeObjectURL(u);
+  };
+
+  const history = historyData?.exports || [];
+  const STATUS_C: Record<string, string> = { generated: "bg-blue-100 text-blue-700", imported: "bg-green-100 text-green-700" };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid md:grid-cols-2 gap-5">
+        {/* Export form */}
+        <div className="bg-white border rounded-xl p-5 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Cpu className="h-5 w-5 text-indigo-600" />
+            <h3 className="font-semibold">Експорт до BAS / 1C</h3>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label className="text-xs">Дата від</Label><Input type="date" value={form.dateFrom} onChange={e => setForm(f => ({ ...f, dateFrom: e.target.value }))} /></div>
+            <div><Label className="text-xs">Дата до</Label><Input type="date" value={form.dateTo} onChange={e => setForm(f => ({ ...f, dateTo: e.target.value }))} /></div>
+          </div>
+          <div>
+            <Label className="text-xs">Формат</Label>
+            <Select value={form.format} onValueChange={v => setForm(f => ({ ...f, format: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bas_xml">BAS XML (J1201009)</SelectItem>
+                <SelectItem value="bas_v8">BAS 8.x XML</SelectItem>
+                <SelectItem value="medoc_xml">M.E.Doc XML</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => exportMut.mutate(form)} disabled={exportMut.isPending}>
+            {exportMut.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Генерація...</> : <><Download className="h-4 w-4 mr-1" />Генерувати XML</>}
+          </Button>
+          {result && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
+              <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-green-600" /><p className="text-sm font-medium text-green-800">Експорт: {result.docCount} документів</p></div>
+              <Button size="sm" className="w-full" variant="outline" onClick={() => handleDownload(result.xml, result.fileName)}>
+                <Download className="h-4 w-4 mr-1" />Завантажити {result.fileName}
+              </Button>
+              <div className="text-xs text-green-700 bg-green-100 rounded p-2">
+                <p className="font-semibold">Імпорт в BAS:</p>
+                <p>{result.instructions?.bas}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Integration guides */}
+        <div className="space-y-3">
+          {[
+            {
+              name: "BAS / 1C Підприємство",
+              icon: Cpu,
+              color: "border-blue-200 bg-blue-50",
+              steps: ["Меню Файл → Відкрити", "Обрати XML файл експорту", "Документи → Журнал", "Перевірити імпортовані записи"],
+              status: "XML адаптер готовий",
+              statusColor: "bg-green-100 text-green-700",
+            },
+            {
+              name: "M.E.Doc",
+              icon: FolderOpen,
+              color: "border-violet-200 bg-violet-50",
+              steps: ["Реєстр → Імпорт XML", "Вказати папку обміну", "Отримати квитанцію ДПС", "Перевірити реєстрацію ПН"],
+              status: "Файловий обмін",
+              statusColor: "bg-violet-100 text-violet-700",
+            },
+            {
+              name: "Вчасно.КЕП / Вчасно",
+              icon: ShieldCheck,
+              color: "border-green-200 bg-green-50",
+              steps: ["Інтеграції → Вчасно → API ключ", "POST /api/v1/documents", "Підписати КЕП через API", "Відстежити статус реєстрації"],
+              status: "REST API готовий",
+              statusColor: "bg-green-100 text-green-700",
+            },
+          ].map(({ name, icon: Icon, color, steps, status, statusColor }) => (
+            <div key={name} className={`border rounded-xl p-4 ${color}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2"><Icon className="h-4 w-4" /><span className="font-semibold text-sm">{name}</span></div>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor}`}>{status}</span>
+              </div>
+              <ol className="text-xs space-y-0.5 text-gray-600 list-decimal list-inside">
+                {steps.map(s => <li key={s}>{s}</li>)}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Export history */}
+      <div className="bg-white border rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+          <span className="font-semibold text-sm flex items-center gap-2"><Cpu className="h-4 w-4 text-indigo-600" />Історія експортів</span>
+        </div>
+        {histLoading ? <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-indigo-600" /></div> : (
+          <Table>
+            <TableHeader><TableRow className="text-xs"><TableHead>Дата</TableHead><TableHead>Формат</TableHead><TableHead>Период</TableHead><TableHead className="text-center">Документів</TableHead><TableHead>Статус</TableHead><TableHead>Дії</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {history.map((h: any) => (
+                <TableRow key={h.id} className="hover:bg-gray-50">
+                  <TableCell className="text-xs">{h.exported_at ? new Date(h.exported_at).toLocaleString("uk-UA") : "—"}</TableCell>
+                  <TableCell className="text-xs font-mono">{h.format}</TableCell>
+                  <TableCell className="text-xs">{h.date_from || "—"} → {h.date_to || "—"}</TableCell>
+                  <TableCell className="text-center font-semibold">{h.doc_count}</TableCell>
+                  <TableCell><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_C[h.status] || "bg-gray-100 text-gray-500"}`}>{h.status === "imported" ? "Імпортовано" : "Згенеровано"}</span></TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      {h.status === "generated" && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => markMut.mutate(h.id)}>Позн. імпортованим</Button>}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!history.length && <TableRow><TableCell colSpan={6} className="text-center text-xs text-gray-400 py-8">Немає історії експортів</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── SIGNING TAB (КЕП / ЕЦП) ─────────────────────────────────────────────────
+function SigningTab() {
+  const qc = useQueryClient();
+  const [filter, setFilter] = useState("pending");
+  const [newOpen, setNewOpen] = useState(false);
+  const [form, setForm] = useState({ docId: "", signerName: "", signerRole: "director", signatureMethod: "kep", provider: "manual", notes: "" });
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["signing-requests", filter],
+    queryFn: () => accFetch(`signing-requests${filter !== "all" ? `?status=${filter}` : ""}`), staleTime: 15_000,
+  });
+
+  const createMut = useMutation({
+    mutationFn: (body: any) => accFetch("signing-requests", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["signing-requests"] }); setNewOpen(false); },
+  });
+
+  const signMut = useMutation({
+    mutationFn: ({ id, status }: any) => accFetch(`signing-requests/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["signing-requests"] }),
+  });
+
+  const requests = data?.requests || [];
+  const STATUS_CFG: Record<string, { label: string; color: string }> = {
+    pending:  { label: "Очікує підпису", color: "bg-amber-100 text-amber-700" },
+    signed:   { label: "Підписано",      color: "bg-green-100 text-green-700" },
+    rejected: { label: "Відхилено",      color: "bg-red-100 text-red-700" },
+    expired:  { label: "Закінчився",     color: "bg-gray-100 text-gray-500" },
+  };
+
+  const METHODS = { kep: "КЕП (ДСТУ 4145)", es: "ЕЦП", dia: "Дія.Підпис", privat: "Приват24 Бізнес", vchasno: "Вчасно.КЕП" };
+  const PROVIDERS = { manual: "Ручне підписання", medoc: "M.E.Doc", vchasno: "Вчасно", dia: "Дія" };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Черга підписання</h2>
+          <p className="text-xs text-gray-400">КЕП · ЕЦП · Дія.Підпис · Вчасно.КЕП · Ручний підпис</p>
+        </div>
+        <div className="flex gap-2">
+          <div className="flex bg-gray-100 rounded-lg p-1">
+            {["pending","signed","rejected","all"].map(s => (
+              <button key={s} onClick={() => setFilter(s)} className={`text-xs px-2.5 py-1 rounded-md transition-colors ${filter === s ? "bg-white shadow text-indigo-600 font-medium" : "text-gray-500"}`}>
+                {s === "all" ? "Всі" : STATUS_CFG[s]?.label || s}
+              </button>
+            ))}
+          </div>
+          <Button size="sm" variant="outline" onClick={() => refetch()}><RefreshCw className="h-3.5 w-3.5" /></Button>
+          <Dialog open={newOpen} onOpenChange={setNewOpen}>
+            <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-1" />Запит</Button></DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Новий запит на підписання</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div><Label className="text-xs">ID документа</Label><Input type="number" value={form.docId} onChange={e => setForm(f => ({ ...f, docId: e.target.value }))} /></div>
+                <div><Label className="text-xs">Підписант</Label><Input value={form.signerName} onChange={e => setForm(f => ({ ...f, signerName: e.target.value }))} placeholder="ПІБ підписанта" /></div>
+                <div>
+                  <Label className="text-xs">Роль</Label>
+                  <Select value={form.signerRole} onValueChange={v => setForm(f => ({ ...f, signerRole: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="director">Директор</SelectItem>
+                      <SelectItem value="accountant">Бухгалтер</SelectItem>
+                      <SelectItem value="authorized">Уповноважений</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Метод підпису</Label>
+                  <Select value={form.signatureMethod} onValueChange={v => setForm(f => ({ ...f, signatureMethod: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{Object.entries(METHODS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Провайдер</Label>
+                  <Select value={form.provider} onValueChange={v => setForm(f => ({ ...f, provider: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{Object.entries(PROVIDERS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label className="text-xs">Нотатки</Label><Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+                <Button className="w-full" onClick={() => createMut.mutate({ ...form, docId: form.docId ? parseInt(form.docId) : undefined })} disabled={createMut.isPending}>
+                  {createMut.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Створити запит
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* KEP providers info */}
+      <div className="grid grid-cols-5 gap-2">
+        {[
+          { name: "M.E.Doc КЕП", color: "bg-violet-50 border-violet-200", ready: true },
+          { name: "Вчасно.КЕП", color: "bg-green-50 border-green-200", ready: true },
+          { name: "Дія.Підпис", color: "bg-blue-50 border-blue-200", ready: false },
+          { name: "Приват24 Бізнес", color: "bg-emerald-50 border-emerald-200", ready: false },
+          { name: "ДПС ІВС", color: "bg-orange-50 border-orange-200", ready: false },
+        ].map(({ name, color, ready }) => (
+          <div key={name} className={`border rounded-lg p-2.5 text-center ${color}`}>
+            <p className="text-xs font-medium text-gray-700">{name}</p>
+            <span className={`text-xs ${ready ? "text-green-600" : "text-amber-500"}`}>{ready ? "✓ Готовий" : "⚙ Placeholder"}</span>
+          </div>
+        ))}
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-indigo-600" /></div> : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader><TableRow className="bg-gray-50 text-xs">
+              <TableHead>Дата</TableHead><TableHead>Документ</TableHead><TableHead>Підписант</TableHead>
+              <TableHead>Роль</TableHead><TableHead>Метод</TableHead><TableHead>Провайдер</TableHead>
+              <TableHead>Статус</TableHead><TableHead>Дії</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {requests.map((r: any) => {
+                const cfg = STATUS_CFG[r.status] || { label: r.status, color: "bg-gray-100 text-gray-500" };
+                return (
+                  <TableRow key={r.id} className="hover:bg-gray-50">
+                    <TableCell className="text-xs">{new Date(r.requested_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.doc_number || `Doc #${r.doc_id}` || "—"}</TableCell>
+                    <TableCell className="text-sm">{r.signer_name || "—"}</TableCell>
+                    <TableCell className="text-xs capitalize">{r.signer_role}</TableCell>
+                    <TableCell><span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{METHODS[r.signature_method as keyof typeof METHODS] || r.signature_method}</span></TableCell>
+                    <TableCell className="text-xs capitalize">{PROVIDERS[r.provider as keyof typeof PROVIDERS] || r.provider}</TableCell>
+                    <TableCell><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.color}`}>{cfg.label}</span></TableCell>
+                    <TableCell>
+                      {r.status === "pending" && (
+                        <div className="flex gap-1">
+                          <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white" onClick={() => signMut.mutate({ id: r.id, status: "signed" })}><BadgeCheck className="h-3 w-3 mr-1" />Підписано</Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs text-red-600" onClick={() => signMut.mutate({ id: r.id, status: "rejected" })}>Відхилити</Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!requests.length && <TableRow><TableCell colSpan={8} className="text-center text-xs text-gray-400 py-8">Немає запитів зі статусом «{STATUS_CFG[filter]?.label || filter}»</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ARCHIVE TAB ──────────────────────────────────────────────────────────────
+function ArchiveTab() {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState({ title: "", documentType: "invoice", category: "primary", counterpartyName: "", docDate: "", amount: "", retentionYears: "10", isOriginal: false, isSigned: false, hasKep: false, fileName: "", notes: "" });
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["doc-archive", search, category],
+    queryFn: () => accFetch(`archive${(search || category) ? `?${search ? `search=${encodeURIComponent(search)}` : ""}${category ? `&category=${category}` : ""}` : ""}`),
+    staleTime: 15_000,
+  });
+
+  const createMut = useMutation({
+    mutationFn: (body: any) => accFetch("archive", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["doc-archive"] }); setAddOpen(false); setForm({ title: "", documentType: "invoice", category: "primary", counterpartyName: "", docDate: "", amount: "", retentionYears: "10", isOriginal: false, isSigned: false, hasKep: false, fileName: "", notes: "" }); },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => accFetch(`archive/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["doc-archive"] }),
+  });
+
+  const docs = data?.documents || [];
+  const CATS: Record<string, { label: string; color: string }> = {
+    primary:    { label: "Первинні", color: "bg-blue-100 text-blue-700" },
+    contract:   { label: "Договори", color: "bg-violet-100 text-violet-700" },
+    tax:        { label: "Податкові", color: "bg-orange-100 text-orange-700" },
+    hr:         { label: "Кадрові", color: "bg-emerald-100 text-emerald-700" },
+    other:      { label: "Інше", color: "bg-gray-100 text-gray-600" },
+  };
+  const DOC_TYPES = { invoice: "Рахунок", act: "Акт", tax_invoice: "Подат. накл.", contract: "Договір", payment: "Платіжка", report: "Звіт", other: "Інше" };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Цифровий архів документів</h2>
+          <p className="text-xs text-gray-400">Первинні документи · 10 рочне зберігання · GDPR-compliant</p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <div className="flex items-center gap-1 bg-white border rounded-lg px-3 py-1.5">
+            <Search className="h-3.5 w-3.5 text-gray-400" />
+            <Input className="border-none h-6 p-0 w-36 text-xs focus-visible:ring-0" placeholder="Пошук..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger className="w-36 h-9 text-xs"><SelectValue placeholder="Категорія" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Всі</SelectItem>
+              {Object.entries(CATS).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" onClick={() => refetch()}><RefreshCw className="h-3.5 w-3.5" /></Button>
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-1" />До архіву</Button></DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Додати до архіву</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div><Label className="text-xs">Назва документа *</Label><Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs">Тип документа</Label>
+                    <Select value={form.documentType} onValueChange={v => setForm(f => ({ ...f, documentType: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{Object.entries(DOC_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Категорія</Label>
+                    <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{Object.entries(CATS).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div><Label className="text-xs">Контрагент</Label><Input value={form.counterpartyName} onChange={e => setForm(f => ({ ...f, counterpartyName: e.target.value }))} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label className="text-xs">Дата документа</Label><Input type="date" value={form.docDate} onChange={e => setForm(f => ({ ...f, docDate: e.target.value }))} /></div>
+                  <div><Label className="text-xs">Сума ₴</Label><Input type="number" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} /></div>
+                </div>
+                <div><Label className="text-xs">Назва файлу</Label><Input value={form.fileName} onChange={e => setForm(f => ({ ...f, fileName: e.target.value }))} placeholder="document.pdf" /></div>
+                <div>
+                  <Label className="text-xs">Зберігання (роки)</Label>
+                  <Select value={form.retentionYears} onValueChange={v => setForm(f => ({ ...f, retentionYears: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="3">3 роки</SelectItem><SelectItem value="5">5 років</SelectItem><SelectItem value="10">10 років (рекоменд.)</SelectItem><SelectItem value="75">75 років (кадрові)</SelectItem></SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-4">
+                  {[["isOriginal", "Оригінал"], ["isSigned", "Підписаний"], ["hasKep", "З КЕП"]].map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input type="checkbox" checked={form[key as keyof typeof form] as boolean} onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))} className="rounded" />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div><Label className="text-xs">Примітки</Label><Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+                <Button className="w-full" onClick={() => createMut.mutate({ ...form, amount: form.amount ? parseFloat(form.amount) : undefined, retentionYears: parseInt(form.retentionYears) })} disabled={!form.title || createMut.isPending}>
+                  {createMut.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Архівувати
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-5 gap-3">
+        {Object.entries(CATS).map(([key, { label, color }]) => {
+          const cnt = docs.filter((d: any) => d.category === key).length;
+          return (
+            <button key={key} onClick={() => setCategory(category === key ? "" : key)} className={`border-2 rounded-xl p-3 text-center transition-all ${category === key ? "border-indigo-400 bg-indigo-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
+              <p className="text-lg font-bold text-gray-800">{cnt}</p>
+              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${color}`}>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-indigo-600" /></div> : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader><TableRow className="bg-gray-50 text-xs">
+              <TableHead>Архів №</TableHead><TableHead>Категорія</TableHead><TableHead>Тип</TableHead>
+              <TableHead>Назва</TableHead><TableHead>Контрагент</TableHead><TableHead>Дата</TableHead>
+              <TableHead className="text-right">Сума ₴</TableHead><TableHead>Атрибути</TableHead>
+              <TableHead>Зберігати до</TableHead><TableHead />
+            </TableRow></TableHeader>
+            <TableBody>
+              {docs.map((d: any) => (
+                <TableRow key={d.id} className="hover:bg-gray-50">
+                  <TableCell className="font-mono text-xs text-gray-500">{d.archive_number}</TableCell>
+                  <TableCell><span className={`text-xs px-1.5 py-0.5 rounded font-medium ${CATS[d.category]?.color || "bg-gray-100 text-gray-500"}`}>{CATS[d.category]?.label || d.category}</span></TableCell>
+                  <TableCell className="text-xs">{DOC_TYPES[d.document_type as keyof typeof DOC_TYPES] || d.document_type}</TableCell>
+                  <TableCell className="text-sm font-medium max-w-[180px] truncate" title={d.title}>{d.title}</TableCell>
+                  <TableCell className="text-xs text-gray-500 max-w-[120px] truncate">{d.counterparty_name || "—"}</TableCell>
+                  <TableCell className="text-xs">{d.doc_date || "—"}</TableCell>
+                  <TableCell className="text-right text-sm font-semibold">{d.amount ? fmtCur2(d.amount) : "—"}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      {d.is_original && <span className="text-xs bg-blue-100 text-blue-700 px-1 rounded">ORG</span>}
+                      {d.is_signed && <span className="text-xs bg-green-100 text-green-700 px-1 rounded">SGN</span>}
+                      {d.has_kep && <span className="text-xs bg-violet-100 text-violet-700 px-1 rounded">КЕП</span>}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-xs text-gray-500">{d.retain_until || "—"}</TableCell>
+                  <TableCell><Button size="sm" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-600 p-0" onClick={() => { if (confirm("Видалити запис архіву?")) deleteMut.mutate(d.id); }}>✕</Button></TableCell>
+                </TableRow>
+              ))}
+              {!docs.length && <TableRow><TableCell colSpan={10} className="text-center text-xs text-gray-400 py-10">Архів порожній. Додайте перший документ.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
       )}
     </div>
   );

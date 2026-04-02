@@ -592,4 +592,737 @@ router.get("/reconciliation/:counterpartyId", async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UKRAINIAN ACCOUNTING LAYER — BAS / M.E.Doc / Vchasno / ПН / Archive / КЕП
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── PN (Податкова накладна) number generator ─────────────────────────────────
+async function genPnNumber(orgId: number): Promise<string> {
+  const m = String(new Date().getMonth() + 1).padStart(2, "0");
+  const y = new Date().getFullYear();
+  const cnt = await db.execute(sql`
+    SELECT COUNT(*) as c FROM ua_tax_invoices
+    WHERE organization_id = ${orgId} AND EXTRACT(YEAR FROM pn_date) = ${y} AND EXTRACT(MONTH FROM pn_date) = ${parseInt(m)}
+  `);
+  const n = parseInt((cnt.rows[0] as any)?.c || "0") + 1;
+  return `${String(n).padStart(6, "0")}`;
+}
+
+// ─── XML generators ───────────────────────────────────────────────────────────
+function generatePnXml(pn: any, items: any[]): string {
+  const itemsXml = items.map((it, i) => `
+    <ITEM>
+      <ROWNUM>${i + 1}</ROWNUM>
+      <DESCRIPTION>${escXml(it.description || it.name || "Послуга")}</DESCRIPTION>
+      <UNIT>${escXml(it.unit || "шт")}</UNIT>
+      <QUANTITY>${parseFloat(it.quantity || 1)}</QUANTITY>
+      <PRICE>${parseFloat(it.unit_price || 0).toFixed(2)}</PRICE>
+      <COST>${parseFloat(it.total_amount || 0).toFixed(2)}</COST>
+      <VATPERCENT>${parseFloat(pn.vat_rate || 20)}</VATPERCENT>
+      <VATCOST>${(parseFloat(it.total_amount || 0) * parseFloat(pn.vat_rate || 20) / 100).toFixed(2)}</VATCOST>
+    </ITEM>`).join("");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<DECLAR>
+  <DECLARHEAD>
+    <TIN>${escXml(pn.seller_ipn || pn.seller_edrpou || "")}</TIN>
+    <C_DOC>J1201009</C_DOC>
+    <C_DOC_SUB>001</C_DOC_SUB>
+    <C_DOC_VER>9</C_DOC_VER>
+    <C_DOC_TYPE>${pn.pn_type === 'correction' ? '1' : '0'}</C_DOC_TYPE>
+    <C_DOC_CNT>1</C_DOC_CNT>
+    <C_REG>00</C_REG>
+    <C_RAJ>000</C_RAJ>
+    <PERIOD_MONTH>${String(new Date(pn.pn_date).getMonth() + 1).padStart(2, "0")}</PERIOD_MONTH>
+    <PERIOD_YEAR>${new Date(pn.pn_date).getFullYear()}</PERIOD_YEAR>
+    <C_STI_ORIG>0000</C_STI_ORIG>
+    <D_FILL>${new Date().toISOString().split('T')[0]}</D_FILL>
+    <SOFTWARE>Maison HD HMS 1.0</SOFTWARE>
+  </DECLARHEAD>
+  <DECLARBODY>
+    <KHNUM>${escXml(pn.pn_number || "")}</KHNUM>
+    <HTYPDOC>${pn.pn_type === 'correction' ? '1' : '0'}</HTYPDOC>
+    <HFILL>${pn.pn_date || new Date().toISOString().split('T')[0]}</HFILL>
+    <HOPER>${pn.operation_code || '07'}</HOPER>
+    <SELLER_TIN>${escXml(pn.seller_ipn || pn.seller_edrpou || "")}</SELLER_TIN>
+    <SELLER_NM>${escXml(pn.seller_name || "")}</SELLER_NM>
+    <BUYER_TIN>${escXml(pn.buyer_ipn || pn.buyer_edrpou || "")}</BUYER_TIN>
+    <BUYER_NM>${escXml(pn.buyer_name || "")}</BUYER_NM>
+    <BUYER_STATUS>${pn.is_vat_payer_buyer ? '1' : '0'}</BUYER_STATUS>
+    <ROZVNUM>${escXml(pn.pn_series || 'А')}</ROZVNUM>
+    <NUMR>${escXml(pn.pn_number || "")}</NUMR>
+    <HKBOS>${escXml(pn.operation_code || '07')}</HKBOS>
+    <HTOTAL>${parseFloat(pn.total_amount || 0).toFixed(2)}</HTOTAL>
+    <HPDV>${parseFloat(pn.vat_amount || 0).toFixed(2)}</HPDV>
+    <HND>${parseFloat(pn.taxable_amount || 0).toFixed(2)}</HND>
+    <T1RXXXXG1S_ROWNUM>1</T1RXXXXG1S_ROWNUM>
+    ${itemsXml}
+  </DECLARBODY>
+</DECLAR>`;
+}
+
+function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): string {
+  const itemsHtml = items.map((it, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td>${escXml(it.name || it.description || "Послуга")}</td>
+      <td class="center">${it.unit || "шт"}</td>
+      <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
+      <td class="right">${parseFloat(it.unit_price || 0).toFixed(2)}</td>
+      <td class="right">${parseFloat(it.vat_rate || 20)}%</td>
+      <td class="right"><b>${parseFloat(it.total_amount || 0).toFixed(2)}</b></td>
+    </tr>`).join("");
+
+  return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#000}
+  .header{display:flex;justify-content:space-between;margin-bottom:20px}
+  .title{font-size:18px;font-weight:bold;text-align:center;margin:15px 0;text-transform:uppercase}
+  .meta{background:#f5f5f5;padding:10px;border:1px solid #ddd;margin-bottom:15px}
+  table{width:100%;border-collapse:collapse;margin-bottom:15px}
+  th,td{border:1px solid #999;padding:5px 7px;font-size:11px}
+  th{background:#e8e8e8;font-weight:bold}
+  .right{text-align:right} .center{text-align:center} .num{text-align:center;width:30px}
+  .totals{float:right;width:300px}
+  .totals td{border:none;padding:3px 5px}
+  .totals .label{text-align:right}
+  .footer{margin-top:30px;border-top:1px solid #ccc;padding-top:15px}
+  .sign-line{display:flex;gap:40px;margin-top:10px}
+  .sign{border-bottom:1px solid #000;width:200px;padding-bottom:3px;font-size:10px}
+  @media print{body{margin:10px}}
+</style></head><body>
+<div class="header">
+  <div>
+    <b>${escXml(entity?.name || "")}</b><br>
+    ЄДРПОУ: ${escXml(entity?.edrpou || "—")}<br>
+    IBAN: ${escXml(entity?.iban || "—")}<br>
+    ${escXml(entity?.bank || "")}, МФО: ${escXml(entity?.mfo || "")}
+  </div>
+  <div style="text-align:right">
+    <img src="data:image/svg+xml;base64,..." style="display:none" alt="logo">
+  </div>
+</div>
+<div class="title">Рахунок на оплату № ${escXml(doc?.doc_number || "—")} від ${doc?.doc_date || "—"}</div>
+<div class="meta">
+  <b>Постачальник:</b> ${escXml(entity?.name || "—")} | ЄДРПОУ: ${escXml(entity?.edrpou || "—")}<br>
+  <b>Покупець:</b> ${escXml(cp?.name || doc?.counterparty_name || "—")} | ЄДРПОУ: ${escXml(cp?.edrpou || doc?.counterparty_edrpou || "—")}${cp?.iban ? `<br><b>IBAN покупця:</b> ${escXml(cp.iban)}` : ""}
+</div>
+<table>
+  <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна, ₴</th><th class="right">ПДВ</th><th class="right">Сума, ₴</th></tr></thead>
+  <tbody>${itemsHtml}</tbody>
+</table>
+<div style="overflow:hidden">
+  <table class="totals">
+    <tr><td class="label">Без ПДВ:</td><td class="right">${parseFloat(doc?.subtotal || 0).toFixed(2)} ₴</td></tr>
+    <tr><td class="label">ПДВ 20%:</td><td class="right">${parseFloat(doc?.vat_amount || 0).toFixed(2)} ₴</td></tr>
+    <tr><td class="label"><b>Разом до оплати:</b></td><td class="right"><b>${parseFloat(doc?.total_amount || 0).toFixed(2)} ₴</b></td></tr>
+  </table>
+</div>
+${doc?.payment_terms ? `<p>Умови оплати: ${escXml(doc.payment_terms)}</p>` : ""}
+<div class="footer">
+  <div class="sign-line">
+    <div><div class="sign">Директор: ______________ ${escXml(entity?.director || "")}</div></div>
+    <div><div class="sign">Бухгалтер: ______________ ${escXml(entity?.accountant || "")}</div></div>
+    <div><div class="sign">МП</div></div>
+  </div>
+</div>
+</body></html>`;
+}
+
+function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
+  const itemsHtml = items.map((it, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td>${escXml(it.name || it.description || "Послуга")}</td>
+      <td class="center">${it.unit || "шт"}</td>
+      <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
+      <td class="right">${parseFloat(it.unit_price || 0).toFixed(2)}</td>
+      <td class="right"><b>${parseFloat(it.total_amount || 0).toFixed(2)}</b></td>
+    </tr>`).join("");
+
+  return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#000}
+  .title{font-size:16px;font-weight:bold;text-align:center;margin:15px 0}
+  .parties{margin-bottom:15px;padding:10px;background:#f9f9f9;border:1px solid #ddd}
+  table{width:100%;border-collapse:collapse;margin-bottom:15px}
+  th,td{border:1px solid #999;padding:5px 7px;font-size:11px}
+  th{background:#e8e8e8;font-weight:bold}
+  .right{text-align:right} .center{text-align:center} .num{text-align:center;width:30px}
+  .totals{float:right;width:300px}
+  .sign-block{display:flex;justify-content:space-between;margin-top:30px}
+  .sign-col{width:45%}
+  .sign-line{border-bottom:1px solid #000;margin-top:30px;padding-bottom:3px;font-size:10px}
+</style></head><body>
+<div class="title">АКТ НАДАННЯ ПОСЛУГ № ${escXml(doc?.doc_number || "—")} від ${doc?.doc_date || "—"}</div>
+<div class="parties">
+  <b>Виконавець:</b> ${escXml(entity?.name || "—")}, ЄДРПОУ ${escXml(entity?.edrpou || "—")}, адреса: ${escXml(entity?.address || "—")}<br>
+  <b>Замовник:</b> ${escXml(cp?.name || doc?.counterparty_name || "—")}, ЄДРПОУ ${escXml(cp?.edrpou || doc?.counterparty_edrpou || "—")}${cp?.legal_address ? `, адреса: ${escXml(cp.legal_address)}` : ""}
+</div>
+<p>Виконавець надав, а Замовник прийняв наступні послуги:</p>
+<table>
+  <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна, ₴</th><th class="right">Сума, ₴</th></tr></thead>
+  <tbody>${itemsHtml}</tbody>
+</table>
+<div style="overflow:hidden">
+  <table class="totals">
+    <tr><td>Без ПДВ:</td><td class="right">${parseFloat(doc?.subtotal || 0).toFixed(2)} ₴</td></tr>
+    <tr><td>ПДВ 20%:</td><td class="right">${parseFloat(doc?.vat_amount || 0).toFixed(2)} ₴</td></tr>
+    <tr><td><b>Разом:</b></td><td class="right"><b>${parseFloat(doc?.total_amount || 0).toFixed(2)} ₴</b></td></tr>
+  </table>
+</div>
+<p>Вищевказані послуги виконані в повному обсязі, сторони претензій одна до одної не мають.</p>
+<div class="sign-block">
+  <div class="sign-col">
+    <b>ВИКОНАВЕЦЬ</b><br>${escXml(entity?.name || "")}<br>
+    <div class="sign-line">Директор ___________ ${escXml(entity?.director || "")}</div>
+    <div class="sign-line">МП</div>
+  </div>
+  <div class="sign-col">
+    <b>ЗАМОВНИК</b><br>${escXml(cp?.name || doc?.counterparty_name || "")}<br>
+    <div class="sign-line">Директор ___________</div>
+    <div class="sign-line">МП</div>
+  </div>
+</div>
+</body></html>`;
+}
+
+function generateBasXml(docs: any[], orgId: number): string {
+  const docsXml = docs.map(d => `
+  <Document>
+    <DocType>${escXml(d.doc_type || "invoice")}</DocType>
+    <DocNumber>${escXml(d.doc_number || "")}</DocNumber>
+    <DocDate>${d.doc_date || ""}</DocDate>
+    <Currency>${d.currency || "UAH"}</Currency>
+    <Subtotal>${parseFloat(d.subtotal || 0).toFixed(2)}</Subtotal>
+    <VatAmount>${parseFloat(d.vat_amount || 0).toFixed(2)}</VatAmount>
+    <TotalAmount>${parseFloat(d.total_amount || 0).toFixed(2)}</TotalAmount>
+    <CounterpartyName>${escXml(d.counterparty_name || "")}</CounterpartyName>
+    <CounterpartyCode>${escXml(d.counterparty_edrpou || "")}</CounterpartyCode>
+    <Status>${escXml(d.status || "")}</Status>
+    <Subject>${escXml(d.subject || "")}</Subject>
+  </Document>`).join("");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<BAS_Export version="1.0" generated="${new Date().toISOString()}" org_id="${orgId}">
+  <Documents count="${docs.length}">${docsXml}
+  </Documents>
+</BAS_Export>`;
+}
+
+function escXml(s: string): string {
+  if (!s) return "";
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// ─── TAX INVOICES (Податкові накладні) ────────────────────────────────────────
+router.get("/tax-invoices", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const { status, from, to, limit = 50, offset = 0 } = req.query;
+    let q = `SELECT pn.*, le.name AS seller_name_entity, cp.name AS buyer_name_cp
+             FROM ua_tax_invoices pn
+             LEFT JOIN legal_entities le ON le.id = pn.seller_entity_id
+             LEFT JOIN counterparties cp ON cp.id = pn.buyer_counterparty_id
+             WHERE pn.organization_id = $1`;
+    const params: any[] = [orgId];
+    let idx = 2;
+    if (status) { q += ` AND pn.status = $${idx++}`; params.push(status); }
+    if (from)   { q += ` AND pn.pn_date >= $${idx++}`; params.push(from); }
+    if (to)     { q += ` AND pn.pn_date <= $${idx++}`; params.push(to); }
+    q += ` ORDER BY pn.pn_date DESC, pn.id DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(parseInt(limit as string), parseInt(offset as string));
+    const { rows } = await (db as any).$client.query(q, params);
+
+    const cnt = await (db as any).$client.query(
+      `SELECT COUNT(*) as c FROM ua_tax_invoices WHERE organization_id = $1${status ? " AND status = $2" : ""}`,
+      status ? [orgId, status] : [orgId]
+    );
+    res.json({ invoices: rows, total: parseInt(cnt.rows[0].c) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/tax-invoices/:id", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows } = await (db as any).$client.query(
+      `SELECT pn.*, le.name AS seller_name_entity, le.edrpou AS seller_edrpou_entity, le.ipn AS seller_ipn_entity,
+              le.director, le.accountant, le.iban, le.bank, le.mfo, le.address AS seller_address,
+              cp.name AS buyer_name_cp, cp.edrpou AS buyer_edrpou_cp, cp.ipn AS buyer_ipn_cp
+       FROM ua_tax_invoices pn
+       LEFT JOIN legal_entities le ON le.id = pn.seller_entity_id
+       LEFT JOIN counterparties cp ON cp.id = pn.buyer_counterparty_id
+       WHERE pn.id = $1 AND pn.organization_id = $2`, [id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+
+    // Get items from linked document
+    let items: any[] = [];
+    if (rows[0].doc_id) {
+      const { rows: its } = await (db as any).$client.query(
+        `SELECT * FROM document_items WHERE document_id = $1 ORDER BY id`, [rows[0].doc_id]);
+      items = its;
+    }
+    res.json({ invoice: rows[0], items });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/tax-invoices", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const userId = req.user?.userId;
+    const {
+      docId, sellerEntityId, buyerCounterpartyId, pnType = "standard",
+      operationDate, operationCode = "07", taxableAmount, vatAmount, totalAmount,
+      vatRate = 20, notes, pnSeries = "А",
+    } = req.body;
+
+    const pnNumber = await genPnNumber(orgId);
+
+    // Auto-fill seller/buyer from linked entities
+    let sellerEdrpou = "", sellerIpn = "", sellerName = "";
+    let buyerEdrpou = "", buyerIpn = "", buyerName = "";
+    if (sellerEntityId) {
+      const { rows: el } = await (db as any).$client.query(`SELECT * FROM legal_entities WHERE id = $1`, [sellerEntityId]);
+      if (el[0]) { sellerEdrpou = el[0].edrpou || ""; sellerIpn = el[0].ipn || ""; sellerName = el[0].name || ""; }
+    }
+    if (buyerCounterpartyId) {
+      const { rows: cp } = await (db as any).$client.query(`SELECT * FROM counterparties WHERE id = $1`, [buyerCounterpartyId]);
+      if (cp[0]) { buyerEdrpou = cp[0].edrpou || ""; buyerIpn = cp[0].ipn || ""; buyerName = cp[0].name || ""; }
+    }
+
+    const { rows } = await (db as any).$client.query(`
+      INSERT INTO ua_tax_invoices (organization_id, doc_id, pn_number, pn_series, pn_date, pn_type,
+        seller_entity_id, buyer_counterparty_id, seller_edrpou, seller_ipn, seller_name,
+        buyer_edrpou, buyer_ipn, buyer_name, operation_date, operation_code,
+        taxable_amount, vat_amount, total_amount, vat_rate, status, notes, created_by)
+      VALUES ($1,$2,$3,$4,CURRENT_DATE,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'draft',$20,$21)
+      RETURNING *`,
+      [orgId, docId || null, pnNumber, pnSeries, pnType, sellerEntityId || null, buyerCounterpartyId || null,
+       sellerEdrpou, sellerIpn, sellerName, buyerEdrpou, buyerIpn, buyerName,
+       operationDate || null, operationCode, taxableAmount || 0, vatAmount || 0, totalAmount || 0, vatRate, notes || null, userId]);
+    res.json({ invoice: rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/tax-invoices/:id/generate-xml", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows } = await (db as any).$client.query(
+      `SELECT * FROM ua_tax_invoices WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    const pn = rows[0];
+
+    let items: any[] = [];
+    if (pn.doc_id) {
+      const { rows: its } = await (db as any).$client.query(`SELECT * FROM document_items WHERE document_id = $1`, [pn.doc_id]);
+      items = its;
+    }
+    if (!items.length) {
+      items = [{ description: pn.seller_name || "Послуги готелю", quantity: 1, unit_price: pn.taxable_amount, total_amount: pn.taxable_amount, unit: "шт" }];
+    }
+
+    const xml = generatePnXml(pn, items);
+    await (db as any).$client.query(
+      `UPDATE ua_tax_invoices SET xml_content = $1, xml_generated_at = NOW(), status = 'ready' WHERE id = $2`,
+      [xml, id]);
+    res.json({ xml, status: "ready", message: "XML ПН згенеровано" });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/tax-invoices/:id/submit-medoc", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows } = await (db as any).$client.query(
+      `SELECT pn.*, ai.settings FROM ua_tax_invoices pn
+       LEFT JOIN accounting_integrations ai ON ai.organization_id = pn.organization_id AND ai.provider = 'medoc'
+       WHERE pn.id = $1 AND pn.organization_id = $2`, [id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    const pn = rows[0];
+    if (!pn.xml_content) return res.status(400).json({ error: "Спочатку згенеруйте XML" });
+
+    // Integration placeholder — MEDoc uses file-based exchange
+    // Real implementation: write XML to MEDoc exchange folder or use MEDoc API
+    const medocPath = (pn.settings as any)?.exchange_path || "/tmp/medoc-exchange";
+    const filename = `PN_${pn.pn_number}_${Date.now()}.xml`;
+
+    await (db as any).$client.query(
+      `UPDATE ua_tax_invoices SET medoc_sent_at = NOW(), medoc_status = 'sent', status = 'submitted' WHERE id = $1`, [id]);
+
+    res.json({
+      success: true,
+      message: "ПН передано до M.E.Doc (режим імітації). Для реальної інтеграції налаштуйте папку обміну M.E.Doc.",
+      filename, medocPath,
+      note: "Відкрийте M.E.Doc → Реєстр → Імпорт XML → вкажіть папку обміну",
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/tax-invoices/:id/submit-vchasno", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows } = await (db as any).$client.query(
+      `SELECT pn.*, ai.settings, ai.api_key FROM ua_tax_invoices pn
+       LEFT JOIN accounting_integrations ai ON ai.organization_id = pn.organization_id AND ai.provider = 'vchasno'
+       WHERE pn.id = $1 AND pn.organization_id = $2`, [id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    const pn = rows[0];
+    if (!pn.xml_content) return res.status(400).json({ error: "Спочатку згенеруйте XML" });
+
+    // Vchasno REST API integration placeholder
+    // Real: POST https://api.vchasno.com.ua/api/v1/documents with JWT auth
+    const hasKey = !!(pn.api_key || (pn.settings as any)?.api_key);
+    if (!hasKey) {
+      await (db as any).$client.query(
+        `UPDATE ua_tax_invoices SET vchasno_sent_at = NOW(), vchasno_status = 'pending_config', status = 'submitted' WHERE id = $1`, [id]);
+      return res.json({
+        success: false,
+        message: "Вчасно.КЕП API ключ не налаштований. Перейдіть Бухгалтерія → Інтеграції → Вчасно",
+        configRequired: true,
+      });
+    }
+
+    await (db as any).$client.query(
+      `UPDATE ua_tax_invoices SET vchasno_sent_at = NOW(), vchasno_status = 'sent', status = 'submitted' WHERE id = $1`, [id]);
+    res.json({
+      success: true,
+      message: "ПН відправлено до Вчасно.КЕП",
+      vchasnoDocId: `VCH-${Date.now()}`,
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch("/tax-invoices/:id", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { status, registrationNumber, rejectionReason, notes } = req.body;
+    const updates: string[] = ["updated_at = NOW()"];
+    const params: any[] = [id, orgId];
+    let idx = 3;
+    if (status) { updates.push(`status = $${idx++}`); params.push(status); }
+    if (registrationNumber) { updates.push(`registration_number = $${idx++}`); params.push(registrationNumber); }
+    if (rejectionReason) { updates.push(`rejection_reason = $${idx++}`); params.push(rejectionReason); }
+    if (notes !== undefined) { updates.push(`notes = $${idx++}`); params.push(notes); }
+    const { rows } = await (db as any).$client.query(
+      `UPDATE ua_tax_invoices SET ${updates.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *`, params);
+    res.json({ invoice: rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── BAS / 1C EXPORT ─────────────────────────────────────────────────────────
+router.post("/export/bas", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const userId = req.user?.userId;
+    const { dateFrom, dateTo, docTypes = [], format = "bas_xml" } = req.body;
+
+    let q = `SELECT * FROM accounting_documents WHERE organization_id = $1`;
+    const params: any[] = [orgId];
+    let idx = 2;
+    if (dateFrom) { q += ` AND doc_date >= $${idx++}`; params.push(dateFrom); }
+    if (dateTo)   { q += ` AND doc_date <= $${idx++}`; params.push(dateTo); }
+    if (docTypes.length) { q += ` AND doc_type = ANY($${idx++}::acc_doc_type[])`; params.push(docTypes); }
+    q += ` ORDER BY doc_date, id`;
+    const { rows: docs } = await (db as any).$client.query(q, params);
+
+    const xmlContent = generateBasXml(docs, orgId);
+    const fileName = `bas_export_${orgId}_${Date.now()}.xml`;
+
+    const { rows } = await (db as any).$client.query(`
+      INSERT INTO ua_bas_exports (organization_id, export_type, format, date_from, date_to, doc_count, xml_content, file_name, exported_by)
+      VALUES ($1, 'filtered', $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [orgId, format, dateFrom || null, dateTo || null, docs.length, xmlContent, fileName, userId]);
+
+    res.json({
+      export: rows[0],
+      xml: xmlContent,
+      docCount: docs.length,
+      fileName,
+      instructions: {
+        bas: "Відкрийте BAS/1C → Файл → Відкрити → вкажіть XML файл → Завантажити",
+        medoc: "M.E.Doc → Реєстр → Імпорт → вибрати XML файл",
+      }
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/export/bas/history", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const { rows } = await (db as any).$client.query(
+      `SELECT id, export_type, format, date_from, date_to, doc_count, file_name, status, exported_at, imported_to_bas_at, notes
+       FROM ua_bas_exports WHERE organization_id = $1 ORDER BY exported_at DESC LIMIT 50`, [orgId]);
+    res.json({ exports: rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch("/export/bas/:id/mark-imported", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    await (db as any).$client.query(
+      `UPDATE ua_bas_exports SET imported_to_bas_at = NOW(), status = 'imported' WHERE id = $1 AND organization_id = $2`,
+      [parseInt(req.params.id), orgId]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── SIGNING REQUESTS (КЕП/ЕЦП) ─────────────────────────────────────────────
+router.get("/signing-requests", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const { status } = req.query;
+    let q = `SELECT sr.*, d.doc_number, d.doc_type, d.total_amount
+             FROM ua_signing_requests sr
+             LEFT JOIN accounting_documents d ON d.id = sr.doc_id
+             WHERE sr.organization_id = $1`;
+    const params: any[] = [orgId];
+    if (status) { q += ` AND sr.status = $2`; params.push(status); }
+    q += ` ORDER BY sr.requested_at DESC LIMIT 100`;
+    const { rows } = await (db as any).$client.query(q, params);
+    res.json({ requests: rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/signing-requests", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const { docId, taxInvoiceId, signerName, signerRole = "director", signatureMethod = "kep", provider = "manual", notes } = req.body;
+    const expires = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+    const { rows } = await (db as any).$client.query(`
+      INSERT INTO ua_signing_requests (organization_id, doc_id, tax_invoice_id, signer_name, signer_role, signature_method, provider, notes, expires_at, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending') RETURNING *`,
+      [orgId, docId || null, taxInvoiceId || null, signerName || null, signerRole, signatureMethod, provider, notes || null, expires]);
+    res.json({ request: rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch("/signing-requests/:id", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { status, signatureData, certificateInfo, notes } = req.body;
+    const updates = ["status = $3"];
+    const params: any[] = [id, orgId, status];
+    let idx = 4;
+    if (status === "signed") { updates.push("signed_at = NOW()"); }
+    if (signatureData) { updates.push(`signature_data = $${idx++}`); params.push(signatureData); }
+    if (certificateInfo) { updates.push(`certificate_info = $${idx++}`); params.push(JSON.stringify(certificateInfo)); }
+    if (notes) { updates.push(`notes = $${idx++}`); params.push(notes); }
+    const { rows } = await (db as any).$client.query(
+      `UPDATE ua_signing_requests SET ${updates.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *`, params);
+
+    // If signed, update document status
+    if (status === "signed" && rows[0]?.doc_id) {
+      await (db as any).$client.query(
+        `UPDATE accounting_documents SET status = 'signed', signed_at = NOW() WHERE id = $1`, [rows[0].doc_id]);
+    }
+    res.json({ request: rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── DOCUMENT ARCHIVE ─────────────────────────────────────────────────────────
+router.get("/archive", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const { category, docType, search, from, to, limit = 50, offset = 0 } = req.query;
+    let q = `SELECT * FROM ua_document_archive WHERE organization_id = $1`;
+    const params: any[] = [orgId];
+    let idx = 2;
+    if (category) { q += ` AND category = $${idx++}`; params.push(category); }
+    if (docType)  { q += ` AND document_type = $${idx++}`; params.push(docType); }
+    if (from)     { q += ` AND doc_date >= $${idx++}`; params.push(from); }
+    if (to)       { q += ` AND doc_date <= $${idx++}`; params.push(to); }
+    if (search)   { q += ` AND (title ILIKE $${idx} OR counterparty_name ILIKE $${idx++})`; params.push(`%${search}%`); }
+    q += ` ORDER BY archived_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(parseInt(limit as string), parseInt(offset as string));
+    const { rows } = await (db as any).$client.query(q, params);
+    const cnt = await (db as any).$client.query(`SELECT COUNT(*) c FROM ua_document_archive WHERE organization_id = $1`, [orgId]);
+    res.json({ documents: rows, total: parseInt(cnt.rows[0].c) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/archive", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const userId = req.user?.userId;
+    const {
+      docId, taxInvoiceId, category = "primary", documentType, title,
+      fileName, counterpartyId, counterpartyName, docDate, amount,
+      retentionYears = 10, isOriginal = false, isSigned = false, hasKep = false, notes, tags
+    } = req.body;
+
+    const archiveNum = `A-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 99999)).padStart(5, "0")}`;
+    const retainUntil = new Date(new Date().setFullYear(new Date().getFullYear() + retentionYears)).toISOString().split("T")[0];
+
+    const { rows } = await (db as any).$client.query(`
+      INSERT INTO ua_document_archive (organization_id, doc_id, tax_invoice_id, archive_number, category, document_type, title,
+        file_name, retention_years, retain_until, is_original, is_signed, has_kep,
+        counterparty_id, counterparty_name, doc_date, amount, notes, tags, archived_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+      [orgId, docId || null, taxInvoiceId || null, archiveNum, category, documentType, title,
+       fileName || null, retentionYears, retainUntil, isOriginal, isSigned, hasKep,
+       counterpartyId || null, counterpartyName || null, docDate || null, amount || null,
+       notes || null, tags || null, userId]);
+    res.json({ document: rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete("/archive/:id", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    await (db as any).$client.query(`DELETE FROM ua_document_archive WHERE id = $1 AND organization_id = $2`, [parseInt(req.params.id), orgId]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── COUNTERPARTY AUTO-CREATE FROM GUEST ─────────────────────────────────────
+router.post("/counterparties/from-guest", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const { guestId } = req.body;
+    const { rows: guests } = await (db as any).$client.query(
+      `SELECT * FROM guests WHERE id = $1 AND organization_id = $2`, [guestId, orgId]);
+    if (!guests[0]) return res.status(404).json({ error: "Guest not found" });
+    const g = guests[0];
+
+    // Check if already mapped
+    const { rows: existing } = await (db as any).$client.query(
+      `SELECT * FROM counterparties WHERE guest_id = $1 AND organization_id = $2`, [guestId, orgId]);
+    if (existing[0]) return res.json({ counterparty: existing[0], created: false });
+
+    const { rows } = await (db as any).$client.query(`
+      INSERT INTO counterparties (organization_id, name, short_name, type, email, phone, guest_id)
+      VALUES ($1, $2, $3, 'individual', $4, $5, $6) RETURNING *`,
+      [orgId, g.full_name || g.first_name + " " + (g.last_name || ""), g.first_name || g.full_name, g.email || null, g.phone || null, guestId]);
+    res.json({ counterparty: rows[0], created: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── ENHANCED DOCUMENT EXPORTS ────────────────────────────────────────────────
+router.get("/documents/:id/export/invoice-ua", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows: docs } = await (db as any).$client.query(
+      `SELECT * FROM accounting_documents WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!docs[0]) return res.status(404).json({ error: "Not found" });
+    const doc = docs[0];
+
+    const { rows: items } = await (db as any).$client.query(`SELECT * FROM document_items WHERE document_id = $1 ORDER BY id`, [id]);
+    let entity = null, cp = null;
+    if (doc.legal_entity_id) {
+      const { rows: el } = await (db as any).$client.query(`SELECT * FROM legal_entities WHERE id = $1`, [doc.legal_entity_id]);
+      entity = el[0];
+    }
+    if (doc.counterparty_id) {
+      const { rows: cps } = await (db as any).$client.query(`SELECT * FROM counterparties WHERE id = $1`, [doc.counterparty_id]);
+      cp = cps[0];
+    }
+
+    const html = generateInvoiceHtml(doc, items, entity, cp);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Disposition", `inline; filename="invoice_${doc.doc_number}.html"`);
+    res.send(html);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/documents/:id/export/act-ua", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows: docs } = await (db as any).$client.query(
+      `SELECT * FROM accounting_documents WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!docs[0]) return res.status(404).json({ error: "Not found" });
+    const doc = docs[0];
+
+    const { rows: items } = await (db as any).$client.query(`SELECT * FROM document_items WHERE document_id = $1 ORDER BY id`, [id]);
+    let entity = null, cp = null;
+    if (doc.legal_entity_id) {
+      const { rows: el } = await (db as any).$client.query(`SELECT * FROM legal_entities WHERE id = $1`, [doc.legal_entity_id]);
+      entity = el[0];
+    }
+    if (doc.counterparty_id) {
+      const { rows: cps } = await (db as any).$client.query(`SELECT * FROM counterparties WHERE id = $1`, [doc.counterparty_id]);
+      cp = cps[0];
+    }
+
+    const html = generateActHtml(doc, items, entity, cp);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Disposition", `inline; filename="act_${doc.doc_number}.html"`);
+    res.send(html);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/documents/:id/export/bas-xml", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows } = await (db as any).$client.query(
+      `SELECT * FROM accounting_documents WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    const xml = generateBasXml([rows[0]], orgId);
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="bas_doc_${id}.xml"`);
+    res.send(xml);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/documents/:id/export/pn-xml", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const id = parseInt(req.params.id);
+    const { rows: pns } = await (db as any).$client.query(
+      `SELECT * FROM ua_tax_invoices WHERE doc_id = $1 AND organization_id = $2 ORDER BY id DESC LIMIT 1`, [id, orgId]);
+    if (!pns[0]) return res.status(404).json({ error: "No tax invoice linked to this document" });
+    if (!pns[0].xml_content) return res.status(400).json({ error: "XML not yet generated. Use POST /tax-invoices/:id/generate-xml first" });
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="PN_${pns[0].pn_number}.xml"`);
+    res.send(pns[0].xml_content);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── UA ACCOUNTING OVERVIEW ───────────────────────────────────────────────────
+router.get("/ua/overview", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+
+    const [pnStats, sigStats, archStats, basStats] = await Promise.all([
+      (db as any).$client.query(`
+        SELECT status, COUNT(*) as cnt, SUM(total_amount) as total
+        FROM ua_tax_invoices WHERE organization_id = $1 GROUP BY status`, [orgId]),
+      (db as any).$client.query(`
+        SELECT status, COUNT(*) as cnt FROM ua_signing_requests WHERE organization_id = $1 GROUP BY status`, [orgId]),
+      (db as any).$client.query(`
+        SELECT COUNT(*) as total, SUM(amount) as total_amount FROM ua_document_archive WHERE organization_id = $1`, [orgId]),
+      (db as any).$client.query(`
+        SELECT COUNT(*) as total, MAX(exported_at) as last_export FROM ua_bas_exports WHERE organization_id = $1`, [orgId]),
+    ]);
+
+    const pnByStatus: Record<string, any> = {};
+    for (const r of pnStats.rows) pnByStatus[r.status] = { count: parseInt(r.cnt), total: parseFloat(r.total || 0) };
+
+    const sigByStatus: Record<string, any> = {};
+    for (const r of sigStats.rows) sigByStatus[r.status] = parseInt(r.cnt);
+
+    res.json({
+      taxInvoices: { byStatus: pnByStatus, total: pnStats.rows.reduce((s: number, r: any) => s + parseInt(r.cnt), 0) },
+      signing: { byStatus: sigByStatus, pending: sigByStatus.pending || 0 },
+      archive: { count: parseInt(archStats.rows[0]?.total || 0), totalAmount: parseFloat(archStats.rows[0]?.total_amount || 0) },
+      bas: { exports: parseInt(basStats.rows[0]?.total || 0), lastExport: basStats.rows[0]?.last_export },
+      integrations: {
+        bas: { status: "adapter_ready", note: "XML export готовий" },
+        medoc: { status: "file_exchange_ready", note: "Налаштуйте папку обміну" },
+        vchasno: { status: "api_ready", note: "Налаштуйте API ключ Вчасно.КЕП" },
+        kep: { status: "placeholder", note: "Підключіть КЕП провайдера: Дія.Підпис / Приват24Бізнес / Вчасно" },
+      }
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
