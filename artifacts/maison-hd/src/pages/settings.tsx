@@ -1015,8 +1015,20 @@ function OwnersTab() {
 
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
-  const { data: user } = useGetMe();
-  const isSA = user?.role === "super_admin";
+  const { data: user, isLoading: userLoading } = useGetMe();
+
+  // Wait for user data before rendering — avoids hook-order flicker
+  if (userLoading || !user) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-full py-32">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const isSA = user.role === "super_admin";
 
   return (
     <AppLayout>
@@ -1046,7 +1058,6 @@ export default function SettingsPage() {
               <TabsTrigger value="subscribers" className="gap-1.5"><Clock className="w-3.5 h-3.5" /> Підписники</TabsTrigger>
               <TabsTrigger value="owners" className="gap-1.5"><Crown className="w-3.5 h-3.5" /> Власники</TabsTrigger>
             </TabsList>
-
             <TabsContent value="profile"><ProfileTab /></TabsContent>
             <TabsContent value="subscribers">
               <Card>
@@ -1076,7 +1087,6 @@ export default function SettingsPage() {
               <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>
               <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Оплата</TabsTrigger>
             </TabsList>
-
             <TabsContent value="profile"><ProfileTab /></TabsContent>
             <TabsContent value="hotel">
               <Card>
