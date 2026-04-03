@@ -27,14 +27,14 @@ const tok = () => localStorage.getItem("hms_token") || "";
 const apiFetch = (path: string, opts: RequestInit = {}) =>
   fetch(API + path, { ...opts, headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
 
-const SIDEBAR_W = 176;
-const HEADER_H = 72;
-const MIN_DAY_W = 28;
-const MAX_DAY_W = 80;
-const ROW_H_COMPACT = 32;
-const ROW_H_NORMAL = 48;
-const ROW_H_EXTENDED = 64;
-const CAT_H = 28;
+const SIDEBAR_W = 180;
+const HEADER_H = 76;
+const MIN_DAY_W = 32;
+const MAX_DAY_W = 110;
+const ROW_H_COMPACT = 34;
+const ROW_H_NORMAL = 52;
+const ROW_H_EXTENDED = 68;
+const CAT_H = 30;
 
 const ds = (d: Date | string) => typeof d === "string" ? d : format(d, "yyyy-MM-dd");
 const dp = (s: string) => parseISO(s);
@@ -100,8 +100,8 @@ export default function ChessPage() {
 
   // ── View state ──
   const [startDate, setStartDate] = useState(() => ds(new Date()));
-  const [days, setDays] = useState(30);
-  const [dayW, setDayW] = useState(42);
+  const [days, setDays] = useState(21);
+  const [dayW, setDayW] = useState(64);
   const [rowMode, setRowMode] = useState<"compact" | "normal" | "extended">("normal");
   const [compact, setCompact] = useState(false);
   const rowH = compact ? ROW_H_COMPACT : rowMode === "compact" ? ROW_H_COMPACT : rowMode === "extended" ? ROW_H_EXTENDED : ROW_H_NORMAL;
@@ -241,14 +241,14 @@ export default function ChessPage() {
 
   const navigate = (delta: number) => setStartDate(ds(addDays(dp(startDate), delta)));
   const goToday = () => setStartDate(ds(new Date()));
-  const zoomIn = () => setDayW(w => Math.min(MAX_DAY_W, w + 8));
-  const zoomOut = () => setDayW(w => Math.max(MIN_DAY_W, w - 8));
+  const zoomIn = () => setDayW(w => Math.min(MAX_DAY_W, w + 10));
+  const zoomOut = () => setDayW(w => Math.max(MIN_DAY_W, w - 10));
 
   // ── Presets ──
   const presets = [
     { label: "7 д", days: 7 }, { label: "14 д", days: 14 },
-    { label: "30 д", days: 30 }, { label: "60 д", days: 60 },
-    { label: "90 д", days: 90 },
+    { label: "21 д", days: 21 }, { label: "30 д", days: 30 },
+    { label: "60 д", days: 60 },
   ];
 
   // ── Booking on a unit for a date ──
@@ -488,17 +488,18 @@ export default function ChessPage() {
                   const occ = overlay === "heatmap" ? (occupancyByDate.get(d) || 0) : 0;
                   const isMonthStart = dp(d).getDate() === 1 || i === 0;
                   return (
-                    <div key={d} className={`flex-shrink-0 flex flex-col items-center justify-end pb-1.5 border-r border-gray-200 transition-colors ${isToday ? "bg-blue-50" : isWeekend ? "bg-gray-100/50" : ""}`}
-                      style={{ width: dayW, position: "relative" }}>
+                    <div key={d} className={`flex-shrink-0 flex flex-col items-center justify-end pb-2 border-r border-gray-200 transition-colors relative ${isWeekend && !isToday ? "bg-rose-50/30" : ""}`}
+                      style={{ width: dayW }}>
                       {isMonthStart && (
-                        <span className="absolute top-1 left-1 text-[9px] font-bold text-gray-400 uppercase">{fmtMonth(d)}</span>
+                        <span className="absolute top-2 left-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{fmtMonth(d)}</span>
                       )}
+                      {isToday && <div className="absolute top-0 left-0 right-0 bottom-0 bg-blue-50/80 border-x border-blue-300" />}
                       {overlay === "heatmap" && occ > 0 && (
                         <div className="absolute bottom-0 left-0 right-0" style={{ height: `${occ * 100}%`, background: `rgba(239,68,68,${occ * 0.5})`, opacity: 0.5 }} />
                       )}
-                      <span className={`text-[9px] font-medium leading-none ${isToday ? "text-blue-600" : isWeekend ? "text-gray-500" : "text-gray-400"}`}>{fmtWeekday(d)}</span>
-                      <span className={`text-sm font-bold leading-none mt-0.5 ${isToday ? "text-blue-700" : isWeekend ? "text-gray-600" : "text-gray-700"}`}>{fmtDay(d)}</span>
-                      {isToday && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />}
+                      <span className={`text-[10px] font-medium leading-none relative z-10 ${isToday ? "text-blue-500 font-semibold" : isWeekend ? "text-rose-400" : "text-gray-400"}`}>{fmtWeekday(d)}</span>
+                      <span className={`text-base font-bold leading-none mt-0.5 relative z-10 ${isToday ? "text-blue-700" : isWeekend ? "text-rose-600" : "text-gray-700"}`}>{fmtDay(d)}</span>
+                      {isToday && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 z-20" />}
                     </div>
                   );
                 })}
@@ -535,7 +536,7 @@ export default function ChessPage() {
                           const occPct = overlay === "heatmap" ? (occupancyByDate.get(d) || 0) : 0;
                           return (
                             <div key={d}
-                              className={`flex-shrink-0 h-full border-r border-gray-100 cursor-cell select-none relative transition-colors ${isToday ? "bg-blue-50/30" : isWeekend ? "bg-gray-50/50" : ""} ${isDrag ? "bg-blue-100" : ""}`}
+                              className={`flex-shrink-0 h-full border-r border-gray-100 cursor-cell select-none relative transition-colors ${isToday ? "bg-blue-50/40" : isWeekend ? "bg-rose-50/25" : ""} ${isDrag ? "bg-blue-100" : ""}`}
                               style={{ width: dayW }}
                               onMouseDown={!bk && !block ? (e) => onCellDown(u.id, d, e) : undefined}
                               onMouseEnter={() => onCellEnter(u.id, d)}
@@ -591,22 +592,22 @@ export default function ChessPage() {
                             )}
 
                             {/* Content */}
-                            {w * dayW > 36 && (
-                              <div className="flex items-center gap-1 px-1.5 min-w-0">
-                                {w * dayW > 50 && (
-                                  <span className="text-[10px] font-semibold truncate leading-tight">
+                            {w * dayW > 30 && (
+                              <div className="flex items-center gap-1 px-1.5 min-w-0 w-full">
+                                {w * dayW > 42 && (
+                                  <span className="text-[11px] font-semibold truncate leading-tight flex-1">
                                     {b.guestName?.split(" ")[0] || "—"}
-                                    {w * dayW > 90 && b.guestName?.split(" ")[1] ? ` ${b.guestName.split(" ")[1][0]}.` : ""}
+                                    {w * dayW > 80 && b.guestName?.split(" ")[1] ? ` ${b.guestName.split(" ")[1][0]}.` : ""}
                                   </span>
                                 )}
-                                {w * dayW > 110 && rowMode === "extended" && (
-                                  <span className="text-[9px] opacity-70">{b.nights}н</span>
+                                {w * dayW > 120 && (
+                                  <span className="text-[9px] opacity-60 flex-shrink-0">{b.nights}н</span>
                                 )}
                               </div>
                             )}
 
                             {/* Status dot */}
-                            {w * dayW <= 36 && (
+                            {w * dayW <= 30 && (
                               <div className="w-full h-full flex items-center justify-center">
                                 <div className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
                               </div>
