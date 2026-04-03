@@ -14,6 +14,8 @@ import { toast } from "@/hooks/use-toast";
 import {
   Building2, Plus, Trash2, Pencil, Check, X, Percent, Star, ShieldCheck,
   Save, KeyRound, User, Hotel, Eye, EyeOff, CreditCard, ExternalLink,
+  Crown, Users2, Loader2, ChevronRight, Clock, CheckCircle2, AlertCircle,
+  Copy, RefreshCw, Globe, Phone, Mail, Lock, Hash,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -682,63 +684,438 @@ function BillingTab() {
   );
 }
 
+// ── Super Admin: Subscribers (Demo / Trial) ───────────────────────
+function SubscribersTab() {
+  const { data: orgs = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["sa-orgs-trial"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/organizations`);
+      if (!r.ok) return [];
+      const all: any[] = await r.json();
+      return all.filter(o => o.subscriptionStatus === "trial" || o.subscriptionStatus === "demo");
+    },
+  });
+
+  if (isLoading) return <div className="py-12 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <p className="text-sm text-muted-foreground">Організації на демо або пробному режимі. Вони ще не придбали підписку.</p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => refetch()} className="gap-1.5">
+          <RefreshCw className="w-3.5 h-3.5" /> Оновити
+        </Button>
+      </div>
+
+      {orgs.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed p-10 text-center text-muted-foreground">
+          <Users2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          <p className="text-sm">Немає активних демо-підписників</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orgs.map((o: any) => {
+            const trialEnd = o.trialEndsAt ? new Date(o.trialEndsAt) : null;
+            const daysLeft = trialEnd ? Math.ceil((trialEnd.getTime() - Date.now()) / 86400000) : null;
+            const expired = daysLeft !== null && daysLeft <= 0;
+            return (
+              <div key={o.id} className="rounded-xl border p-4 hover:border-primary/30 transition-colors">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm">{o.name}</span>
+                      <Badge variant="outline" className="text-xs font-mono">/{o.slug}</Badge>
+                      <Badge variant={expired ? "destructive" : "secondary"} className="text-xs">
+                        {expired ? "⏰ Демо закінчилось" : `🕐 ${daysLeft} дн. демо`}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5">
+                      {o.email && <span className="text-xs text-muted-foreground flex items-center gap-1"><Mail className="w-3 h-3" />{o.email}</span>}
+                      {o.phone && <span className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />{o.phone}</span>}
+                      <span className="text-xs text-muted-foreground">{o.userCount} корист. · {o.propertyCount} об'єктів</span>
+                      <span className="text-xs text-muted-foreground">
+                        Зареєстровано: {new Date(o.createdAt).toLocaleDateString("uk-UA")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-xs font-medium px-2 py-1 rounded-lg border ${
+                      expired ? "bg-red-50 text-red-600 border-red-200" : "bg-amber-50 text-amber-700 border-amber-200"
+                    }`}>
+                      {o.plan?.toUpperCase() || "BASIC"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Super Admin: Owners (Paying subscribers) ─────────────────────
+function OwnersTab() {
+  const qc = useQueryClient();
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<{ org: any; owner: any } | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [form, setForm] = useState({
+    name: "", plan: "basic",
+    email: "", phone: "",
+    ownerName: "", ownerEmail: "", ownerPassword: "",
+  });
+
+  const { data: orgs = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["sa-orgs-active"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/organizations`);
+      if (!r.ok) return [];
+      const all: any[] = await r.json();
+      return all.filter(o => o.subscriptionStatus === "active" || o.subscriptionStatus === "paid");
+    },
+  });
+
+  const fv = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
+
+  const autoSlug = (n: string) =>
+    n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30);
+
+  const generatePassword = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
+    let pw = "";
+    for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+    fv("ownerPassword", pw);
+  };
+
+  const handleCreate = async () => {
+    if (!form.name || !form.ownerName || !form.ownerEmail || !form.ownerPassword) {
+      toast({ title: "Помилка", description: "Заповніть усі обов'язкові поля", variant: "destructive" });
+      return;
+    }
+    setCreating(true);
+    try {
+      const slug = autoSlug(form.name);
+      const r = await authFetch(`${API}/organizations`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: form.name,
+          slug,
+          plan: form.plan,
+          email: form.email || null,
+          phone: form.phone || null,
+          ownerName: form.ownerName,
+          ownerEmail: form.ownerEmail,
+          ownerPassword: form.ownerPassword,
+          trialDays: 0,
+        }),
+      });
+      if (!r.ok) {
+        const e = await r.json();
+        toast({ title: "Помилка", description: e.message || e.error, variant: "destructive" });
+        return;
+      }
+      const data = await r.json();
+      setCreated(data);
+      qc.invalidateQueries({ queryKey: ["sa-orgs-active"] });
+      refetch();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const PLAN_LABELS: Record<string, { label: string; color: string }> = {
+    basic:      { label: "Basic",      color: "bg-gray-100 text-gray-700 border-gray-200" },
+    pro:        { label: "Pro",        color: "bg-blue-50 text-blue-700 border-blue-200" },
+    enterprise: { label: "Enterprise", color: "bg-violet-50 text-violet-700 border-violet-200" },
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm text-muted-foreground">Клієнти з активною платною підпискою. Тут ви реєструєте новий об'єкт і видаєте доступ власнику.</p>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" onClick={() => refetch()} className="gap-1.5">
+            <RefreshCw className="w-3.5 h-3.5" />
+          </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => { setShowCreate(true); setCreated(null); }}>
+            <Plus className="w-3.5 h-3.5" /> Додати власника
+          </Button>
+        </div>
+      </div>
+
+      {/* Create form */}
+      {showCreate && !created && (
+        <div className="border rounded-2xl p-6 space-y-5 bg-muted/5">
+          <h4 className="font-bold text-base flex items-center gap-2"><Crown className="w-4 h-4 text-amber-500" /> Реєстрація нового власника</h4>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5 col-span-2">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Інформація про об'єкт</label>
+            </div>
+            <div className="space-y-1.5 col-span-2">
+              <Label className="text-xs">Назва організації / закладу *</Label>
+              <Input placeholder='Готель «Вершина»' value={form.name} onChange={e => fv("name", e.target.value)} />
+              {form.name && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Hash className="w-3 h-3" /> Slug: <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{autoSlug(form.name)}</code>
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Тарифний план *</Label>
+              <Select value={form.plan} onValueChange={v => fv("plan", v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="basic">Basic — до 30 юнітів</SelectItem>
+                  <SelectItem value="pro">Pro — до 100 юнітів</SelectItem>
+                  <SelectItem value="enterprise">Enterprise — необмежено</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Email організації</Label>
+              <Input type="email" placeholder="info@hotel.ua" value={form.email} onChange={e => fv("email", e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Телефон</Label>
+              <Input type="tel" placeholder="+380 67 000 00 00" value={form.phone} onChange={e => fv("phone", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t">
+            <div className="space-y-1.5 col-span-2">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Обліковий запис власника</label>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Ім'я власника *</Label>
+              <Input placeholder="Ольга Коваленко" value={form.ownerName} onChange={e => fv("ownerName", e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Email для входу *</Label>
+              <Input type="email" placeholder="owner@hotel.ua" value={form.ownerEmail} onChange={e => fv("ownerEmail", e.target.value)} />
+            </div>
+            <div className="space-y-1.5 col-span-2">
+              <Label className="text-xs">Пароль *</Label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Мінімум 6 символів"
+                    value={form.ownerPassword}
+                    onChange={e => fv("ownerPassword", e.target.value)}
+                  />
+                  <button type="button" onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <Button type="button" variant="outline" size="icon" onClick={generatePassword} title="Згенерувати пароль">
+                  <RefreshCw className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="ghost" size="sm" onClick={() => { setShowCreate(false); setForm({ name: "", plan: "basic", email: "", phone: "", ownerName: "", ownerEmail: "", ownerPassword: "" }); }}>
+              <X className="h-3.5 w-3.5 mr-1" /> Скасувати
+            </Button>
+            <Button size="sm" onClick={handleCreate} disabled={creating} className="gap-1.5">
+              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              Створити та надати доступ
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Success — show credentials */}
+      {created && (
+        <div className="border-2 border-emerald-300 rounded-2xl p-6 bg-emerald-50/40 space-y-4">
+          <div className="flex items-center gap-2 text-emerald-700 font-bold">
+            <CheckCircle2 className="w-5 h-5" /> Власника успішно зареєстровано!
+          </div>
+          <p className="text-sm text-muted-foreground">Передайте ці дані для першого входу. Власник зможе змінити пароль у налаштуваннях.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {[
+              { label: "Організація", value: created.org?.name },
+              { label: "Slug", value: created.org?.slug },
+              { label: "Email", value: created.owner?.email },
+              { label: "Пароль", value: form.ownerPassword },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-white rounded-xl border border-emerald-200 px-4 py-3">
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <code className="text-sm font-semibold flex-1 break-all">{value}</code>
+                  <button onClick={() => { navigator.clipboard.writeText(String(value)); toast({ title: "Скопійовано" }); }}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"><Copy className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setCreated(null); setShowCreate(false); setForm({ name: "", plan: "basic", email: "", phone: "", ownerName: "", ownerEmail: "", ownerPassword: "" }); }}>
+              Закрити
+            </Button>
+            <Button size="sm" onClick={() => { setCreated(null); setForm({ name: "", plan: "basic", email: "", phone: "", ownerName: "", ownerEmail: "", ownerPassword: "" }); }}>
+              <Plus className="w-3.5 h-3.5 mr-1" /> Додати ще
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* List of active owners */}
+      {isLoading ? (
+        <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+      ) : orgs.length === 0 && !showCreate ? (
+        <div className="rounded-xl border-2 border-dashed p-10 text-center text-muted-foreground">
+          <Crown className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          <p className="text-sm font-medium">Ще немає клієнтів з оплаченою підпискою</p>
+          <p className="text-xs mt-1">Натисніть «Додати власника» щоб зареєструвати перший об'єкт</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orgs.map((o: any) => {
+            const pl = PLAN_LABELS[o.plan] || PLAN_LABELS.basic;
+            return (
+              <div key={o.id} className="rounded-xl border p-4 hover:border-primary/30 transition-colors">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm">{o.name}</span>
+                      <Badge variant="outline" className="text-xs font-mono">/{o.slug}</Badge>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-lg border ${pl.color}`}>{pl.label}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-lg border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Активна</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5">
+                      {o.email && <span className="text-xs text-muted-foreground flex items-center gap-1"><Mail className="w-3 h-3" />{o.email}</span>}
+                      {o.phone && <span className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />{o.phone}</span>}
+                      <span className="text-xs text-muted-foreground">{o.userCount} корист. · {o.propertyCount} об'єктів</span>
+                      <span className="text-xs text-muted-foreground">З {new Date(o.createdAt).toLocaleDateString("uk-UA")}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-xs text-muted-foreground">
+                      {o.maxUnits} юнітів / {o.maxUsers} користувачів
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
+  const { data: user } = useGetMe();
+  const isSA = user?.role === "super_admin";
+
   return (
     <AppLayout>
       <div className="p-8 max-w-4xl mx-auto h-full">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">Налаштування</h1>
-          <p className="text-muted-foreground mt-1">Керування обліковим записом та параметрами системи.</p>
+          {isSA ? (
+            <>
+              <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5 mb-3">
+                <Crown className="w-3.5 h-3.5 text-amber-600" />
+                <span className="text-xs font-bold text-amber-700 uppercase tracking-wide">Super Admin Panel</span>
+              </div>
+              <h1 className="text-3xl font-bold tracking-tight">Управління платформою</h1>
+              <p className="text-muted-foreground mt-1">Особистий профіль, підписники та клієнти з оплаченим доступом.</p>
+            </>
+          ) : (
+            <>
+              <h1 className="text-3xl font-bold tracking-tight">Налаштування</h1>
+              <p className="text-muted-foreground mt-1">Керування обліковим записом та параметрами системи.</p>
+            </>
+          )}
         </div>
 
-        <Tabs defaultValue="profile" className="w-full">
-          <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
-            <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
-            <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
-            <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>
-            <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>
-            <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Оплата</TabsTrigger>
-          </TabsList>
+        {isSA ? (
+          <Tabs defaultValue="profile" className="w-full">
+            <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
+              <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
+              <TabsTrigger value="subscribers" className="gap-1.5"><Clock className="w-3.5 h-3.5" /> Підписники</TabsTrigger>
+              <TabsTrigger value="owners" className="gap-1.5"><Crown className="w-3.5 h-3.5" /> Власники</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="profile"><ProfileTab /></TabsContent>
-          <TabsContent value="hotel">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Hotel className="w-4 h-4" /> Налаштування об'єкту</CardTitle>
-                <CardDescription>Основна інформація про готель, що відображається у системі.</CardDescription>
-              </CardHeader>
-              <CardContent><HotelTab /></CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="legal">
-            <Card>
-              <CardHeader>
-                <CardTitle>Юридичні особи</CardTitle>
-                <CardDescription>Реквізити для формування рахунків та приймання онлайн-оплат через LiqPay.</CardDescription>
-              </CardHeader>
-              <CardContent><LegalEntitiesTab /></CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="discounts">
-            <Card>
-              <CardHeader>
-                <CardTitle>Типи знижок</CardTitle>
-                <CardDescription>Визначте знижки для окремих категорій гостей (УБД, день народження, постійний гість тощо).</CardDescription>
-              </CardHeader>
-              <CardContent><DiscountTypesTab /></CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="billing">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><CreditCard className="w-4 h-4" /> Підписка та оплата</CardTitle>
-                <CardDescription>Керування підпискою Maison HD та платіжними налаштуваннями.</CardDescription>
-              </CardHeader>
-              <CardContent><BillingTab /></CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+            <TabsContent value="profile"><ProfileTab /></TabsContent>
+            <TabsContent value="subscribers">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Users2 className="w-4 h-4" /> Підписники (Демо)</CardTitle>
+                  <CardDescription>Організації що зараз тестують систему на демо або пробному доступі.</CardDescription>
+                </CardHeader>
+                <CardContent><SubscribersTab /></CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="owners">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Crown className="w-4 h-4 text-amber-500" /> Власники (Платна підписка)</CardTitle>
+                  <CardDescription>Клієнти з оплаченим доступом. Тут реєструйте новий об'єкт та видавайте логін/пароль власнику.</CardDescription>
+                </CardHeader>
+                <CardContent><OwnersTab /></CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <Tabs defaultValue="profile" className="w-full">
+            <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
+              <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
+              <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
+              <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>
+              <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>
+              <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Оплата</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="profile"><ProfileTab /></TabsContent>
+            <TabsContent value="hotel">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Hotel className="w-4 h-4" /> Налаштування об'єкту</CardTitle>
+                  <CardDescription>Основна інформація про готель, що відображається у системі.</CardDescription>
+                </CardHeader>
+                <CardContent><HotelTab /></CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="legal">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Юридичні особи</CardTitle>
+                  <CardDescription>Реквізити для формування рахунків та приймання онлайн-оплат через LiqPay.</CardDescription>
+                </CardHeader>
+                <CardContent><LegalEntitiesTab /></CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="discounts">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Типи знижок</CardTitle>
+                  <CardDescription>Визначте знижки для окремих категорій гостей (УБД, день народження, постійний гість тощо).</CardDescription>
+                </CardHeader>
+                <CardContent><DiscountTypesTab /></CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="billing">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><CreditCard className="w-4 h-4" /> Підписка та оплата</CardTitle>
+                  <CardDescription>Керування підпискою Maison HD та платіжними налаштуваннями.</CardDescription>
+                </CardHeader>
+                <CardContent><BillingTab /></CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
     </AppLayout>
   );
