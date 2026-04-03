@@ -5,6 +5,7 @@ import {
   ChevronRight, ArrowRight, Check, BedDouble, BarChart3,
   MessageSquare, Users, Zap, Globe2, Shield, TrendingUp,
   Calendar, Star, Hotel, Clock, Play, X,
+  Wand2, Tv, LayoutDashboard, QrCode, BrainCircuit,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -31,14 +32,19 @@ const CELL_CLR: Record<string, string> = {
 };
 
 const FEATURES = [
-  { icon: Calendar, title: "Шахматка бронювань",  desc: "Drag-and-drop grid. Всі юніти. 60-денний вид. Без плутанини." },
-  { icon: BarChart3, title: "Аналітика власника",  desc: "ADR, RevPAR, Occupancy, Revenue — в реальному часі." },
-  { icon: Globe2,    title: "OTA-синхронізація",   desc: "Booking.com, Airbnb, Expedia. Один інвентар, жодного овербукінгу." },
-  { icon: MessageSquare, title: "Unified Inbox",   desc: "SMS, Email, Telegram — один потік. Zero missed messages." },
-  { icon: Zap,       title: "Автоматизація",        desc: "Нічний аудит, HK-завдання, нагадування — без ручного втручання." },
-  { icon: Users,     title: "Ролева система",        desc: "Власник → Менеджер → Ресепшн → Покоївка. Чіткі права доступу." },
-  { icon: Shield,    title: "Фіскальний модуль",    desc: "Checkbox ПРРО, VCHASNO, ПДВ — вбудована комплаєнс-модель." },
-  { icon: TrendingUp, title: "Yield Management",   desc: "Динамічні ціни. Сезонні множники. Пакети. Знижки зі стратегією." },
+  { icon: Calendar,       title: "Шахматка бронювань",      desc: "Drag-and-drop grid. Всі юніти. 60-денний вид. Без плутанини." },
+  { icon: BarChart3,      title: "Аналітика власника",       desc: "ADR, RevPAR, Occupancy, Revenue — в реальному часі." },
+  { icon: Globe2,         title: "OTA-синхронізація",        desc: "Booking.com, Airbnb, Expedia. Один інвентар, жодного овербукінгу." },
+  { icon: MessageSquare,  title: "Unified Inbox",            desc: "SMS, Email, Telegram — один потік. Жодного пропущеного запиту." },
+  { icon: Zap,            title: "Автоматизація",            desc: "Нічний аудит, HK-завдання, нагадування — без ручного втручання." },
+  { icon: Users,          title: "Ролева система",           desc: "Власник → Менеджер → Ресепшн → Покоївка. Чіткі права доступу." },
+  { icon: Shield,         title: "Фіскальний модуль",       desc: "Checkbox ПРРО, VCHASNO, ПДВ — вбудована комплаєнс-модель." },
+  { icon: TrendingUp,     title: "Yield Management",         desc: "Динамічні ціни. Сезонні множники. Пакети. Знижки зі стратегією." },
+  { icon: Wand2,          title: "Майстер налаштування",     desc: "Покроковий онбординг від першого входу до повноцінної роботи. Підключення за 48 годин — без участі ІТ-команди.", highlight: true },
+  { icon: Tv,             title: "Hotel TV",                 desc: "Цифровий канал для кожного номера: вітання гостя, QR-меню, акції та сервісні оголошення — без додаткового обладнання.", highlight: true },
+  { icon: LayoutDashboard, title: "Кабінет гостя",          desc: "Особистий портал: бронювання, сервісні запити, рахунки та документи — доступні гостю через одне посилання.", highlight: true },
+  { icon: QrCode,         title: "Онлайн чекін / чекаут",   desc: "Гість прибуває і від'їжджає без черги та паперів. Верифікація, цифровий ключ і закриття рахунку — через смартфон.", highlight: true },
+  { icon: BrainCircuit,   title: "AI Hub",                   desc: "Вбудований AI-асистент прискорює обробку запитів, генерує звіти, підказує цінові рішення та автоматизує щоденні комунікації.", highlight: true },
 ];
 
 const TESTIMONIALS = [
@@ -375,8 +381,9 @@ export default function DemoPage() {
             <h2 className="text-4xl md:text-5xl font-black text-white mb-4 leading-tight">Повний Hospitality OS</h2>
             <p className="text-white/40 text-lg max-w-xl mx-auto">Не набір інструментів. Єдина операційна модель для готелю будь-якого масштабу.</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {FEATURES.map((f, i) => (
+          {/* Core platform features */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {FEATURES.filter(f => !f.highlight).map((f, i) => (
               <div key={i} className="group p-6 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-indigo-500/30 hover:bg-white/[0.06] transition-all">
                 <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center mb-4 group-hover:bg-indigo-600/30 transition-colors">
                   <f.icon className="w-5 h-5 text-indigo-400" />
@@ -385,6 +392,31 @@ export default function DemoPage() {
                 <p className="text-white/40 text-xs leading-relaxed">{f.desc}</p>
               </div>
             ))}
+          </div>
+
+          {/* Differentiating advantages */}
+          <div className="relative">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-violet-500/30" />
+              <span className="text-xs font-bold text-violet-400 uppercase tracking-widest px-3 py-1.5 rounded-full border border-violet-500/20 bg-violet-500/10">
+                Конкурентні переваги
+              </span>
+              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-violet-500/30" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {FEATURES.filter(f => f.highlight).map((f, i) => (
+                <div key={i} className="group relative p-6 rounded-2xl bg-violet-950/30 border border-violet-500/15 hover:border-violet-400/35 hover:bg-violet-950/50 transition-all overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-br from-violet-600/5 to-indigo-600/5 pointer-events-none" />
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-500/25 flex items-center justify-center mb-4 group-hover:bg-violet-600/35 transition-colors">
+                      <f.icon className="w-5 h-5 text-violet-400" />
+                    </div>
+                    <h3 className="font-bold text-white text-sm mb-2">{f.title}</h3>
+                    <p className="text-white/40 text-xs leading-relaxed">{f.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>

@@ -1,5 +1,5 @@
-const CACHE_NAME = "maison-hd-v1";
-const STATIC_ASSETS = ["/maison-hd/", "/maison-hd/manifest.json"];
+const CACHE_NAME = "maison-hd-v2";
+const STATIC_ASSETS = ["/", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
