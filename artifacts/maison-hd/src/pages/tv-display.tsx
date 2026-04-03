@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRoute } from "wouter";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/tv";
 
 type Slide = "welcome" | "weather" | "services" | "food" | "activities" | "events" | "upsell" | "info";

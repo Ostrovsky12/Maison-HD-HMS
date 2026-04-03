@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Tv, QrCode, Wifi, WifiOff, Settings, ExternalLink, Monitor, Sparkles, CheckCircle2, Eye } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/tv";
 const token = () => localStorage.getItem("hms_token") || "";
 const apiFetch = (path: string, opts: RequestInit = {}) =>

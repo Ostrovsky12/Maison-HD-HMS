@@ -17,7 +17,7 @@ import {
   ArrowRight, DollarSign, Moon, Star, Filter, Clock, ArrowUpRight, Layers,
 } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/accommodation";
 const token = () => localStorage.getItem("hms_token") || "";
 const apiFetch = (path: string, opts: RequestInit = {}) =>

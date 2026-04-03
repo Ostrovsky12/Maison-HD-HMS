@@ -15,7 +15,7 @@ export default function PricingPage() {
   const [activeTab, setActiveTab] = useState<"plans" | "modules">("plans");
   const [hoveredModule, setHoveredModule] = useState<string | null>(null);
   const [, navigate] = useLocation();
-  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 
   const fmtPrice = (p: number) =>
     Math.round(p).toLocaleString("uk-UA") + " ₴";

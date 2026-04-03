@@ -18,7 +18,7 @@ import {
   ExternalLink, Download, Lock, CreditCard, AlertCircle, Globe,
 } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_PUB = BASE.replace("/maison-hd", "") + "/api/public";
 const apiFetch = (path: string, opts: RequestInit = {}) =>
   fetch(API_PUB + path, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });

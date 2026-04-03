@@ -11,7 +11,7 @@ import {
   BarChart3, Zap, Filter, Search, Play, ArrowRight, Tag, ClipboardList,
 } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_ROOT = BASE.replace("/maison-hd", "");
 const tok = () => localStorage.getItem("hms_token") || "";
 const apiFetch = (path: string, opts: RequestInit = {}) =>

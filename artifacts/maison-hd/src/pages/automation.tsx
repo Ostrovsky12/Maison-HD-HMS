@@ -16,7 +16,7 @@ import {
   ListChecks, Settings2, TrendingUp,
 } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/automation";
 const token = () => localStorage.getItem("hms_token") || "";
 const apiFetch = (path: string, opts: RequestInit = {}) =>

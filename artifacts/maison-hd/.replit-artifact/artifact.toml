@@ -1,5 +1,5 @@
 kind = "web"
-previewPath = "/maison-hd/"
+previewPath = "/"
 title = "Maison HD — HMS"
 version = "1.0.0"
 id = "artifacts/maison-hd"
@@ -11,7 +11,7 @@ version = "1.0.0"
 
 [[services]]
 name = "web"
-paths = [ "/maison-hd/" ]
+paths = [ "/" ]
 localPort = 26242
 
 [services.development]
@@ -28,4 +28,4 @@ to = "/index.html"
 
 [services.env]
 PORT = "26242"
-BASE_PATH = "/maison-hd/"
+BASE_PATH = "/"

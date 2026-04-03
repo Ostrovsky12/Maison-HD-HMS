@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useToast } from "@/hooks/use-toast";
 import { TrendingUp, TrendingDown, Tag, Calendar, Layers, Plus, Lock, Unlock, CheckCircle2, Pencil, X } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/revenue";
 const token = () => localStorage.getItem("hms_token") || "";
 const apiFetch = (path: string, opts: RequestInit = {}) =>

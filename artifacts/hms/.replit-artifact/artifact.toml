@@ -1,5 +1,5 @@
 kind = "web"
-previewPath = "/"
+previewPath = "/hms/"
 title = "HMS - Hotel Management System"
 version = "1.0.0"
 id = "artifacts/hms"
@@ -11,7 +11,7 @@ version = "1.0.0"
 
 [[services]]
 name = "web"
-paths = [ "/" ]
+paths = [ "/hms/" ]
 localPort = 22938
 
 [services.development]
@@ -28,4 +28,4 @@ to = "/index.html"
 
 [services.env]
 PORT = "22938"
-BASE_PATH = "/"
+BASE_PATH = "/hms/"

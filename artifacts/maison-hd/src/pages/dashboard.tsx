@@ -62,7 +62,7 @@ export default function DashboardPage() {
   const today = format(new Date(), "yyyy-MM-dd");
   const { data: todayBookings } = useListBookings({ dateFrom: today, dateTo: today });
   const [, navigate] = useLocation();
-  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 
   if (analyticsLoading) {
     return (

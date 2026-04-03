@@ -43,7 +43,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [active, setActive] = useState(0);
   const [, navigate] = useLocation();
   const inputRef = useRef<HTMLInputElement>(null);
-  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 
   const actions: Action[] = NAV_ACTIONS.map(a => ({ ...a, group: "Навігація" }));
 

@@ -61,7 +61,7 @@ export default function GuestAppPage() {
   ]);
   const { toast } = useToast();
 
-  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "/maison-hd";
+  const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
   const apiFetch = (path: string, opts: RequestInit = {}) =>
     fetch(BASE.replace("/maison-hd", "") + path, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
 
