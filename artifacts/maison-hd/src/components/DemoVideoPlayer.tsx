@@ -38,11 +38,9 @@ function useAmbient() {
 
 // ─── TTS narration ────────────────────────────────────────────────────────────
 const SCENE_NARRATION: Record<number, string> = {
-  0: "Maison HD. Новий рівень управління готелем — RevPAR це лише поверхня.",
-  1: "Повна картина вашого готелю в реальному часі. Дохід, завантаженість, ADR — все в одному дашборді.",
-  2: "Шахматка бронювань. Весь номерний фонд одним поглядом — без плутанини.",
-  3: "Бронювання, Housekeeping, звіти, AI Hub — все в одній системі.",
-  4: "Спробуйте Maison HD безкоштовно. Без кредитної картки. Міграція з будь-якої PMS.",
+  0: "Maison HD — AI-система управління готельним бізнесом нового покоління.",
+  1: "Ми автоматизуємо операційні процеси настільки, що замість трьох адміністраторів достатньо одного.",
+  2: "Єдина екосистема модулів і повний контроль над кожним етапом — від бронювання до сервісу гостя.",
 };
 
 function useTTS() {
@@ -52,12 +50,22 @@ function useTTS() {
   useEffect(() => {
     const pick = () => {
       const voices = window.speechSynthesis?.getVoices() ?? [];
-      voiceRef.current =
-        voices.find(v => v.lang.startsWith('uk')) ||
-        voices.find(v => v.lang.startsWith('ru') && /male/i.test(v.name)) ||
-        voices.find(v => v.lang.startsWith('ru')) ||
-        voices.find(v => /google/i.test(v.name)) ||
-        voices[0] || null;
+      if (!voices.length) return;
+
+      // Priority 1 — Google Ukrainian (cloud, highest quality)
+      const googleUk = voices.find(v => v.lang.startsWith('uk') && /google/i.test(v.name));
+      // Priority 2 — any Ukrainian voice
+      const anyUk = voices.find(v => v.lang.startsWith('uk'));
+      // Priority 3 — Google Russian (cloud) as close phonetic match
+      const googleRu = voices.find(v => v.lang.startsWith('ru') && /google/i.test(v.name));
+      // Priority 4 — Google UK English Female (well-known high quality)
+      const googleEnFemale = voices.find(v => /google uk english female/i.test(v.name));
+      // Priority 5 — any Google voice
+      const anyGoogle = voices.find(v => /google/i.test(v.name) && !v.localService);
+      // Priority 6 — best local voice
+      const local = voices.find(v => !v.localService) || voices[0];
+
+      voiceRef.current = googleUk || anyUk || googleRu || googleEnFemale || anyGoogle || local || null;
     };
     pick();
     if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = pick;
@@ -68,9 +76,9 @@ function useTTS() {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = voiceRef.current?.lang ?? 'uk-UA';
-    u.rate = 0.75;
-    u.pitch = 0.82;
-    u.volume = 0.9;
+    u.rate = 0.72;
+    u.pitch = 0.9;
+    u.volume = 1.0;
     if (voiceRef.current) u.voice = voiceRef.current;
     window.speechSynthesis.speak(u);
   }, []);
