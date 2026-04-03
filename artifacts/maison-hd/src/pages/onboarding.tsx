@@ -546,7 +546,7 @@ export default function OnboardingPage() {
               </div>
             </div>
 
-            <Content />
+            {Content()}
 
             {/* Error */}
             {error && (
