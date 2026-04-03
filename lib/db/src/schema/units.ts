@@ -17,6 +17,8 @@ export const unitsTable = pgTable("units", {
   floor: integer("floor"),
   description: text("description"),
   basePrice: numeric("base_price", { precision: 10, scale: 2 }),
+  baseGuests: integer("base_guests").default(2),
+  extraGuestPrice: numeric("extra_guest_price", { precision: 10, scale: 2 }).default("0"),
   housekeepingStatus: housekeepingStatusEnum("housekeeping_status").notNull().default("clean"),
   hasView: text("has_view"),
   hasBalcony: boolean("has_balcony").default(false),

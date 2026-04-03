@@ -152,18 +152,22 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(units.map(u => ({
     ...u,
     basePrice: u.basePrice ? Number(u.basePrice) : null,
+    baseGuests: u.baseGuests ?? 2,
+    extraGuestPrice: Number(u.extraGuestPrice || 0),
     squareMeters: u.squareMeters ? Number(u.squareMeters) : null,
   })));
 });
 
 router.post("/", requireAuth, async (req, res) => {
-  const { propertyId, name, category, capacity, maxCapacity, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
+  const { propertyId, name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
   const [unit] = await db.insert(unitsTable).values({
     propertyId,
     name,
     category,
     capacity: capacity || 2,
     maxCapacity: maxCapacity || null,
+    baseGuests: baseGuests != null ? Number(baseGuests) : (capacity || 2),
+    extraGuestPrice: extraGuestPrice != null ? String(extraGuestPrice) : "0",
     floor,
     description,
     basePrice: basePrice ? String(basePrice) : null,
@@ -171,7 +175,7 @@ router.post("/", requireAuth, async (req, res) => {
     hasBalcony: hasBalcony ?? false,
     squareMeters: squareMeters ? String(squareMeters) : null,
   }).returning();
-  res.status(201).json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
+  res.status(201).json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, extraGuestPrice: Number(unit.extraGuestPrice || 0), squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
 
 router.get("/:unitId", requireAuth, async (req, res) => {
@@ -181,17 +185,19 @@ router.get("/:unitId", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Not Found", message: "Unit not found" });
     return;
   }
-  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
+  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, baseGuests: unit.baseGuests ?? 2, extraGuestPrice: Number(unit.extraGuestPrice || 0), squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
 
 router.put("/:unitId", requireAuth, async (req, res) => {
   const unitId = parseInt(req.params.unitId);
-  const { name, category, capacity, maxCapacity, status, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
+  const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
   const [unit] = await db.update(unitsTable).set({
     ...(name !== undefined && { name }),
     ...(category !== undefined && { category }),
     ...(capacity !== undefined && { capacity }),
     ...(maxCapacity !== undefined && { maxCapacity }),
+    ...(baseGuests !== undefined && { baseGuests: Number(baseGuests) }),
+    ...(extraGuestPrice !== undefined && { extraGuestPrice: String(extraGuestPrice) }),
     ...(status !== undefined && { status }),
     ...(floor !== undefined && { floor }),
     ...(description !== undefined && { description }),
@@ -205,7 +211,7 @@ router.put("/:unitId", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Not Found", message: "Unit not found" });
     return;
   }
-  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
+  res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, baseGuests: unit.baseGuests ?? 2, extraGuestPrice: Number(unit.extraGuestPrice || 0), squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
 
 export default router;

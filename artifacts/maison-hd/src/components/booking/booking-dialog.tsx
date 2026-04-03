@@ -228,10 +228,10 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
             <span className="font-bold text-indigo-700 text-xl">{nights}</span>
             <span className="text-indigo-500 ml-1 text-sm">{nightsLabel(nights)}</span>
           </div>
-          {pricingPreview?.total > 0 && (
+          {pricingPreview?.totalAmount > 0 && (
             <div className="text-right">
-              <div className="font-black text-indigo-700 text-xl">{fmt(pricingPreview.total)}</div>
-              <div className="text-xs text-indigo-400">{fmt(Math.round(pricingPreview.total / nights))}/ніч</div>
+              <div className="font-black text-indigo-700 text-xl">{fmt(pricingPreview.totalAmount)}</div>
+              <div className="text-xs text-indigo-400">{fmt(Math.round(pricingPreview.totalAmount / nights))}/ніч</div>
             </div>
           )}
         </div>
@@ -781,8 +781,12 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     if (key) addonPriceMap[key] = Number(a.price || 0);
   });
 
-  // Compute total
-  const base = pricingPreview?.total || 0;
+  // Compute total — use rate price as fallback when unit has no base_price
+  const selectedRate = ratesData?.find((r: any) => r.id === form.rateId);
+  const previewTotal = pricingPreview?.totalAmount || 0;
+  const base = previewTotal > 0
+    ? previewTotal
+    : (selectedRate ? Number(selectedRate.pricePerNight) * nights : 0);
   const addonCost = STANDARD_ADDONS.reduce((s, { key }) => {
     return form.selectedAddons[key] ? s + (addonPriceMap[key] || 0) * nights : s;
   }, 0);

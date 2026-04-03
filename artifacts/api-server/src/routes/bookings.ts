@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable } from "@workspace/db/schema";
+import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, inArray, desc, sql, or, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
@@ -340,7 +340,14 @@ router.get("/pricing-preview", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Unit not found" });
     return;
   }
-  const base = Number(unit.basePrice || 0);
+  // Use unit.basePrice; fall back to the applicable rate when it is 0
+  let base = Number(unit.basePrice || 0);
+  if (base === 0) {
+    const rates = await db.select().from(ratesTable)
+      .where(eq(ratesTable.propertyId, unit.propertyId));
+    const rate = rates.find(r => !r.unitCategory || r.unitCategory === unit.category) || rates[0];
+    if (rate) base = Number(rate.pricePerNight || 0);
+  }
   const start = new Date(checkIn as string);
   const end = new Date(checkOut as string);
   const nights = Math.round((end.getTime() - start.getTime()) / 86400000);
