@@ -1,0 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #0d0f1c;
+  --accent-indigo: #6366f1;
+  --accent-violet: #8b5cf6;
+  --accent-gold: #f59e0b;
+  --font-display: 'Playfair Display', serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--primary);
+  color: white;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Custom scrollbar for demo purposes if needed, though video has no overflow */
+::-webkit-scrollbar {
+  width: 0px;
+}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { toast } from "@/hooks/use-toast";
+import DemoVideoPlayer from "@/components/DemoVideoPlayer";
 import {
   ChevronRight, ArrowRight, Check, BedDouble, BarChart3,
   MessageSquare, Users, Zap, Globe2, Shield, TrendingUp,
@@ -692,24 +693,18 @@ export default function DemoPage() {
         </div>
       </footer>
 
-      {/* ── Video modal placeholder ── */}
+      {/* ── Video modal ── */}
       {videoOpen && (
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="relative w-full max-w-3xl aspect-video bg-[#0d0f1c] rounded-2xl border border-white/10 flex items-center justify-center">
-            <div className="text-center">
-              <div className="w-16 h-16 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center mx-auto mb-4">
-                <Play className="w-7 h-7 text-indigo-400 fill-indigo-400 ml-1" />
-              </div>
-              <p className="text-white/40 text-sm">Відео-огляд — незабаром</p>
-              <p className="text-white/25 text-xs mt-1">Замість нього — запросіть живе демо</p>
-              <a href="#demo-form" onClick={() => setVideoOpen(false)}
-                className="inline-flex items-center gap-2 mt-4 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-colors">
-                Запросити демо <ArrowRight className="w-3.5 h-3.5" />
-              </a>
-            </div>
-            <button onClick={() => setVideoOpen(false)} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+          <div className="relative w-full max-w-5xl aspect-video rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
+            <DemoVideoPlayer />
+            <button onClick={() => setVideoOpen(false)} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors z-50">
               <X className="w-4 h-4" />
             </button>
+            <a href="#demo-form" onClick={() => setVideoOpen(false)}
+              className="absolute bottom-5 right-5 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-colors z-50">
+              Запросити демо <ArrowRight className="w-3.5 h-3.5" />
+            </a>
           </div>
         </div>
       )}

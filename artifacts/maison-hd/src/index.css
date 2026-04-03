@@ -67,6 +67,11 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
+  /* Video accent palette — used by DemoVideoPlayer */
+  --color-accent-indigo: #6366f1;
+  --color-accent-violet: #8b5cf6;
+  --color-accent-gold: #f59e0b;
+
   /* Maison HD extended color palette — accessible via Tailwind */
   --color-brand-50: #EEF2FF;
   --color-brand-100: #E0E7FF;

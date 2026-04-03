@@ -1,0 +1,31 @@
+kind = "video"
+previewPath = "/maison-hd-demo-video/"
+title = "Maison HD — Demo Video"
+version = "1.0.0"
+id = "artifacts/maison-hd-demo-video"
+router = "path"
+
+[[integratedSkills]]
+name = "video-js"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/maison-hd-demo-video/" ]
+localPort = 5174
+
+[services.development]
+run = "pnpm --filter @workspace/maison-hd-demo-video run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/maison-hd-demo-video", "run", "build" ]
+publicDir = "artifacts/maison-hd-demo-video/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "5174"
+BASE_PATH = "/maison-hd-demo-video/"
