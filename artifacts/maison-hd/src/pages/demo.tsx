@@ -43,8 +43,8 @@ const FEATURES = [
   { icon: TrendingUp,     title: "Yield Management",         desc: "Динамічні ціни. Сезонні множники. Пакети. Знижки зі стратегією." },
   { icon: Wand2,          title: "Майстер налаштування",     desc: "Покроковий онбординг від першого входу до повноцінної роботи. Підключення за 48 годин — без участі ІТ-команди.", highlight: true },
   { icon: Tv,             title: "Hotel TV",                 desc: "Цифровий канал для кожного номера: вітання гостя, QR-меню, акції та сервісні оголошення — без додаткового обладнання.", highlight: true },
-  { icon: LayoutDashboard, title: "Кабінет гостя",          desc: "Особистий портал: бронювання, сервісні запити, рахунки та документи — доступні гостю через одне посилання.", highlight: true },
-  { icon: QrCode,         title: "Онлайн чекін / чекаут",   desc: "Гість прибуває і від'їжджає без черги та паперів. Верифікація, цифровий ключ і закриття рахунку — через смартфон.", highlight: true },
+  { icon: LayoutDashboard, title: "Guest Portal",            desc: "A personal hub for every guest — reservations, service requests, invoices, and documents, all accessible from a single link before, during, and after the stay.", highlight: true },
+  { icon: QrCode,         title: "Mobile Check-in & Check-out", desc: "Guests arrive and leave on their own terms — no queues, no paperwork. ID verification, digital room key, and bill settlement, entirely from their smartphone.", highlight: true },
   { icon: BrainCircuit,   title: "AI Hub",                   desc: "Вбудований AI-асистент прискорює обробку запитів, генерує звіти, підказує цінові рішення та автоматизує щоденні комунікації.", highlight: true },
 ];
 
