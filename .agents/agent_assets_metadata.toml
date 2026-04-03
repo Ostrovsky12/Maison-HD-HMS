@@ -18,3 +18,9 @@ id = "qi-i_Rm11FUBVtCVpInmm"
 uri = "file://artifacts/maison-hd/public/brand/maison-hd-instagram.png"
 type = "image"
 title = "Maison HD — Instagram (1000×1000 PNG)"
+
+[[outputs]]
+id = "6g1zDhN9vK3dlsePkN9Nq"
+uri = "file://artifacts/maison-hd/public/brand/maison-hd-logo.png"
+type = "image"
+title = "Maison HD — Повний логотип (2800×640 PNG)"
