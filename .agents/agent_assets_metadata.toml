@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "fJmH7InscsNrPez3fjlgr"
+uri = "file://artifacts/maison-hd/public/brand/maison-hd-icon.svg"
+type = "image"
+title = "Maison HD — Іконка (M монограма)"
+
+[[outputs]]
+id = "UmQcfJvoeS-H_2YOO--Gf"
+uri = "file://artifacts/maison-hd/public/brand/maison-hd-logo.svg"
+type = "image"
+title = "Maison HD — Повний логотип з текстом"
