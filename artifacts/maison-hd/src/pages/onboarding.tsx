@@ -62,7 +62,7 @@ const TIPS = [
       "Ресепшеніст — бронювання, чек-ін/аут, Inbox (без фінансових звітів)",
       "Покоївка — лише власні завдання з прибирання",
     ],
-    hint: "Запрошений отримає email для встановлення пароля. Цей крок можна пропустити.",
+    hint: "Цей крок можна пропустити і додати співробітників пізніше в Налаштування → Користувачі.",
   },
   {
     step: 5, title: "Способи оплати", color: "from-amber-600 to-orange-700",
@@ -120,9 +120,9 @@ function Sel({ value, onChange, children }: { value: string; onChange: (v: strin
 
 // ── Row types ─────────────────────────────────────────────────────────────────
 interface UnitRow  { name: string; category: string; capacity: string; floor: string; }
-interface StaffRow { email: string; name: string; role: string; }
+interface StaffRow { email: string; name: string; role: string; password: string; }
 const emptyUnit  = (): UnitRow  => ({ name: "", category: "standard", capacity: "2", floor: "1" });
-const emptyStaff = (): StaffRow => ({ email: "", name: "", role: "reception" });
+const emptyStaff = (): StaffRow => ({ email: "", name: "", role: "reception", password: "" });
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function OnboardingPage() {
@@ -152,7 +152,7 @@ export default function OnboardingPage() {
   const [done, setDone] = useState<{ propId?: number; units?: number; rate?: boolean; staff?: number }>({});
 
   // Step 1
-  const [prop, setProp] = useState({ name: "", type: "hotel", address: "", timezone: "Europe/Kyiv", currency: "UAH", phone: "", website: "" });
+  const [prop, setProp] = useState({ name: "", type: "hotel", address: "", description: "" });
   // Step 2
   const [units, setUnits] = useState<UnitRow[]>([emptyUnit()]);
   // Step 3
@@ -176,7 +176,7 @@ export default function OnboardingPage() {
   async function save1() {
     if (!prop.name.trim()) { setError("Вкажіть назву закладу"); return false; }
     if (!prop.address.trim()) { setError("Вкажіть адресу"); return false; }
-    const r = await apiFetch(`${API}/properties`, { method: "POST", body: JSON.stringify({ name: prop.name, propertyType: prop.type, address: prop.address, timezone: prop.timezone, phone: prop.phone, website: prop.website }) });
+    const r = await apiFetch(`${API}/properties`, { method: "POST", body: JSON.stringify({ name: prop.name, type: prop.type, address: prop.address, description: prop.description || null }) });
     if (!r.ok) { const d = await r.json(); setError(d.error || "Помилка збереження"); return false; }
     const d = await r.json();
     setDone(x => ({ ...x, propId: d.id || d.property?.id }));
@@ -189,7 +189,7 @@ export default function OnboardingPage() {
     if (!done.propId) { setError("Спочатку збережіть заклад (крок 1)"); return false; }
     let created = 0;
     for (const u of valid) {
-      const r = await apiFetch(`${API}/units`, { method: "POST", body: JSON.stringify({ propertyId: done.propId, name: u.name, unitCategory: u.category, capacity: parseInt(u.capacity) || 2, floor: parseInt(u.floor) || 1, status: "available" }) });
+      const r = await apiFetch(`${API}/units`, { method: "POST", body: JSON.stringify({ propertyId: done.propId, name: u.name, category: u.category, capacity: parseInt(u.capacity) || 2, floor: parseInt(u.floor) || 1 }) });
       if (r.ok) created++;
     }
     setDone(x => ({ ...x, units: created }));
@@ -198,7 +198,7 @@ export default function OnboardingPage() {
 
   async function save3() {
     if (!rate.price || isNaN(Number(rate.price))) { setError("Вкажіть ціну за ніч"); return false; }
-    const r = await apiFetch(`${API}/rates`, { method: "POST", body: JSON.stringify({ name: rate.name, pricePerNight: Number(rate.price), unitCategory: rate.category, type: "BAR" }) });
+    const r = await apiFetch(`${API}/rates`, { method: "POST", body: JSON.stringify({ propertyId: done.propId, name: rate.name, pricePerNight: Number(rate.price), unitCategory: rate.category }) });
     if (r.ok) setDone(x => ({ ...x, rate: true }));
     return true;
   }
@@ -207,7 +207,8 @@ export default function OnboardingPage() {
     const valid = staff.filter(s => s.email.trim() && s.name.trim());
     let invited = 0;
     for (const s of valid) {
-      const r = await apiFetch(`${API}/users/invite`, { method: "POST", body: JSON.stringify({ email: s.email, name: s.name, role: s.role }) });
+      const pass = s.password.trim() || ("Maison" + Math.random().toString(36).slice(2, 8));
+      const r = await apiFetch(`${API}/users`, { method: "POST", body: JSON.stringify({ email: s.email, name: s.name, role: s.role, password: pass }) });
       if (r.ok) invited++;
     }
     setDone(x => ({ ...x, staff: invited }));
@@ -235,7 +236,7 @@ export default function OnboardingPage() {
     if (step === 1) return (
       <div className="space-y-4">
         <Field label="Назва закладу" required hint="Відображається у рахунках, гостьовому порталі та всіх звітах">
-          <Inp placeholder='Наприклад: Арт-курорт «Догода»' value={prop.name} onChange={e => p("name", e.target.value)} />
+          <Inp placeholder='Наприклад: Готель «Вершина», Бутік-курорт «Карпати»' value={prop.name} onChange={e => p("name", e.target.value)} />
         </Field>
         <Field label="Тип закладу" hint="Впливає на категорії номерів та шаблони завдань покоївок">
           <Sel value={prop.type} onChange={v => p("type", v)}>
@@ -251,31 +252,15 @@ export default function OnboardingPage() {
         <Field label="Адреса" required hint="Використовується в документах та на карті гостьового порталу">
           <Inp placeholder="Вул. Лісова, 14, с. Верховина, Івано-Франківська обл." value={prop.address} onChange={e => p("address", e.target.value)} />
         </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Часовий пояс" hint="Критично для нічного аудиту та нарахувань">
-            <Sel value={prop.timezone} onChange={v => p("timezone", v)}>
-              <option value="Europe/Kyiv">🇺🇦 Київ (UTC+2/+3)</option>
-              <option value="Europe/Warsaw">🇵🇱 Варшава</option>
-              <option value="Europe/Berlin">🇩🇪 Берлін</option>
-              <option value="Europe/Bucharest">🇷🇴 Бухарест</option>
-            </Sel>
-          </Field>
-          <Field label="Основна валюта" hint="Встановлюється один раз">
-            <Sel value={prop.currency} onChange={v => p("currency", v)}>
-              <option value="UAH">₴ Гривня (UAH)</option>
-              <option value="EUR">€ Євро (EUR)</option>
-              <option value="USD">$ Долар (USD)</option>
-            </Sel>
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Телефон" hint="Необов'язково — для контактів у порталі">
-            <Inp placeholder="+380 XX XXX XX XX" value={prop.phone} onChange={e => p("phone", e.target.value)} />
-          </Field>
-          <Field label="Сайт" hint="Необов'язково">
-            <Inp placeholder="https://hotel.ua" value={prop.website} onChange={e => p("website", e.target.value)} />
-          </Field>
-        </div>
+        <Field label="Опис" hint="Необов'язково — короткий опис вашого закладу">
+          <textarea
+            placeholder="Затишний бутік-готель у центрі міста..."
+            value={prop.description || ""}
+            onChange={e => setProp(x => ({ ...x, description: e.target.value }))}
+            rows={2}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all bg-white resize-none"
+          />
+        </Field>
       </div>
     );
 
@@ -363,7 +348,7 @@ export default function OnboardingPage() {
       <div className="space-y-4">
         <div className="bg-violet-50 border border-violet-100 rounded-xl p-3 text-xs text-violet-700 flex gap-2">
           <Lightbulb className="w-4 h-4 shrink-0 mt-0.5 text-violet-500" />
-          <span>Запрошений отримає email з посиланням для встановлення пароля. Цей крок можна пропустити і запросити пізніше.</span>
+          <span>Акаунти для персоналу можна додати тут або пізніше в Налаштування → Користувачі. Пароль задається вручну при створенні.</span>
         </div>
         {staff.map((s, i) => (
           <div key={i} className="relative p-4 border border-gray-100 rounded-2xl bg-gray-50/60 space-y-3">
@@ -375,10 +360,13 @@ export default function OnboardingPage() {
               <Field label="Ім'я та прізвище" hint="Відображається у системі та звітах">
                 <Inp placeholder="Олена Коваль" value={s.name} onChange={e => setStaff(a => a.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
               </Field>
-              <Field label="Email" hint="На цю адресу прийде запрошення">
+              <Field label="Email (логін)" hint="Буде використовуватись для входу в систему">
                 <Inp type="email" placeholder="olena@hotel.ua" value={s.email} onChange={e => setStaff(a => a.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} />
               </Field>
             </div>
+            <Field label="Пароль" hint="Передайте пароль співробітнику особисто. Пізніше він зможе змінити у Налаштуваннях">
+              <Inp type="password" placeholder="Мін. 6 символів" value={s.password} onChange={e => setStaff(a => a.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} />
+            </Field>
             <Field label="Роль у системі" hint="Визначає доступ до розділів та можливостей">
               <Sel value={s.role} onChange={v => setStaff(a => a.map((x, j) => j === i ? { ...x, role: v } : x))}>
                 <option value="manager">👔 Менеджер — бронювання, команда, аналітика</option>
@@ -474,7 +462,7 @@ export default function OnboardingPage() {
             className="w-full flex items-center justify-center gap-2 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-colors shadow-lg shadow-indigo-600/20">
             Перейти до системи <ChevronRight className="w-4 h-4" />
           </button>
-          <button onClick={() => navigate("/chess")}
+          <button onClick={() => { localStorage.setItem("mhd_onboarding_done", "1"); navigate("/chess"); }}
             className="w-full flex items-center justify-center gap-2 py-3 border border-indigo-100 text-indigo-600 text-sm font-semibold rounded-2xl hover:bg-indigo-50 transition-colors">
             <Sparkles className="w-4 h-4" /> Зробити перше бронювання в шахматці
           </button>
