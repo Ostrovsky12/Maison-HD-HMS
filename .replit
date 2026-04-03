@@ -27,3 +27,9 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+MAISONHD_TG_BOT_TOKEN = "8438373695:AAHOlmdsfXbz58dpFLqta9gmuH3a1ZB9o1o"
+MAISONHD_TG_CHAT_ID = "8438373695"

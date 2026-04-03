@@ -6,6 +6,39 @@ import { requireAuth, requireRole } from "../lib/auth.js";
 
 const router = Router();
 
+// ─── Telegram notification for demo requests ──────────────────────────────────
+async function notifyDemoRequest(data: {
+  name: string;
+  email: string;
+  phone?: string | null;
+  company: string;
+  propertiesCount?: number;
+  message?: string | null;
+}) {
+  const token = process.env.MAISONHD_TG_BOT_TOKEN;
+  const chatId = process.env.MAISONHD_TG_CHAT_ID;
+  if (!token || !chatId) return;
+
+  const lines = [
+    `🏨 *Нова заявка на демо — Maison HD*`,
+    ``,
+    `👤 *Ім'я:* ${data.name}`,
+    `🏢 *Компанія:* ${data.company}`,
+    `📧 *Email:* ${data.email}`,
+    data.phone ? `📱 *Телефон:* ${data.phone}` : null,
+    data.propertiesCount ? `🛏 *Кількість номерів:* ${data.propertiesCount}` : null,
+    data.message ? `\n💬 *Коментар:* ${data.message}` : null,
+  ].filter(Boolean).join("\n");
+
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: lines, parse_mode: "Markdown" }),
+    });
+  } catch (_) {}
+}
+
 router.post("/", async (req, res) => {
   try {
     const { name, email, phone, company, propertiesCount, message } = req.body;
@@ -31,6 +64,9 @@ router.post("/", async (req, res) => {
         status: "new",
       })
       .returning();
+
+    // Fire-and-forget Telegram notification
+    notifyDemoRequest({ name: request.name, email: request.email, phone: request.phone, company: request.company, propertiesCount: request.propertiesCount ?? 1, message: request.message });
 
     res.status(201).json({ success: true, id: request.id, message: "Заявку отримано! Ми зв'яжемось з вами найближчим часом." });
   } catch (e: any) {
