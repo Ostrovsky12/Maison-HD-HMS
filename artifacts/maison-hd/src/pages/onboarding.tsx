@@ -241,12 +241,15 @@ export default function OnboardingPage() {
         <Field label="Тип закладу" hint="Впливає на категорії номерів та шаблони завдань покоївок">
           <Sel value={prop.type} onChange={v => p("type", v)}>
             <option value="hotel">🏨 Готель</option>
-            <option value="hostel">🛏️ Хостел</option>
-            <option value="resort">🌿 Курорт / комплекс</option>
-            <option value="apartments">🏢 Апартаменти</option>
+            <option value="apartment">🏢 Апартаменти</option>
             <option value="villa">🏡 Вілла / котедж</option>
-            <option value="camping">⛺ Кемпінг / глемпінг</option>
-            <option value="sanatorium">💊 Санаторій</option>
+            <option value="house">🏠 Будинок / садиба</option>
+            <option value="bungalow">🌴 Бунгало</option>
+            <option value="glamping">⭐ Глемпінг</option>
+            <option value="camping">⛺ Кемпінг</option>
+            <option value="spa">💆 СПА-курорт</option>
+            <option value="pool">🏊 База відпочинку</option>
+            <option value="other">🏗️ Інше</option>
           </Sel>
         </Field>
         <Field label="Адреса" required hint="Використовується в документах та на карті гостьового порталу">
