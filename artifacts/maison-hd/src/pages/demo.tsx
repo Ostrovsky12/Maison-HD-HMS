@@ -278,37 +278,40 @@ function VideoFullscreen({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
-      {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-5">
-        <div className="flex items-center gap-2 opacity-60">
-          <div className="w-6 h-6 rounded-md flex items-center justify-center"
+    <div
+      className="fixed inset-0 z-[100] bg-black flex flex-col"
+      style={{ height: '100dvh' }}
+    >
+      {/* Top bar — logo left, CTA + close right */}
+      <div className="shrink-0 flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 bg-black/60 backdrop-blur-md border-b border-white/[0.07] z-20">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-md flex items-center justify-center shrink-0"
             style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
             <span className="text-white text-xs font-bold">M</span>
           </div>
-          <span className="text-white text-sm font-semibold tracking-wide">Maison HD</span>
+          <span className="text-white/70 text-sm font-semibold tracking-wide">Maison HD</span>
         </div>
-        <button
-          onClick={onClose}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-sm transition-all backdrop-blur-sm border border-white/10"
-        >
-          <X className="w-4 h-4" />
-          <span className="hidden sm:inline">Закрити</span>
-          <span className="text-white/30 text-xs hidden sm:inline">Esc</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="#demo-form"
+            onClick={onClose}
+            className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-bold rounded-lg transition-colors shadow-lg shadow-indigo-600/30"
+          >
+            Запросити демо <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+          </a>
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs sm:text-sm transition-all border border-white/10"
+          >
+            <X className="w-4 h-4" />
+            <span className="hidden sm:inline">Esc</span>
+          </button>
+        </div>
       </div>
 
-      {/* Video — full viewport */}
-      <div className="flex-1 relative">
+      {/* Video — fills remaining height */}
+      <div className="flex-1 relative min-h-0">
         <DemoVideoPlayer />
-      </div>
-
-      {/* Bottom CTA */}
-      <div className="absolute bottom-5 right-4 sm:right-6 z-20">
-        <a href="#demo-form" onClick={onClose}
-          className="inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-colors shadow-lg shadow-indigo-600/30">
-          Запросити демо <ArrowRight className="w-3.5 h-3.5" />
-        </a>
       </div>
     </div>
   );
