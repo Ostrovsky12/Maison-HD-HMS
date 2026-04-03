@@ -6,6 +6,7 @@ import { toast } from "@/hooks/use-toast";
 import {
   X, ChevronRight, ChevronLeft, BedDouble, Calendar, User, Star,
   Minus, Plus, Tag, Check, AlertTriangle, Loader2,
+  FileText, Link2, CreditCard, Banknote, Copy, Send, ChevronDown,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -66,10 +67,11 @@ const STANDARD_ADDONS = [
 ];
 
 const SOURCE_OPTIONS = [
-  { value: "direct",  label: "Прямий" },
-  { value: "booking", label: "Booking.com" },
-  { value: "airbnb",  label: "Airbnb" },
-  { value: "other",   label: "Інший" },
+  { value: "phone",     label: "📞 Телефон" },
+  { value: "instagram", label: "📸 Інстаграм" },
+  { value: "telegram",  label: "✈️ Телеграм" },
+  { value: "booking",   label: "🏨 Букінг" },
+  { value: "other",     label: "💬 Інший" },
 ];
 
 const emptyForm = (unitId?: number, checkIn?: string, checkOut?: string): BookingForm => ({
@@ -93,7 +95,7 @@ const emptyForm = (unitId?: number, checkIn?: string, checkOut?: string): Bookin
   discountValue: 0,
   discountType: "percent",
   totalAmount: 0,
-  source: "direct",
+  source: "phone",
 });
 
 // ── Step config ────────────────────────────────────────────────────────────
@@ -101,7 +103,7 @@ const STEPS = [
   { key: "room",    label: "Номер", icon: BedDouble },
   { key: "guest",   label: "Гість", icon: User },
   { key: "details", label: "Деталі", icon: Star },
-  { key: "confirm", label: "Підтвердження", icon: Check },
+  { key: "payment", label: "Оплата", icon: CreditCard },
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -434,87 +436,243 @@ function StepDetails({ form, f, addonPriceMap, nights }: any) {
   );
 }
 
-// ── Step 4: Confirm / Summary ─────────────────────────────────────────────
-function StepConfirm({ form, nights, pricingPreview, addonPriceMap, totalAmount, unitsData }: any) {
-  const unit   = unitsData?.find((u: any) => u.id === form.unitId);
-  const addons = Object.entries(form.selectedAddons).filter(([, v]) => v).map(([k]) => k);
+// ── Action Card (helper) ──────────────────────────────────────────────────
+const COLOR_MAP: Record<string, string> = {
+  blue:   "border-blue-200 bg-blue-50 text-blue-700",
+  violet: "border-violet-200 bg-violet-50 text-violet-700",
+  emerald:"border-emerald-200 bg-emerald-50 text-emerald-700",
+};
 
-  const baseCost  = pricingPreview?.total || 0;
-  const addonCost = addons.reduce((s, k) => s + (addonPriceMap[k] || 0) * nights, 0);
-  const discount  = form.discountValue > 0
-    ? form.discountType === "percent" ? (baseCost + addonCost) * form.discountValue / 100 : form.discountValue
-    : 0;
+function ActionCard({ icon, color, title, subtitle, expanded, onToggle, children }: {
+  icon: React.ReactNode; color: string; title: string; subtitle: string;
+  expanded: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
+  const cls = COLOR_MAP[color] || COLOR_MAP.blue;
+  return (
+    <div className={`rounded-2xl border-2 transition-all ${expanded ? cls : "border-gray-100 bg-white hover:border-gray-200"}`}>
+      <button type="button" onClick={onToggle} className="w-full flex items-center gap-4 p-4 text-left">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${expanded ? cls.split(" ").slice(0,2).join(" ") : "bg-gray-100 text-gray-500"}`}>
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className={`font-bold text-sm transition-colors ${expanded ? "text-gray-900" : "text-gray-700"}`}>{title}</div>
+          <div className="text-xs text-gray-400 mt-0.5 truncate">{subtitle}</div>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${expanded ? "rotate-180" : ""}`} />
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4">
+          <div className="border-t border-gray-100 pt-3">
+            {children}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
+// ── Step 4: Payment Actions ────────────────────────────────────────────────
+function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount, unitsData, legalEntities, onConfirm, saving }: any) {
+  const [expanded, setExpanded] = useState<"invoice" | "link" | "pay" | null>(null);
+  const [legalEntityId, setLegalEntityId] = useState(() => legalEntities?.[0]?.id?.toString() || "");
+  const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  const [payMethod, setPayMethod] = useState<"card" | "cash">("card");
+
+  const unit     = unitsData?.find((u: any) => u.id === form.unitId);
   const guestFull = [form.lastName, form.firstName, form.middleName].filter(Boolean).join(" ");
 
+  const copyLink = async () => {
+    if (paymentLink) {
+      await navigator.clipboard.writeText(paymentLink);
+      toast({ title: "Посилання скопійовано" });
+    }
+  };
+  const sendLink = () => {
+    if (paymentLink) {
+      const msg = encodeURIComponent(`Оплатіть бронювання за посиланням: ${paymentLink}`);
+      window.open(`https://wa.me/?text=${msg}`, "_blank");
+    }
+  };
+  const handleAction = async (type: "invoice" | "link" | "card" | "cash") => {
+    const result = await onConfirm("confirmed", type);
+    if (result && type === "link") {
+      setPaymentLink(`https://pay.maisonhd.com/b/${result.id}`);
+    }
+  };
+
   return (
-    <div className="space-y-5">
-      {/* Guest */}
-      {guestFull && (
-        <div className="flex items-center gap-4 p-4 bg-gradient-to-br from-indigo-50 to-violet-50 rounded-2xl border border-indigo-100/50">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white font-black text-lg shrink-0">
-            {guestFull[0].toUpperCase()}
-          </div>
-          <div>
-            <div className="font-bold text-gray-900">{guestFull}</div>
-            <div className="text-sm text-gray-400">{form.phone || "Без телефону"}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Stay */}
-      <div className="grid grid-cols-3 gap-2.5">
-        {[
-          { label: "Заїзд",  value: form.checkIn  ? format(new Date(form.checkIn),  "d MMM", { locale: uk }) : "—" },
-          { label: "Виїзд",  value: form.checkOut ? format(new Date(form.checkOut), "d MMM", { locale: uk }) : "—" },
-          { label: "Ночей",  value: String(nights) },
-        ].map(t => (
-          <div key={t.label} className="bg-gray-50 rounded-2xl p-3.5 text-center border border-gray-100">
-            <div className="text-lg font-black text-gray-900">{t.value}</div>
-            <div className="text-[11px] text-gray-400 mt-0.5">{t.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Unit */}
-      {unit && (
-        <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100">
-          <BedDouble className="w-5 h-5 text-gray-400 shrink-0" />
-          <span className="text-sm font-semibold text-gray-800">{unit.name}</span>
-          {unit.category && <span className="text-xs text-gray-400">{unit.category}</span>}
-        </div>
-      )}
-
-      {/* Price breakdown */}
-      <div className="rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Розрахунок</span>
-        </div>
-        <div className="px-4 py-2 space-y-1">
-          {baseCost > 0 && (
-            <div className="flex justify-between py-2 text-sm">
-              <span className="text-gray-600">Проживання ({nights} {nightsLabel(nights)})</span>
-              <span className="font-semibold text-gray-900">{fmt(baseCost)}</span>
+    <div className="space-y-4">
+      {/* Mini summary */}
+      <div className="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-2xl border border-indigo-100/60 p-4 space-y-2.5">
+        {guestFull && (
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white font-black text-base shrink-0">
+              {guestFull[0].toUpperCase()}
             </div>
-          )}
-          {addonCost > 0 && (
-            <div className="flex justify-between py-2 text-sm border-t border-gray-50">
-              <span className="text-gray-600">Додаткові послуги</span>
-              <span className="font-semibold text-gray-900">{fmt(addonCost)}</span>
+            <div>
+              <div className="font-bold text-gray-900 text-sm">{guestFull}</div>
+              <div className="text-xs text-gray-400">{form.phone || "Без телефону"}</div>
             </div>
-          )}
-          {discount > 0 && (
-            <div className="flex justify-between py-2 text-sm border-t border-gray-50">
-              <span className="text-emerald-600">Знижка {form.discountType === "percent" ? `(${form.discountValue}%)` : ""}</span>
-              <span className="font-semibold text-emerald-600">−{fmt(discount)}</span>
-            </div>
-          )}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          {unit && <span className="flex items-center gap-1.5 text-gray-700 font-medium"><BedDouble className="w-3.5 h-3.5 text-gray-400" />{unit.name}</span>}
+          <span className="text-gray-300">·</span>
+          <span className="text-gray-500">
+            {form.checkIn ? format(new Date(form.checkIn), "d MMM", { locale: uk }) : "—"}
+            {" → "}
+            {form.checkOut ? format(new Date(form.checkOut), "d MMM", { locale: uk }) : "—"}
+          </span>
+          <span className="text-gray-300">·</span>
+          <span className="text-gray-500">{nights} {nightsLabel(nights)}</span>
         </div>
-        <div className="flex justify-between items-baseline px-4 py-4 border-t border-gray-100 bg-gradient-to-r from-indigo-50 to-violet-50">
-          <span className="text-sm font-bold text-gray-600">Разом</span>
+        <div className="flex justify-between items-center pt-2 border-t border-indigo-100/80">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wide">До сплати</span>
           <span className="text-2xl font-black text-indigo-700">{fmt(totalAmount)}</span>
         </div>
       </div>
+
+      {/* Action 1 — Виставити рахунок */}
+      <ActionCard
+        icon={<FileText className="w-5 h-5" />}
+        color="blue"
+        title="Виставити рахунок"
+        subtitle="Юридичний документ для оплати від бізнесу"
+        expanded={expanded === "invoice"}
+        onToggle={() => setExpanded(expanded === "invoice" ? null : "invoice")}
+      >
+        {legalEntities?.length > 0 ? (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Юридична особа</label>
+              <select
+                value={legalEntityId}
+                onChange={e => setLegalEntityId(e.target.value)}
+                className="w-full h-10 px-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 appearance-none"
+              >
+                {legalEntities.map((le: any) => (
+                  <option key={le.id} value={String(le.id)}>{le.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleAction("invoice")}
+              disabled={saving || !legalEntityId}
+              className="w-full flex items-center justify-center gap-2 h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-sm font-bold transition-colors"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+              Виставити рахунок
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              Немає юридичних осіб. Додайте їх у Налаштуваннях → Юридичні особи.
+            </p>
+            <button
+              type="button"
+              onClick={() => handleAction("invoice")}
+              disabled={saving}
+              className="w-full flex items-center justify-center gap-2 h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-sm font-bold transition-colors"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+              Виставити рахунок
+            </button>
+          </div>
+        )}
+      </ActionCard>
+
+      {/* Action 2 — Посилання на оплату */}
+      <ActionCard
+        icon={<Link2 className="w-5 h-5" />}
+        color="violet"
+        title="Згенерувати посилання на оплату"
+        subtitle="Надішліть гостю посилання для онлайн-оплати"
+        expanded={expanded === "link"}
+        onToggle={() => { if (!paymentLink) setExpanded(expanded === "link" ? null : "link"); }}
+      >
+        {paymentLink ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-violet-50 border border-violet-200 rounded-xl">
+              <Link2 className="w-4 h-4 text-violet-500 shrink-0" />
+              <span className="text-xs text-violet-800 font-mono truncate flex-1">{paymentLink}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={sendLink}
+                className="flex items-center justify-center gap-2 h-11 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-bold transition-colors"
+              >
+                <Send className="w-4 h-4" /> Надіслати
+              </button>
+              <button
+                type="button"
+                onClick={copyLink}
+                className="flex items-center justify-center gap-2 h-11 bg-white border-2 border-violet-200 hover:bg-violet-50 text-violet-700 rounded-xl text-sm font-bold transition-colors"
+              >
+                <Copy className="w-4 h-4" /> Скопіювати
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => handleAction("link")}
+            disabled={saving}
+            className="w-full flex items-center justify-center gap-2 h-11 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-xl text-sm font-bold transition-colors"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+            Згенерувати посилання
+          </button>
+        )}
+      </ActionCard>
+
+      {/* Action 3 — Оплата на місці */}
+      <ActionCard
+        icon={<CreditCard className="w-5 h-5" />}
+        color="emerald"
+        title="Забронювати та Сплатити"
+        subtitle="Оплата картою через термінал або готівкою"
+        expanded={expanded === "pay"}
+        onToggle={() => setExpanded(expanded === "pay" ? null : "pay")}
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setPayMethod("card")}
+              className={`flex items-center justify-center gap-2 h-12 rounded-xl border-2 text-sm font-semibold transition-all ${
+                payMethod === "card"
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                  : "border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200"
+              }`}
+            >
+              <CreditCard className="w-4 h-4" /> Картка (термінал)
+            </button>
+            <button
+              type="button"
+              onClick={() => setPayMethod("cash")}
+              className={`flex items-center justify-center gap-2 h-12 rounded-xl border-2 text-sm font-semibold transition-all ${
+                payMethod === "cash"
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                  : "border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200"
+              }`}
+            >
+              <Banknote className="w-4 h-4" /> Готівка
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleAction(payMethod)}
+            disabled={saving}
+            className="w-full flex items-center justify-center gap-2 h-11 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl text-sm font-bold transition-colors"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            {payMethod === "card" ? "Оплачено карткою" : "Оплачено готівкою"}
+          </button>
+        </div>
+      </ActionCard>
     </div>
   );
 }
@@ -594,6 +752,12 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     queryFn: () => authFetch(`${API}/addons`).then(r => r.ok ? r.json() : []),
   });
 
+  const { data: legalEntities } = useQuery<any[]>({
+    queryKey: ["legal-entities"],
+    enabled: open,
+    queryFn: () => authFetch(`${API}/legal-entities`).then(r => r.ok ? r.json() : []),
+  });
+
   const { data: pricingPreview } = useQuery<any>({
     queryKey: ["pricing-preview", form.unitId, form.checkIn, form.checkOut],
     enabled: open && !!form.unitId && !!form.checkIn && !!form.checkOut && nights > 0,
@@ -639,9 +803,9 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     return true;
   };
 
-  const handleSave = async (status: "confirmed" | "pending") => {
-    if (!form.unitId) { toast({ title: "Виберіть номер", variant: "destructive" }); return; }
-    if (!form.checkIn || !form.checkOut || nights < 1) { toast({ title: "Вкажіть коректні дати", variant: "destructive" }); return; }
+  const handleSave = async (status: "confirmed" | "pending", paymentMethod?: string): Promise<any> => {
+    if (!form.unitId) { toast({ title: "Виберіть номер", variant: "destructive" }); return null; }
+    if (!form.checkIn || !form.checkOut || nights < 1) { toast({ title: "Вкажіть коректні дати", variant: "destructive" }); return null; }
     setSaving(true);
     try {
       const body = {
@@ -667,6 +831,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         discountType: form.discountType || undefined,
         selectedAddons: form.selectedAddons,
         notes: form.notes || undefined,
+        ...(paymentMethod && { paymentMethod }),
       };
       const url    = isEdit ? `${API}/bookings/${booking.id}` : `${API}/bookings`;
       const method = isEdit ? "PUT" : "POST";
@@ -675,11 +840,19 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
       const saved = await r.json();
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["calendar"] });
-      toast({ title: isEdit ? "Бронювання оновлено" : "Бронювання створено" });
+      const payLabels: Record<string, string> = {
+        invoice: "Рахунок виставлено",
+        link:    "Посилання згенеровано",
+        card:    "Оплачено карткою",
+        cash:    "Оплачено готівкою",
+      };
+      toast({ title: payLabels[paymentMethod || ""] || (isEdit ? "Бронювання оновлено" : "Бронювання створено") });
       onSuccess?.(saved);
-      onClose();
+      if (paymentMethod !== "link") onClose();
+      return saved;
     } catch (e: any) {
       toast({ title: "Помилка", description: e.message, variant: "destructive" });
+      return null;
     } finally {
       setSaving(false);
     }
@@ -748,7 +921,17 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
             <StepDetails form={form} f={f} addonPriceMap={addonPriceMap} nights={nights} />
           )}
           {step === 3 && (
-            <StepConfirm form={form} nights={nights} pricingPreview={pricingPreview} addonPriceMap={addonPriceMap} totalAmount={totalAmount} unitsData={unitsData} />
+            <StepPayment
+              form={form}
+              nights={nights}
+              pricingPreview={pricingPreview}
+              addonPriceMap={addonPriceMap}
+              totalAmount={totalAmount}
+              unitsData={unitsData}
+              legalEntities={legalEntities || []}
+              onConfirm={handleSave}
+              saving={saving}
+            />
           )}
         </div>
 
@@ -768,7 +951,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
 
           <div className="flex-1" />
 
-          {step < STEPS.length - 1 ? (
+          {step < STEPS.length - 1 && (
             <button
               type="button"
               onClick={() => { if (canGoNext()) setStep(s => s + 1); }}
@@ -777,28 +960,17 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
             >
               Далі <ChevronRight className="w-4 h-4" />
             </button>
-          ) : (
-            <div className="flex gap-2">
-              {!isEdit && (
-                <button
-                  type="button"
-                  onClick={() => handleSave("pending")}
-                  disabled={saving}
-                  className="px-5 py-3 rounded-2xl border border-gray-200 text-sm text-gray-600 font-semibold hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                >
-                  Зберегти як чернетку
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => handleSave("confirmed")}
-                disabled={saving}
-                className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-bold transition-colors shadow-sm shadow-indigo-500/25"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                {isEdit ? "Зберегти зміни" : "Підтвердити бронювання"}
-              </button>
-            </div>
+          )}
+          {step === STEPS.length - 1 && isEdit && (
+            <button
+              type="button"
+              onClick={() => handleSave("confirmed")}
+              disabled={saving}
+              className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-bold transition-colors shadow-sm shadow-indigo-500/25"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Зберегти зміни
+            </button>
           )}
         </div>
       </div>
