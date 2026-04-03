@@ -181,13 +181,27 @@ async function bootstrap() {
     logger.error({ err }, "Bootstrap error");
   }
 
-  app.listen(port, (err) => {
+  const server = app.listen(port, (err) => {
     if (err) {
       logger.error({ err }, "Error listening on port");
       process.exit(1);
     }
     logger.info({ port }, "Server listening");
   });
+
+  // Graceful shutdown — release port before exit so restarts never hit EADDRINUSE
+  const shutdown = (signal: string) => {
+    logger.info({ signal }, "Shutdown signal received, closing server...");
+    server.close(() => {
+      logger.info("Server closed.");
+      process.exit(0);
+    });
+    // Force-exit after 5s if connections are still open
+    setTimeout(() => process.exit(0), 5000).unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT",  () => shutdown("SIGINT"));
 }
 
 bootstrap();
