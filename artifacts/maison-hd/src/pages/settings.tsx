@@ -16,6 +16,7 @@ import {
   Save, KeyRound, User, Hotel, Eye, EyeOff, CreditCard, ExternalLink,
   Crown, Users2, Loader2, ChevronRight, Clock, CheckCircle2, AlertCircle,
   Copy, RefreshCw, Globe, Phone, Mail, Lock, Hash,
+  Bell, Send, Bot, ToggleLeft, ToggleRight,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -609,6 +610,224 @@ function DiscountTypesTab() {
   );
 }
 
+// ── Notifications Tab ──────────────────────────────────────────────
+function NotificationsTab() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<"email" | "telegram" | null>(null);
+  const [testing, setTesting] = useState<"email" | "telegram" | null>(null);
+
+  const emptyEmail = { enabled: false, host: "", port: 587, secure: false, user: "", pass: "", from: "", fromName: "Maison HD", adminEmails: [] as string[] };
+  const emptyTelegram = { enabled: false, botToken: "", chatId: "" };
+
+  const [email, setEmail] = useState<any>(emptyEmail);
+  const [telegram, setTelegram] = useState<any>(emptyTelegram);
+  const [adminEmailInput, setAdminEmailInput] = useState("");
+
+  useEffect(() => {
+    authFetch(`${API}/notifications/channels`).then(async r => {
+      if (r.ok) {
+        const d = await r.json();
+        if (d.email) setEmail(d.email);
+        if (d.telegram) setTelegram(d.telegram);
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const saveEmail = async () => {
+    setSaving("email");
+    const r = await authFetch(`${API}/notifications/channels/email`, { method: "PUT", body: JSON.stringify(email) });
+    setSaving(null);
+    if (r.ok) toast({ title: "✅ Email збережено", description: "SMTP налаштування оновлено" });
+    else toast({ title: "Помилка", description: "Не вдалось зберегти", variant: "destructive" });
+  };
+
+  const saveTelegram = async () => {
+    setSaving("telegram");
+    const r = await authFetch(`${API}/notifications/channels/telegram`, { method: "PUT", body: JSON.stringify(telegram) });
+    setSaving(null);
+    if (r.ok) toast({ title: "✅ Telegram збережено", description: "Бот налаштовано" });
+    else toast({ title: "Помилка", description: "Не вдалось зберегти", variant: "destructive" });
+  };
+
+  const testChannel = async (channel: "email" | "telegram") => {
+    setTesting(channel);
+    const r = await authFetch(`${API}/notifications/test`, { method: "POST", body: JSON.stringify({ channel }) });
+    const d = await r.json();
+    setTesting(null);
+    if (d.ok) toast({ title: "✅ Тест успішний!", description: channel === "email" ? "Лист надіслано на вказані адреси" : "Повідомлення надіслано в Telegram" });
+    else toast({ title: "Помилка відправки", description: d.error || "Перевірте налаштування", variant: "destructive" });
+  };
+
+  const addAdminEmail = () => {
+    const val = adminEmailInput.trim();
+    if (!val || !val.includes("@")) return;
+    if (!email.adminEmails.includes(val)) setEmail((e: any) => ({ ...e, adminEmails: [...e.adminEmails, val] }));
+    setAdminEmailInput("");
+  };
+
+  if (loading) return <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Завантаження...</div>;
+
+  return (
+    <div className="space-y-6">
+
+      {/* Email / SMTP */}
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mail className="w-4 h-4 text-indigo-500" />
+              <CardTitle className="text-base">Email сповіщення (SMTP)</CardTitle>
+            </div>
+            <button
+              onClick={() => setEmail((e: any) => ({ ...e, enabled: !e.enabled }))}
+              className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${email.enabled ? "text-emerald-600" : "text-muted-foreground"}`}
+            >
+              {email.enabled ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
+              {email.enabled ? "Увімкнено" : "Вимкнено"}
+            </button>
+          </div>
+          <CardDescription>Листи при новому бронюванні, заїзді та оплаті</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">SMTP Host</Label>
+              <Input className="mt-1" placeholder="smtp.gmail.com" value={email.host} onChange={e => setEmail((v: any) => ({ ...v, host: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Порт</Label>
+              <Input className="mt-1" type="number" placeholder="587" value={email.port} onChange={e => setEmail((v: any) => ({ ...v, port: parseInt(e.target.value) || 587 }))} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Логін (email)</Label>
+              <Input className="mt-1" placeholder="alerts@myhotel.ua" value={email.user} onChange={e => setEmail((v: any) => ({ ...v, user: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Пароль / App Password</Label>
+              <Input className="mt-1" type="password" placeholder="••••••••" value={email.pass} onChange={e => setEmail((v: any) => ({ ...v, pass: e.target.value }))} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Ім'я відправника</Label>
+              <Input className="mt-1" placeholder="Maison HD" value={email.fromName} onChange={e => setEmail((v: any) => ({ ...v, fromName: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">From email</Label>
+              <Input className="mt-1" placeholder="noreply@myhotel.ua" value={email.from} onChange={e => setEmail((v: any) => ({ ...v, from: e.target.value }))} />
+            </div>
+          </div>
+
+          {/* Admin emails */}
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Кому надсилати (адміни)</Label>
+            <div className="flex gap-2 mt-1">
+              <Input
+                placeholder="admin@myhotel.ua"
+                value={adminEmailInput}
+                onChange={e => setAdminEmailInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addAdminEmail()}
+              />
+              <Button variant="outline" size="sm" onClick={addAdminEmail}><Plus className="w-3.5 h-3.5" /></Button>
+            </div>
+            {email.adminEmails?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {email.adminEmails.map((em: string) => (
+                  <Badge key={em} variant="secondary" className="gap-1 pr-1">
+                    {em}
+                    <button onClick={() => setEmail((v: any) => ({ ...v, adminEmails: v.adminEmails.filter((x: string) => x !== em) }))}>
+                      <X className="w-3 h-3 opacity-50 hover:opacity-100" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 pt-2">
+            <Button onClick={saveEmail} disabled={!!saving} className="gap-1.5">
+              {saving === "email" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Зберегти
+            </Button>
+            <Button variant="outline" onClick={() => testChannel("email")} disabled={!email.enabled || !!testing} className="gap-1.5">
+              {testing === "email" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Надіслати тест
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Telegram */}
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bot className="w-4 h-4 text-blue-500" />
+              <CardTitle className="text-base">Telegram Bot</CardTitle>
+            </div>
+            <button
+              onClick={() => setTelegram((t: any) => ({ ...t, enabled: !t.enabled }))}
+              className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${telegram.enabled ? "text-emerald-600" : "text-muted-foreground"}`}
+            >
+              {telegram.enabled ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
+              {telegram.enabled ? "Увімкнено" : "Вимкнено"}
+            </button>
+          </div>
+          <CardDescription>
+            Миттєві сповіщення у Telegram-чат або групу.{" "}
+            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline inline-flex items-center gap-0.5">
+              Створити бота <ExternalLink className="w-3 h-3" />
+            </a>
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Bot Token</Label>
+            <Input className="mt-1 font-mono text-sm" placeholder="1234567890:AAH..." value={telegram.botToken} onChange={e => setTelegram((t: any) => ({ ...t, botToken: e.target.value }))} />
+            <p className="text-xs text-muted-foreground mt-1">Отримайте у @BotFather → /newbot</p>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Chat ID (чат або група)</Label>
+            <Input className="mt-1 font-mono text-sm" placeholder="-1001234567890" value={telegram.chatId} onChange={e => setTelegram((t: any) => ({ ...t, chatId: e.target.value }))} />
+            <p className="text-xs text-muted-foreground mt-1">
+              Додайте бота до групи, перешліть будь-яке повідомлення до{" "}
+              <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">@userinfobot</a> — він покаже Chat ID
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-2">
+            <Button onClick={saveTelegram} disabled={!!saving} className="gap-1.5">
+              {saving === "telegram" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Зберегти
+            </Button>
+            <Button variant="outline" onClick={() => testChannel("telegram")} disabled={!telegram.enabled || !!testing} className="gap-1.5">
+              {testing === "telegram" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Надіслати тест
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Guide */}
+      <Card className="bg-indigo-50/50 border-indigo-100">
+        <CardContent className="pt-5 pb-4">
+          <p className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2"><Bell className="w-4 h-4" /> Коли надсилаються сповіщення?</p>
+          <ul className="space-y-1.5 text-sm text-indigo-800/70">
+            {[
+              "📋 Нове бронювання — миттєво після підтвердження",
+              "✅ Check-in гостя — при оформленні заїзду",
+              "💳 Оплата отримана — при успішному платежі LiqPay",
+            ].map(t => <li key={t}>{t}</li>)}
+          </ul>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── Billing Tab ───────────────────────────────────────────────────
 function BillingTab() {
   const [, navigate] = useLocation();
@@ -1085,6 +1304,7 @@ export default function SettingsPage() {
               <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
               <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>
               <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>
+              <TabsTrigger value="notifications" className="gap-1.5"><Bell className="w-3.5 h-3.5" /> Сповіщення</TabsTrigger>
               <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Оплата</TabsTrigger>
             </TabsList>
             <TabsContent value="profile"><ProfileTab /></TabsContent>
@@ -1113,6 +1333,15 @@ export default function SettingsPage() {
                   <CardDescription>Визначте знижки для окремих категорій гостей (УБД, день народження, постійний гість тощо).</CardDescription>
                 </CardHeader>
                 <CardContent><DiscountTypesTab /></CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="notifications">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Bell className="w-4 h-4" /> Сповіщення</CardTitle>
+                  <CardDescription>Налаштуйте Email та Telegram — система сповіщатиме вас про нові бронювання, заїзди та платежі.</CardDescription>
+                </CardHeader>
+                <CardContent><NotificationsTab /></CardContent>
               </Card>
             </TabsContent>
             <TabsContent value="billing">

@@ -6,6 +6,7 @@ import { requireAuth } from "../lib/auth.js";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
 import { generateBookingQR } from "../lib/qr.js";
 import { logger } from "../lib/logger.js";
+import { notifyBookingCreated, notifyCheckIn } from "../lib/notify.js";
 
 const CALENDAR_COLORS = [
   "#4f86c6", "#e07b54", "#5cb85c", "#9b59b6",
@@ -189,13 +190,27 @@ router.post("/", requireAuth, async (req, res) => {
   const [g] = guestId ? await db.select().from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1) : [null];
   const [u] = await db.select().from(unitsTable).where(eq(unitsTable.id, unitId)).limit(1);
 
+  const guestName = g ? `${g.firstName} ${g.lastName}` : (lastName ? `${lastName} ${firstName || ""}`.trim() : "Гість");
+
   res.status(201).json({
     ...booking,
     totalAmount: Number(booking.totalAmount),
     paidAmount: Number(booking.paidAmount),
-    guestName: g ? `${g.firstName} ${g.lastName}` : (lastName ? `${lastName} ${firstName || ""}`.trim() : "Гість"),
+    guestName,
     unitName: u?.name || null,
   });
+
+  // Fire-and-forget notifications (don't block response)
+  if (!isDraft && user.organizationId) {
+    notifyBookingCreated(user.organizationId, {
+      id: booking.id,
+      guestName,
+      unitName: u?.name,
+      checkIn: booking.checkIn,
+      checkOut: booking.checkOut,
+      totalAmount: booking.totalAmount,
+    }).catch(() => {});
+  }
 });
 
 // GET /api/bookings/calendar?startDate=&days=&propertyId= — chessboard data
@@ -566,6 +581,11 @@ router.post("/:bookingId/checkin", requireAuth, async (req, res) => {
   }).catch(() => {});
 
   res.json({ ...updated, totalAmount: Number(updated.totalAmount), paidAmount: Number(updated.paidAmount) });
+
+  // Fire-and-forget external notification
+  if (user.organizationId) {
+    notifyCheckIn(user.organizationId, guestName, unit?.name || "номер", bookingId).catch(() => {});
+  }
 });
 
 // POST /api/bookings/:bookingId/checkout — check out a guest

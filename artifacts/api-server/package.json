@@ -11,6 +11,7 @@
     "seed:demo": "node_modules/.bin/tsx src/lib/demo-seed.ts"
   },
   "dependencies": {
+    "@types/nodemailer": "^7.0.11",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",
@@ -20,6 +21,7 @@
     "drizzle-orm": "catalog:",
     "express": "^5",
     "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^8.0.4",
     "pg": "^8.20.0",
     "pino": "^9",
     "pino-http": "^10",
