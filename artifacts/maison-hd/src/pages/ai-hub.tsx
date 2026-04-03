@@ -146,10 +146,10 @@ function AiShellTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
       .catch(() => {});
   }, []);
 
-  const quickAsk = async () => {
-    if (!copilotInput.trim() || copilotLoading) return;
-    const q = copilotInput.trim();
-    setCopilotInput("");
+  const quickAsk = async (directQuestion?: string) => {
+    const q = (directQuestion !== undefined ? directQuestion : copilotInput).trim();
+    if (!q || copilotLoading) return;
+    if (!directQuestion) setCopilotInput("");
     setCopilotLoading(true);
     setCopilotReply("");
     let msg = "";
@@ -320,7 +320,7 @@ function AiShellTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
               type="text"
               value={copilotInput}
               onChange={e => setCopilotInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && quickAsk()}
+              onKeyDown={e => e.key === "Enter" && quickAsk(undefined)}
               placeholder="Напр.: Як правильно зустріти VIP гостя?"
               className="flex-1 px-3 py-2 rounded-lg border border-violet-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
             />
@@ -352,8 +352,9 @@ function AiShellTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
             ].map(q => (
               <button
                 key={q}
-                onClick={() => setCopilotInput(q)}
-                className="text-xs px-2.5 py-1 bg-white border border-violet-200 rounded-full text-violet-600 hover:bg-violet-100 transition-colors"
+                onClick={() => quickAsk(q)}
+                disabled={copilotLoading}
+                className="text-xs px-2.5 py-1 bg-white border border-violet-200 rounded-full text-violet-600 hover:bg-violet-100 disabled:opacity-50 transition-colors"
               >
                 {q}
               </button>
@@ -425,10 +426,10 @@ function CopilotTab() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [history, loading]);
 
-  const send = async () => {
-    if (!input.trim() || loading) return;
-    const userMsg = input.trim();
-    setInput("");
+  const send = async (directQuestion?: string) => {
+    const userMsg = (directQuestion !== undefined ? directQuestion : input).trim();
+    if (!userMsg || loading) return;
+    if (!directQuestion) setInput("");
     setHistory(h => [...h, { role: "user", content: userMsg }]);
     setLoading(true);
 
@@ -525,11 +526,11 @@ function CopilotTab() {
             <Input
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
+              onKeyDown={e => e.key === "Enter" && !e.shiftKey && send(undefined)}
               placeholder="Запитайте про будь-яку ситуацію в готелі..."
               className="flex-1"
             />
-            <Button onClick={send} disabled={loading || !input.trim()} className="bg-violet-600 hover:bg-violet-700">
+            <Button onClick={() => send(undefined)} disabled={loading || !input.trim()} className="bg-violet-600 hover:bg-violet-700">
               <Send className="w-4 h-4" />
             </Button>
           </div>
@@ -540,8 +541,9 @@ function CopilotTab() {
         {QUICK.map((q, i) => (
           <button
             key={i}
-            onClick={() => { setInput(q); }}
-            className="w-full text-left text-xs p-2.5 bg-white border border-gray-200 rounded-lg hover:border-violet-300 hover:bg-violet-50 transition-colors"
+            onClick={() => send(q)}
+            disabled={loading}
+            className="w-full text-left text-xs p-2.5 bg-white border border-gray-200 rounded-lg hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50 transition-colors"
           >
             <ChevronRight className="w-3 h-3 inline text-violet-400 mr-1" />
             {q}
