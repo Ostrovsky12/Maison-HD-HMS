@@ -269,6 +269,51 @@ function Counter({ target, suffix = "" }: { target: number; suffix?: string }) {
   return <span ref={ref}>{count.toLocaleString("uk-UA")}{suffix}</span>;
 }
 
+// ── Video fullscreen overlay ──────────────────────────────────────
+function VideoFullscreen({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
+      {/* Top bar */}
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-5">
+        <div className="flex items-center gap-2 opacity-60">
+          <div className="w-6 h-6 rounded-md flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+            <span className="text-white text-xs font-bold">M</span>
+          </div>
+          <span className="text-white text-sm font-semibold tracking-wide">Maison HD</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-sm transition-all backdrop-blur-sm border border-white/10"
+        >
+          <X className="w-4 h-4" />
+          <span className="hidden sm:inline">Закрити</span>
+          <span className="text-white/30 text-xs hidden sm:inline">Esc</span>
+        </button>
+      </div>
+
+      {/* Video — full viewport */}
+      <div className="flex-1 relative">
+        <DemoVideoPlayer />
+      </div>
+
+      {/* Bottom CTA */}
+      <div className="absolute bottom-5 right-4 sm:right-6 z-20">
+        <a href="#demo-form" onClick={onClose}
+          className="inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-colors shadow-lg shadow-indigo-600/30">
+          Запросити демо <ArrowRight className="w-3.5 h-3.5" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // ── Main landing ──────────────────────────────────────────────────
 export default function DemoPage() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", propertiesCount: "1", message: "" });
@@ -862,20 +907,9 @@ export default function DemoPage() {
         </div>
       </footer>
 
-      {/* ── Video modal ── */}
+      {/* ── Video fullscreen ── */}
       {videoOpen && (
-        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="relative w-full max-w-5xl aspect-video rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
-            <DemoVideoPlayer />
-            <button onClick={() => setVideoOpen(false)} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors z-50">
-              <X className="w-4 h-4" />
-            </button>
-            <a href="#demo-form" onClick={() => setVideoOpen(false)}
-              className="absolute bottom-5 right-5 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-colors z-50">
-              Запросити демо <ArrowRight className="w-3.5 h-3.5" />
-            </a>
-          </div>
-        </div>
+        <VideoFullscreen onClose={() => setVideoOpen(false)} />
       )}
     </div>
   );
