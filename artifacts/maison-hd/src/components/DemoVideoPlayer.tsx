@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { TrendingUp, Users, CreditCard, CalendarCheck, Smartphone, Sparkles, FileText, Blocks, BrainCircuit } from 'lucide-react';
 
 // ─── Web Audio ambient engine ─────────────────────────────────────────────────
@@ -48,43 +48,109 @@ function useAmbientAudio() {
   return { start, stop };
 }
 
+// ─── Text-to-Speech engine ────────────────────────────────────────────────────
+function useTTS() {
+  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const activeRef = useRef(false);
+
+  // Load voices — async in Chrome, sync in Firefox
+  const loadVoice = useCallback(() => {
+    if (!window.speechSynthesis) return;
+    const pick = () => {
+      const voices = window.speechSynthesis.getVoices();
+      // Prefer Ukrainian, then Russian (Cyrillic), then any Google/deep male
+      voiceRef.current =
+        voices.find(v => v.lang.startsWith('uk')) ||
+        voices.find(v => v.lang.startsWith('ru') && v.name.toLowerCase().includes('male')) ||
+        voices.find(v => v.lang.startsWith('ru')) ||
+        voices.find(v => v.name.toLowerCase().includes('google') && v.lang.startsWith('en')) ||
+        voices[0] || null;
+    };
+    pick();
+    window.speechSynthesis.onvoiceschanged = pick;
+  }, []);
+
+  useEffect(() => { loadVoice(); }, [loadVoice]);
+
+  const speak = useCallback((text: string) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    if (!activeRef.current) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = voiceRef.current?.lang ?? 'uk-UA';
+    utterance.rate = 0.72;
+    utterance.pitch = 0.82;
+    utterance.volume = 0.9;
+    if (voiceRef.current) utterance.voice = voiceRef.current;
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const start = useCallback(() => { activeRef.current = true; }, []);
+
+  const stop = useCallback(() => {
+    activeRef.current = false;
+    window.speechSynthesis?.cancel();
+  }, []);
+
+  return { speak, start, stop };
+}
+
 // ─── Intro scene: cinematic voiceover text ────────────────────────────────────
 const INTRO_BEATS = [
-  { at: 400,  lines: ["Готельний бізнес змінюється."],                        style: "heading" },
-  { at: 3000, lines: ["Але більшість систем — ні."],                           style: "muted" },
-  { at: 6200, lines: ["Вони рахують."],                                        style: "normal" },
-  { at: 8400, lines: ["Але не думають."],                                      style: "muted" },
-  { at: 11200,lines: ["Вони зберігають дані."],                                style: "normal" },
-  { at: 13500,lines: ["Але не допомагають приймати рішення."],                 style: "muted" },
-  { at: 17000,lines: ["Hospitality — це більше, ніж сервіс."],                 style: "heading" },
-  { at: 20000,lines: ["Це управління рішеннями."],                             style: "accent" },
-  { at: 22800,lines: ["І швидкість цих рішень", "визначає прибуток."],         style: "normal" },
-  { at: 26500,lines: ["Maison HD — це інша логіка."],                          style: "brand" },
-  { at: 30000,lines: ["Система, яка аналізує,", "пропонує", "і діє разом з тобою."], style: "normal" },
-  { at: 34500,lines: ["Автоматизація процесів."],                              style: "pill" },
-  { at: 36500,lines: ["Менше людей у операціях."],                             style: "pill" },
-  { at: 38500,lines: ["Більше контролю над бізнесом."],                        style: "pill" },
-  { at: 41000,lines: ["Дані.\u2003AI.\u2003Управління."],                      style: "trinity" },
-  { at: 43500,lines: ["В одному середовищі."],                                 style: "muted" },
-  { at: 46500,lines: ["Це не просто система."],                                style: "normal" },
-  { at: 48800,lines: ["Це новий рівень мислення", "в hospitality."],           style: "heading" },
-  { at: 52500,lines: ["Maison HD."],                                            style: "final" },
+  { at: 400,  lines: ["Готельний бізнес змінюється."],                        style: "heading", speech: "Готельний бізнес змінюється." },
+  { at: 3000, lines: ["Але більшість систем — ні."],                           style: "muted",   speech: "Але більшість систем — ні." },
+  { at: 6200, lines: ["Вони рахують."],                                        style: "normal",  speech: "Вони рахують." },
+  { at: 8400, lines: ["Але не думають."],                                      style: "muted",   speech: "Але не думають." },
+  { at: 11200,lines: ["Вони зберігають дані."],                                style: "normal",  speech: "Вони зберігають дані." },
+  { at: 13500,lines: ["Але не допомагають приймати рішення."],                 style: "muted",   speech: "Але не допомагають приймати рішення." },
+  { at: 17000,lines: ["Hospitality — це більше, ніж сервіс."],                 style: "heading", speech: "Hospitality — це більше, ніж сервіс." },
+  { at: 20000,lines: ["Це управління рішеннями."],                             style: "accent",  speech: "Це управління рішеннями." },
+  { at: 22800,lines: ["І швидкість цих рішень", "визначає прибуток."],         style: "normal",  speech: "І швидкість цих рішень визначає прибуток." },
+  { at: 26500,lines: ["Maison HD — це інша логіка."],                          style: "brand",   speech: "Maison HD — це інша логіка." },
+  { at: 30000,lines: ["Система, яка аналізує,", "пропонує", "і діє разом з тобою."], style: "normal", speech: "Система, яка аналізує, пропонує і діє разом з тобою." },
+  { at: 34500,lines: ["Автоматизація процесів."],                              style: "pill",    speech: "Автоматизація процесів." },
+  { at: 36500,lines: ["Менше людей у операціях."],                             style: "pill",    speech: "Менше людей у операціях." },
+  { at: 38500,lines: ["Більше контролю над бізнесом."],                        style: "pill",    speech: "Більше контролю над бізнесом." },
+  { at: 41000,lines: ["Дані.\u2003AI.\u2003Управління."],                      style: "trinity", speech: "Дані. AI. Управління." },
+  { at: 43500,lines: ["В одному середовищі."],                                 style: "muted",   speech: "В одному середовищі." },
+  { at: 46500,lines: ["Це не просто система."],                                style: "normal",  speech: "Це не просто система." },
+  { at: 48800,lines: ["Це новий рівень мислення", "в hospitality."],           style: "heading", speech: "Це новий рівень мислення в hospitality." },
+  { at: 52500,lines: ["Maison HD."],                                            style: "final",   speech: "Maison HD." },
 ];
 
 const INTRO_DURATION = 58000;
 
 function SceneIntro({ onDone }: { onDone?: () => void }) {
   const [beatIdx, setBeatIdx] = useState(-1);
-  const { start, stop } = useAmbientAudio();
+  const audio = useAmbientAudio();
+  const tts = useTTS();
 
+  // Start ambient audio + enable TTS on mount
   useEffect(() => {
-    start();
+    audio.start();
+    tts.start();
     const timers = INTRO_BEATS.map((b, i) =>
       setTimeout(() => setBeatIdx(i), b.at)
     );
-    const doneTimer = setTimeout(() => { stop(); onDone?.(); }, INTRO_DURATION);
-    return () => { timers.forEach(clearTimeout); clearTimeout(doneTimer); stop(); };
+    const doneTimer = setTimeout(() => {
+      audio.stop();
+      tts.stop();
+      onDone?.();
+    }, INTRO_DURATION);
+    return () => {
+      timers.forEach(clearTimeout);
+      clearTimeout(doneTimer);
+      audio.stop();
+      tts.stop();
+    };
   }, []);
+
+  // Speak each beat as it appears
+  useEffect(() => {
+    if (beatIdx < 0) return;
+    const beat = INTRO_BEATS[beatIdx];
+    tts.speak(beat.speech);
+  }, [beatIdx]);
 
   const beat = beatIdx >= 0 ? INTRO_BEATS[beatIdx] : null;
 
