@@ -12,3 +12,9 @@ id = "UmQcfJvoeS-H_2YOO--Gf"
 uri = "file://artifacts/maison-hd/public/brand/maison-hd-logo.svg"
 type = "image"
 title = "Maison HD — Повний логотип з текстом"
+
+[[outputs]]
+id = "qi-i_Rm11FUBVtCVpInmm"
+uri = "file://artifacts/maison-hd/public/brand/maison-hd-instagram.png"
+type = "image"
+title = "Maison HD — Instagram (1000×1000 PNG)"
