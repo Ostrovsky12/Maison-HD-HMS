@@ -36,60 +36,52 @@ function useAmbient() {
   return { start, stop };
 }
 
-// ─── TTS narration ────────────────────────────────────────────────────────────
-const SCENE_NARRATION: Record<number, string> = {
-  0: "Maison HD — AI-система управління готельним бізнесом нового покоління.",
-  1: "Ми автоматизуємо операційні процеси настільки, що замість трьох адміністраторів достатньо одного.",
-  2: "Єдина екосистема модулів і повний контроль над кожним етапом — від бронювання до сервісу гостя.",
+// ─── ElevenLabs pre-generated narration ───────────────────────────────────────
+const SCENE_AUDIO: Record<number, string> = {
+  0: '/audio/scene0.mp3',
+  1: '/audio/scene1.mp3',
+  2: '/audio/scene2.mp3',
 };
 
-function useTTS() {
-  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+function useNarration() {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeRef = useRef(false);
 
+  // Preload all audio files
   useEffect(() => {
-    const pick = () => {
-      const voices = window.speechSynthesis?.getVoices() ?? [];
-      if (!voices.length) return;
-
-      // Priority 1 — Google Ukrainian (cloud, highest quality)
-      const googleUk = voices.find(v => v.lang.startsWith('uk') && /google/i.test(v.name));
-      // Priority 2 — any Ukrainian voice
-      const anyUk = voices.find(v => v.lang.startsWith('uk'));
-      // Priority 3 — Google Russian (cloud) as close phonetic match
-      const googleRu = voices.find(v => v.lang.startsWith('ru') && /google/i.test(v.name));
-      // Priority 4 — Google UK English Female (well-known high quality)
-      const googleEnFemale = voices.find(v => /google uk english female/i.test(v.name));
-      // Priority 5 — any Google voice
-      const anyGoogle = voices.find(v => /google/i.test(v.name) && !v.localService);
-      // Priority 6 — best local voice
-      const local = voices.find(v => !v.localService) || voices[0];
-
-      voiceRef.current = googleUk || anyUk || googleRu || googleEnFemale || anyGoogle || local || null;
-    };
-    pick();
-    if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = pick;
+    Object.values(SCENE_AUDIO).forEach(src => {
+      const a = new Audio(src);
+      a.preload = 'auto';
+    });
   }, []);
 
-  const speak = useCallback((text: string) => {
-    if (!window.speechSynthesis || !activeRef.current) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = voiceRef.current?.lang ?? 'uk-UA';
-    u.rate = 0.72;
-    u.pitch = 0.9;
-    u.volume = 1.0;
-    if (voiceRef.current) u.voice = voiceRef.current;
-    window.speechSynthesis.speak(u);
+  const play = useCallback((sceneIdx: number) => {
+    if (!activeRef.current) return;
+    const src = SCENE_AUDIO[sceneIdx];
+    if (!src) return;
+
+    // Stop previous
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    const audio = new Audio(src);
+    audio.volume = 0.92;
+    audioRef.current = audio;
+    audio.play().catch(() => {});
   }, []);
 
   const enable = useCallback(() => { activeRef.current = true; }, []);
   const disable = useCallback(() => {
     activeRef.current = false;
-    window.speechSynthesis?.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
   }, []);
 
-  return { speak, enable, disable };
+  return { play, enable, disable };
 }
 
 // ─── Scene hook ───────────────────────────────────────────────────────────────
@@ -420,22 +412,21 @@ function Scene5() {
 export default function DemoVideoPlayer() {
   const sceneIdx = useScenes();
   const ambient = useAmbient();
-  const tts = useTTS();
+  const narration = useNarration();
   const startedRef = useRef(false);
 
-  // Boot audio + TTS on first render (triggered by user click opening the modal)
+  // Boot audio on first render (triggered by user click opening the modal)
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
     ambient.start();
-    tts.enable();
-    return () => { ambient.stop(); tts.disable(); };
+    narration.enable();
+    return () => { ambient.stop(); narration.disable(); };
   }, []);
 
-  // Narrate each scene as it appears
+  // Play pre-generated ElevenLabs audio for each scene
   useEffect(() => {
-    const text = SCENE_NARRATION[sceneIdx];
-    if (text) tts.speak(text);
+    narration.play(sceneIdx);
   }, [sceneIdx]);
 
   return (
