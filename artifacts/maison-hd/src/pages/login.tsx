@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Building, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { MaisonLogo } from "@/components/MaisonLogo";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -76,9 +77,7 @@ export default function LoginPage() {
 
       <div className="w-full max-w-md z-10">
         <div className="flex flex-col items-center mb-8 text-center">
-          <div className="bg-primary text-primary-foreground p-3 rounded-xl shadow-lg mb-4">
-            <Building className="w-8 h-8" />
-          </div>
+          <MaisonLogo size={52} textVariant="light" showText={false} className="mb-4" />
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Maison HD</h1>
           <p className="text-muted-foreground mt-2 font-mono text-sm uppercase tracking-widest">Property Management System</p>
         </div>

@@ -1,7 +1,8 @@
 import { useLocation } from "wouter";
+import { MaisonLogo } from "@/components/MaisonLogo";
 import {
   LayoutDashboard, CalendarDays, KeyRound, Users, BarChart3, Settings,
-  LogOut, Building, Grid3X3, Bell, CheckCheck, X, FileText, TrendingUp,
+  LogOut, Grid3X3, Bell, CheckCheck, X, FileText, TrendingUp,
   Plug, Crown, CreditCard, ArrowRightLeft, MessageSquare, Waves,
   PartyPopper, UtensilsCrossed, Zap, Bot, Building2, Globe,
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
@@ -249,18 +250,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Brand header */}
-      <div className="px-5 pt-6 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-            <Building className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <div className="font-bold text-base text-white tracking-tight leading-tight">Maison HD</div>
-            <div className="text-[11px] text-white/40 tracking-widest uppercase">Hospitality OS</div>
-          </div>
-        </div>
+      <div className="px-5 pt-6 pb-4 space-y-3">
+        <MaisonLogo size={36} textVariant="dark" />
         {isSuperAdmin && (
-          <div className="mt-3 flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/15 border border-amber-500/20 rounded-lg">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/15 border border-amber-500/20 rounded-lg">
             <Crown className="w-3 h-3 text-amber-400" />
             <span className="text-xs text-amber-300 font-medium">Super Admin</span>
           </div>

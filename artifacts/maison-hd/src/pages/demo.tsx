@@ -7,6 +7,7 @@ import {
   Calendar, Star, Hotel, Clock, Play, X,
   Wand2, Tv, LayoutDashboard, QrCode, BrainCircuit,
 } from "lucide-react";
+import { MaisonLogo } from "@/components/MaisonLogo";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API_URL = BASE.replace("/maison-hd", "") + "/api";
@@ -236,14 +237,7 @@ export default function DemoPage() {
 
       {/* ── NAV ── */}
       <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 md:px-12 py-4 bg-[#050914]/80 backdrop-blur-xl border-b border-white/5">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center">
-            <BedDouble className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <span className="font-black text-base text-white tracking-tight">Maison HD</span>
-          </div>
-        </div>
+        <MaisonLogo size={34} textVariant="dark" />
         <div className="hidden md:flex items-center gap-8 text-sm text-white/50">
           {[["Продукт","#features"], ["Рішення","#solution"], ["Ціни","#pricing"], ["Відгуки","#testimonials"]].map(([l, h]) => (
             <a key={l} href={h} className="hover:text-white transition-colors">{l}</a>
@@ -707,15 +701,7 @@ export default function DemoPage() {
       {/* ── FOOTER ── */}
       <footer className="border-t border-white/5 py-12 px-6 md:px-12">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
-              <BedDouble className="w-3.5 h-3.5 text-white" />
-            </div>
-            <div>
-              <span className="font-black text-sm text-white">Maison HD</span>
-              <span className="text-white/25 text-xs ml-2">Hospitality OS</span>
-            </div>
-          </div>
+          <MaisonLogo size={28} textVariant="dark" />
           <div className="flex items-center gap-8 text-xs text-white/25">
             {[["Продукт","#features"], ["Ціни","#pricing"], ["Демо","#demo-form"]].map(([l, h]) => (
               <a key={l} href={h} className="hover:text-white/60 transition-colors">{l}</a>
