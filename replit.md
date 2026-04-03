@@ -57,6 +57,24 @@ The project is structured as a pnpm monorepo with distinct `artifacts` for the f
 - **Rentals & Activities:** Inventory management for rental equipment and scheduling/booking of activities.
 - **Owner/HQ Command Center:** Real-time dashboards providing aggregated KPIs, operational oversight, financial summaries, and forecasts across properties and departments.
 
+## Test Tenants
+
+### Комплекс ДОГОДА (org_id=41, slug=dogoda)
+- **Owner login:** admin@dogoda.com.ua / Dogoda2026!
+- **Property:** "Котеджний комплекс ДОГОДА" (id=55), тип: hotel, адреса: с. Шешори, Косівський р-н, Івано-Франківська обл.
+- **Units:** 12 котеджів (Котедж 1-11 + Люкс Євро), unit IDs 279-290
+- **Unit types:** STD (стандарт 2800грн), DLX (делюкс 4200грн), VIP (6500грн), EUR (люкс 3500грн)
+- **Rates:** NR Прямий і NR Канал по всіх категоріях + знижки -10%/-20%
+- **Sample bookings:** 10 бронювань з реальними українськими іменами (checked_in, confirmed, checked_out)
+- Реальні дані DOGODA з Servio HMS не мігровані (динамічне завантаження через JS, потребує headless browser)
+
+### Maison HD demo org (org_id=35, slug=maisonhd)
+- **Owner login:** owner@maisonhd.com / Owner2026!
+- **Property:** Готель "Карпати" (id=53), 6 будиночків (id 273-278)
+
+### Super Admin
+- admin@hms.app / admin123 (role: super_admin)
+
 ## External Dependencies
 
 The project integrates with several external services and APIs:

@@ -97,7 +97,7 @@ router.get("/", requireAuth, async (req, res) => {
     paidAmount: bookingsTable.paidAmount,
     notes: bookingsTable.notes,
     createdAt: bookingsTable.createdAt,
-    guestName: sql<string>`concat(${guestsTable.firstName}, ' ', ${guestsTable.lastName})`,
+    guestName: sql<string>`COALESCE(NULLIF(concat(${guestsTable.firstName}, ' ', ${guestsTable.lastName}), ' '), NULLIF(trim(concat(${bookingsTable.lastName}, ' ', ${bookingsTable.firstName})), ''), 'Гість')`,
     unitName: unitsTable.name,
   }).from(bookingsTable)
     .leftJoin(guestsTable, eq(bookingsTable.guestId, guestsTable.id))
