@@ -15,7 +15,8 @@ import {
   useMarkAllNotificationsRead, useMarkNotificationRead,
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
-import { ReactNode, useState, useRef, useEffect } from "react";
+import { ReactNode, useState, useRef, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { uk } from "date-fns/locale";
 import { CommandPalette, useCommandPalette } from "@/components/command-palette";
@@ -217,15 +218,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { data: user } = useGetMe();
   const logout = useLogout();
   const { toast } = useToast();
+  const qc = useQueryClient();
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
   const { open: cmdOpen, setOpen: setCmdOpen } = useCommandPalette();
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     logout.mutate(undefined, {
-      onSuccess: () => { localStorage.removeItem("hms_token"); navigate(`~${BASE}/login`); },
+      onSuccess: () => {
+        localStorage.removeItem("hms_token");
+        qc.clear();
+        navigate(`~${BASE}/login`);
+      },
       onError: () => toast({ title: "Помилка виходу", variant: "destructive" }),
     });
-  };
+  }, [logout, qc, navigate, BASE, toast]);
 
   const goTo = (path: string) => {
     navigate(`~${BASE}${path}`);
@@ -343,7 +349,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen bg-[#F7F8FC] text-foreground">
       {/* Desktop sidebar */}
       <aside className="w-60 shrink-0 hidden md:flex flex-col bg-[#1a1d2e] border-r border-white/5 fixed top-0 left-0 h-screen z-30 overflow-hidden">
-        <SidebarContent />
+        {SidebarContent()}
       </aside>
 
       {/* Mobile sidebar overlay */}
@@ -351,7 +357,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
           <aside className="relative w-64 bg-[#1a1d2e] h-full overflow-hidden flex flex-col">
-            <SidebarContent />
+            {SidebarContent()}
           </aside>
         </div>
       )}
