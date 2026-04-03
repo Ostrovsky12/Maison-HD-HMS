@@ -1,7 +1,201 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { TrendingUp, Users, CreditCard, CalendarCheck, Smartphone, Sparkles, FileText, Blocks, BrainCircuit } from 'lucide-react';
 
+// ─── Web Audio ambient engine ─────────────────────────────────────────────────
+function useAmbientAudio() {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const started = useRef(false);
+
+  const start = () => {
+    if (started.current) return;
+    started.current = true;
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      ctxRef.current = ctx;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0, ctx.currentTime);
+      master.gain.linearRampToValueAtTime(0.07, ctx.currentTime + 3);
+      master.connect(ctx.destination);
+
+      // Two slightly detuned pads
+      [[110, 0], [165, 0.3], [220, 0.6], [330, 1.0]].forEach(([freq, delay]) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        osc.frequency.linearRampToValueAtTime(freq * 1.001, ctx.currentTime + 20);
+        g.gain.setValueAtTime(0, ctx.currentTime + delay);
+        g.gain.linearRampToValueAtTime(freq < 200 ? 0.6 : 0.25, ctx.currentTime + delay + 4);
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(400, ctx.currentTime);
+        filter.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 8);
+        osc.connect(filter); filter.connect(g); g.connect(master);
+        osc.start(ctx.currentTime + delay);
+      });
+
+      // Slow fade out near end
+      master.gain.setValueAtTime(0.07, ctx.currentTime + 44);
+      master.gain.linearRampToValueAtTime(0, ctx.currentTime + 52);
+    } catch (_) {}
+  };
+
+  const stop = () => {
+    ctxRef.current?.close().catch(() => {});
+  };
+
+  return { start, stop };
+}
+
+// ─── Intro scene: cinematic voiceover text ────────────────────────────────────
+const INTRO_BEATS = [
+  { at: 400,  lines: ["Готельний бізнес змінюється."],                        style: "heading" },
+  { at: 3000, lines: ["Але більшість систем — ні."],                           style: "muted" },
+  { at: 6200, lines: ["Вони рахують."],                                        style: "normal" },
+  { at: 8400, lines: ["Але не думають."],                                      style: "muted" },
+  { at: 11200,lines: ["Вони зберігають дані."],                                style: "normal" },
+  { at: 13500,lines: ["Але не допомагають приймати рішення."],                 style: "muted" },
+  { at: 17000,lines: ["Hospitality — це більше, ніж сервіс."],                 style: "heading" },
+  { at: 20000,lines: ["Це управління рішеннями."],                             style: "accent" },
+  { at: 22800,lines: ["І швидкість цих рішень", "визначає прибуток."],         style: "normal" },
+  { at: 26500,lines: ["Maison HD — це інша логіка."],                          style: "brand" },
+  { at: 30000,lines: ["Система, яка аналізує,", "пропонує", "і діє разом з тобою."], style: "normal" },
+  { at: 34500,lines: ["Автоматизація процесів."],                              style: "pill" },
+  { at: 36500,lines: ["Менше людей у операціях."],                             style: "pill" },
+  { at: 38500,lines: ["Більше контролю над бізнесом."],                        style: "pill" },
+  { at: 41000,lines: ["Дані.\u2003AI.\u2003Управління."],                      style: "trinity" },
+  { at: 43500,lines: ["В одному середовищі."],                                 style: "muted" },
+  { at: 46500,lines: ["Це не просто система."],                                style: "normal" },
+  { at: 48800,lines: ["Це новий рівень мислення", "в hospitality."],           style: "heading" },
+  { at: 52500,lines: ["Maison HD."],                                            style: "final" },
+];
+
+const INTRO_DURATION = 58000;
+
+function SceneIntro({ onDone }: { onDone?: () => void }) {
+  const [beatIdx, setBeatIdx] = useState(-1);
+  const { start, stop } = useAmbientAudio();
+
+  useEffect(() => {
+    start();
+    const timers = INTRO_BEATS.map((b, i) =>
+      setTimeout(() => setBeatIdx(i), b.at)
+    );
+    const doneTimer = setTimeout(() => { stop(); onDone?.(); }, INTRO_DURATION);
+    return () => { timers.forEach(clearTimeout); clearTimeout(doneTimer); stop(); };
+  }, []);
+
+  const beat = beatIdx >= 0 ? INTRO_BEATS[beatIdx] : null;
+
+  return (
+    <motion.div
+      className="absolute inset-0 flex flex-col items-center justify-center z-10"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, filter: 'blur(20px)' }}
+      transition={{ duration: 1.5 }}
+    >
+      {/* Subtle scanline overlay */}
+      <div className="absolute inset-0 pointer-events-none z-0"
+        style={{ background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 1px, transparent 1px, transparent 3px)' }} />
+
+      <AnimatePresence mode="wait">
+        {beat && (
+          <motion.div
+            key={beatIdx}
+            className="flex flex-col items-center text-center px-16 max-w-4xl"
+            initial={{ opacity: 0, y: 18, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, y: -12, filter: 'blur(4px)' }}
+            transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {beat.style === 'final' ? (
+              /* ── FINAL REVEAL ─────────────────────────────── */
+              <div className="flex flex-col items-center gap-6">
+                <motion.div
+                  className="w-20 h-20 rounded-2xl flex items-center justify-center"
+                  style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', boxShadow: '0 0 80px rgba(99,102,241,0.5)' }}
+                  initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <span className="text-white font-bold text-5xl" style={{ fontFamily: 'serif' }}>M</span>
+                </motion.div>
+                <motion.p
+                  className="text-7xl font-bold tracking-tight text-white"
+                  style={{ fontFamily: 'Georgia, serif', letterSpacing: '-0.02em' }}
+                  initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 1.2, delay: 0.3 }}
+                >
+                  {beat.lines[0]}
+                </motion.p>
+                <motion.div className="w-24 h-px bg-gradient-to-r from-transparent via-indigo-400 to-transparent"
+                  initial={{ scaleX: 0 }} animate={{ scaleX: 1 }}
+                  transition={{ duration: 1.5, delay: 0.8 }} />
+              </div>
+            ) : beat.style === 'brand' ? (
+              /* ── BRAND BEAT ───────────────────────────────── */
+              <div className="relative">
+                <motion.div className="absolute -inset-8 rounded-3xl"
+                  style={{ background: 'radial-gradient(ellipse, rgba(99,102,241,0.15), transparent)', filter: 'blur(20px)' }}
+                  animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 3, repeat: Infinity }} />
+                <p className="text-5xl font-bold text-white relative" style={{ fontFamily: 'Georgia, serif' }}>
+                  {beat.lines[0]}
+                </p>
+              </div>
+            ) : beat.style === 'trinity' ? (
+              /* ── DATA / AI / CONTROL ──────────────────────── */
+              <p className="text-5xl font-light tracking-widest text-white/90"
+                style={{ fontFamily: 'Georgia, serif', letterSpacing: '0.12em' }}>
+                {beat.lines[0]}
+              </p>
+            ) : beat.style === 'pill' ? (
+              /* ── PILL STYLE ───────────────────────────────── */
+              <motion.div
+                className="px-8 py-3 rounded-full border"
+                style={{ borderColor: 'rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.08)' }}
+              >
+                <p className="text-2xl font-medium text-white/80" style={{ fontFamily: 'Georgia, serif' }}>
+                  {beat.lines[0]}
+                </p>
+              </motion.div>
+            ) : (
+              /* ── DEFAULT TEXT BEATS ───────────────────────── */
+              <div className="flex flex-col items-center gap-3">
+                {beat.lines.map((line, li) => (
+                  <motion.p
+                    key={li}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.9, delay: li * 0.25, ease: [0.16, 1, 0.3, 1] }}
+                    className={
+                      beat.style === 'heading' ? 'text-5xl font-bold text-white' :
+                      beat.style === 'accent'  ? 'text-4xl font-semibold text-indigo-300' :
+                      beat.style === 'muted'   ? 'text-3xl font-light text-white/45' :
+                                                 'text-3xl font-light text-white/80'
+                    }
+                    style={{ fontFamily: 'Georgia, serif', lineHeight: 1.4 }}
+                  >
+                    {line}
+                  </motion.p>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Progress bar */}
+      <motion.div className="absolute bottom-0 left-0 h-px bg-white/15 w-full" />
+      <motion.div
+        className="absolute bottom-0 left-0 h-px"
+        style={{ background: 'linear-gradient(90deg,#6366f1,#8b5cf6)' }}
+        initial={{ width: '0%' }} animate={{ width: '100%' }}
+        transition={{ duration: INTRO_DURATION / 1000, ease: 'linear' }}
+      />
+    </motion.div>
+  );
+}
+
+// ─── Scene hooks ───────────────────────────────────────────────────────────────
 function useVideoPlayer(durations: Record<string, number>) {
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
   const sceneKeys = Object.keys(durations);
@@ -17,7 +211,16 @@ function useVideoPlayer(durations: Record<string, number>) {
   return { currentScene: currentSceneIndex };
 }
 
-const SCENE_DURATIONS = { open: 10000, dashboard: 15000, chess: 15000, modules: 15000, close: 10000 };
+const SCENE_DURATIONS = {
+  intro: INTRO_DURATION,
+  open: 10000,
+  dashboard: 15000,
+  chess: 15000,
+  modules: 15000,
+  close: 10000,
+};
+
+// ─── Original scenes (unchanged) ─────────────────────────────────────────────
 
 function Scene1() {
   const [phase, setPhase] = useState(0);
@@ -292,7 +495,7 @@ function Scene5() {
             transition={{ duration: 1.2, ease: 'easeOut' }}
             className="px-10 py-5 rounded-full mb-8"
             style={{ background: 'linear-gradient(90deg, #6366f1, #8b5cf6)', boxShadow: '0 0 60px rgba(139,92,246,0.4)' }}>
-            <h2 className="text-5xl font-bold font-display tracking-tight text-white">14 днів безкоштовно</h2>
+            <h2 className="text-5xl font-bold font-display tracking-tight text-white">7 днів безкоштовно</h2>
           </motion.div>
         )}
         {phase >= 2 && (
@@ -319,11 +522,15 @@ function Scene5() {
   );
 }
 
+// ─── Main player ───────────────────────────────────────────────────────────────
 export default function DemoVideoPlayer() {
   const { currentScene } = useVideoPlayer(SCENE_DURATIONS);
+  const sceneKeys = Object.keys(SCENE_DURATIONS);
 
   return (
-    <div className="relative w-full h-full overflow-hidden" style={{ backgroundColor: '#0d0f1c', fontFamily: 'Inter, sans-serif', color: 'white' }}>
+    <div className="relative w-full h-full overflow-hidden"
+      style={{ backgroundColor: '#0d0f1c', fontFamily: 'Inter, sans-serif', color: 'white' }}>
+
       {/* Background glow */}
       <div className="absolute inset-0 z-0">
         <motion.div className="absolute w-[80vw] h-[80vw] rounded-full pointer-events-none"
@@ -348,18 +555,22 @@ export default function DemoVideoPlayer() {
 
       {/* Scenes */}
       <AnimatePresence mode="sync">
-        {currentScene === 0 && <Scene1 key="open" />}
-        {currentScene === 1 && <Scene2 key="dashboard" />}
-        {currentScene === 2 && <Scene3 key="chess" />}
-        {currentScene === 3 && <Scene4 key="modules" />}
-        {currentScene === 4 && <Scene5 key="close" />}
+        {currentScene === 0 && <SceneIntro key="intro" />}
+        {currentScene === 1 && <Scene1 key="open" />}
+        {currentScene === 2 && <Scene2 key="dashboard" />}
+        {currentScene === 3 && <Scene3 key="chess" />}
+        {currentScene === 4 && <Scene4 key="modules" />}
+        {currentScene === 5 && <Scene5 key="close" />}
       </AnimatePresence>
 
-      {/* Scene indicator */}
+      {/* Scene dots — skip intro dot */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-20">
-        {Object.keys(SCENE_DURATIONS).map((_, i) => (
+        {sceneKeys.map((_, i) => i > 0 && (
           <div key={i} className="w-1.5 h-1.5 rounded-full transition-all duration-500"
-            style={{ background: currentScene === i ? 'white' : 'rgba(255,255,255,0.25)', transform: currentScene === i ? 'scale(1.3)' : 'scale(1)' }} />
+            style={{
+              background: currentScene === i ? 'white' : 'rgba(255,255,255,0.25)',
+              transform: currentScene === i ? 'scale(1.3)' : 'scale(1)',
+            }} />
         ))}
       </div>
     </div>
