@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable } from "@workspace/db/schema";
+import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable, housekeepingTasksTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, inArray, desc, sql, or, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
@@ -718,6 +718,29 @@ router.post("/:bookingId/checkout", requireAuth, async (req, res) => {
     message: `${guestName} виселився з ${unit?.name || "номера"} (${booking.checkOut})`,
     priority: "normal",
   }).catch(() => {});
+
+  // Auto-create housekeeping cleaning task after checkout
+  if (unit) {
+    await db.insert(housekeepingTasksTable).values({
+      unitId: unit.id,
+      title: `Прибирання після виїзду — ${unit.name}`,
+      description: `Гість: ${guestName}. Виїзд: ${new Date().toLocaleDateString("uk-UA")}. Стандартне прибирання після виїзду.`,
+      taskType: "cleaning",
+      status: "pending",
+      priority: "high",
+      dueDate: new Date().toISOString().split("T")[0],
+      estimatedMinutes: 60,
+      checklist: [
+        { id: "1", text: "Змінити постільну білизну", checked: false },
+        { id: "2", text: "Прибрати і помити ванну кімнату", checked: false },
+        { id: "3", text: "Пропилосос і миття підлоги", checked: false },
+        { id: "4", text: "Протерти всі поверхні", checked: false },
+        { id: "5", text: "Поповнити витратні матеріали", checked: false },
+        { id: "6", text: "Перевірити наявність забутих речей", checked: false },
+        { id: "7", text: "Провітрити приміщення", checked: false },
+      ],
+    }).catch(() => {});
+  }
 
   res.json({ ...updated, totalAmount: Number(updated.totalAmount), paidAmount: Number(updated.paidAmount) });
 });

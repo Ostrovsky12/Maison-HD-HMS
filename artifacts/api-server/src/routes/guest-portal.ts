@@ -6,7 +6,7 @@ import {
   guestPortalMessagesTable, guestSpecialOffersTable, guestCommunicationLogTable,
   addonsTable,
 } from "@workspace/db";
-import { eq, and, desc, asc, ne, sql } from "drizzle-orm";
+import { eq, and, desc, asc, ne, sql, inArray } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { requireAuth } from "../lib/auth.js";
 
@@ -233,6 +233,71 @@ router.get("/summary", requireAuth, async (req: any, res) => {
       activeOffers: parseInt((offersCount.rows[0] as any)?.cnt || "0"),
       unreadMessages: parseInt((unreadMessages.rows[0] as any)?.cnt || "0"),
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: List service orders for organization ─────────────────────────────
+router.get("/service-orders", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const { status, limit: lim } = req.query;
+    const limitN = parseInt(lim as string) || 100;
+
+    const propIds = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, orgId));
+    const pIds = propIds.map(p => p.id);
+    if (pIds.length === 0) return res.json([]);
+
+    const unitRows = await db.select({ id: unitsTable.id, name: unitsTable.name, propertyId: unitsTable.propertyId })
+      .from(unitsTable).where(inArray(unitsTable.propertyId, pIds));
+    const uIds = unitRows.map(u => u.id);
+    if (uIds.length === 0) return res.json([]);
+
+    const unitMap = Object.fromEntries(unitRows.map(u => [u.id, u.name]));
+
+    const bookingRows = await db.select({ id: bookingsTable.id, unitId: bookingsTable.unitId, guestName: bookingsTable.guestName })
+      .from(bookingsTable).where(inArray(bookingsTable.unitId, uIds));
+    const bIds = bookingRows.map(b => b.id);
+    if (bIds.length === 0) return res.json([]);
+
+    const bookingMap = Object.fromEntries(bookingRows.map(b => [b.id, b]));
+
+    const conds: any[] = [inArray(guestServiceOrdersTable.bookingId, bIds)];
+    if (status && status !== "all") conds.push(eq(guestServiceOrdersTable.status, status as string));
+
+    const orders = await db.select().from(guestServiceOrdersTable)
+      .where(and(...conds))
+      .orderBy(desc(guestServiceOrdersTable.createdAt))
+      .limit(limitN);
+
+    const result = orders.map(o => {
+      const booking = bookingMap[o.bookingId];
+      return {
+        ...o,
+        guestName: booking?.guestName || "—",
+        unitName: booking?.unitId ? unitMap[booking.unitId] || "—" : "—",
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Update service order status ──────────────────────────────────────
+router.patch("/service-orders/:id", requireAuth, async (req: any, res) => {
+  try {
+    const { status, staffNote } = req.body;
+    const id = parseInt(req.params.id);
+    const update: any = { updatedAt: new Date() };
+    if (status) update.status = status;
+    if (staffNote !== undefined) update.staffNote = staffNote;
+    const [updated] = await db.update(guestServiceOrdersTable).set(update)
+      .where(eq(guestServiceOrdersTable.id, id)).returning();
+    res.json(updated);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -57,16 +57,28 @@ The project is structured as a pnpm monorepo with distinct `artifacts` for the f
 - **Rentals & Activities:** Inventory management for rental equipment and scheduling/booking of activities.
 - **Owner/HQ Command Center:** Real-time dashboards providing aggregated KPIs, operational oversight, financial summaries, and forecasts across properties and departments.
 
+## Development Stage Roadmap
+
+- ✅ Stage 1 — Bookings filters + Today bar (arrivals/departures/staying quick stats)
+- ✅ Stage 2 — Guests CRUD dialog (create/edit with all fields, loyalty filter)
+- ✅ Stage 3 — Service orders management (admin confirm/complete/cancel)
+- ✅ Stage 4 — Public booking widget (`/book?slug=dogoda`) — end-to-end working
+- ✅ Auto-housekeeping task on checkout (7-item checklist, high priority)
+- ⏳ Stage 5 — LiqPay online payments
+- ⏳ Stage 6 — Automation rules engine
+
 ## Test Tenants
 
 ### Комплекс ДОГОДА (org_id=41, slug=dogoda)
 - **Owner login:** admin@dogoda.com.ua / Dogoda2026!
-- **Property:** "Котеджний комплекс ДОГОДА" (id=55), тип: hotel, адреса: с. Шешори, Косівський р-н, Івано-Франківська обл.
-- **Units:** 12 котеджів (Котедж 1-11 + Люкс Євро), unit IDs 279-290
-- **Unit types:** STD (стандарт 2800грн), DLX (делюкс 4200грн), VIP (6500грн), EUR (люкс 3500грн)
-- **Rates:** NR Прямий і NR Канал по всіх категоріях + знижки -10%/-20%
-- **Sample bookings:** 10 бронювань з реальними українськими іменами (checked_in, confirmed, checked_out)
-- Реальні дані DOGODA з Servio HMS не мігровані (динамічне завантаження через JS, потребує headless browser)
+- **Reception login:** reception@dogoda.com.ua / reception123
+- **Properties:** id 55, 57, 58 — всі "Котеджний комплекс ДОГОДА", с. Шешори, Косівський р-н
+- **Units:** 27+ юнітів (Котедж 1-11 в декількох корпусах), unit IDs від 279
+- **Unit types:** STD (2800грн), DLX (4200грн), EUR (7200грн)
+- **Addons:** id 43–53 (11 послуг, e.g. SPA, трансфер, сніданок)
+- **Guest portal code:** 32C94BEF72 (тест, 11 сервісів)
+- **Tourist tax rate:** 43.37 UAH
+- **Public booking widget:** `/book?slug=dogoda`
 
 ### Maison HD demo org (org_id=35, slug=maisonhd)
 - **Owner login:** owner@maisonhd.com / Owner2026!

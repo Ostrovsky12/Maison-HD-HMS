@@ -3,7 +3,7 @@
  * Routes: /maison-hd/book
  * Modes: widget embed, standalone hosted page, mobile-first flow, white-label
  */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,7 +66,9 @@ type Step = "search" | "unit" | "extras" | "form" | "payment" | "confirm";
 
 export default function BookPage() {
   const { toast } = useToast();
+  const slug = useMemo(() => new URLSearchParams(window.location.search).get("slug") || "", []);
   const [step, setStep] = useState<Step>("search");
+  const [organization, setOrganization] = useState<any>(null);
   const [properties, setProperties] = useState<any[]>([]);
   const [search, setSearch] = useState({ propertyId: "", checkIn: todayStr(), checkOut: tomorrowStr(), adults: 2, children: 0, childAge1: 0, childAge2: 0 });
   const [results, setResults] = useState<any[]>([]);
@@ -83,7 +85,16 @@ export default function BookPage() {
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", country: "UA", specialRequests: "", agreeTerms: false });
   const [payMethod, setPayMethod] = useState("arrival");
 
-  useEffect(() => { apiFetch("/properties").then(r => r.json()).then(d => setProperties(Array.isArray(d) ? d : (Array.isArray(d?.properties) ? d.properties : []))).catch(() => {}); }, []);
+  useEffect(() => {
+    const params = slug ? `?slug=${slug}` : "";
+    apiFetch(`/properties${params}`)
+      .then(r => r.json())
+      .then(d => {
+        setProperties(Array.isArray(d) ? d : (Array.isArray(d?.properties) ? d.properties : []));
+        if (d?.organization) setOrganization(d.organization);
+      })
+      .catch(() => {});
+  }, [slug]);
 
   const nightsCount = calcNights(search.checkIn, search.checkOut);
   const rate = RATE_PLANS.find(r => r.id === selectedRate)!;
@@ -123,6 +134,7 @@ export default function BookPage() {
     setLoading(true);
     const p = new URLSearchParams({ checkIn: search.checkIn, checkOut: search.checkOut, guests: String(search.adults) });
     if (search.propertyId) p.set("propertyId", search.propertyId);
+    else if (slug) p.set("slug", slug);
     const r = await apiFetch(`/availability?${p}`);
     const d = await r.json();
     setResults(d.units || []);
@@ -161,7 +173,8 @@ export default function BookPage() {
     const d = await r.json();
     setLoading(false);
     if (r.ok) {
-      setConfirmed({ bookingRef: d.bookingRef, ...form, ...search, nights: nightsCount, total, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName });
+      const bk = d.booking || d;
+      setConfirmed({ bookingRef: bk.bookingRef || bk.booking_ref || "—", ...form, ...search, nights: nightsCount, total, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName || organization?.name });
       setStep("confirm");
     } else {
       toast({ title: d.error || "Помилка бронювання", variant: "destructive" });
@@ -218,7 +231,7 @@ export default function BookPage() {
                 <ArrowLeft className="h-4 w-4" />
               </button>
             )}
-            <span className="font-bold text-gray-900 text-lg">🏡 Онлайн бронювання</span>
+            <span className="font-bold text-gray-900 text-lg">🏡 {organization?.name || "Онлайн бронювання"}</span>
           </div>
           {/* Steps */}
           <div className="hidden sm:flex items-center gap-1">

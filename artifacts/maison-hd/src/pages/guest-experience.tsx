@@ -13,7 +13,7 @@ import {
   Heart, Star, MessageSquare, Gift, Tag, Users, TrendingUp, Award,
   CheckCircle2, Clock, RefreshCw, Plus, Send, Eye, EyeOff,
   ThumbsUp, Crown, Zap, AlertCircle, ChevronRight, Mail,
-  BarChart3, Sparkles, Globe, Calendar,
+  BarChart3, Sparkles, Globe, Calendar, ShoppingBag, Check, X, Package,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -47,6 +47,159 @@ function NpsBar({ score }: { score: number | null }) {
   const clr = score >= 9 ? "text-green-600" : score >= 7 ? "text-yellow-600" : "text-red-500";
   const label = score >= 9 ? "Promoter" : score >= 7 ? "Passive" : "Detractor";
   return <span className={`text-sm font-bold ${clr}`}>{score}/10 <span className="text-xs font-normal">{label}</span></span>;
+}
+
+// ── Service Orders Tab ────────────────────────────────────────────────────────
+const ORDER_STATUS: Record<string, { label: string; pill: string; icon: any }> = {
+  pending:   { label: "Нове",        pill: "bg-amber-50 text-amber-700 ring-amber-200",   icon: Clock },
+  confirmed: { label: "Підтверджено",pill: "bg-blue-50 text-blue-700 ring-blue-200",      icon: CheckCircle2 },
+  completed: { label: "Виконано",    pill: "bg-emerald-50 text-emerald-700 ring-emerald-200", icon: Check },
+  cancelled: { label: "Скасовано",   pill: "bg-gray-100 text-gray-500 ring-gray-200",     icon: X },
+};
+
+function ServiceOrdersTab() {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState("pending");
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    const r = await apiFetch(`/guest/service-orders?status=${filterStatus}&limit=200`);
+    if (r.ok) setOrders(await r.json());
+    setLoading(false);
+  }, [filterStatus]);
+
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  const updateStatus = async (id: number, status: string) => {
+    setUpdatingId(id);
+    const r = await apiFetch(`/guest/service-orders/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    if (r.ok) { toast({ title: "Статус оновлено" }); loadOrders(); }
+    setUpdatingId(null);
+  };
+
+  const fmtDate = (d: string) => {
+    try { return new Date(d).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+    catch { return d; }
+  };
+
+  const pendingCount = orders.filter(o => o.status === "pending").length;
+
+  return (
+    <div className="space-y-4">
+      {/* Status filter */}
+      <div className="flex gap-2 flex-wrap">
+        {[["all","Всі"],["pending","Нові"],["confirmed","Підтверджено"],["completed","Виконано"],["cancelled","Скасовано"]].map(([k, l]) => (
+          <button
+            key={k}
+            onClick={() => setFilterStatus(k)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
+              filterStatus === k ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+            }`}
+          >
+            {l}
+            {k === "pending" && pendingCount > 0 && filterStatus !== "pending" && (
+              <span className="ml-1 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5">{pendingCount}</span>
+            )}
+          </button>
+        ))}
+        <button onClick={loadOrders} className="ml-auto p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-32 text-gray-400">
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Завантаження...
+        </div>
+      ) : orders.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-32 gap-2 text-gray-400">
+          <Package className="w-8 h-8 text-gray-200" />
+          <p className="text-sm">Замовлень немає</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {orders.map(o => {
+            const st = ORDER_STATUS[o.status] || ORDER_STATUS.pending;
+            const StIcon = st.icon;
+            return (
+              <Card key={o.id} className="border-0 shadow-sm">
+                <CardContent className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    {/* Icon */}
+                    <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-lg shrink-0">
+                      {o.serviceIcon || "🛎️"}
+                    </div>
+
+                    {/* Main info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-gray-900 text-sm">{o.serviceName || o.serviceType}</span>
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ring-1 ${st.pill}`}>
+                          <StIcon className="w-2.5 h-2.5" /> {st.label}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5 flex flex-wrap gap-x-3">
+                        <span>👤 {o.guestName}</span>
+                        <span>🛏 {o.unitName}</span>
+                        <span>🕐 {fmtDate(o.createdAt)}</span>
+                        {o.requestedTime && <span>⏰ {o.requestedTime}</span>}
+                        {o.quantity > 1 && <span>×{o.quantity}</span>}
+                      </div>
+                      {o.guestNotes && (
+                        <div className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1.5 inline-block">
+                          💬 {o.guestNotes}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Price */}
+                    <div className="text-right shrink-0">
+                      <div className="font-bold text-gray-900 text-sm">
+                        {o.price ? new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", maximumFractionDigits: 0 }).format(o.price * (o.quantity || 1)) : "—"}
+                      </div>
+
+                      {/* Quick actions */}
+                      <div className="flex gap-1 mt-1.5 justify-end">
+                        {o.status === "pending" && (
+                          <>
+                            <button
+                              onClick={() => updateStatus(o.id, "confirmed")}
+                              disabled={updatingId === o.id}
+                              className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold rounded-lg transition-colors"
+                            >
+                              Підтвердити
+                            </button>
+                            <button
+                              onClick={() => updateStatus(o.id, "cancelled")}
+                              disabled={updatingId === o.id}
+                              className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-semibold rounded-lg transition-colors"
+                            >
+                              Скасувати
+                            </button>
+                          </>
+                        )}
+                        {o.status === "confirmed" && (
+                          <button
+                            onClick={() => updateStatus(o.id, "completed")}
+                            disabled={updatingId === o.id}
+                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold rounded-lg transition-colors"
+                          >
+                            ✓ Виконано
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function GuestExperiencePage() {
@@ -179,13 +332,19 @@ export default function GuestExperiencePage() {
           ))}
         </div>
 
-        <Tabs defaultValue="loyalty">
-          <TabsList className="w-full grid grid-cols-4 h-10">
+        <Tabs defaultValue="orders">
+          <TabsList className="w-full grid grid-cols-5 h-10">
+            <TabsTrigger value="orders" className="text-xs"><ShoppingBag className="h-3.5 w-3.5 mr-1" />Замовлення</TabsTrigger>
             <TabsTrigger value="loyalty" className="text-xs"><Crown className="h-3.5 w-3.5 mr-1" />Лояльність</TabsTrigger>
             <TabsTrigger value="reviews" className="text-xs"><Star className="h-3.5 w-3.5 mr-1" />Відгуки</TabsTrigger>
             <TabsTrigger value="offers" className="text-xs"><Tag className="h-3.5 w-3.5 mr-1" />Пропозиції</TabsTrigger>
             <TabsTrigger value="workflow" className="text-xs"><Zap className="h-3.5 w-3.5 mr-1" />Workflow</TabsTrigger>
           </TabsList>
+
+          {/* ===== SERVICE ORDERS ===== */}
+          <TabsContent value="orders" className="mt-4">
+            <ServiceOrdersTab />
+          </TabsContent>
 
           {/* ===== LOYALTY ===== */}
           <TabsContent value="loyalty" className="mt-4 space-y-4">
