@@ -190,7 +190,7 @@ router.get("/:unitId", requireAuth, async (req, res) => {
 
 router.put("/:unitId", requireAuth, async (req, res) => {
   const unitId = parseInt(req.params.unitId);
-  const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
+  const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters, propertyId, sortOrder } = req.body;
   const [unit] = await db.update(unitsTable).set({
     ...(name !== undefined && { name }),
     ...(category !== undefined && { category }),
@@ -205,13 +205,28 @@ router.put("/:unitId", requireAuth, async (req, res) => {
     ...(hasView !== undefined && { hasView }),
     ...(hasBalcony !== undefined && { hasBalcony }),
     ...(squareMeters !== undefined && { squareMeters: squareMeters ? String(squareMeters) : null }),
+    ...(propertyId !== undefined && { propertyId: Number(propertyId) }),
     updatedAt: new Date(),
   }).where(eq(unitsTable.id, unitId)).returning();
   if (!unit) {
     res.status(404).json({ error: "Not Found", message: "Unit not found" });
     return;
   }
+  // Update sort_order if provided (raw SQL since schema might not have it)
+  if (sortOrder !== undefined) {
+    await db.execute(sql`UPDATE units SET sort_order = ${sortOrder} WHERE id = ${unitId}`);
+  }
   res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, baseGuests: unit.baseGuests ?? 2, extraGuestPrice: Number(unit.extraGuestPrice || 0), squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
+});
+
+// PATCH /units/bulk-sort — reorder units within a property
+router.patch("/bulk-sort", requireAuth, async (req, res) => {
+  const { orders } = req.body; // [{ id, sortOrder }]
+  if (!Array.isArray(orders)) { res.status(400).json({ error: "orders required" }); return; }
+  for (const { id, sortOrder } of orders) {
+    await db.execute(sql`UPDATE units SET sort_order = ${sortOrder} WHERE id = ${id}`);
+  }
+  res.json({ ok: true });
 });
 
 export default router;

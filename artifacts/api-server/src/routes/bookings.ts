@@ -246,30 +246,42 @@ router.get("/calendar", requireAuth, async (req, res) => {
     propIds = props.map((p: any) => p.id);
   }
 
-  const propertiesData = propIds.length > 0
-    ? await db.select({ id: propertiesTable.id, name: propertiesTable.name })
-        .from(propertiesTable).where(inArray(propertiesTable.id, propIds))
-    : [];
+  const propertiesRaw = propIds.length > 0
+    ? await db.execute<any>(sql`SELECT id, name, COALESCE(sort_order, 0) as sort_order FROM properties WHERE id = ANY(${propIds}) ORDER BY COALESCE(sort_order, 0), id`)
+    : { rows: [] };
+  const propertiesData = propertiesRaw.rows;
   const propNameMap = new Map(propertiesData.map((p: any) => [p.id, p.name]));
+  const propSortMap = new Map(propertiesData.map((p: any) => [p.id, p.sort_order ?? 0]));
 
   let unitConditions: any[] = [];
   if (propIds.length > 0) unitConditions.push(inArray(unitsTable.propertyId, propIds));
   if (categoryFilter) unitConditions.push(sql`${unitsTable.category} = ${categoryFilter}`);
 
-  const unitRows = await db.select().from(unitsTable)
-    .where(unitConditions.length > 0 ? and(...unitConditions) : undefined);
+  const unitRows = await db.execute<any>(
+    unitConditions.length > 0
+      ? sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units WHERE ${and(...unitConditions)} ORDER BY COALESCE(sort_order, 0), name`
+      : sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units ORDER BY COALESCE(sort_order, 0), name`
+  );
 
-  const units = unitRows.map((u: any) => ({
+  const units = unitRows.rows.map((u: any) => ({
     id: u.id,
     name: u.name,
     category: u.category || "Без категорії",
-    propertyId: u.propertyId,
-    propertyName: propNameMap.get(u.propertyId) || "",
-    hasView: u.hasView ?? false,
-    hasBalcony: u.hasBalcony ?? false,
-    squareMeters: u.squareMeters ? Number(u.squareMeters) : null,
-    maxCapacity: u.maxCapacity ?? null,
-  }));
+    propertyId: u.property_id,
+    propertyName: propNameMap.get(u.property_id) || "",
+    propertySortOrder: propSortMap.get(u.property_id) ?? 0,
+    unitSortOrder: u.unit_sort_order ?? 0,
+    hasView: u.has_view ?? false,
+    hasBalcony: u.has_balcony ?? false,
+    squareMeters: u.square_meters ? Number(u.square_meters) : null,
+    maxCapacity: u.max_capacity ?? null,
+  })).sort((a: any, b: any) =>
+    a.propertySortOrder !== b.propertySortOrder
+      ? a.propertySortOrder - b.propertySortOrder
+      : a.unitSortOrder !== b.unitSortOrder
+      ? a.unitSortOrder - b.unitSortOrder
+      : a.name.localeCompare(b.name)
+  );
 
   const unitIds = units.map((u: any) => u.id);
   if (unitIds.length === 0) {

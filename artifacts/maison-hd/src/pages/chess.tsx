@@ -128,6 +128,7 @@ export default function ChessPage() {
   const [newBk, setNewBk] = useState<{ open: boolean; unitId?: number; checkIn?: string; checkOut?: string }>({ open: false });
   const [detailBk, setDetailBk] = useState<any>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showGroups, setShowGroups] = useState(false);
 
   const today = ds(new Date());
 
@@ -190,20 +191,24 @@ export default function ChessPage() {
     return m;
   }, [bookings]);
 
-  // Group units by property
-  type Row = { type: "group"; label: string; propType?: string } | { type: "unit"; unit: any };
+  // Group units by property, sorted by propertySortOrder then unitSortOrder
+  type Row = { type: "group"; label: string; propId: number; propType?: string } | { type: "unit"; unit: any };
   const rows = useMemo<Row[]>(() => {
     const res: Row[] = [];
-    const byProp = new Map<string, any[]>();
-    filteredUnits.forEach(u => {
-      const k = `${u.propertyId}|${u.propertyName}`;
-      if (!byProp.has(k)) byProp.set(k, []);
-      byProp.get(k)!.push(u);
+    // Sort: first by propertySortOrder, then by unitSortOrder, then name
+    const sorted = [...filteredUnits].sort((a, b) => {
+      if (a.propertySortOrder !== b.propertySortOrder) return (a.propertySortOrder ?? 0) - (b.propertySortOrder ?? 0);
+      if (a.propertyId !== b.propertyId) return a.propertyId - b.propertyId;
+      if (a.unitSortOrder !== b.unitSortOrder) return (a.unitSortOrder ?? 0) - (b.unitSortOrder ?? 0);
+      return a.name.localeCompare(b.name);
     });
-    byProp.forEach((us, k) => {
-      const [, name] = k.split("|");
-      res.push({ type: "group", label: name });
-      us.forEach(u => res.push({ type: "unit", unit: u }));
+    const seen = new Set<number>();
+    sorted.forEach(u => {
+      if (!seen.has(u.propertyId)) {
+        seen.add(u.propertyId);
+        res.push({ type: "group", label: u.propertyName || "Без групи", propId: u.propertyId });
+      }
+      res.push({ type: "unit", unit: u });
     });
     return res;
   }, [filteredUnits]);
@@ -382,6 +387,12 @@ export default function ChessPage() {
               {(filterProp !== "all" || filterCat !== "all" || filterStatus !== "all") && (
                 <span className="bg-blue-600 text-white text-[9px] rounded-full px-1">!</span>
               )}
+            </button>
+
+            {/* Groups settings */}
+            <button onClick={() => setShowGroups(v => !v)}
+              className={`flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition ${showGroups ? "bg-violet-50 text-violet-700" : "text-gray-500 hover:bg-gray-100"}`}>
+              <Layers className="h-3.5 w-3.5" /> Групи
             </button>
 
             {/* Overlay */}
@@ -729,6 +740,11 @@ export default function ChessPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ─── GROUPS PANEL ───────────────────────────────────────────────── */}
+      {showGroups && (
+        <GroupsPanel onClose={() => setShowGroups(false)} onSaved={() => loadData(true)} />
+      )}
     </AppLayout>
   );
 }
@@ -852,6 +868,252 @@ function ActionBtn({ icon: Icon, label, onClick, color }: any) {
     <button onClick={onClick} className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition ${isOutline ? colors[color] : colors[color] + " text-white"}`}>
       <Icon className="h-3.5 w-3.5" /> {label}
     </button>
+  );
+}
+
+// ─── Groups Panel ─────────────────────────────────────────────────────────────
+function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { toast } = useToast();
+
+  type Grp = { id: number; name: string; sort_order: number; unitCount: number };
+  type UnitRow = { id: number; name: string; category: string; propertyId: number; sort_order: number };
+
+  const [groups, setGroups] = useState<Grp[]>([]);
+  const [units, setUnits] = useState<UnitRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [addingGroup, setAddingGroup] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    const [gRes, uRes] = await Promise.all([
+      apiFetch("/properties"),
+      apiFetch("/units"),
+    ]);
+    if (gRes.ok) {
+      const g: Grp[] = await gRes.json();
+      setGroups(g.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
+      setExpanded(new Set(g.map(x => x.id)));
+    }
+    if (uRes.ok) {
+      const u = await uRes.json();
+      setUnits(u.map((x: any) => ({ id: x.id, name: x.name, category: x.category || "", propertyId: x.propertyId || x.property_id, sort_order: x.sort_order ?? 0 })));
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const unitsForGroup = (gId: number) =>
+    units.filter(u => u.propertyId === gId).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
+
+  const toggleExpand = (id: number) => setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  // ── Rename group ──
+  const startEdit = (g: Grp) => { setEditing(g.id); setEditName(g.name); };
+  const saveEdit = async (id: number) => {
+    if (!editName.trim()) return;
+    setSaving(true);
+    const r = await apiFetch(`/properties/${id}`, { method: "PATCH", body: JSON.stringify({ name: editName.trim() }) });
+    if (r.ok) { toast({ title: "Назву змінено" }); setEditing(null); await load(); onSaved(); }
+    else toast({ title: "Помилка", variant: "destructive" });
+    setSaving(false);
+  };
+
+  // ── Create group ──
+  const createGroup = async () => {
+    if (!newGroupName.trim()) return;
+    setSaving(true);
+    const r = await apiFetch("/properties", { method: "POST", body: JSON.stringify({ name: newGroupName.trim(), type: "house" }) });
+    if (r.ok) { toast({ title: "Групу створено ✓" }); setNewGroupName(""); setAddingGroup(false); await load(); onSaved(); }
+    else toast({ title: "Помилка", variant: "destructive" });
+    setSaving(false);
+  };
+
+  // ── Delete group ──
+  const deleteGroup = async (g: Grp) => {
+    if (!confirm(`Видалити групу "${g.name}"? Видалення можливе тільки якщо вона порожня.`)) return;
+    setSaving(true);
+    const r = await apiFetch(`/properties/${g.id}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Групу видалено" }); await load(); onSaved(); }
+    else { const d = await r.json().catch(() => ({})); toast({ title: d.error || "Помилка", variant: "destructive" }); }
+    setSaving(false);
+  };
+
+  // ── Move group up/down ──
+  const moveGroup = async (idx: number, dir: -1 | 1) => {
+    const newGs = [...groups];
+    const swap = idx + dir;
+    if (swap < 0 || swap >= newGs.length) return;
+    [newGs[idx], newGs[swap]] = [newGs[swap], newGs[idx]];
+    const orders = newGs.map((g, i) => ({ id: g.id, sortOrder: i }));
+    setGroups(newGs);
+    await apiFetch("/properties/bulk-sort", { method: "PATCH", body: JSON.stringify({ orders }) });
+    onSaved();
+  };
+
+  // ── Move unit to another group ──
+  const moveUnit = async (unit: UnitRow, toGroupId: number) => {
+    const unitsSrc = unitsForGroup(unit.propertyId).filter(u => u.id !== unit.id);
+    const unitsDst = unitsForGroup(toGroupId);
+    setSaving(true);
+    // Re-assign sort_order in source
+    const srcOrders = unitsSrc.map((u, i) => ({ id: u.id, sortOrder: i }));
+    const nextSortOrder = unitsDst.length;
+    await apiFetch(`/units/${unit.id}`, { method: "PUT", body: JSON.stringify({ propertyId: toGroupId, sortOrder: nextSortOrder }) });
+    if (srcOrders.length > 0) await apiFetch("/units/bulk-sort", { method: "PATCH", body: JSON.stringify({ orders: srcOrders }) });
+    toast({ title: `"${unit.name}" переміщено` });
+    await load(); onSaved(); setSaving(false);
+  };
+
+  // ── Move unit up/down within group ──
+  const moveUnitInGroup = async (unit: UnitRow, dir: -1 | 1) => {
+    const list = unitsForGroup(unit.propertyId);
+    const idx = list.findIndex(u => u.id === unit.id);
+    if (idx + dir < 0 || idx + dir >= list.length) return;
+    const swapped = [...list];
+    [swapped[idx], swapped[idx + dir]] = [swapped[idx + dir], swapped[idx]];
+    const orders = swapped.map((u, i) => ({ id: u.id, sortOrder: i }));
+    setUnits(prev => {
+      const others = prev.filter(u => u.propertyId !== unit.propertyId);
+      return [...others, ...swapped.map((u, i) => ({ ...u, sort_order: i }))];
+    });
+    await apiFetch("/units/bulk-sort", { method: "PATCH", body: JSON.stringify({ orders }) });
+    onSaved();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
+      <div className="w-full max-w-md bg-white shadow-2xl border-l border-gray-200 flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-violet-50">
+          <div>
+            <h2 className="text-sm font-bold text-violet-800">Управління групами</h2>
+            <p className="text-[11px] text-violet-500">Перейменовуйте, сортуйте, переміщуйте номери між групами</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-violet-100"><X className="h-4 w-4 text-violet-600" /></button>
+        </div>
+
+        {/* Add group */}
+        <div className="px-4 py-2.5 border-b border-gray-100">
+          {addingGroup ? (
+            <div className="flex gap-2 items-center">
+              <input autoFocus value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") createGroup(); if (e.key === "Escape") setAddingGroup(false); }}
+                placeholder="Назва нової групи…" className="flex-1 text-sm border rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-300" />
+              <button onClick={createGroup} disabled={saving || !newGroupName.trim()} className="px-3 py-1.5 bg-violet-600 text-white text-xs rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                {saving ? "…" : "Додати"}
+              </button>
+              <button onClick={() => setAddingGroup(false)} className="px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg">✕</button>
+            </div>
+          ) : (
+            <button onClick={() => setAddingGroup(true)} className="flex items-center gap-1.5 text-xs text-violet-600 hover:text-violet-800 font-medium py-0.5">
+              <Plus className="h-3.5 w-3.5" /> Нова група
+            </button>
+          )}
+        </div>
+
+        {/* Groups list */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
+          ) : groups.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">Немає груп. Створіть першу!</div>
+          ) : groups.map((g, gi) => {
+            const gUnits = unitsForGroup(g.id);
+            const isOpen = expanded.has(g.id);
+            return (
+              <div key={g.id} className="border-b border-gray-100">
+                {/* Group header */}
+                <div className="flex items-center gap-1.5 px-3 py-2 bg-gray-50 hover:bg-violet-50 group transition">
+                  <button onClick={() => toggleExpand(g.id)} className="text-gray-400 hover:text-violet-600">
+                    <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                  </button>
+
+                  {editing === g.id ? (
+                    <input autoFocus value={editName} onChange={e => setEditName(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") saveEdit(g.id); if (e.key === "Escape") setEditing(null); }}
+                      className="flex-1 text-sm font-semibold border rounded px-2 py-0.5 outline-none focus:ring-2 focus:ring-violet-300" />
+                  ) : (
+                    <span onClick={() => toggleExpand(g.id)} className="flex-1 text-sm font-semibold text-gray-700 cursor-pointer select-none">
+                      {g.name}
+                      <span className="ml-2 text-[10px] font-normal text-gray-400">{gUnits.length} ном.</span>
+                    </span>
+                  )}
+
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                    {editing === g.id ? (
+                      <>
+                        <button onClick={() => saveEdit(g.id)} disabled={saving} className="px-2 py-0.5 text-[11px] bg-violet-600 text-white rounded hover:bg-violet-700">✓</button>
+                        <button onClick={() => setEditing(null)} className="px-1 py-0.5 text-[11px] text-gray-400 hover:bg-gray-200 rounded">✕</button>
+                      </>
+                    ) : (
+                      <button onClick={() => startEdit(g)} className="p-1 rounded hover:bg-gray-200" title="Перейменувати">
+                        <svg className="h-3 w-3 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </button>
+                    )}
+                    <button onClick={() => moveGroup(gi, -1)} disabled={gi === 0} className="p-1 rounded hover:bg-gray-200 disabled:opacity-20" title="Вище">
+                      <svg className="h-3 w-3 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                    </button>
+                    <button onClick={() => moveGroup(gi, 1)} disabled={gi === groups.length - 1} className="p-1 rounded hover:bg-gray-200 disabled:opacity-20" title="Нижче">
+                      <svg className="h-3 w-3 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    <button onClick={() => deleteGroup(g)} className="p-1 rounded hover:bg-red-100" title="Видалити">
+                      <svg className="h-3 w-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Units list */}
+                {isOpen && (
+                  <div>
+                    {gUnits.length === 0 ? (
+                      <div className="px-8 py-2 text-[11px] text-gray-400 italic">Порожня група</div>
+                    ) : gUnits.map((u, ui) => (
+                      <div key={u.id} className="flex items-center gap-2 px-8 py-1.5 hover:bg-gray-50 group/u transition">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-medium text-gray-700">{u.name}</span>
+                          {u.category && <span className="ml-1.5 text-[10px] text-gray-400">{u.category}</span>}
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover/u:opacity-100 transition">
+                          <button onClick={() => moveUnitInGroup(u, -1)} disabled={ui === 0} className="p-0.5 rounded hover:bg-gray-200 disabled:opacity-20" title="Вище">
+                            <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                          </button>
+                          <button onClick={() => moveUnitInGroup(u, 1)} disabled={ui === gUnits.length - 1} className="p-0.5 rounded hover:bg-gray-200 disabled:opacity-20" title="Нижче">
+                            <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                          </button>
+                          {groups.length > 1 && (
+                            <select onChange={e => { if (e.target.value) moveUnit(u, parseInt(e.target.value)); e.target.value = ""; }}
+                              defaultValue="" className="text-[10px] border rounded px-1 py-0.5 bg-white text-gray-500 cursor-pointer max-w-[100px]">
+                              <option value="" disabled>→ перемістити</option>
+                              {groups.filter(gg => gg.id !== g.id).map(gg => (
+                                <option key={gg.id} value={gg.id}>{gg.name}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 py-3 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+          <span className="text-[11px] text-gray-400">{groups.length} гр. · {units.length} номерів</span>
+          <Button size="sm" variant="outline" onClick={onClose} className="text-xs">Закрити</Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
