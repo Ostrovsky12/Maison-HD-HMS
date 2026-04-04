@@ -66,9 +66,9 @@ interface BookingData {
 }
 
 interface Service {
-  id: string; type: string; icon: string; name: string;
+  id: string; addonId?: number; type: string; icon: string; name: string;
   description: string; price: number; currency: string; available: boolean;
-  slots?: string[]; perDay?: boolean;
+  unit?: string; slots?: string[]; perDay?: boolean; maxQuantity?: number;
 }
 
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -245,7 +245,9 @@ export default function GuestPortalPage() {
       const r = await fetch(`${API}/guest/${code}/service-order`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          serviceId: selectedService.id, serviceName: selectedService.name,
+          serviceId: selectedService.id,
+          addonId: selectedService.addonId || null,
+          serviceName: selectedService.name,
           serviceType: selectedService.type, quantity: serviceQty,
           requestedTime: serviceTime || null, guestNotes: serviceNotes, price: selectedService.price,
         }),

@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp, numeric, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, numeric, boolean, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./organizations";
@@ -10,7 +10,12 @@ export const addonsTable = pgTable("addons", {
   name: text("name").notNull(),
   description: text("description"),
   price: numeric("price", { precision: 10, scale: 2 }).notNull(),
-  unit: text("unit").notNull().default("per day"),
+  unit: text("unit").notNull().default("per session"),
+  category: text("category").notNull().default("service"),
+  icon: text("icon").default("🔧"),
+  timeSlots: jsonb("time_slots").$type<string[]>().default([]),
+  sortOrder: integer("sort_order").notNull().default(0),
+  propertyId: integer("property_id"),
   maxQuantity: integer("max_quantity"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),

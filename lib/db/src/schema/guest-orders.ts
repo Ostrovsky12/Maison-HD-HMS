@@ -9,6 +9,7 @@ export const guestOrderTypeEnum = pgEnum("guest_order_type", ["service", "food",
 export const guestServiceOrdersTable = pgTable("guest_service_orders", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id").notNull().references(() => bookingsTable.id),
+  addonId: integer("addon_id"),
   orderType: guestOrderTypeEnum("order_type").notNull().default("service"),
   serviceName: varchar("service_name", { length: 255 }).notNull(),
   serviceDescription: text("service_description"),

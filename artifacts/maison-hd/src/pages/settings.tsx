@@ -16,7 +16,7 @@ import {
   Save, KeyRound, User, Hotel, Eye, EyeOff, CreditCard, ExternalLink,
   Crown, Users2, Loader2, ChevronRight, Clock, CheckCircle2, AlertCircle,
   Copy, RefreshCw, Globe, Phone, Mail, Lock, Hash,
-  Bell, Send, Bot, ToggleLeft, ToggleRight,
+  Bell, Send, Bot, ToggleLeft, ToggleRight, Sparkles,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -1232,6 +1232,216 @@ function OwnersTab() {
   );
 }
 
+// ── Addons / Services Tab ─────────────────────────────────────────
+const CATEGORIES = [
+  { value: "service",  label: "Сервіс",     icon: "🔧" },
+  { value: "food",     label: "Харчування", icon: "🍳" },
+  { value: "spa",      label: "SPA",        icon: "🧖" },
+  { value: "rental",   label: "Оренда",     icon: "🚲" },
+  { value: "activity", label: "Активності", icon: "🎣" },
+  { value: "other",    label: "Інше",       icon: "📦" },
+];
+const UNIT_OPTIONS = [
+  { value: "per session",     label: "за сеанс" },
+  { value: "per day",         label: "за добу" },
+  { value: "per stay",        label: "за весь заїзд" },
+  { value: "per person",      label: "за особу" },
+  { value: "per trip",        label: "за рейс" },
+  { value: "per set",         label: "за набір" },
+  { value: "per bundle",      label: "за в'язку" },
+  { value: "per arrangement", label: "за оформлення" },
+];
+
+function AddonsTab() {
+  const qc = useQueryClient();
+  const [editId, setEditId] = useState<number | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: "", description: "", price: "", unit: "per session", category: "service", icon: "🔧", timeSlots: "", sortOrder: "0", maxQuantity: "", isActive: true });
+
+  const { data: addons = [], isLoading } = useQuery<any[]>({
+    queryKey: ["addons"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/addons`);
+      return r.json();
+    },
+  });
+
+  const sorted = [...addons].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+
+  function resetForm() {
+    setForm({ name: "", description: "", price: "", unit: "per session", category: "service", icon: "🔧", timeSlots: "", sortOrder: "0", maxQuantity: "", isActive: true });
+    setEditId(null);
+    setShowForm(false);
+  }
+
+  function startEdit(a: any) {
+    setForm({
+      name: a.name, description: a.description || "", price: String(a.price),
+      unit: a.unit || "per session", category: a.category || "service", icon: a.icon || "🔧",
+      timeSlots: Array.isArray(a.timeSlots) ? a.timeSlots.join(", ") : "",
+      sortOrder: String(a.sortOrder ?? 0), maxQuantity: a.maxQuantity ? String(a.maxQuantity) : "",
+      isActive: a.isActive,
+    });
+    setEditId(a.id);
+    setShowForm(true);
+  }
+
+  async function saveAddon() {
+    const payload = {
+      name: form.name.trim(), description: form.description.trim() || null,
+      price: parseFloat(form.price) || 0, unit: form.unit,
+      category: form.category, icon: form.icon,
+      timeSlots: form.timeSlots ? form.timeSlots.split(",").map(s => s.trim()).filter(Boolean) : [],
+      sortOrder: parseInt(form.sortOrder) || 0,
+      maxQuantity: form.maxQuantity ? parseInt(form.maxQuantity) : null,
+      isActive: form.isActive,
+    };
+    if (!payload.name) { toast({ title: "Назва обов'язкова", variant: "destructive" }); return; }
+    if (!payload.price) { toast({ title: "Вкажіть ціну", variant: "destructive" }); return; }
+
+    if (editId) {
+      await authFetch(`${API}/addons/${editId}`, { method: "PATCH", body: JSON.stringify(payload) });
+      toast({ title: "Послугу оновлено" });
+    } else {
+      await authFetch(`${API}/addons`, { method: "POST", body: JSON.stringify(payload) });
+      toast({ title: "Послугу додано" });
+    }
+    qc.invalidateQueries({ queryKey: ["addons"] });
+    resetForm();
+  }
+
+  async function deleteAddon(id: number) {
+    if (!confirm("Видалити послугу?")) return;
+    await authFetch(`${API}/addons/${id}`, { method: "DELETE" });
+    qc.invalidateQueries({ queryKey: ["addons"] });
+    toast({ title: "Видалено" });
+  }
+
+  async function toggleActive(a: any) {
+    await authFetch(`${API}/addons/${a.id}`, { method: "PATCH", body: JSON.stringify({ isActive: !a.isActive }) });
+    qc.invalidateQueries({ queryKey: ["addons"] });
+  }
+
+  const catInfo = (cat: string) => CATEGORIES.find(c => c.value === cat) || CATEGORIES[0];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-muted-foreground">Всі активні послуги автоматично відображаються в кабінеті гостя для замовлення.</p>
+        </div>
+        <Button size="sm" onClick={() => { resetForm(); setShowForm(true); }} className="gap-1.5">
+          <Plus className="w-3.5 h-3.5" /> Додати послугу
+        </Button>
+      </div>
+
+      {showForm && (
+        <div className="border rounded-xl p-4 bg-muted/30 space-y-3">
+          <h4 className="font-semibold text-sm">{editId ? "Редагувати послугу" : "Нова послуга"}</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2 grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <Label className="text-xs">Назва *</Label>
+                <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Баня/Сауна" className="h-8 text-sm mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Іконка (emoji)</Label>
+                <Input value={form.icon} onChange={e => setForm(p => ({ ...p, icon: e.target.value }))} placeholder="🔥" className="h-8 text-sm mt-1 text-center text-lg" maxLength={4} />
+              </div>
+            </div>
+            <div className="col-span-2">
+              <Label className="text-xs">Опис</Label>
+              <Input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Короткий опис для гостя" className="h-8 text-sm mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Ціна (грн) *</Label>
+              <Input type="number" value={form.price} onChange={e => setForm(p => ({ ...p, price: e.target.value }))} placeholder="500" className="h-8 text-sm mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Одиниця</Label>
+              <Select value={form.unit} onValueChange={v => setForm(p => ({ ...p, unit: v }))}>
+                <SelectTrigger className="h-8 text-sm mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {UNIT_OPTIONS.map(u => <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Категорія</Label>
+              <Select value={form.category} onValueChange={v => setForm(p => ({ ...p, category: v }))}>
+                <SelectTrigger className="h-8 text-sm mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.icon} {c.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Макс. кількість</Label>
+              <Input type="number" value={form.maxQuantity} onChange={e => setForm(p => ({ ...p, maxQuantity: e.target.value }))} placeholder="Без обмежень" className="h-8 text-sm mt-1" />
+            </div>
+            <div className="col-span-2">
+              <Label className="text-xs">Часові слоти (через кому)</Label>
+              <Input value={form.timeSlots} onChange={e => setForm(p => ({ ...p, timeSlots: e.target.value }))} placeholder="10:00, 13:00, 16:00, 19:00" className="h-8 text-sm mt-1" />
+              <p className="text-[10px] text-muted-foreground mt-0.5">Якщо порожньо — гість замовляє без вибору часу</p>
+            </div>
+            <div>
+              <Label className="text-xs">Порядок сортування</Label>
+              <Input type="number" value={form.sortOrder} onChange={e => setForm(p => ({ ...p, sortOrder: e.target.value }))} placeholder="0" className="h-8 text-sm mt-1" />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" onClick={saveAddon} className="gap-1.5"><Check className="w-3.5 h-3.5" /> Зберегти</Button>
+            <Button size="sm" variant="outline" onClick={resetForm} className="gap-1.5"><X className="w-3.5 h-3.5" /> Скасувати</Button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+      ) : sorted.length === 0 ? (
+        <div className="text-center py-10 text-muted-foreground text-sm">
+          <p>Послуги ще не додані</p>
+          <p className="text-xs mt-1">Додайте баню, трансфер, сніданок та інші послуги вашого об'єкту</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {sorted.map((a: any) => (
+            <div key={a.id} className={`flex items-center gap-3 p-3 border rounded-xl transition-all ${a.isActive ? "bg-white" : "bg-muted/30 opacity-60"}`}>
+              <span className="text-xl w-8 text-center">{a.icon || "🔧"}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-sm truncate">{a.name}</p>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{catInfo(a.category).label}</Badge>
+                  {!a.isActive && <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground shrink-0">Неактивна</Badge>}
+                </div>
+                {a.description && <p className="text-xs text-muted-foreground truncate mt-0.5">{a.description}</p>}
+                <div className="flex gap-2 mt-0.5">
+                  <span className="text-xs font-semibold text-green-700">{a.price.toLocaleString("uk")} грн</span>
+                  <span className="text-xs text-muted-foreground">/ {UNIT_OPTIONS.find(u => u.value === a.unit)?.label || a.unit}</span>
+                  {Array.isArray(a.timeSlots) && a.timeSlots.length > 0 && (
+                    <span className="text-xs text-blue-500">🕐 {a.timeSlots.length} слотів</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => toggleActive(a)} title={a.isActive ? "Деактивувати" : "Активувати"}>
+                  {a.isActive ? <ToggleRight className="w-4 h-4 text-green-600" /> : <ToggleLeft className="w-4 h-4 text-muted-foreground" />}
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(a)}>
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600" onClick={() => deleteAddon(a.id)}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
   const { data: user, isLoading: userLoading } = useGetMe();
@@ -1305,6 +1515,7 @@ export default function SettingsPage() {
               <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>
               <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>
               <TabsTrigger value="notifications" className="gap-1.5"><Bell className="w-3.5 h-3.5" /> Сповіщення</TabsTrigger>
+              <TabsTrigger value="services" className="gap-1.5"><Sparkles className="w-3.5 h-3.5" /> Послуги</TabsTrigger>
               <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Оплата</TabsTrigger>
             </TabsList>
             <TabsContent value="profile"><ProfileTab /></TabsContent>
@@ -1342,6 +1553,15 @@ export default function SettingsPage() {
                   <CardDescription>Налаштуйте Email та Telegram — система сповіщатиме вас про нові бронювання, заїзди та платежі.</CardDescription>
                 </CardHeader>
                 <CardContent><NotificationsTab /></CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="services">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4" /> Додаткові послуги</CardTitle>
+                  <CardDescription>Налаштуйте послуги вашого об'єкту — вони з'являться в кабінеті гостя для замовлення онлайн.</CardDescription>
+                </CardHeader>
+                <CardContent><AddonsTab /></CardContent>
               </Card>
             </TabsContent>
             <TabsContent value="billing">

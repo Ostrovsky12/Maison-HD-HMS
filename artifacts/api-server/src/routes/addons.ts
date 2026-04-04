@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { addonsTable, bookingAddonsTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
@@ -13,7 +13,11 @@ router.get("/", requireAuth, async (req, res) => {
     ? await db.select().from(addonsTable).where(eq(addonsTable.organizationId, orgId))
     : await db.select().from(addonsTable);
 
-  res.json(addons.map(a => ({ ...a, price: Number(a.price) })));
+  res.json(addons.map((a: any) => ({
+    ...a,
+    price: Number(a.price),
+    timeSlots: Array.isArray(a.timeSlots) ? a.timeSlots : [],
+  })));
 });
 
 router.post("/", requireAuth, async (req, res) => {
@@ -23,16 +27,57 @@ router.post("/", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Bad Request", message: "No organization" });
     return;
   }
-  const { name, description, price, unit, maxQuantity } = req.body;
+  const { name, description, price, unit, category, icon, timeSlots, sortOrder, propertyId, maxQuantity } = req.body;
   const [addon] = await db.insert(addonsTable).values({
     organizationId: orgId,
     name,
-    description,
+    description: description || null,
     price: String(price),
-    unit: unit || "per day",
-    maxQuantity,
+    unit: unit || "per session",
+    category: category || "service",
+    icon: icon || "🔧",
+    timeSlots: Array.isArray(timeSlots) ? timeSlots : [],
+    sortOrder: sortOrder ?? 0,
+    propertyId: propertyId || null,
+    maxQuantity: maxQuantity || null,
   }).returning();
   res.status(201).json({ ...addon, price: Number(addon.price) });
+});
+
+router.patch("/:id", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.organizationId;
+  const id = parseInt(req.params.id);
+  const { name, description, price, unit, category, icon, timeSlots, sortOrder, propertyId, maxQuantity, isActive } = req.body;
+
+  const updates: Record<string, any> = { updatedAt: new Date() };
+  if (name !== undefined) updates.name = name;
+  if (description !== undefined) updates.description = description;
+  if (price !== undefined) updates.price = String(price);
+  if (unit !== undefined) updates.unit = unit;
+  if (category !== undefined) updates.category = category;
+  if (icon !== undefined) updates.icon = icon;
+  if (timeSlots !== undefined) updates.timeSlots = Array.isArray(timeSlots) ? timeSlots : [];
+  if (sortOrder !== undefined) updates.sortOrder = sortOrder;
+  if (propertyId !== undefined) updates.propertyId = propertyId || null;
+  if (maxQuantity !== undefined) updates.maxQuantity = maxQuantity || null;
+  if (isActive !== undefined) updates.isActive = isActive;
+
+  const [addon] = await db.update(addonsTable)
+    .set(updates)
+    .where(and(eq(addonsTable.id, id), eq(addonsTable.organizationId, orgId)))
+    .returning();
+
+  if (!addon) { res.status(404).json({ error: "Not Found" }); return; }
+  res.json({ ...addon, price: Number(addon.price) });
+});
+
+router.delete("/:id", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.organizationId;
+  const id = parseInt(req.params.id);
+  await db.delete(addonsTable).where(and(eq(addonsTable.id, id), eq(addonsTable.organizationId, orgId)));
+  res.json({ success: true });
 });
 
 router.get("/:bookingId/addons", requireAuth, async (req, res) => {
