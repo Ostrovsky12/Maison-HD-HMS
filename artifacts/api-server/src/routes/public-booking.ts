@@ -4,6 +4,8 @@ import {
   propertiesTable, unitsTable, bookingsTable, organizationsTable,
 } from "@workspace/db";
 import { eq, and, or, gte, lte, ne, inArray, notInArray, sql } from "drizzle-orm";
+import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
+import { fireBookingEvent } from "../lib/automation-runner.js";
 
 const router = Router();
 
@@ -186,6 +188,16 @@ router.post("/bookings", async (req, res) => {
       source: "direct" as any,
     } as any).returning();
 
+    // Fire automation event (non-blocking)
+    if ((booking as any).id) {
+      const [unitWithProp] = await db.select({ orgId: propertiesTable.organizationId })
+        .from(unitsTable).innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+        .where(eq(unitsTable.id, unit.id)).limit(1).catch(() => []);
+      if (unitWithProp?.orgId) {
+        fireBookingEvent("booking_created", unitWithProp.orgId, (booking as any).id).catch(() => {});
+      }
+    }
+
     res.json({
       booking: {
         id: booking.id,
@@ -198,6 +210,87 @@ router.post("/bookings", async (req, res) => {
       },
     });
   } catch (e: any) { console.error("POST BOOKING ERROR:", e.message, e.stack); res.status(500).json({ error: e.message }); }
+});
+
+// ─── POST /liqpay/:bookingId — generate payment form (public) ─────────────────
+router.post("/liqpay/:bookingId", async (req, res) => {
+  try {
+    if (!process.env.LIQPAY_PUBLIC_KEY || !process.env.LIQPAY_PRIVATE_KEY) {
+      return res.status(503).json({
+        error: "liqpay_not_configured",
+        message: "Онлайн-оплата тимчасово недоступна. Оплатіть при заїзді.",
+      });
+    }
+
+    const bookingId = parseInt(req.params.bookingId);
+    const [result] = await db.select({
+      id: bookingsTable.id,
+      bookingRef: sql<string>`${bookingsTable}.booking_ref`,
+      totalAmount: bookingsTable.totalAmount,
+      paidAmount: bookingsTable.paidAmount,
+      paymentStatus: bookingsTable.paymentStatus,
+      firstName: bookingsTable.firstName,
+      lastName: bookingsTable.lastName,
+      email: bookingsTable.email,
+    }).from(bookingsTable)
+      .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(bookingsTable.id, bookingId)).limit(1);
+
+    if (!result) return res.status(404).json({ error: "Бронювання не знайдено" });
+    if (result.paymentStatus === "paid") return res.status(400).json({ error: "Бронювання вже оплачено" });
+
+    const amount = Math.max(
+      0,
+      parseFloat(result.totalAmount?.toString() || "0") - parseFloat(result.paidAmount?.toString() || "0"),
+    );
+    if (amount <= 0) return res.status(400).json({ error: "Сума до оплати = 0" });
+
+    const baseUrl = process.env.API_BASE_URL || `https://${process.env.REPLIT_DEV_DOMAIN || "localhost"}`;
+    const { data, signature } = generateLiqPayForm({
+      action: "pay",
+      amount,
+      currency: "UAH",
+      description: `Бронювання ${result.bookingRef || result.id} — ${result.firstName} ${result.lastName}`,
+      orderId: `booking_${result.id}`,
+      serverUrl: `${baseUrl}/api/public/liqpay/callback`,
+    });
+
+    res.json({ data, signature, amount });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── POST /liqpay/callback — LiqPay server callback (public) ─────────────────
+router.post("/liqpay/callback", async (req, res) => {
+  try {
+    const { data, signature } = req.body;
+    if (!verifyLiqPayCallback(data, signature)) {
+      return res.status(400).json({ error: "invalid_signature" });
+    }
+
+    const parsed = parseLiqPayData(data);
+    if (!parsed?.order_id) return res.status(400).json({ error: "no_order_id" });
+
+    const bookingId = parseInt(parsed.order_id.toString().replace("booking_", "").replace(/\D/g, ""));
+    if (!bookingId) return res.status(400).json({ error: "invalid_order_id" });
+
+    if (parsed.status === "success" || parsed.status === "sandbox") {
+      const paid = parseFloat(parsed.amount?.toString() || "0");
+      const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+      if (booking) {
+        const total = parseFloat(booking.totalAmount?.toString() || "0");
+        const prevPaid = parseFloat(booking.paidAmount?.toString() || "0");
+        const newPaid = prevPaid + paid;
+        await db.update(bookingsTable).set({
+          paidAmount: newPaid.toFixed(2),
+          paymentStatus: newPaid >= total - 0.01 ? "paid" as any : "partial" as any,
+          updatedAt: new Date(),
+        }).where(eq(bookingsTable.id, bookingId));
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── GET /bookings/:ref — get by reference ────────────────────────────────────

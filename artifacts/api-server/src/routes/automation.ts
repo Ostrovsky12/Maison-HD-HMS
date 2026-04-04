@@ -7,6 +7,7 @@ import {
 } from "@workspace/db";
 import { eq, and, desc, asc, ne, gte, lte, inArray, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { runRule, runScheduledRules } from "../lib/automation-runner.js";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
@@ -198,29 +199,24 @@ router.delete("/rules/:id", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── POST /rules/:id/run — manual trigger ────────────────────────────────────
+// ─── POST /rules/:id/run — execute rule (real) ────────────────────────────────
 router.post("/rules/:id/run", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const ruleId = parseInt(req.params.id);
-    const [rule] = await db.select().from(automationRulesTable)
-      .where(and(eq(automationRulesTable.id, ruleId), eq(automationRulesTable.organizationId, orgId)));
-    if (!rule) return res.status(404).json({ error: "Rule not found" });
+    const { bookingId } = req.body || {};
+    const result = await runRule(ruleId, orgId, bookingId ? parseInt(bookingId) : undefined);
+    if (!result.ok && result.message === "Правило не знайдено") return res.status(404).json({ error: result.message });
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
 
-    // Simulate execution
-    const actionResults = rule.actions?.map((a: any) => ACTION_LABELS[a.type] || a.type).join(", ");
-    const msg = `Правило виконано вручну: ${actionResults}`;
-
-    await db.insert(automationLogsTable).values({
-      organizationId: orgId, ruleId: rule.id, ruleName: rule.name,
-      trigger: "manual", status: "success", resultMessage: msg,
-    });
-    await db.update(automationRulesTable).set({
-      runCount: sql`${automationRulesTable.runCount} + 1`,
-      lastRunAt: new Date(), updatedAt: new Date(),
-    }).where(eq(automationRulesTable.id, ruleId));
-
-    res.json({ ok: true, message: msg });
+// ─── POST /run-scheduled — run all active time-based rules for today ─────────
+router.post("/run-scheduled", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const result = await runScheduledRules(orgId);
+    res.json(result);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

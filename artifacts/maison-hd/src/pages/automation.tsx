@@ -87,6 +87,7 @@ export default function AutomationPage() {
   const [actionLabels, setActionLabels] = useState<Record<string, string>>({});
   const [showNewRule, setShowNewRule] = useState(false);
   const [logFilter, setLogFilter] = useState("all");
+  const [runningScheduled, setRunningScheduled] = useState(false);
   const { toast } = useToast();
 
   const loadStats = async () => { const r = await apiFetch("/stats"); if (r.ok) setStats(await r.json()); };
@@ -110,7 +111,28 @@ export default function AutomationPage() {
 
   const runRule = async (id: number, name: string) => {
     const r = await apiFetch(`/rules/${id}/run`, { method: "POST" });
-    if (r.ok) { const d = await r.json(); toast({ title: `▶️ ${name}`, description: d.message }); loadLogs(); loadStats(); }
+    if (r.ok) {
+      const d = await r.json();
+      const desc = d.processed > 0 ? `Оброблено: ${d.processed} · ${d.message}` : d.message;
+      toast({ title: `▶️ ${name}`, description: desc });
+      loadLogs(); loadStats();
+    } else {
+      const d = await r.json();
+      toast({ title: "Помилка", description: d.error, variant: "destructive" });
+    }
+  };
+
+  const runScheduled = async () => {
+    setRunningScheduled(true);
+    const r = await apiFetch("/run-scheduled", { method: "POST" });
+    setRunningScheduled(false);
+    if (r.ok) {
+      const d = await r.json();
+      toast({ title: `✅ Розклад виконано`, description: `${d.totalRules} правил, ${d.executed} активних сьогодні` });
+      loadLogs(); loadStats(); loadRules();
+    } else {
+      toast({ title: "Помилка запуску", variant: "destructive" });
+    }
   };
 
   const deleteRule = async (id: number) => {
@@ -136,11 +158,17 @@ export default function AutomationPage() {
             </h1>
             <p className="text-gray-500 text-sm">Правила автоматизації, розумні апсели, тригери і дії</p>
           </div>
-          {tab === "rules" && (
-            <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setShowNewRule(true)}>
-              <Plus className="h-4 w-4 mr-2" />Нове правило
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={runScheduled} disabled={runningScheduled}>
+              {runningScheduled ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+              Запустити розклад
             </Button>
-          )}
+            {tab === "rules" && (
+              <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setShowNewRule(true)}>
+                <Plus className="h-4 w-4 mr-2" />Нове правило
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Stats */}

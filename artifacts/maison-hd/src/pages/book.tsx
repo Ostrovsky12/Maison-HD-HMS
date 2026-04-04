@@ -168,17 +168,43 @@ export default function BookPage() {
       unitId: selectedUnit.id, firstName: form.firstName, lastName: form.lastName,
       email: form.email, phone: form.phone, checkIn: search.checkIn, checkOut: search.checkOut,
       adults: search.adults, children: search.children, specialRequests: extras,
-      totalAmount: total, paidAmount: payMethod === "online" ? prepayment : 0,
+      totalAmount: total, paidAmount: 0,
     }) });
     const d = await r.json();
-    setLoading(false);
-    if (r.ok) {
-      const bk = d.booking || d;
-      setConfirmed({ bookingRef: bk.bookingRef || bk.booking_ref || "—", ...form, ...search, nights: nightsCount, total, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName || organization?.name });
-      setStep("confirm");
-    } else {
-      toast({ title: d.error || "Помилка бронювання", variant: "destructive" });
+    if (!r.ok) { setLoading(false); toast({ title: d.error || "Помилка бронювання", variant: "destructive" }); return; }
+
+    const bk = d.booking || d;
+    const bookingId = bk.id;
+    const bookingRef = bk.bookingRef || bk.booking_ref || "—";
+
+    // Online payment — redirect to LiqPay
+    if (payMethod === "online" && bookingId) {
+      const lqr = await apiFetch(`/liqpay/${bookingId}`, { method: "POST" });
+      const lqd = await lqr.json();
+      if (lqr.ok && lqd.data && lqd.signature) {
+        // Build and submit LiqPay form
+        const form_ = document.createElement("form");
+        form_.method = "POST";
+        form_.action = "https://www.liqpay.ua/api/3/checkout";
+        form_.target = "_blank";
+        ["data", "signature"].forEach(k => {
+          const inp = document.createElement("input");
+          inp.type = "hidden"; inp.name = k; inp.value = lqd[k];
+          form_.appendChild(inp);
+        });
+        document.body.appendChild(form_);
+        form_.submit();
+        document.body.removeChild(form_);
+        toast({ title: "Перенаправляємо на оплату LiqPay…" });
+      } else {
+        // LiqPay not configured — still confirm but notify
+        toast({ title: lqd.message || "Онлайн-оплата недоступна. Оплата при заїзді.", variant: "destructive" });
+      }
     }
+
+    setLoading(false);
+    setConfirmed({ bookingRef, ...form, ...search, nights: nightsCount, total, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName || organization?.name, payMethod });
+    setStep("confirm");
   };
 
   // ─── CONFIRM PAGE ─────────────────────────────────────────────────────────
@@ -517,11 +543,17 @@ export default function BookPage() {
                   ))}
                 </div>
                 {payMethod === "online" && (
-                  <div className="mt-4 p-4 bg-gray-50 rounded-2xl space-y-3 border border-gray-200">
-                    <p className="text-sm font-semibold text-gray-600 flex items-center gap-2"><Lock className="h-4 w-4 text-gray-400" />Дані картки (демо — не вводьте реальні дані)</p>
-                    <Input placeholder="1234 5678 9012 3456" className="font-mono tracking-widest" maxLength={19} />
-                    <div className="grid grid-cols-2 gap-2"><Input placeholder="MM / YY" /><Input placeholder="CVV" type="password" maxLength={4} /></div>
-                    <p className="text-[10px] text-gray-400">Захищено 3D Secure · Visa / Mastercard</p>
+                  <div className="mt-4 p-4 bg-blue-50 rounded-2xl space-y-3 border border-blue-200">
+                    <p className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+                      <Lock className="h-4 w-4" />Безпечна оплата через LiqPay
+                    </p>
+                    <div className="flex items-center gap-3 text-xs text-blue-700">
+                      <span className="bg-white border border-blue-200 rounded px-2 py-1 font-bold text-blue-600">VISA</span>
+                      <span className="bg-white border border-blue-200 rounded px-2 py-1 font-bold text-red-500">MC</span>
+                      <span className="bg-white border border-blue-200 rounded px-2 py-1 font-bold text-orange-500">LiqPay</span>
+                    </div>
+                    <p className="text-xs text-blue-600">Після натискання «Оплатити» ви будете перенаправлені на захищену сторінку LiqPay для введення даних картки.</p>
+                    <p className="text-[10px] text-blue-500">3D Secure · SSL шифрування · PCI DSS</p>
                   </div>
                 )}
               </SCard>

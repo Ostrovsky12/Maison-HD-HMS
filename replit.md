@@ -47,7 +47,8 @@ The project is structured as a pnpm monorepo with distinct `artifacts` for the f
 
 **Key Feature Specifications:**
 - **Reservation Grid (Chessboard):** Visual calendar for booking management with collapsible groups and drag-to-select functionality.
-- **Payment Layer:** Integration with LiqPay, supporting payment URL generation and webhooks.
+- **Payment Layer:** LiqPay integration fully wired — `generateLiqPayForm/verifyLiqPayCallback/parseLiqPayData` in `lib/liqpay.ts`. Public endpoint `POST /api/public/liqpay/:bookingId` generates payment form; `POST /api/public/liqpay/callback` handles LiqPay server callbacks and updates booking payment status. Admin endpoint `POST /api/bookings/:bookingId/liqpay` also available. Requires `LIQPAY_PUBLIC_KEY` + `LIQPAY_PRIVATE_KEY` env vars — gracefully returns 503 without them.
+- **Automation Engine (Real):** Full real execution in `artifacts/api-server/src/lib/automation-runner.ts`. Supports `create_hk_task`, `create_notification`, `send_inbox_message`, `upsell_spa/fb/upgrade`, `send_email`, `webhook_call`. Time-based triggers: `checkin_today`, `checkout_today`, `checkout_tomorrow`, `payment_overdue`. Event triggers: `booking_created`, `booking_confirmed` (fire via `fireBookingEvent()`). Endpoint `POST /api/automation/run-scheduled` runs all active time-based rules. Endpoint `POST /api/automation/rules/:id/run` runs a single rule (optionally against `{bookingId}`). UI has "Запустити розклад" button.
 - **Data Import:** Comprehensive migration layer for importing data from external systems like Servio, including data preview, conflict resolution, and entity mapping.
 - **Revenue Management:** Dynamic pricing rules, rate plans, and date-level overrides for optimizing revenue.
 - **OTA Channel Manager:** Configuration and synchronization with major OTAs (Booking.com, Airbnb, Expedia) including webhook processing.
