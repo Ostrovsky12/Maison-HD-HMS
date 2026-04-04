@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BookingDialog } from "@/components/booking/booking-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, subDays, parseISO, differenceInDays, startOfWeek, endOfWeek } from "date-fns";
@@ -16,7 +16,7 @@ import {
   ChevronLeft, ChevronRight, Plus, Maximize2, Minimize2, Filter, X,
   Layers, Home, BedDouble, TreePine, Building2, Star, Tent, MapPin,
   Calendar, CalendarDays, Search, Loader2, LogIn, LogOut, Banknote,
-  Sparkles, Wrench, Lock, Users, Check, Eye, RefreshCw, ZoomIn, ZoomOut,
+  Sparkles, Wrench, Lock, Users, Eye, RefreshCw, ZoomIn, ZoomOut,
   Sun, Moon, AlertCircle, Hammer,
 } from "lucide-react";
 
@@ -699,13 +699,13 @@ export default function ChessPage() {
       )}
 
       {/* ─── NEW BOOKING DIALOG ─────────────────────────────────────────── */}
-      <NewBookingDialog
+      <BookingDialog
         open={newBk.open}
         unitId={newBk.unitId}
         checkIn={newBk.checkIn}
         checkOut={newBk.checkOut}
         onClose={() => setNewBk({ open: false })}
-        onCreated={() => { setNewBk({ open: false }); loadData(true); toast({ title: "Бронювання створено ✓" }); }}
+        onSuccess={() => { setNewBk({ open: false }); loadData(true); toast({ title: "Бронювання створено ✓" }); }}
       />
 
       {/* Date picker */}
@@ -855,117 +855,3 @@ function ActionBtn({ icon: Icon, label, onClick, color }: any) {
   );
 }
 
-// ─── New Booking Dialog ────────────────────────────────────────────────────────
-function NewBookingDialog({ open, unitId, checkIn, checkOut, onClose, onCreated }: any) {
-  const today = ds(new Date());
-  const [form, setForm] = useState({
-    firstName: "", lastName: "", phone: "", email: "",
-    checkIn: checkIn || today,
-    checkOut: checkOut || ds(addDays(dp(today), 2)),
-    unitId: unitId ? String(unitId) : "",
-    adults: 1, children: 0, source: "direct", status: "confirmed",
-    notes: "", paidAmount: 0, checkinTime: "14:00", checkoutTime: "12:00",
-  });
-  const [units, setUnits] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setForm(f => ({ ...f, checkIn: checkIn || today, checkOut: checkOut || ds(addDays(dp(today), 2)), unitId: unitId ? String(unitId) : f.unitId }));
-    }
-  }, [open, checkIn, checkOut, unitId]);
-
-  useEffect(() => {
-    if (!open) return;
-    apiFetch(`/console/availability?checkIn=${form.checkIn}&checkOut=${form.checkOut}`)
-      .then(r => r.json()).then(d => setUnits(d.units || []));
-  }, [open, form.checkIn, form.checkOut]);
-
-  const selectedUnit = units.find(u => String(u.id) === form.unitId);
-  const nights = form.checkIn && form.checkOut ? differenceInDays(dp(form.checkOut), dp(form.checkIn)) : 0;
-  const total = selectedUnit ? parseFloat(selectedUnit.base_price) * nights : 0;
-
-  const submit = async () => {
-    if (!form.firstName || !form.unitId || !form.checkIn || !form.checkOut) return;
-    setLoading(true);
-    const r = await apiFetch("/console/quick-booking", { method: "POST", body: JSON.stringify({ ...form, totalAmount: total }) });
-    setLoading(false);
-    if (r.ok) onCreated();
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-blue-600" /> Нове бронювання</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div><Label className="text-xs">Ім'я *</Label><Input value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} placeholder="Олена" /></div>
-            <div><Label className="text-xs">Прізвище</Label><Input value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Коваль" /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div><Label className="text-xs">Телефон</Label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+380…" /></div>
-            <div><Label className="text-xs">Email</Label><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div><Label className="text-xs">Заїзд *</Label><Input type="date" value={form.checkIn} onChange={e => setForm(f => ({ ...f, checkIn: e.target.value }))} /></div>
-            <div><Label className="text-xs">Виїзд *</Label><Input type="date" value={form.checkOut} onChange={e => setForm(f => ({ ...f, checkOut: e.target.value }))} /></div>
-          </div>
-          <div>
-            <Label className="text-xs">Об'єкт *</Label>
-            <Select value={form.unitId} onValueChange={v => setForm(f => ({ ...f, unitId: v }))}>
-              <SelectTrigger className="text-sm"><SelectValue placeholder="Оберіть кімнату / будинок…" /></SelectTrigger>
-              <SelectContent>
-                {units.filter(u => u.is_available || String(u.id) === form.unitId).map(u => (
-                  <SelectItem key={u.id} value={String(u.id)} className="text-xs">
-                    {u.is_available ? "✓" : "✗"} {u.name} · {u.property_name} · {fmtMoney(parseFloat(u.base_price || "0"))}/н
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {total > 0 && (
-            <div className="bg-blue-50 rounded-xl p-2.5 flex justify-between text-sm">
-              <span className="text-blue-700">Сума ({nights} н. × {fmtMoney(parseFloat(selectedUnit?.base_price || "0"))} ₴)</span>
-              <span className="font-bold text-blue-800">{fmtMoney(total)} ₴</span>
-            </div>
-          )}
-          <div className="grid grid-cols-3 gap-2">
-            <div><Label className="text-xs">Дорослі</Label><Input type="number" min={1} value={form.adults} onChange={e => setForm(f => ({ ...f, adults: parseInt(e.target.value) || 1 }))} /></div>
-            <div><Label className="text-xs">Діти</Label><Input type="number" min={0} value={form.children} onChange={e => setForm(f => ({ ...f, children: parseInt(e.target.value) || 0 }))} /></div>
-            <div><Label className="text-xs">Передоплата ₴</Label><Input type="number" min={0} value={form.paidAmount} onChange={e => setForm(f => ({ ...f, paidAmount: parseFloat(e.target.value) || 0 }))} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div><Label className="text-xs">Джерело</Label>
-              <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
-                <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {[["direct","Прямий"],["booking","Booking.com"],["instagram","Instagram"],["telegram","Telegram"],["phone","Телефон"],["walk_in","Walk-in"],["airbnb","Airbnb"],["other","Інший"]].map(([v,l]) => (
-                    <SelectItem key={v} value={v} className="text-xs">{l}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div><Label className="text-xs">Статус</Label>
-              <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
-                <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="confirmed" className="text-xs">Підтверджено</SelectItem>
-                  <SelectItem value="pending" className="text-xs">Очікує</SelectItem>
-                  <SelectItem value="checked_in" className="text-xs">Заселити зараз</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div><Label className="text-xs">Нотатки</Label><Textarea rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
-          <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={onClose}>Скасувати</Button>
-            <Button className="flex-1 bg-blue-600 hover:bg-blue-700" onClick={submit} disabled={loading || !form.firstName || !form.unitId}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />}
-              Забронювати
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
