@@ -179,7 +179,7 @@ export async function autoSeedIfEmpty() {
       {
         unitId: u[2].id, guestId: g[0].id,
         checkIn: d(12), checkOut: d(16),
-        status: "tentative", paymentStatus: "unpaid", source: "direct",
+        status: "pending", paymentStatus: "unpaid", source: "direct",
         guestsCount: 4, totalAmount: "11200", paidAmount: "0",
         lastName: g[0].lastName, firstName: g[0].firstName,
       },

@@ -342,6 +342,8 @@ function TenantsTab() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [selected, setSelected] = useState<any | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
+  const { toast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -350,6 +352,27 @@ function TenantsTab() {
       if (r.ok) { const d = await r.json(); setTenants(d.tenants || []); }
     } finally { setLoading(false); }
   }, []);
+
+  const provisionDogoda = async () => {
+    setProvisioning(true);
+    try {
+      const r = await apiFetch("/super-admin/provision-dogoda", { method: "POST" });
+      const data = await r.json();
+      if (r.ok) {
+        toast({
+          title: "✅ ДОГОДА налаштовано",
+          description: `Логін: admin@dogoda.com.ua / Dogoda2026!`,
+        });
+        load();
+      } else {
+        toast({ title: "Помилка", description: data.error || "Невідома помилка", variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Помилка", description: e.message, variant: "destructive" });
+    } finally {
+      setProvisioning(false);
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -390,6 +413,10 @@ function TenantsTab() {
         </Select>
         <Button onClick={() => setShowCreate(true)} className="bg-indigo-600 hover:bg-indigo-700 gap-1.5">
           <Plus className="w-4 h-4" /> Новий тенант
+        </Button>
+        <Button onClick={provisionDogoda} disabled={provisioning} variant="outline" className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50">
+          {provisioning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+          Налаштувати ДОГОДА
         </Button>
         <Button variant="outline" size="icon" onClick={load}><RefreshCw className="w-4 h-4" /></Button>
       </div>

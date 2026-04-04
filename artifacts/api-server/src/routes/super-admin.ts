@@ -1,7 +1,11 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { organizationsTable, usersTable, propertiesTable } from "@workspace/db/schema";
+import {
+  organizationsTable, usersTable, propertiesTable, unitsTable,
+  guestsTable, bookingsTable, addonsTable,
+} from "@workspace/db/schema";
 import { eq, sql, desc, and } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 import { requireAuth, requireRole } from "../lib/auth.js";
 
 const router = Router();
@@ -302,6 +306,173 @@ router.get("/billing", async (_req, res) => {
         totalInvoiced: invoices.rows.reduce((s: number, r: any) => s + parseFloat(r.total || 0), 0),
         pendingCount: invoices.rows.filter((r: any) => r.status === "pending").length,
         paidCount: invoices.rows.filter((r: any) => r.status === "paid").length,
+      },
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── PROVISION DOGODA TENANT ───────────────────────────────────────────────────
+// Idempotent: sets up or repairs the ДОГОДА tenant on any environment
+router.post("/provision-dogoda", async (_req, res) => {
+  try {
+    const db_ = db as any;
+    const q = (sql: string, params: any[] = []) => db_.$client.query(sql, params);
+    const hp = (p: string) => bcrypt.hash(p, 10);
+    const d = (offset: number) => {
+      const dt = new Date(); dt.setHours(0,0,0,0); dt.setDate(dt.getDate() + offset);
+      return dt.toISOString().split("T")[0];
+    };
+
+    // 1. Upsert org
+    const orgRes = await q(
+      `INSERT INTO organizations (name, slug, plan, max_units, max_users, is_active)
+       VALUES ($1, $2, $3, $4, $5, true)
+       ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name, plan=EXCLUDED.plan
+       RETURNING id`,
+      ["Котеджний комплекс ДОГОДА", "dogoda", "pro", 200, 20]
+    );
+    const orgId: number = orgRes.rows[0].id;
+
+    // 2. Upsert admin user
+    const adminHash = await hp("Dogoda2026!");
+    await q(
+      `INSERT INTO users (email, name, password_hash, role, organization_id, is_active)
+       VALUES ($1, $2, $3, 'owner', $4, true)
+       ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+         role='owner', organization_id=$4, is_active=true`,
+      ["admin@dogoda.com.ua", "Дмитро Головко", adminHash, orgId]
+    );
+
+    // 3. Upsert reception user
+    const recHash = await hp("reception123");
+    await q(
+      `INSERT INTO users (email, name, password_hash, role, organization_id, is_active)
+       VALUES ($1, $2, $3, 'reception', $4, true)
+       ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+         role='reception', organization_id=$4, is_active=true`,
+      ["reception@dogoda.com.ua", "Рецепція ДОГОДА", recHash, orgId]
+    );
+
+    // 4. Find or create property
+    const existProp = await q(
+      `SELECT id FROM properties WHERE organization_id=$1 ORDER BY id LIMIT 1`, [orgId]
+    );
+    let propId: number;
+    if (existProp.rows.length > 0) {
+      propId = existProp.rows[0].id;
+      // Update property details
+      await q(`UPDATE properties SET name=$1, type='house', address=$2, is_active=true WHERE id=$3`,
+        ["Котеджний комплекс ДОГОДА", "с. Шешори, Косівський р-н, Івано-Франківська обл.", propId]);
+    } else {
+      const newProp = await q(
+        `INSERT INTO properties (organization_id, name, type, description, address, is_active)
+         VALUES ($1, $2, 'house', $3, $4, true) RETURNING id`,
+        [orgId, "Котеджний комплекс ДОГОДА", "Котеджний комплекс у с. Шешори, Косівський р-н, Івано-Франківська обл.", "с. Шешори, Косівський р-н, Івано-Франківська обл."]
+      );
+      propId = newProp.rows[0].id;
+    }
+
+    // Update users' property_id
+    await q(`UPDATE users SET property_id=$1 WHERE email IN ($2, $3)`, [propId, "admin@dogoda.com.ua", "reception@dogoda.com.ua"]);
+
+    // 5. Check units
+    const unitCount = await q(`SELECT COUNT(*)::int AS cnt FROM units WHERE property_id=$1`, [propId]);
+    let unitsStatus = "already existed";
+
+    if (unitCount.rows[0].cnt < 12) {
+      await q(`DELETE FROM bookings WHERE unit_id IN (SELECT id FROM units WHERE property_id=$1)`, [propId]);
+      await q(`DELETE FROM units WHERE property_id=$1`, [propId]);
+
+      const cottages = [
+        ["Котедж 1 (STD)", "STD Стандарт", 4, "2800"],
+        ["Котедж 2 (STD)", "STD Стандарт", 4, "2800"],
+        ["Котедж 3 (STD)", "STD Стандарт", 4, "2800"],
+        ["Котедж 4 (DLX)", "DLX Делюкс",  6, "3800"],
+        ["Котедж 5 (DLX)", "DLX Делюкс",  6, "3800"],
+        ["Котедж 6 (DLX)", "DLX Делюкс",  6, "3800"],
+        ["Котедж 7 (VIP)", "VIP",          8, "5500"],
+        ["Котедж 8 (VIP)", "VIP",          8, "5500"],
+        ["Котедж 9 (VIP)", "VIP",          8, "5500"],
+        ["Котедж 10 (EUR)", "EUR Євро",   10, "7200"],
+        ["Котедж 11 (EUR)", "EUR Євро",   10, "7200"],
+        ["Котедж 12 (EUR)", "EUR Євро",   10, "7200"],
+      ];
+
+      const unitIds: number[] = [];
+      for (const [name, category, capacity, price] of cottages) {
+        const r = await q(
+          `INSERT INTO units (property_id, name, category, capacity, base_price)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [propId, name, category, capacity, price]
+        );
+        unitIds.push(r.rows[0].id);
+      }
+      unitsStatus = `created ${unitIds.length} cottages`;
+
+      // Addons
+      await q(`DELETE FROM addons WHERE organization_id=$1`, [orgId]);
+      for (const [name, desc, price, unit] of [
+        ["Баня/сауна", "Приватна баня на 2 год", "500", "per session"],
+        ["Барбекю-набір", "Мангал + вугілля", "200", "per session"],
+        ["Трансфер Коломия", "Трансфер від/до Коломиї", "600", "per trip"],
+      ]) {
+        await q(`INSERT INTO addons (organization_id, name, description, price, unit) VALUES ($1,$2,$3,$4,$5)`,
+          [orgId, name, desc, price, unit]);
+      }
+
+      // Guests
+      await q(`DELETE FROM guests WHERE organization_id=$1`, [orgId]);
+      const guestData = [
+        ["Андрій", "Кравченко", "+380501234501"],
+        ["Олена",  "Бондаренко","+380671234502"],
+        ["Василь", "Ткаченко",  "+380631234503"],
+        ["Наталія","Мороз",     "+380991234504"],
+        ["Ігор",   "Лисенко",   "+380661234505"],
+        ["Тетяна", "Гончаренко","+380731234506"],
+        ["Михайло","Савченко",  "+380971234507"],
+        ["Людмила","Яременко",  "+380501234508"],
+      ];
+      const guestIds: number[] = [];
+      for (const [fn, ln, ph] of guestData) {
+        const r = await q(
+          `INSERT INTO guests (organization_id, first_name, last_name, phone) VALUES ($1,$2,$3,$4) RETURNING id`,
+          [orgId, fn, ln, ph]
+        );
+        guestIds.push(r.rows[0].id);
+      }
+
+      // Bookings
+      const bk = [
+        [unitIds[0], guestIds[0], d(-3), d(2),  "checked_in",  "partial",  "direct",  4, "14000","7000",  guestData[0][1], guestData[0][0]],
+        [unitIds[3], guestIds[1], d(1),  d(5),  "confirmed",   "unpaid",   "booking", 5, "15200","0",     guestData[1][1], guestData[1][0]],
+        [unitIds[6], guestIds[2], d(-1), d(3),  "checked_in",  "paid",     "direct",  6, "22000","22000", guestData[2][1], guestData[2][0]],
+        [unitIds[9], guestIds[3], d(-7), d(-2), "checked_out", "paid",     "airbnb",  8, "36000","36000", guestData[3][1], guestData[3][0]],
+        [unitIds[1], guestIds[4], d(5),  d(9),  "confirmed",   "partial",  "direct",  3, "11200","5600",  guestData[4][1], guestData[4][0]],
+        [unitIds[4], guestIds[5], d(3),  d(7),  "confirmed",   "unpaid",   "booking", 4, "15200","0",     guestData[5][1], guestData[5][0]],
+        [unitIds[7], guestIds[6], d(10), d(15), "pending",     "unpaid",   "direct",  7, "27500","0",     guestData[6][1], guestData[6][0]],
+        [unitIds[10],guestIds[7], d(2),  d(6),  "confirmed",   "paid",     "direct",  9, "28800","28800", guestData[7][1], guestData[7][0]],
+        [unitIds[2], guestIds[0], d(12), d(16), "pending",     "unpaid",   "direct",  4, "11200","0",     guestData[0][1], guestData[0][0]],
+        [unitIds[5], guestIds[2], d(8),  d(13), "confirmed",   "partial",  "direct",  5, "19000","9500",  guestData[2][1], guestData[2][0]],
+      ];
+      for (const [uid, gid, ci, co, st, ps, src, gc, tot, paid, ln, fn] of bk) {
+        await q(
+          `INSERT INTO bookings (unit_id, guest_id, check_in, check_out, status, payment_status,
+             source, guests_count, total_amount, paid_amount, last_name, first_name)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [uid, gid, ci, co, st, ps, src, gc, tot, paid, ln, fn]
+        );
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: "ДОГОДА tenant provisioned ✓",
+      orgId, propId, unitsStatus,
+      logins: {
+        owner: "admin@dogoda.com.ua / Dogoda2026!",
+        reception: "reception@dogoda.com.ua / reception123",
       },
     });
   } catch (e: any) {
