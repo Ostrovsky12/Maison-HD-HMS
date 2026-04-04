@@ -441,6 +441,7 @@ const COLOR_MAP: Record<string, string> = {
   blue:   "border-blue-200 bg-blue-50 text-blue-700",
   violet: "border-violet-200 bg-violet-50 text-violet-700",
   emerald:"border-emerald-200 bg-emerald-50 text-emerald-700",
+  orange: "border-orange-200 bg-orange-50 text-orange-700",
 };
 
 function ActionCard({ icon, color, title, subtitle, expanded, onToggle, children }: {
@@ -473,10 +474,17 @@ function ActionCard({ icon, color, title, subtitle, expanded, onToggle, children
 
 // ── Step 4: Payment Actions ────────────────────────────────────────────────
 function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount, touristTax, touristTaxRate, unitsData, legalEntities, onConfirm, saving }: any) {
-  const [expanded, setExpanded] = useState<"invoice" | "link" | "pay" | null>(null);
+  const [expanded, setExpanded] = useState<"invoice" | "link" | "pay" | "arrival" | null>(null);
   const [legalEntityId, setLegalEntityId] = useState(() => legalEntities?.[0]?.id?.toString() || "");
   const [paymentLink, setPaymentLink] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<"card" | "cash">("card");
+  const [partialAmount, setPartialAmount] = useState<number>(() => Math.round(totalAmount * 0.5 * 100) / 100);
+  const [usePartial, setUsePartial] = useState(false);
+
+  // Sync default partial when totalAmount changes (first render)
+  useEffect(() => {
+    setPartialAmount(Math.round(totalAmount * 0.5 * 100) / 100);
+  }, [totalAmount]);
 
   const unit     = unitsData?.find((u: any) => u.id === form.unitId);
   const guestFull = [form.lastName, form.firstName, form.middleName].filter(Boolean).join(" ");
@@ -493,8 +501,14 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
       window.open(`https://wa.me/?text=${msg}`, "_blank");
     }
   };
-  const handleAction = async (type: "invoice" | "link" | "card" | "cash") => {
-    const result = await onConfirm("confirmed", type);
+  const handleAction = async (type: "invoice" | "link" | "card" | "cash" | "arrival") => {
+    const extra: any = {};
+    if (type === "arrival") {
+      extra.payOnArrival = true;
+    } else if (usePartial && partialAmount > 0 && partialAmount < totalAmount) {
+      extra.partialAmount = partialAmount;
+    }
+    const result = await onConfirm("confirmed", type, extra);
     if (result && type === "link") {
       setPaymentLink(`https://pay.maisonhd.com/b/${result.id}`);
     }
@@ -538,6 +552,59 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
         <div className="flex justify-between items-center pt-2 border-t border-indigo-100/80">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wide">До сплати</span>
           <span className="text-2xl font-black text-indigo-700">{fmt(totalAmount)}</span>
+        </div>
+
+        {/* Часткова передоплата */}
+        <div className="border border-indigo-100 rounded-xl p-3 space-y-2.5">
+          <label className="flex items-center gap-2.5 cursor-pointer group">
+            <div
+              onClick={() => setUsePartial(!usePartial)}
+              className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${usePartial ? "bg-indigo-500" : "bg-gray-200"}`}
+            >
+              <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${usePartial ? "translate-x-4" : ""}`} />
+            </div>
+            <span className="text-xs font-semibold text-gray-700">Часткова передоплата</span>
+          </label>
+          {usePartial && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-1.5">
+                {[25, 50, 100].map(pct => {
+                  const amt = Math.round(totalAmount * pct / 100 * 100) / 100;
+                  return (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => setPartialAmount(amt)}
+                      className={`h-8 rounded-lg text-xs font-bold border-2 transition-all ${
+                        partialAmount === amt
+                          ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                          : "border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200"
+                      }`}
+                    >
+                      {pct === 100 ? "Повна" : `${pct}%`}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 shrink-0">Сума ₴</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalAmount}
+                  value={partialAmount}
+                  onChange={e => setPartialAmount(Math.min(totalAmount, Math.max(0, Number(e.target.value))))}
+                  className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-xl text-sm font-bold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                />
+              </div>
+              {partialAmount < totalAmount && (
+                <div className="flex justify-between text-xs text-orange-700 bg-orange-50 rounded-lg px-2 py-1.5">
+                  <span>Залишок (борг при заїзді)</span>
+                  <span className="font-bold">{fmt(Math.round((totalAmount - partialAmount) * 100) / 100)}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -642,7 +709,7 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
         icon={<CreditCard className="w-5 h-5" />}
         color="emerald"
         title="Забронювати та Сплатити"
-        subtitle="Оплата картою через термінал або готівкою"
+        subtitle={usePartial && partialAmount < totalAmount ? `Зараз: ${fmt(partialAmount)} · Борг: ${fmt(Math.round((totalAmount - partialAmount)*100)/100)}` : "Оплата картою через термінал або готівкою"}
         expanded={expanded === "pay"}
         onToggle={() => setExpanded(expanded === "pay" ? null : "pay")}
       >
@@ -678,7 +745,37 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
             className="w-full flex items-center justify-center gap-2 h-11 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl text-sm font-bold transition-colors"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            {payMethod === "card" ? "Оплачено карткою" : "Оплачено готівкою"}
+            {usePartial && partialAmount < totalAmount
+              ? `${payMethod === "card" ? "Картка" : "Готівка"} — ${fmt(partialAmount)}`
+              : payMethod === "card" ? "Оплачено карткою" : "Оплачено готівкою"}
+          </button>
+        </div>
+      </ActionCard>
+
+      {/* Action 4 — Розрахунок на місці */}
+      <ActionCard
+        icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
+        color="orange"
+        title="Розрахунок на місці"
+        subtitle="Зберегти бронювання без оплати — гість сплатить при заїзді"
+        expanded={expanded === "arrival"}
+        onToggle={() => setExpanded(expanded === "arrival" ? null : "arrival")}
+      >
+        <div className="space-y-3">
+          <div className="flex items-start gap-2.5 p-3 bg-orange-50 border border-orange-100 rounded-xl text-xs text-orange-800">
+            <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <div>
+              Бронювання буде збережене зі статусом <strong>«Оплата при заїзді»</strong>. Ресепшн побачить цю мітку та зможе прийняти оплату (готівка або картка) при заїзді гостя.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleAction("arrival")}
+            disabled={saving}
+            className="w-full flex items-center justify-center gap-2 h-11 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white rounded-xl text-sm font-bold transition-colors"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+            Зберегти — оплата при заїзді
           </button>
         </div>
       </ActionCard>
@@ -827,7 +924,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     return true;
   };
 
-  const handleSave = async (status: "confirmed" | "pending", paymentMethod?: string): Promise<any> => {
+  const handleSave = async (status: "confirmed" | "pending", paymentMethod?: string, extra?: { payOnArrival?: boolean; partialAmount?: number }): Promise<any> => {
     if (!form.unitId) { toast({ title: "Виберіть номер", variant: "destructive" }); return null; }
     if (!form.checkIn || !form.checkOut || nights < 1) { toast({ title: "Вкажіть коректні дати", variant: "destructive" }); return null; }
     setSaving(true);
@@ -855,7 +952,9 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         discountType: form.discountType || undefined,
         selectedAddons: form.selectedAddons,
         notes: form.notes || undefined,
-        ...(paymentMethod && { paymentMethod }),
+        ...(paymentMethod && paymentMethod !== "arrival" && { paymentMethod }),
+        ...(extra?.payOnArrival && { payOnArrival: true }),
+        ...(extra?.partialAmount && extra.partialAmount < form.totalAmount && { partialAmount: extra.partialAmount }),
       };
       const url    = isEdit ? `${API}/bookings/${booking.id}` : `${API}/bookings`;
       const method = isEdit ? "PUT" : "POST";
@@ -869,6 +968,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         link:    "Посилання згенеровано",
         card:    "Оплачено карткою",
         cash:    "Оплачено готівкою",
+        arrival: "Збережено — оплата при заїзді",
       };
       toast({ title: payLabels[paymentMethod || ""] || (isEdit ? "Бронювання оновлено" : "Бронювання створено") });
       onSuccess?.(saved);

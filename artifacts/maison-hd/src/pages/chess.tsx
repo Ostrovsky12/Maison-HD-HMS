@@ -768,9 +768,12 @@ function BookingDrawer({ booking: b, onClose, onCheckin, onCheckout, onCancel, o
           <div>
             <p className="font-bold text-base">{b.guestName || "—"}</p>
             <p className="text-sm opacity-80 mt-0.5">{b.bookingRef || `#${b.id}`}</p>
-            <div className="flex items-center gap-2 mt-1.5">
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/20 uppercase`}>{def.label}</span>
               <span className="text-xs opacity-80">{nights} ночей</span>
+              {(b.payOnArrival || b.pay_on_arrival) && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-400 text-white uppercase">Оплата при заїзді</span>
+              )}
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30">
@@ -799,6 +802,12 @@ function BookingDrawer({ booking: b, onClose, onCheckin, onCheckout, onCancel, o
           </div>
         </InfoCard>
 
+        {b.internalNotes && (
+          <div className="bg-orange-50 rounded-xl p-3 text-sm text-orange-800 border border-orange-200 flex items-center gap-2">
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            {b.internalNotes}
+          </div>
+        )}
         {b.notes && (
           <div className="bg-amber-50 rounded-xl p-3 text-sm text-amber-800 border border-amber-200">{b.notes}</div>
         )}

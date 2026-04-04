@@ -112,6 +112,8 @@ export const reservations = pgTable("bookings", {
   draftExpiresAt:       timestamp("draft_expires_at"),
   paymentLink:          text("payment_link"),
 
+  payOnArrival:         boolean("pay_on_arrival").notNull().default(false),
+
   notes:                text("notes"),
   internalNotes:        text("internal_notes"),
   tags:                 jsonb("tags").default("[]"),

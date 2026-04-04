@@ -40,6 +40,8 @@ export const bookingsTable = pgTable("bookings", {
   email: varchar("email", { length: 255 }),
   bookingRef: varchar("booking_ref", { length: 20 }).unique(),
   notes: text("notes"),
+  internalNotes: text("internal_notes"),
+  payOnArrival: boolean("pay_on_arrival").notNull().default(false),
   draftExpiresAt: timestamp("draft_expires_at"),
   paymentLink: text("payment_link"),
   legalEntityId: integer("legal_entity_id"),

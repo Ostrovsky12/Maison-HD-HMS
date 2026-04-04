@@ -1,10 +1,11 @@
 import { useGetDashboardAnalytics, useListBookings, useGetMe } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
 import {
   TrendingUp, CreditCard, ArrowRight, ArrowLeft, Users,
   CalendarCheck, BedDouble, Loader2, Sparkles, ChevronRight,
-  BarChart2, Clock, CheckCircle,
+  BarChart2, Clock, CheckCircle, AlertCircle, Home,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +57,10 @@ const STATUS_LABELS: Record<string, string> = {
   checked_out: "Виселено",
 };
 
+const API = import.meta.env.VITE_API_URL || "";
+const tok = () => localStorage.getItem("hms_token") || "";
+const apiFetch = (url: string) => fetch(url, { headers: { Authorization: `Bearer ${tok()}` } });
+
 export default function DashboardPage() {
   const { data: analytics, isLoading: analyticsLoading } = useGetDashboardAnalytics({});
   const { data: user } = useGetMe();
@@ -63,6 +68,12 @@ export default function DashboardPage() {
   const { data: todayBookings } = useListBookings({ dateFrom: today, dateTo: today });
   const [, navigate] = useLocation();
   const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
+
+  const { data: paymentSummary } = useQuery<{ count: number; totalDebt: number; payOnArrivalCount: number }>({
+    queryKey: ["payment-summary"],
+    queryFn: () => apiFetch(`${API}/bookings/payment-summary`).then((r: Response) => r.ok ? r.json() : { count: 0, totalDebt: 0, payOnArrivalCount: 0 }),
+    refetchInterval: 60000,
+  });
 
   if (analyticsLoading) {
     return (
@@ -153,6 +164,36 @@ export default function DashboardPage() {
             iconColor="text-amber-600"
           />
         </div>
+
+        {/* ── Очікуємо оплат ── */}
+        {paymentSummary && paymentSummary.count > 0 && (
+          <div
+            className="flex items-center gap-4 bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-2xl p-4 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => navigate(`~${BASE}/bookings`)}
+          >
+            <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center shrink-0">
+              <AlertCircle className="w-6 h-6 text-orange-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-gray-900 text-base">Очікуємо оплат</div>
+              <div className="text-sm text-gray-500">
+                {paymentSummary.count} бронювань на суму{" "}
+                <span className="font-bold text-orange-700">
+                  {new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", maximumFractionDigits: 0 }).format(paymentSummary.totalDebt)}
+                </span>
+                {paymentSummary.payOnArrivalCount > 0 && (
+                  <span className="ml-2 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
+                    {paymentSummary.payOnArrivalCount} при заїзді
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs font-semibold text-orange-600 hidden sm:block">Переглянути</span>
+              <ChevronRight className="w-4 h-4 text-orange-400" />
+            </div>
+          </div>
+        )}
 
         {/* ── Secondary stats ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -273,7 +314,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {recent.map(b => (
+              {recent.map((b: any) => (
                 <div key={b.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50/60 transition-colors">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
                     {(b.guestName || "?")[0].toUpperCase()}

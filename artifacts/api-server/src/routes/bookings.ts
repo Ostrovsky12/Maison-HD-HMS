@@ -121,6 +121,7 @@ router.post("/", requireAuth, async (req, res) => {
     firstName, lastName, middleName, phone,
     discountId, discountValue, discountType,
     selectedAddons, legalEntityId,
+    payOnArrival, partialAmount,
   } = req.body;
 
   let { guestId } = req.body;
@@ -149,6 +150,18 @@ router.post("/", requireAuth, async (req, res) => {
   const draftExpiresAt = isDraft ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null;
   const guestsCount = (adults || 1) + (childrenUnder6 || 0) + (childrenOver6 || 0);
 
+  // Determine payment fields
+  const isPayOnArrival = Boolean(payOnArrival);
+  const partial = partialAmount ? Number(partialAmount) : null;
+  const total = Number(totalAmount || 0);
+  let initialPaid = "0";
+  let initialPaymentStatus = "unpaid";
+  if (partial !== null && partial > 0 && partial < total) {
+    initialPaid = String(partial);
+    initialPaymentStatus = "partial";
+  }
+  const arrivalNote = isPayOnArrival ? "Оплата при заїзді" : null;
+
   const [booking] = await db.insert(bookingsTable).values({
     unitId,
     guestId: guestId || null,
@@ -169,13 +182,17 @@ router.post("/", requireAuth, async (req, res) => {
     lastName: lastName || null,
     middleName: middleName || null,
     phone: phone || null,
-    totalAmount: String(totalAmount || 0),
+    totalAmount: String(total),
+    paidAmount: initialPaid,
+    paymentStatus: initialPaymentStatus,
+    payOnArrival: isPayOnArrival,
     discountId: discountId || null,
     discountValue: discountValue ? String(discountValue) : null,
     discountType: discountType || null,
     selectedAddons: selectedAddons || {},
     legalEntityId: legalEntityId || null,
     notes,
+    internalNotes: arrivalNote,
     draftExpiresAt,
   }).returning();
 
@@ -302,9 +319,14 @@ router.get("/calendar", requireAuth, async (req, res) => {
     status: bookingsTable.status,
     guestsCount: bookingsTable.guestsCount,
     totalAmount: bookingsTable.totalAmount,
+    paidAmount: bookingsTable.paidAmount,
+    paymentStatus: bookingsTable.paymentStatus,
+    payOnArrival: bookingsTable.payOnArrival,
     firstName: bookingsTable.firstName,
     lastName: bookingsTable.lastName,
     phone: bookingsTable.phone,
+    notes: bookingsTable.notes,
+    internalNotes: bookingsTable.internalNotes,
     draftExpiresAt: bookingsTable.draftExpiresAt,
     adults: bookingsTable.adults,
     checkinTime: bookingsTable.checkinTime,
@@ -346,6 +368,15 @@ router.get("/calendar", requireAuth, async (req, res) => {
       nights,
       guestsCount: b.guestsCount || 1,
       totalAmount: Number(b.totalAmount || 0),
+      paidAmount: Number(b.paidAmount || 0),
+      paymentStatus: b.paymentStatus || "unpaid",
+      payOnArrival: Boolean(b.payOnArrival),
+      phone: b.phone,
+      notes: b.notes,
+      internalNotes: b.internalNotes,
+      checkinTime: b.checkinTime,
+      checkoutTime: b.checkoutTime,
+      adults: b.adults,
       color: isDraft ? "#a0aec0" : bookingColor(b.id),
       isDraft,
       draftExpiresAt: b.draftExpiresAt,
@@ -353,6 +384,51 @@ router.get("/calendar", requireAuth, async (req, res) => {
   });
 
   res.json({ units, bookings, dates, startDate, days });
+});
+
+// GET /api/bookings/payment-summary — unpaid/partial booking stats for dashboard
+router.get("/payment-summary", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  let unitIds: number[] = [];
+  if (user.organizationId) {
+    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    const propIds = props.map((p: any) => p.id);
+    if (propIds.length > 0) {
+      const units = await db.select({ id: unitsTable.id }).from(unitsTable)
+        .where(inArray(unitsTable.propertyId, propIds));
+      unitIds = units.map((u: any) => u.id);
+    }
+  }
+  if (unitIds.length === 0) { res.json({ count: 0, totalDebt: 0, payOnArrivalCount: 0 }); return; }
+
+  const bookings = await db.select({
+    id: bookingsTable.id,
+    totalAmount: bookingsTable.totalAmount,
+    paidAmount: bookingsTable.paidAmount,
+    paymentStatus: bookingsTable.paymentStatus,
+    status: bookingsTable.status,
+  }).from(bookingsTable).where(
+    and(
+      inArray(bookingsTable.unitId, unitIds),
+      ne(bookingsTable.status, "cancelled" as any),
+      ne(bookingsTable.status, "checked_out" as any),
+      ne(bookingsTable.paymentStatus, "paid"),
+    )
+  );
+
+  // Get pay_on_arrival counts via raw SQL (new column, not in schema yet)
+  const poaResult = await db.execute<any>(sql`
+    SELECT COUNT(*) AS cnt FROM bookings
+    WHERE id = ANY(ARRAY[${sql.join(bookings.map((b: any) => sql`${b.id}`), sql`, `)}]::int[])
+      AND pay_on_arrival = TRUE
+  `);
+  const payOnArrivalCount = bookings.length > 0 ? Number(poaResult.rows[0]?.cnt || 0) : 0;
+
+  const count = bookings.length;
+  const totalDebt = bookings.reduce((s: number, b: any) => s + Math.max(0, Number(b.totalAmount || 0) - Number(b.paidAmount || 0)), 0);
+
+  res.json({ count, totalDebt: Math.round(totalDebt * 100) / 100, payOnArrivalCount });
 });
 
 // GET /api/bookings/pricing-preview?checkIn=&checkOut=&unitId= — dynamic price breakdown
@@ -493,6 +569,7 @@ router.put("/:bookingId", requireAuth, async (req, res) => {
     firstName, lastName, middleName, phone,
     discountId, discountValue, discountType,
     selectedAddons, legalEntityId,
+    payOnArrival, partialAmount,
   } = req.body;
 
   const guestsCount = (adults ?? undefined) !== undefined
@@ -528,6 +605,7 @@ router.put("/:bookingId", requireAuth, async (req, res) => {
     ...(selectedAddons !== undefined && { selectedAddons }),
     ...(legalEntityId !== undefined && { legalEntityId }),
     ...(notes !== undefined && { notes }),
+    ...(payOnArrival !== undefined && { payOnArrival: Boolean(payOnArrival) }),
     ...(draftExpiresAt && { draftExpiresAt }),
     updatedAt: new Date(),
   }).where(eq(bookingsTable.id, bookingId)).returning();
