@@ -11,7 +11,7 @@ router.get("/", requireAuth, async (req, res) => {
   const orgId = user.role === "super_admin" ? undefined : user.organizationId;
 
   const rows = await db.execute<any>(
-    sql`SELECT * FROM properties ${orgId ? sql`WHERE organization_id = ${orgId}` : sql``} ORDER BY COALESCE(sort_order, 0), id`
+    sql`SELECT *, COALESCE(tourist_tax_rate, 0)::numeric as tourist_tax_rate FROM properties ${orgId ? sql`WHERE organization_id = ${orgId}` : sql``} ORDER BY COALESCE(sort_order, 0), id`
   );
 
   const unitCounts = await db.select({
@@ -89,7 +89,7 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden", message: "Insufficient permissions" });
     return;
   }
-  const { name, address, type, description, sortOrder } = req.body;
+  const { name, address, type, description, sortOrder, touristTaxRate } = req.body;
   const [updated] = await db.update(propertiesTable).set({
     ...(name !== undefined && { name }),
     ...(address !== undefined && { address }),
@@ -99,8 +99,12 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
   if (sortOrder !== undefined) {
     await db.execute(sql`UPDATE properties SET sort_order = ${sortOrder} WHERE id = ${propertyId}`);
   }
+  if (touristTaxRate !== undefined) {
+    await db.execute(sql`UPDATE properties SET tourist_tax_rate = ${parseFloat(String(touristTaxRate))} WHERE id = ${propertyId}`);
+  }
   const [unitCountRow] = await db.select({ count: count() }).from(unitsTable).where(eq(unitsTable.propertyId, propertyId));
-  res.json({ ...updated, sort_order: sortOrder, unitCount: Number(unitCountRow?.count || 0) });
+  const taxRate = touristTaxRate ?? (updated as any).tourist_tax_rate ?? 0;
+  res.json({ ...updated, sort_order: sortOrder, tourist_tax_rate: taxRate, unitCount: Number(unitCountRow?.count || 0) });
 });
 
 router.delete("/:propertyId", requireAuth, async (req, res) => {

@@ -472,7 +472,7 @@ function ActionCard({ icon, color, title, subtitle, expanded, onToggle, children
 }
 
 // ── Step 4: Payment Actions ────────────────────────────────────────────────
-function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount, unitsData, legalEntities, onConfirm, saving }: any) {
+function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount, touristTax, touristTaxRate, unitsData, legalEntities, onConfirm, saving }: any) {
   const [expanded, setExpanded] = useState<"invoice" | "link" | "pay" | null>(null);
   const [legalEntityId, setLegalEntityId] = useState(() => legalEntities?.[0]?.id?.toString() || "");
   const [paymentLink, setPaymentLink] = useState<string | null>(null);
@@ -526,6 +526,15 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
           <span className="text-gray-300">·</span>
           <span className="text-gray-500">{nights} {nightsLabel(nights)}</span>
         </div>
+        {touristTax > 0 && (
+          <div className="flex justify-between items-center text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5">
+            <span className="flex items-center gap-1.5">
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+              Туристичний збір ({touristTaxRate} ₴ × {form.adults || 1} гост. × {nights} ніч)
+            </span>
+            <span className="font-bold">{fmt(touristTax)}</span>
+          </div>
+        )}
         <div className="flex justify-between items-center pt-2 border-t border-indigo-100/80">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wide">До сплати</span>
           <span className="text-2xl font-black text-indigo-700">{fmt(totalAmount)}</span>
@@ -740,6 +749,12 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     queryFn: () => authFetch(`${API}/units`).then(r => r.ok ? r.json() : []),
   });
 
+  const { data: propertiesData } = useQuery<any[]>({
+    queryKey: ["properties"],
+    enabled: open,
+    queryFn: () => authFetch(`${API}/properties`).then(r => r.ok ? r.json() : []),
+  });
+
   const { data: ratesData } = useQuery<any[]>({
     queryKey: ["rates"],
     enabled: open,
@@ -783,6 +798,11 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
 
   // Compute total — use rate price as fallback when unit has no base_price
   const selectedRate = ratesData?.find((r: any) => r.id === form.rateId);
+  const selectedUnit = unitsData?.find((u: any) => u.id === form.unitId);
+  const selectedProperty = propertiesData?.find((p: any) => p.id === (selectedUnit?.propertyId || selectedUnit?.property_id));
+  const touristTaxRate = Number(selectedProperty?.tourist_tax_rate || 0);
+  const touristTax = touristTaxRate > 0 ? Math.round(touristTaxRate * (form.adults || 1) * nights * 100) / 100 : 0;
+
   const previewTotal = pricingPreview?.totalAmount || 0;
   const base = previewTotal > 0
     ? previewTotal
@@ -793,7 +813,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const discount = form.discountValue > 0
     ? form.discountType === "percent" ? (base + addonCost) * form.discountValue / 100 : form.discountValue
     : 0;
-  const totalAmount = Math.max(0, Math.round((base + addonCost - discount) * 100) / 100);
+  const totalAmount = Math.max(0, Math.round((base + addonCost - discount + touristTax) * 100) / 100);
 
   // Sync totalAmount into form for save
   useEffect(() => {
@@ -931,6 +951,8 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
               pricingPreview={pricingPreview}
               addonPriceMap={addonPriceMap}
               totalAmount={totalAmount}
+              touristTax={touristTax}
+              touristTaxRate={touristTaxRate}
               unitsData={unitsData}
               legalEntities={legalEntities || []}
               onConfirm={handleSave}

@@ -316,9 +316,11 @@ export default function ChessPage() {
     await apiFetch(`/bookings/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason: "" }) });
     toast({ title: "Скасовано", variant: "destructive" }); loadData(true); setDetailBk(null);
   };
-  const doPayment = async (id: number, amount: number) => {
-    await apiFetch(`/console/booking/${id}/payment`, { method: "POST", body: JSON.stringify({ amount }) });
-    toast({ title: `Оплата ${fmtMoney(amount)} ₴ зарахована` }); loadData(true); setDetailBk(null);
+  const doPayment = async (id: number, amount: number, payMethod?: string, viaRegister?: boolean) => {
+    await apiFetch(`/console/booking/${id}/payment`, { method: "POST", body: JSON.stringify({ amount, method: payMethod || "cash", viaRegister: viaRegister || false }) });
+    const label = payMethod === "card" ? "Картка" : "Готівка";
+    const reg = viaRegister ? " (через касу)" : "";
+    toast({ title: `Оплата ${fmtMoney(amount)} ₴ зарахована — ${label}${reg}` }); loadData(true); setDetailBk(null);
   };
 
   const totalW = dates.length * dayW;
@@ -755,6 +757,8 @@ function BookingDrawer({ booking: b, onClose, onCheckin, onCheckout, onCancel, o
   const def = STATUS_DEF[status] || STATUS_DEF.confirmed;
   const debt = parseFloat(b.totalAmount || 0) - parseFloat(b.paidAmount || 0);
   const [payAmt, setPayAmt] = useState("");
+  const [payMethod, setPayMethod] = useState<"cash" | "card">("cash");
+  const [viaRegister, setViaRegister] = useState(false);
   const nights = b.nights || differenceInDays(dp(b.checkOut), dp(b.checkIn));
 
   return (
@@ -803,18 +807,42 @@ function BookingDrawer({ booking: b, onClose, onCheckin, onCheckout, onCancel, o
         {debt > 0 && b.status !== "cancelled" && (
           <div className="bg-gray-50 rounded-xl p-3 space-y-2">
             <p className="text-xs font-semibold text-gray-600">Зареєструвати оплату</p>
+            {/* Method toggle */}
+            <div className="grid grid-cols-2 gap-1.5">
+              <button type="button" onClick={() => setPayMethod("cash")}
+                className={`flex items-center justify-center gap-1.5 h-9 rounded-lg border-2 text-xs font-semibold transition-all ${payMethod === "cash" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-white text-gray-500 hover:border-gray-300"}`}>
+                <Banknote className="h-3.5 w-3.5" /> Готівка
+              </button>
+              <button type="button" onClick={() => { setPayMethod("card"); setViaRegister(false); }}
+                className={`flex items-center justify-center gap-1.5 h-9 rounded-lg border-2 text-xs font-semibold transition-all ${payMethod === "card" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 bg-white text-gray-500 hover:border-gray-300"}`}>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                Картка (термінал)
+              </button>
+            </div>
+            {/* Via register checkbox — only for cash */}
+            {payMethod === "cash" && (
+              <label className="flex items-center gap-2 cursor-pointer select-none px-0.5">
+                <input type="checkbox" checked={viaRegister} onChange={e => setViaRegister(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
+                <span className="text-xs text-gray-600 font-medium">Провести через касу (фіскальний реєстратор)</span>
+              </label>
+            )}
+            {/* Quick amounts */}
             <div className="flex gap-1 flex-wrap">
               {[debt, Math.round(debt / 2), 500, 1000, 2000].filter(v => v > 0 && v <= debt).map(v => (
                 <button key={v} onClick={() => setPayAmt(String(v))}
-                  className="text-xs px-2 py-1 bg-white border border-gray-300 rounded-lg hover:border-blue-400 hover:text-blue-700 font-medium transition">
+                  className="text-xs px-2 py-1 bg-white border border-gray-300 rounded-lg hover:border-emerald-400 hover:text-emerald-700 font-medium transition">
                   {fmtMoney(v)} ₴
                 </button>
               ))}
             </div>
             <div className="flex gap-2">
               <Input type="number" placeholder="Сума ₴" value={payAmt} onChange={e => setPayAmt(e.target.value)} className="text-sm h-9" />
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 h-9 flex-shrink-0" onClick={() => { onPayment(b.id, parseFloat(payAmt)); }}>
-                <Banknote className="h-3.5 w-3.5 mr-1" /> Зарахувати
+              <Button size="sm"
+                className={`h-9 flex-shrink-0 ${payMethod === "card" ? "bg-blue-600 hover:bg-blue-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                onClick={() => { if (!payAmt || parseFloat(payAmt) <= 0) return; onPayment(b.id, parseFloat(payAmt), payMethod, viaRegister); }}>
+                {payMethod === "card" ? <svg className="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg> : <Banknote className="h-3.5 w-3.5 mr-1" />}
+                {payMethod === "card" ? "Картка" : viaRegister ? "Готівка (каса)" : "Готівка"}
               </Button>
             </div>
           </div>
@@ -875,7 +903,7 @@ function ActionBtn({ icon: Icon, label, onClick, color }: any) {
 function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { toast } = useToast();
 
-  type Grp = { id: number; name: string; sort_order: number; unitCount: number };
+  type Grp = { id: number; name: string; sort_order: number; unitCount: number; tourist_tax_rate: number };
   type UnitRow = { id: number; name: string; category: string; propertyId: number; sort_order: number };
 
   const [groups, setGroups] = useState<Grp[]>([]);
@@ -885,6 +913,8 @@ function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [editing, setEditing] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+  const [editingTax, setEditingTax] = useState<number | null>(null);
+  const [editTaxVal, setEditTaxVal] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [addingGroup, setAddingGroup] = useState(false);
 
@@ -904,6 +934,19 @@ function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
       setUnits(u.map((x: any) => ({ id: x.id, name: x.name, category: x.category || "", propertyId: x.propertyId || x.property_id, sort_order: x.sort_order ?? 0 })));
     }
     setLoading(false);
+  };
+
+  // ── Save tourist tax ──
+  const saveTax = async (id: number) => {
+    const rate = parseFloat(editTaxVal);
+    if (isNaN(rate) || rate < 0) return;
+    setSaving(true);
+    await apiFetch(`/properties/${id}`, { method: "PATCH", body: JSON.stringify({ touristTaxRate: rate }) });
+    toast({ title: `Туристичний збір збережено: ${rate} ₴/гість/ніч` });
+    setEditingTax(null);
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, tourist_tax_rate: rate } : g));
+    onSaved();
+    setSaving(false);
   };
 
   useEffect(() => { load(); }, []);
@@ -1069,6 +1112,31 @@ function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
                     </button>
                   </div>
                 </div>
+
+                {/* Tourist tax row under group header */}
+                {isOpen && (
+                  <div className="flex items-center gap-2 px-8 py-1.5 bg-amber-50 border-b border-amber-100">
+                    <svg className="h-3 w-3 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                    <span className="text-[10px] text-amber-700 font-medium flex-1">Туристичний збір:</span>
+                    {editingTax === g.id ? (
+                      <div className="flex items-center gap-1">
+                        <input autoFocus type="number" step="0.01" min="0" value={editTaxVal}
+                          onChange={e => setEditTaxVal(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") saveTax(g.id); if (e.key === "Escape") setEditingTax(null); }}
+                          className="w-20 text-[11px] border rounded px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-amber-300" />
+                        <span className="text-[10px] text-amber-600">₴/гість/ніч</span>
+                        <button onClick={() => saveTax(g.id)} disabled={saving} className="px-1.5 py-0.5 text-[10px] bg-amber-500 text-white rounded hover:bg-amber-600">✓</button>
+                        <button onClick={() => setEditingTax(null)} className="text-[10px] text-gray-400 hover:text-gray-600">✕</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setEditingTax(g.id); setEditTaxVal(String(g.tourist_tax_rate ?? 0)); }}
+                        className="flex items-center gap-1 text-[10px] font-semibold text-amber-800 hover:text-amber-900 hover:bg-amber-100 rounded px-1.5 py-0.5 transition">
+                        {g.tourist_tax_rate > 0 ? `${Number(g.tourist_tax_rate).toFixed(2)} ₴/гість/ніч` : "не встановлено"}
+                        <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* Units list */}
                 {isOpen && (

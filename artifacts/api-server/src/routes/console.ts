@@ -266,18 +266,31 @@ router.patch("/booking/:id/status", requireAuth, async (req: any, res) => {
 router.post("/booking/:id/payment", requireAuth, async (req: any, res) => {
   try {
     const { id } = req.params;
-    const { amount, method } = req.body;
+    const { amount, method = "cash", viaRegister = false } = req.body;
+    const bookingId = parseInt(id);
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { res.status(400).json({ error: "Невірна сума" }); return; }
+
+    // Update booking paid_amount
     await db.execute<any>(sql`
       UPDATE bookings
-      SET paid_amount = paid_amount + ${parseFloat(amount)},
+      SET paid_amount = paid_amount + ${amt},
         payment_status = CASE
-          WHEN paid_amount + ${parseFloat(amount)} >= total_amount THEN 'paid'::payment_status
+          WHEN paid_amount + ${amt} >= total_amount THEN 'paid'::payment_status
           ELSE 'partial'::payment_status
         END,
         updated_at = NOW()
-      WHERE id=${parseInt(id)}
+      WHERE id = ${bookingId}
     `);
-    res.json({ ok: true });
+
+    // Record in payments table (method must be a valid payment_method enum value)
+    const pmMethod = ["cash", "card", "liqpay", "stripe", "bank_transfer"].includes(method) ? method : "cash";
+    await db.execute<any>(sql`
+      INSERT INTO payments (booking_id, amount, currency, method, via_register, status, payment_type, processed_at, created_at)
+      VALUES (${bookingId}, ${String(amt)}, 'UAH', ${pmMethod}::payment_method, ${Boolean(viaRegister)}, 'completed'::payment_tx_status, 'payment'::payment_type, NOW(), NOW())
+    `);
+
+    res.json({ ok: true, method, viaRegister });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
