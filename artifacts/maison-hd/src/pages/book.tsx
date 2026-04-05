@@ -176,6 +176,7 @@ export default function BookPage() {
     const bk = d.booking || d;
     const bookingId = bk.id;
     const bookingRef = bk.bookingRef || bk.booking_ref || "—";
+    const guestAccessCode = bk.guestAccessCode || bk.guest_access_code || null;
 
     // Online payment — redirect to LiqPay
     if (payMethod === "online" && bookingId) {
@@ -203,7 +204,7 @@ export default function BookPage() {
     }
 
     setLoading(false);
-    setConfirmed({ bookingRef, ...form, ...search, nights: nightsCount, total, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName || organization?.name, payMethod });
+    setConfirmed({ bookingRef, guestAccessCode, ...form, ...search, nights: nightsCount, total, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName || organization?.name, payMethod });
     setStep("confirm");
   };
 
@@ -234,7 +235,7 @@ export default function BookPage() {
             <p className="opacity-80 text-xs">Посилання для онлайн-чекіну надійде за 24 год до заїзду.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => window.open(`${BASE}/guest/${confirmed.bookingRef}`, "_blank")}>
+            <Button variant="outline" className="flex-1" onClick={() => window.open(`${BASE}/guest/${confirmed.guestAccessCode || confirmed.bookingRef}`, "_blank")}>
               <ExternalLink className="h-4 w-4 mr-1" /> Кабінет гостя
             </Button>
             <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { setStep("search"); setConfirmed(null); setSelectedUnit(null); setSelectedAddons(new Set()); setSelectedPackage(null); setAppliedPromo(null); }}>

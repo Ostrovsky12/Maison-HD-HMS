@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import {
   propertiesTable, unitsTable, bookingsTable, organizationsTable,
@@ -164,6 +165,7 @@ router.post("/bookings", async (req, res) => {
 
     const refNum = Math.floor(100000 + Math.random() * 900000);
     const bookingRef = `BK-${refNum}`;
+    const guestAccessCode = randomBytes(5).toString("hex").toUpperCase();
     const totalGuests = parseInt(String(guestsCount || adults || 1));
 
     const totalAdults = parseInt(String(adults || guestsCount || 1));
@@ -186,6 +188,7 @@ router.post("/bookings", async (req, res) => {
       paidAmount: "0",
       notes: specialRequests || null,
       bookingRef,
+      guestAccessCode,
       source: "direct" as any,
     } as any).returning();
 
@@ -249,6 +252,7 @@ router.post("/bookings", async (req, res) => {
       booking: {
         id: booking.id,
         bookingRef: (booking as any).bookingRef || bookingRef,
+        guestAccessCode: (booking as any).guestAccessCode || guestAccessCode,
         firstName, lastName, email,
         checkIn, checkOut, nights,
         totalAmount, propertyName: prop?.name,
