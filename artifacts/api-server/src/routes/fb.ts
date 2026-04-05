@@ -154,6 +154,25 @@ router.post("/categories", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.patch("/categories/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const [cat] = await db.update(fbCategoriesTable).set({ ...req.body })
+      .where(and(eq(fbCategoriesTable.id, parseInt(req.params.id)), eq(fbCategoriesTable.organizationId, orgId)))
+      .returning();
+    res.json({ category: cat });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/categories/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    await db.delete(fbCategoriesTable)
+      .where(and(eq(fbCategoriesTable.id, parseInt(req.params.id)), eq(fbCategoriesTable.organizationId, orgId)));
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 router.get("/items", requireAuth, async (req: any, res) => {
   try {
@@ -197,6 +216,15 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.delete("/items/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    await db.delete(fbItemsTable)
+      .where(and(eq(fbItemsTable.id, parseInt(req.params.id)), eq(fbItemsTable.organizationId, orgId)));
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Tables ───────────────────────────────────────────────────────────────────
 router.get("/tables", requireAuth, async (req: any, res) => {
   try {
@@ -227,14 +255,26 @@ router.post("/tables", requireAuth, async (req: any, res) => {
 router.patch("/tables/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const { status } = req.body;
+    const { status, number, capacity, location } = req.body;
     const updates: any = {};
-    if (status) updates.status = status;
+    if (status !== undefined) updates.status = status;
     if (status === "free") updates.currentOrderId = null;
+    if (number !== undefined) updates.number = number;
+    if (capacity !== undefined) updates.capacity = capacity;
+    if (location !== undefined) updates.location = location;
     const [tbl] = await db.update(fbTablesTable).set(updates)
       .where(and(eq(fbTablesTable.id, parseInt(req.params.id)), eq(fbTablesTable.organizationId, orgId)))
       .returning();
     res.json({ table: tbl });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/tables/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    await db.update(fbTablesTable).set({ isActive: false })
+      .where(and(eq(fbTablesTable.id, parseInt(req.params.id)), eq(fbTablesTable.organizationId, orgId)));
+    res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -497,12 +497,17 @@ function KitchenTab() {
 }
 
 // ─── TABLES TAB ──────────────────────────────────────────────────────────────
+const BLANK_TABLE_FORM = { table_number: '', section: 'Зал', capacity: '4', notes: '' };
+
 function TablesTab() {
   const [tables, setTables] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [reservationDate, setReservationDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(true);
   const [showReservation, setShowNewReservation] = useState(false);
+  const [showTableForm, setShowTableForm] = useState(false);
+  const [editTable, setEditTable] = useState<any>(null);
+  const [tableForm, setTableForm] = useState({ ...BLANK_TABLE_FORM });
   const [resvForm, setResvForm] = useState({ guest_name: '', guest_phone: '', guest_count: 2, reservation_date: new Date().toISOString().split('T')[0], reservation_time: '19:00', duration_min: 90, notes: '', deposit_amount: 0, table_id: '' });
   const [saving, setSaving] = useState(false);
 
@@ -520,6 +525,29 @@ function TablesTab() {
   useEffect(() => { load(); }, [load]);
 
   const sections = [...new Set(tables.map((t: any) => t.section))];
+
+  const openCreateTable = () => { setEditTable(null); setTableForm({ ...BLANK_TABLE_FORM }); setShowTableForm(true); };
+  const openEditTable = (t: any) => { setEditTable(t); setTableForm({ table_number: t.table_number, section: t.section || 'Зал', capacity: String(t.capacity), notes: t.notes || '' }); setShowTableForm(true); };
+
+  const saveTable = async () => {
+    if (!tableForm.table_number) return;
+    setSaving(true);
+    const body = { table_number: tableForm.table_number, section: tableForm.section || 'Зал', capacity: parseInt(tableForm.capacity) || 4, notes: tableForm.notes || null };
+    if (editTable) {
+      await apiFetch(`/restaurant/tables/${editTable.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await apiFetch('/restaurant/tables', { method: 'POST', body: JSON.stringify(body) });
+    }
+    setSaving(false);
+    setShowTableForm(false);
+    load();
+  };
+
+  const deleteTable = async (t: any) => {
+    if (!confirm(`Деактивувати стіл ${t.table_number}?`)) return;
+    await apiFetch(`/restaurant/tables/${t.id}`, { method: 'DELETE' });
+    load();
+  };
 
   const saveReservation = async () => {
     if (!resvForm.guest_name) return;
@@ -542,8 +570,11 @@ function TablesTab() {
           <span className="text-sm font-medium text-gray-700">Схема залу</span>
           <button onClick={load} className="p-1.5 text-gray-400 hover:text-gray-700 border border-gray-200 rounded-lg bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Резервації на:</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={openCreateTable} className="flex items-center gap-1.5 bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:border-gray-300">
+            <Plus className="w-3.5 h-3.5" /> Новий стіл
+          </button>
+          <span className="text-xs text-gray-400">Резервації на:</span>
           <input type="date" value={reservationDate} onChange={e => setReservationDate(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" />
           <button onClick={() => setShowNewReservation(true)} className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700">
             <Plus className="w-3.5 h-3.5" /> Нова резервація
@@ -555,13 +586,24 @@ function TablesTab() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Table floor plan */}
           <div className="lg:col-span-2 space-y-4">
+            {sections.length === 0 && (
+              <div className="text-center py-10 border-2 border-dashed border-gray-200 rounded-xl">
+                <Grid3x3 className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+                <p className="text-sm text-gray-400">Немає столів. Натисніть «Новий стіл» щоб додати.</p>
+              </div>
+            )}
             {sections.map(section => (
               <div key={section}>
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{section}</h3>
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {tables.filter((t: any) => t.section === section).map((table: any) => (
-                    <div key={table.id} className={`border-2 rounded-xl p-3 ${TABLE_STATUS_COLORS[table.status as TableStatus]}`}>
-                      <div className="flex items-start justify-between">
+                    <div key={table.id} className={`border-2 rounded-xl p-3 relative group ${TABLE_STATUS_COLORS[table.status as TableStatus]}`}>
+                      {/* Edit / Delete on hover */}
+                      <div className="absolute top-1.5 right-1.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => openEditTable(table)} className="p-1 bg-white/80 hover:bg-white rounded text-indigo-600 shadow-sm"><Edit2 className="w-3 h-3" /></button>
+                        <button onClick={() => deleteTable(table)} className="p-1 bg-white/80 hover:bg-white rounded text-red-500 shadow-sm"><Trash2 className="w-3 h-3" /></button>
+                      </div>
+                      <div className="flex items-start justify-between pr-8">
                         <div>
                           <div className="font-semibold text-sm">Стіл {table.table_number}</div>
                           <div className="text-xs opacity-70 flex items-center gap-0.5 mt-0.5"><Users className="w-3 h-3" />{table.capacity}</div>
@@ -620,9 +662,47 @@ function TablesTab() {
         </div>
       )}
 
+      {/* Create / Edit Table Modal */}
+      {showTableForm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowTableForm(false); }}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-900">{editTable ? `Редагувати стіл ${editTable.table_number}` : 'Новий стіл'}</h3>
+              <button onClick={() => setShowTableForm(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Номер столу *</label>
+                  <input type="text" placeholder="1, 2A, VIP..." value={tableForm.table_number} onChange={e => setTableForm(f => ({ ...f, table_number: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Місць</label>
+                  <input type="number" min={1} value={tableForm.capacity} onChange={e => setTableForm(f => ({ ...f, capacity: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Зона / секція</label>
+                <input type="text" placeholder="Зал, Тераса, VIP, Бар..." value={tableForm.section} onChange={e => setTableForm(f => ({ ...f, section: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Примітки</label>
+                <input type="text" placeholder="Біля вікна, для сімей..." value={tableForm.notes} onChange={e => setTableForm(f => ({ ...f, notes: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 border-t">
+              <button onClick={() => setShowTableForm(false)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
+              <button onClick={saveTable} disabled={!tableForm.table_number || saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                {saving ? 'Збереження...' : editTable ? 'Зберегти' : 'Створити стіл'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* New Reservation Modal */}
       {showReservation && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowNewReservation(false); }}>
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between p-4 border-b">
               <h3 className="font-semibold text-gray-900">Нова резервація столу</h3>
@@ -671,15 +751,161 @@ function TablesTab() {
 }
 
 // ─── MENU TAB ─────────────────────────────────────────────────────────────────
+const BLANK_ITEM = { name: '', description: '', price: '', cost_price: '', category_id: '', item_type: 'food', prep_time_min: 15, calories: '', is_available: true, is_featured: false, photo_url: '' };
+const BLANK_CAT = { name: '', icon: '', description: '' };
+
+function MenuItemModal({ item, categories, onClose, onSaved }: { item?: any; categories: any[]; onClose: () => void; onSaved: () => void }) {
+  const ITEM_TYPE_OPTIONS = [['food','Їжа'],['drink','Напій'],['dessert','Десерт'],['alcohol','Алкоголь'],['tobacco','Тютюн/Кальян']];
+  const [form, setForm] = useState(item ? {
+    name: item.name || '', description: item.description || '', price: String(item.price || ''),
+    cost_price: item.cost_price ? String(item.cost_price) : '', category_id: item.category_id ? String(item.category_id) : '',
+    item_type: item.item_type || 'food', prep_time_min: item.prep_time_min ?? 15,
+    calories: item.calories ? String(item.calories) : '', is_available: item.is_available !== false, is_featured: !!item.is_featured, photo_url: item.photo_url || '',
+  } : { ...BLANK_ITEM });
+  const [saving, setSaving] = useState(false);
+  const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
+  const isEdit = !!item;
+
+  const handleSave = async () => {
+    if (!form.name || !form.price) return;
+    setSaving(true);
+    const body = { ...form, price: parseFloat(form.price), cost_price: form.cost_price ? parseFloat(form.cost_price) : null, category_id: form.category_id ? parseInt(form.category_id) : null, calories: form.calories ? parseInt(form.calories) : null, photo_url: form.photo_url || null };
+    if (isEdit) {
+      await apiFetch(`/restaurant/menu/items/${item.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await apiFetch('/restaurant/menu/items', { method: 'POST', body: JSON.stringify(body) });
+    }
+    setSaving(false);
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
+          <h3 className="font-semibold text-gray-900">{isEdit ? `Редагувати: ${item.name}` : 'Нова позиція меню'}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-4 space-y-3 overflow-y-auto flex-1">
+          <input type="text" placeholder="Назва *" value={form.name} onChange={e => set('name', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+          <textarea placeholder="Опис (склад, особливості, алергени...)" value={form.description} onChange={e => set('description', e.target.value)} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Ціна (₴) *</label>
+              <input type="number" min={0} step={0.01} placeholder="0.00" value={form.price} onChange={e => set('price', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Собівартість (₴)</label>
+              <input type="number" min={0} step={0.01} placeholder="0.00" value={form.cost_price} onChange={e => set('cost_price', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <select value={form.category_id} onChange={e => set('category_id', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm">
+              <option value="">Категорія</option>
+              {categories.map((c: any) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+            </select>
+            <select value={form.item_type} onChange={e => set('item_type', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm">
+              {ITEM_TYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Час приготування (хв)</label>
+              <input type="number" min={0} value={form.prep_time_min} onChange={e => set('prep_time_min', parseInt(e.target.value) || 0)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Калорії (ккал)</label>
+              <input type="number" min={0} placeholder="—" value={form.calories} onChange={e => set('calories', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">URL фото (посилання на зображення)</label>
+            <input type="url" placeholder="https://..." value={form.photo_url} onChange={e => set('photo_url', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+            {form.photo_url && <img src={form.photo_url} alt="preview" className="mt-2 w-full h-28 object-cover rounded-lg border" onError={e => { (e.target as any).style.display='none'; }} />}
+          </div>
+          <div className="flex items-center gap-5">
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={form.is_featured} onChange={e => set('is_featured', e.target.checked)} className="rounded" />
+              Топ-позиція ⭐
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={form.is_available} onChange={e => set('is_available', e.target.checked)} className="rounded" />
+              Доступна зараз
+            </label>
+          </div>
+        </div>
+        <div className="flex gap-2 p-4 border-t flex-shrink-0">
+          <button onClick={onClose} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
+          <button onClick={handleSave} disabled={!form.name || !form.price || saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+            {saving ? 'Збереження...' : isEdit ? 'Зберегти зміни' : 'Додати позицію'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategoryModal({ category, onClose, onSaved }: { category?: any; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState(category ? { name: category.name || '', icon: category.icon || '', description: category.description || '' } : { ...BLANK_CAT });
+  const [saving, setSaving] = useState(false);
+  const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
+  const isEdit = !!category;
+
+  const handleSave = async () => {
+    if (!form.name) return;
+    setSaving(true);
+    if (isEdit) {
+      await apiFetch(`/restaurant/menu/categories/${category.id}`, { method: 'PATCH', body: JSON.stringify(form) });
+    } else {
+      await apiFetch('/restaurant/menu/categories', { method: 'POST', body: JSON.stringify(form) });
+    }
+    setSaving(false);
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h3 className="font-semibold text-gray-900">{isEdit ? 'Редагувати категорію' : 'Нова категорія'}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2">
+              <label className="text-xs text-gray-500 mb-1 block">Назва *</label>
+              <input type="text" placeholder="Піца, Салати, Напої..." value={form.name} onChange={e => set('name', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Іконка (емодзі)</label>
+              <input type="text" placeholder="🍕" value={form.icon} onChange={e => set('icon', e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-center text-lg" />
+            </div>
+          </div>
+          <textarea placeholder="Опис категорії (необов'язково)" value={form.description} onChange={e => set('description', e.target.value)} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" />
+        </div>
+        <div className="flex gap-2 p-4 border-t">
+          <button onClick={onClose} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
+          <button onClick={handleSave} disabled={!form.name || saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+            {saving ? 'Збереження...' : isEdit ? 'Зберегти' : 'Створити'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MenuTab() {
   const [categories, setCategories] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [selectedCat, setSelectedCat] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [showAddItem, setShowAddItem] = useState(false);
-  const [itemForm, setItemForm] = useState({ name: '', description: '', price: '', cost_price: '', category_id: '', item_type: 'food', prep_time_min: 15, calories: '', is_available: true, is_featured: false });
-  const [saving, setSaving] = useState(false);
+  const [itemModal, setItemModal] = useState<{ open: boolean; item?: any }>({ open: false });
+  const [catModal, setCatModal] = useState<{ open: boolean; cat?: any }>({ open: false });
+  const [showCatMgr, setShowCatMgr] = useState(false);
+  const [deleteItem, setDeleteItem] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -699,13 +925,14 @@ function MenuTab() {
     load();
   };
 
-  const saveItem = async () => {
-    if (!itemForm.name || !itemForm.price) return;
-    setSaving(true);
-    await apiFetch('/restaurant/menu/items', { method: 'POST', body: JSON.stringify({ ...itemForm, price: parseFloat(itemForm.price), cost_price: itemForm.cost_price ? parseFloat(itemForm.cost_price) : null, category_id: itemForm.category_id ? parseInt(itemForm.category_id) : null }) });
-    setSaving(false);
-    setShowAddItem(false);
-    setItemForm({ name: '', description: '', price: '', cost_price: '', category_id: '', item_type: 'food', prep_time_min: 15, calories: '', is_available: true, is_featured: false });
+  const handleDeleteItem = async (item: any) => {
+    await apiFetch(`/restaurant/menu/items/${item.id}`, { method: 'DELETE' });
+    setDeleteItem(null);
+    load();
+  };
+
+  const handleDeleteCategory = async (cat: any) => {
+    await apiFetch(`/restaurant/menu/categories/${cat.id}`, { method: 'DELETE' });
     load();
   };
 
@@ -714,21 +941,61 @@ function MenuTab() {
     (!search || i.name.toLowerCase().includes(search.toLowerCase()) || (i.description || '').toLowerCase().includes(search.toLowerCase()))
   );
 
-  const ITEM_TYPE_OPTIONS = [['food','Їжа'],['drink','Напій'],['dessert','Десерт'],['alcohol','Алкоголь'],['tobacco','Тютюн/Кальян']];
-
   return (
     <div>
+      {itemModal.open && <MenuItemModal item={itemModal.item} categories={categories} onClose={() => setItemModal({ open: false })} onSaved={load} />}
+      {catModal.open && <CategoryModal category={catModal.cat} onClose={() => setCatModal({ open: false })} onSaved={load} />}
+      {deleteItem && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl text-center space-y-4">
+            <div className="text-4xl">🗑️</div>
+            <p className="font-semibold text-gray-800">Видалити «{deleteItem.name}»?</p>
+            <p className="text-xs text-gray-400">Позицію буде деактивовано (позначено як недоступну)</p>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteItem(null)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Ні</button>
+              <button onClick={() => handleDeleteItem(deleteItem)} className="flex-1 bg-red-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-red-700">Так, видалити</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top bar */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           <input type="text" placeholder="Пошук страви..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white" />
         </div>
-        <button onClick={() => setShowAddItem(true)} className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700">
+        <button onClick={() => setShowCatMgr(v => !v)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${showCatMgr ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+          ⚙️ Категорії
+        </button>
+        <button onClick={() => setItemModal({ open: true })} className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700">
           <Plus className="w-3.5 h-3.5" /> Нова позиція
         </button>
       </div>
 
-      {/* Category tabs */}
+      {/* Category manager */}
+      {showCatMgr && (
+        <div className="mb-4 p-3 border border-indigo-100 bg-indigo-50/50 rounded-xl">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-gray-700">Управління категоріями</span>
+            <button onClick={() => setCatModal({ open: true })} className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg hover:bg-indigo-700">
+              <Plus className="w-3 h-3" />Нова
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {categories.map((c: any) => (
+              <div key={c.id} className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs">
+                <span>{c.icon} {c.name}</span>
+                <span className="text-gray-300">({c.item_count})</span>
+                <button onClick={() => setCatModal({ open: true, cat: c })} className="text-indigo-400 hover:text-indigo-600 ml-0.5"><Edit2 className="w-3 h-3" /></button>
+                <button onClick={() => handleDeleteCategory(c)} className="text-red-300 hover:text-red-500"><X className="w-3 h-3" /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Category filter tabs */}
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 scrollbar-hide">
         <button onClick={() => setSelectedCat(null)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${!selectedCat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
           Всі ({items.length})
@@ -740,94 +1007,57 @@ function MenuTab() {
         ))}
       </div>
 
-      {loading ? <div className="text-center py-12 text-gray-400">Завантаження...</div> : (
+      {/* Items grid */}
+      {loading ? <div className="text-center py-12 text-gray-400">Завантаження...</div> : filtered.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <div className="text-4xl mb-2">🍽️</div>
+          <p className="text-sm">Позицій не знайдено</p>
+          <button onClick={() => setItemModal({ open: true })} className="mt-3 text-xs text-indigo-600 hover:underline">+ Додати страву</button>
+        </div>
+      ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map((item: any) => (
-            <div key={item.id} className={`bg-white border rounded-xl p-3 transition-all ${!item.is_available ? 'opacity-60' : 'border-gray-200'}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="font-medium text-sm text-gray-900">{item.name}</span>
-                    {item.is_featured && <Star className="w-3 h-3 text-amber-400 fill-amber-400" />}
+            <div key={item.id} className={`bg-white border rounded-xl overflow-hidden transition-all group hover:shadow-md ${!item.is_available ? 'opacity-60 border-gray-100' : 'border-gray-200'}`}>
+              {item.photo_url && (
+                <div className="h-28 bg-gray-100 overflow-hidden">
+                  <img src={item.photo_url} alt={item.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).parentElement!.style.display='none'; }} />
+                </div>
+              )}
+              <div className="p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-medium text-sm text-gray-900">{item.name}</span>
+                      {item.is_featured && <Star className="w-3 h-3 text-amber-400 fill-amber-400" />}
+                    </div>
+                    {item.description && <div className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.description}</div>}
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <span className="font-semibold text-indigo-600">{Number(item.price).toLocaleString('uk-UA')} ₴</span>
+                      {item.cost_price > 0 && <span className="text-xs text-gray-400">с/в: {Number(item.cost_price).toLocaleString('uk-UA')} ₴</span>}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      {item.category_name && <span className="text-xs text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">{item.category_icon} {item.category_name}</span>}
+                      <span className="text-xs text-gray-400 flex items-center gap-0.5"><Clock className="w-3 h-3" />{item.prep_time_min}хв</span>
+                      {item.calories > 0 && <span className="text-xs text-gray-400">{item.calories} ккал</span>}
+                    </div>
                   </div>
-                  {item.description && <div className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.description}</div>}
-                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                    <span className="font-semibold text-indigo-600">{Number(item.price).toLocaleString('uk-UA')} ₴</span>
-                    {item.cost_price && <span className="text-xs text-gray-400">собівартість: {Number(item.cost_price).toLocaleString('uk-UA')} ₴</span>}
-                  </div>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <span className="text-xs text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">{item.category_name} {item.category_icon}</span>
-                    <span className="text-xs text-gray-400 flex items-center gap-0.5"><Clock className="w-3 h-3" />{item.prep_time_min}хв</span>
-                    {item.calories > 0 && <span className="text-xs text-gray-400">{item.calories} ккал</span>}
+                  {/* Edit/Delete — visible on hover */}
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <button onClick={() => setItemModal({ open: true, item })} className="p-1.5 hover:bg-indigo-100 rounded-lg text-indigo-500" title="Редагувати"><Edit2 className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setDeleteItem(item)} className="p-1.5 hover:bg-red-100 rounded-lg text-red-400" title="Видалити"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 mt-2 pt-2 border-t">
-                <button onClick={() => toggleAvailability(item)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.is_available ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                  {item.is_available ? '✓ Доступне' : '✗ Недоступне'}
-                </button>
+                <div className="flex items-center gap-2 mt-2 pt-2 border-t">
+                  <button onClick={() => toggleAvailability(item)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.is_available ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                    {item.is_available ? '✓ Доступне' : '✗ Недоступне'}
+                  </button>
+                  <button onClick={() => setItemModal({ open: true, item })} className="ml-auto text-xs text-indigo-500 hover:underline flex items-center gap-0.5">
+                    <Edit2 className="w-3 h-3" />Редагувати
+                  </button>
+                </div>
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Add Item Modal */}
-      {showAddItem && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h3 className="font-semibold text-gray-900">Нова позиція меню</h3>
-              <button onClick={() => setShowAddItem(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
-              <input type="text" placeholder="Назва *" value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
-              <textarea placeholder="Опис (склад, особливості...)" value={itemForm.description} onChange={e => setItemForm(f => ({ ...f, description: e.target.value }))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" />
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Ціна (₴) *</label>
-                  <input type="number" min={0} step={0.01} placeholder="0.00" value={itemForm.price} onChange={e => setItemForm(f => ({ ...f, price: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Собівартість (₴)</label>
-                  <input type="number" min={0} step={0.01} placeholder="0.00" value={itemForm.cost_price} onChange={e => setItemForm(f => ({ ...f, cost_price: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
-                </div>
-              </div>
-              <select value={itemForm.category_id} onChange={e => setItemForm(f => ({ ...f, category_id: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm">
-                <option value="">Категорія (не вказана)</option>
-                {categories.map((c: any) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-              </select>
-              <select value={itemForm.item_type} onChange={e => setItemForm(f => ({ ...f, item_type: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm">
-                {ITEM_TYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Час приготування (хв)</label>
-                  <input type="number" min={0} value={itemForm.prep_time_min} onChange={e => setItemForm(f => ({ ...f, prep_time_min: parseInt(e.target.value) || 0 }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Калорії</label>
-                  <input type="number" min={0} placeholder="0" value={itemForm.calories} onChange={e => setItemForm(f => ({ ...f, calories: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                  <input type="checkbox" checked={itemForm.is_featured} onChange={e => setItemForm(f => ({ ...f, is_featured: e.target.checked }))} className="rounded" />
-                  Фічерна страва
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                  <input type="checkbox" checked={itemForm.is_available} onChange={e => setItemForm(f => ({ ...f, is_available: e.target.checked }))} className="rounded" />
-                  Доступна
-                </label>
-              </div>
-            </div>
-            <div className="flex gap-2 p-4 border-t">
-              <button onClick={() => setShowAddItem(false)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
-              <button onClick={saveItem} disabled={!itemForm.name || !itemForm.price || saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
-                {saving ? 'Збереження...' : 'Додати позицію'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

@@ -14,6 +14,7 @@ import {
   Clock, CheckCircle2, Loader2, Star, ShoppingBag, Wine, Home,
   ChevronRight, RefreshCw, SquarePlus, Minus, Search, Flame,
   Sunrise, PartyPopper, Building2, AlarmClock, Truck,
+  Edit2, Trash2, Settings, X,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -98,6 +99,18 @@ export default function FbPage() {
   const [menuCatFilter, setMenuCatFilter] = useState("all");
   const [kitchenLoading, setKitchenLoading] = useState(false);
   const [now, setNow] = useState(Date.now());
+  // Table CRUD
+  const [showTableModal, setShowTableModal] = useState(false);
+  const [editingTable, setEditingTable] = useState<any>(null);
+  const [tableForm, setTableForm] = useState({ number: "", location: "Основний зал", capacity: "4" });
+  // Menu item CRUD
+  const [showEditItem, setShowEditItem] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
+  // Category CRUD
+  const [showCatManager, setShowCatManager] = useState(false);
+  const [showCatModal, setShowCatModal] = useState(false);
+  const [editingCat, setEditingCat] = useState<any>(null);
+  const [catForm, setCatForm] = useState({ name: "", emoji: "🍽️" });
   const kitchenInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const { toast } = useToast();
 
@@ -176,6 +189,47 @@ export default function FbPage() {
   const handleKitchenItemStatus = async (itemId: number, status: string) => {
     const r = await apiFetch(`/order-items/${itemId}`, { method: "PATCH", body: JSON.stringify({ status }) });
     if (r.ok) { toast({ title: status === "cooking" ? "🔥 Готується" : "✓ Готово" }); loadKitchen(); loadStats(); }
+  };
+
+  // ── Table CRUD ──────────────────────────────────────────────────────────────
+  const openNewTable = () => { setEditingTable(null); setTableForm({ number: "", location: "Основний зал", capacity: "4" }); setShowTableModal(true); };
+  const openEditTable = (t: any) => { setEditingTable(t); setTableForm({ number: t.number, location: t.location || "Основний зал", capacity: String(t.capacity) }); setShowTableModal(true); };
+  const saveTable = async () => {
+    if (!tableForm.number) return;
+    const body = { number: tableForm.number, location: tableForm.location || "Основний зал", capacity: parseInt(tableForm.capacity) || 4 };
+    const r = editingTable
+      ? await apiFetch(`/tables/${editingTable.id}`, { method: "PATCH", body: JSON.stringify(body) })
+      : await apiFetch("/tables", { method: "POST", body: JSON.stringify(body) });
+    if (r.ok) { toast({ title: editingTable ? "Стіл оновлено" : "Стіл додано" }); setShowTableModal(false); loadTables(); }
+  };
+  const deleteTable = async (t: any) => {
+    if (!confirm(`Видалити стіл ${t.number}?`)) return;
+    const r = await apiFetch(`/tables/${t.id}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: `Стіл ${t.number} видалено` }); loadTables(); }
+  };
+
+  // ── Menu item CRUD ──────────────────────────────────────────────────────────
+  const openEditItem = (it: any) => { setEditingItem(it); setShowEditItem(true); };
+  const deleteMenuItem = async (it: any) => {
+    if (!confirm(`Видалити «${it.name}»?`)) return;
+    const r = await apiFetch(`/items/${it.id}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: `«${it.name}» видалено` }); loadItems(); }
+  };
+
+  // ── Category CRUD ───────────────────────────────────────────────────────────
+  const openNewCat = () => { setEditingCat(null); setCatForm({ name: "", emoji: "🍽️" }); setShowCatModal(true); };
+  const openEditCat = (c: any) => { setEditingCat(c); setCatForm({ name: c.name, emoji: c.emoji || "🍽️" }); setShowCatModal(true); };
+  const saveCat = async () => {
+    if (!catForm.name) return;
+    const r = editingCat
+      ? await apiFetch(`/categories/${editingCat.id}`, { method: "PATCH", body: JSON.stringify(catForm) })
+      : await apiFetch("/categories", { method: "POST", body: JSON.stringify(catForm) });
+    if (r.ok) { toast({ title: editingCat ? "Категорію оновлено" : "Категорію додано" }); setShowCatModal(false); loadCategories(); loadItems(); }
+  };
+  const deleteCat = async (c: any) => {
+    if (!confirm(`Видалити категорію «${c.name}»?`)) return;
+    const r = await apiFetch(`/categories/${c.id}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: `Категорію «${c.name}» видалено` }); loadCategories(); loadItems(); }
   };
 
   // ── Full-screen order detail ────────────────────────────────────────────────
@@ -355,28 +409,47 @@ export default function FbPage() {
 
         {/* ── HALL ── */}
         {tab === "hall" && (
-          <div className="space-y-6">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-gray-500">{tables.length} столів · клікніть для замовлення</p>
+              <Button variant="outline" size="sm" onClick={openNewTable} className="h-8 gap-1.5">
+                <Plus className="h-3.5 w-3.5" />Новий стіл
+              </Button>
+            </div>
             {Object.entries(groupedTables).map(([location, tbls]) => (
               <div key={location}>
                 <h3 className="font-semibold text-gray-700 mb-3 text-sm">{location}</h3>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                  {tbls.map((tbl: any) => (
-                    <button key={tbl.id} onClick={() => handleTableClick(tbl)}
-                      className={`relative p-3 rounded-xl border-2 text-center transition-all hover:shadow-md ${TABLE_STATUS_COLORS[tbl.status]} ${tbl.status === "free" ? "hover:border-green-500" : "hover:border-current"}`}>
-                      <div className="text-xs font-medium text-gray-500 mb-1">{tbl.location === "Бар" ? "🍸" : "🪑"}</div>
-                      <div className="font-bold text-lg leading-none">{tbl.number}</div>
-                      <div className="text-xs mt-1 opacity-70">{tbl.capacity} ос.</div>
-                      {tbl.status === "occupied" && tbl.orderTotal && (
-                        <div className="text-xs font-medium mt-0.5">{parseFloat(tbl.orderTotal).toLocaleString()} ₴</div>
-                      )}
-                      {tbl.status !== "free" && (
-                        <div className={`absolute top-1 right-1 w-2 h-2 rounded-full ${tbl.status === "occupied" ? "bg-red-500" : tbl.status === "reserved" ? "bg-yellow-500" : "bg-blue-500"}`} />
-                      )}
-                    </button>
+                  {(tbls as any[]).map((tbl: any) => (
+                    <div key={tbl.id} className="relative group">
+                      <button onClick={() => handleTableClick(tbl)}
+                        className={`relative w-full p-3 rounded-xl border-2 text-center transition-all hover:shadow-md ${TABLE_STATUS_COLORS[tbl.status]} ${tbl.status === "free" ? "hover:border-green-500" : "hover:border-current"}`}>
+                        <div className="text-xs font-medium text-gray-500 mb-1">{tbl.location === "Бар" ? "🍸" : "🪑"}</div>
+                        <div className="font-bold text-lg leading-none">{tbl.number}</div>
+                        <div className="text-xs mt-1 opacity-70">{tbl.capacity} ос.</div>
+                        {tbl.status === "occupied" && tbl.orderTotal && (
+                          <div className="text-xs font-medium mt-0.5">{parseFloat(tbl.orderTotal).toLocaleString()} ₴</div>
+                        )}
+                        {tbl.status !== "free" && (
+                          <div className={`absolute top-1 right-1 w-2 h-2 rounded-full ${tbl.status === "occupied" ? "bg-red-500" : tbl.status === "reserved" ? "bg-yellow-500" : "bg-blue-500"}`} />
+                        )}
+                      </button>
+                      {/* Edit / Delete on hover */}
+                      <div className="absolute -top-1.5 -right-1.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <button onClick={e => { e.stopPropagation(); openEditTable(tbl); }} className="p-1 bg-white border border-gray-200 rounded-md shadow-sm text-indigo-600 hover:bg-indigo-50"><Edit2 className="h-2.5 w-2.5" /></button>
+                        <button onClick={e => { e.stopPropagation(); deleteTable(tbl); }} className="p-1 bg-white border border-gray-200 rounded-md shadow-sm text-red-500 hover:bg-red-50"><Trash2 className="h-2.5 w-2.5" /></button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
             ))}
+            {tables.length === 0 && (
+              <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-xl">
+                <UtensilsCrossed className="h-10 w-10 text-gray-200 mx-auto mb-2" />
+                <p className="text-sm text-gray-400">Немає столів. Натисніть «Новий стіл» щоб додати.</p>
+              </div>
+            )}
             <div className="flex flex-wrap gap-3 text-xs text-gray-500">
               {Object.entries(TABLE_STATUS_UA).map(([s, l]) => (
                 <span key={s} className="flex items-center gap-1">
@@ -532,27 +605,51 @@ export default function FbPage() {
         {/* ── MENU ── */}
         {tab === "menu" && (
           <div className="space-y-4">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
+            <div className="flex gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[160px]">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                 <Input className="pl-9" placeholder="Пошук по меню…" value={menuSearch} onChange={e => setMenuSearch(e.target.value)} />
               </div>
               <Select value={menuCatFilter} onValueChange={setMenuCatFilter}>
-                <SelectTrigger className="w-44"><SelectValue placeholder="Категорія" /></SelectTrigger>
+                <SelectTrigger className="w-40"><SelectValue placeholder="Категорія" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Всі категорії</SelectItem>
                   {categories.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.emoji} {c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Button className="bg-orange-600 hover:bg-orange-700" onClick={() => setShowNewItem(true)}><Plus className="h-4 w-4 mr-1" />Страва</Button>
+              <Button variant="outline" size="sm" onClick={() => setShowCatManager(v => !v)} className={`h-10 gap-1.5 ${showCatManager ? "bg-orange-50 border-orange-300" : ""}`}>
+                <Settings className="h-3.5 w-3.5" />Категорії
+              </Button>
+              <Button className="bg-orange-600 hover:bg-orange-700 h-10" onClick={() => setShowNewItem(true)}><Plus className="h-4 w-4 mr-1" />Нова позиція</Button>
             </div>
+
+            {/* Category Manager Panel */}
+            {showCatManager && (
+              <div className="border border-orange-200 rounded-xl bg-orange-50 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-orange-700 uppercase tracking-wide">Управління категоріями</span>
+                  <Button variant="ghost" size="sm" onClick={openNewCat} className="h-6 text-xs gap-1 text-orange-700 hover:bg-orange-100">
+                    <Plus className="h-3 w-3" />Нова
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {categories.map(c => (
+                    <div key={c.id} className="flex items-center gap-1 bg-white border border-orange-200 rounded-lg px-2 py-1">
+                      <span className="text-sm">{c.emoji} {c.name}</span>
+                      <button onClick={() => openEditCat(c)} className="text-gray-400 hover:text-indigo-600 ml-1"><Edit2 className="h-3 w-3" /></button>
+                      <button onClick={() => deleteCat(c)} className="text-gray-400 hover:text-red-500"><X className="h-3 w-3" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {Object.entries(groupedItems).map(([cat, catItems]) => (
               <div key={cat}>
                 <h3 className="font-semibold text-gray-700 mb-2 text-sm">{cat}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {(catItems as any[]).map((it: any) => (
-                    <div key={it.id} className={`flex items-center gap-3 p-3 rounded-xl border ${it.isAvailable ? "bg-white border-gray-100" : "bg-gray-50 border-gray-200 opacity-60"}`}>
+                    <div key={it.id} className={`relative group flex items-center gap-3 p-3 rounded-xl border ${it.isAvailable ? "bg-white border-gray-100" : "bg-gray-50 border-gray-200 opacity-60"}`}>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-medium text-sm">{it.name}</span>
@@ -566,18 +663,25 @@ export default function FbPage() {
                           {it.cookMinutes && <span className="text-xs text-gray-400 flex items-center gap-0.5"><Clock className="h-3 w-3" />{it.cookMinutes} хв</span>}
                         </div>
                       </div>
-                      <button className="text-xs px-2 py-1 rounded-lg border transition hover:border-orange-300"
-                        onClick={async () => {
-                          await apiFetch(`/items/${it.id}`, { method: "PATCH", body: JSON.stringify({ isAvailable: !it.isAvailable }) });
-                          loadItems();
-                        }}>
-                        {it.isAvailable ? "✓ Є" : "○ Немає"}
-                      </button>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button className="text-xs px-2 py-1 rounded-lg border transition hover:border-orange-300"
+                          onClick={async () => {
+                            await apiFetch(`/items/${it.id}`, { method: "PATCH", body: JSON.stringify({ isAvailable: !it.isAvailable }) });
+                            loadItems();
+                          }}>
+                          {it.isAvailable ? "✓ Є" : "○ Немає"}
+                        </button>
+                        <button onClick={() => openEditItem(it)} title="Редагувати" className="opacity-30 group-hover:opacity-100 transition-opacity p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg border border-transparent hover:border-indigo-200"><Edit2 className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => deleteMenuItem(it)} title="Видалити" className="opacity-30 group-hover:opacity-100 transition-opacity p-1.5 text-red-500 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
             ))}
+            {items.length === 0 && (
+              <Card className="border-dashed"><CardContent className="py-10 text-center text-gray-400">Меню порожнє. Додайте першу страву.</CardContent></Card>
+            )}
           </div>
         )}
       </div>
@@ -604,6 +708,65 @@ export default function FbPage() {
           const r = await apiFetch("/items", { method: "POST", body: JSON.stringify(data) });
           if (r.ok) { toast({ title: "Страву додано" }); setShowNewItem(false); loadItems(); }
         }} />
+
+      {/* Table create/edit modal */}
+      <Dialog open={showTableModal} onOpenChange={setShowTableModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>{editingTable ? `Редагувати стіл ${editingTable.number}` : "Новий стіл"}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">Номер столу *</Label>
+                <Input placeholder="1, 2A, VIP-1…" value={tableForm.number} onChange={e => setTableForm(f => ({ ...f, number: e.target.value }))} />
+              </div>
+              <div><Label className="text-xs">Місць</Label>
+                <Input type="number" min={1} value={tableForm.capacity} onChange={e => setTableForm(f => ({ ...f, capacity: e.target.value }))} />
+              </div>
+            </div>
+            <div><Label className="text-xs">Зона / локація</Label>
+              <Input placeholder="Основний зал, Тераса, VIP…" value={tableForm.location} onChange={e => setTableForm(f => ({ ...f, location: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTableModal(false)}>Скасувати</Button>
+            <Button disabled={!tableForm.number} onClick={saveTable} className="bg-orange-600 hover:bg-orange-700">
+              {editingTable ? "Зберегти" : "Додати стіл"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit menu item dialog */}
+      {editingItem && (
+        <EditMenuItemDialog open={showEditItem} item={editingItem} categories={categories}
+          onClose={() => { setShowEditItem(false); setEditingItem(null); }}
+          onSave={async (data: any) => {
+            const r = await apiFetch(`/items/${editingItem.id}`, { method: "PATCH", body: JSON.stringify(data) });
+            if (r.ok) { toast({ title: "Страву оновлено" }); setShowEditItem(false); setEditingItem(null); loadItems(); }
+          }} />
+      )}
+
+      {/* Category create/edit modal */}
+      <Dialog open={showCatModal} onOpenChange={setShowCatModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>{editingCat ? `Редагувати: ${editingCat.name}` : "Нова категорія"}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-3 gap-2">
+              <div><Label className="text-xs">Емодзі</Label>
+                <Input value={catForm.emoji} onChange={e => setCatForm(f => ({ ...f, emoji: e.target.value }))} className="text-center text-xl" maxLength={4} />
+              </div>
+              <div className="col-span-2"><Label className="text-xs">Назва *</Label>
+                <Input placeholder="Основні страви" value={catForm.name} onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCatModal(false)}>Скасувати</Button>
+            <Button disabled={!catForm.name} onClick={saveCat} className="bg-orange-600 hover:bg-orange-700">
+              {editingCat ? "Зберегти" : "Додати категорію"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }
@@ -738,47 +901,85 @@ function NewOrderDialog({ open, onClose, tables, defaultTable, onSave }: any) {
 }
 
 // ── New menu item dialog ──────────────────────────────────────────────────────
+function MenuItemForm({ form, setForm, categories }: any) {
+  return (
+    <div className="space-y-3">
+      <div><Label>Назва *</Label><Input placeholder="Борщ із пампушками" value={form.name} onChange={e => setForm((f: any) => ({ ...f, name: e.target.value }))} /></div>
+      <div><Label>Опис</Label><Textarea rows={2} value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} /></div>
+      <div className="grid grid-cols-2 gap-2">
+        <div><Label>Категорія</Label>
+          <Select value={String(form.categoryId || "")} onValueChange={v => setForm((f: any) => ({ ...f, categoryId: v }))}>
+            <SelectTrigger><SelectValue placeholder="Оберіть" /></SelectTrigger>
+            <SelectContent>{categories.map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.emoji} {c.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div><Label>Ціна (₴) *</Label><Input type="number" value={form.price} onChange={e => setForm((f: any) => ({ ...f, price: e.target.value }))} /></div>
+      </div>
+      <div><Label>Час приготування (хв)</Label><Input type="number" value={form.cookMinutes} onChange={e => setForm((f: any) => ({ ...f, cookMinutes: parseInt(e.target.value) || 15 }))} /></div>
+      <div className="flex gap-4">
+        <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={!!form.isVegetarian} onChange={e => setForm((f: any) => ({ ...f, isVegetarian: e.target.checked }))} />🌿 Вегетаріанське</label>
+        <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={!!form.isPopular} onChange={e => setForm((f: any) => ({ ...f, isPopular: e.target.checked }))} />⭐ Популярне</label>
+      </div>
+    </div>
+  );
+}
+
 function NewMenuItemDialog({ open, onClose, categories, onSave }: any) {
-  const [form, setForm] = useState({ name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, tags: "" });
+  const [form, setForm] = useState({ name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false });
   const [loading, setLoading] = useState(false);
+  const handleSubmit = async () => {
+    if (!form.name || !form.price) return;
+    setLoading(true);
+    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15 });
+    setLoading(false);
+    setForm({ name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false });
+  };
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Нова страва / позиція меню</DialogTitle></DialogHeader>
+        <MenuItemForm form={form} setForm={setForm} categories={categories} />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Скасувати</Button>
+          <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Додати"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Edit menu item dialog ─────────────────────────────────────────────────────
+function EditMenuItemDialog({ open, item, onClose, categories, onSave }: any) {
+  const [form, setForm] = useState<any>({});
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (item) setForm({
+      name: item.name || "",
+      description: item.description || "",
+      categoryId: item.categoryId ? String(item.categoryId) : "",
+      price: item.price || "",
+      cookMinutes: item.cookMinutes || 15,
+      isVegetarian: !!item.isVegetarian,
+      isPopular: !!item.isPopular,
+    });
+  }, [item]);
 
   const handleSubmit = async () => {
     if (!form.name || !form.price) return;
     setLoading(true);
-    await onSave({
-      ...form,
-      categoryId: form.categoryId ? parseInt(form.categoryId) : null,
-      cookMinutes: parseInt(String(form.cookMinutes)),
-      tags: form.tags.split(",").map((s: string) => s.trim()).filter(Boolean),
-    });
+    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15 });
     setLoading(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Нова страва / позиція меню</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div><Label>Назва *</Label><Input placeholder="Борщ із пампушками" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <div><Label>Опис</Label><Textarea rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
-          <div className="grid grid-cols-2 gap-2">
-            <div><Label>Категорія</Label>
-              <Select value={form.categoryId} onValueChange={v => setForm(f => ({ ...f, categoryId: v }))}>
-                <SelectTrigger><SelectValue placeholder="Оберіть" /></SelectTrigger>
-                <SelectContent>{categories.map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.emoji} {c.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div><Label>Ціна (₴) *</Label><Input type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} /></div>
-          </div>
-          <div><Label>Час приготування (хв)</Label><Input type="number" value={form.cookMinutes} onChange={e => setForm(f => ({ ...f, cookMinutes: parseInt(e.target.value) }))} /></div>
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={form.isVegetarian} onChange={e => setForm(f => ({ ...f, isVegetarian: e.target.checked }))} />🌿 Вегетаріанське</label>
-            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={form.isPopular} onChange={e => setForm(f => ({ ...f, isPopular: e.target.checked }))} />⭐ Популярне</label>
-          </div>
-        </div>
+        <DialogHeader><DialogTitle>Редагувати: {item?.name}</DialogTitle></DialogHeader>
+        <MenuItemForm form={form} setForm={setForm} categories={categories} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
-          <Button onClick={handleSubmit} disabled={loading} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Додати"}</Button>
+          <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Зберегти зміни"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -90,6 +90,38 @@ router.post('/menu/categories', async (req, res) => {
   }
 });
 
+router.patch('/menu/categories/:id', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { id } = req.params;
+    const { name, description, icon, sort_order } = req.body;
+    const result = await db.execute(sql`
+      UPDATE menu_categories SET
+        name = COALESCE(${name || null}, name),
+        description = COALESCE(${description || null}, description),
+        icon = COALESCE(${icon || null}, icon),
+        sort_order = COALESCE(${sort_order ?? null}, sort_order)
+      WHERE id = ${parseInt(id)} AND organization_id = ${orgId}
+      RETURNING *
+    `);
+    if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ category: result.rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/menu/categories/:id', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { id } = req.params;
+    await db.execute(sql`UPDATE menu_categories SET is_active = FALSE WHERE id = ${parseInt(id)} AND organization_id = ${orgId}`);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── MENU ITEMS ───────────────────────────────────────────────────────────────
 router.get('/menu/items', async (req, res) => {
   try {
@@ -139,7 +171,7 @@ router.patch('/menu/items/:id', async (req, res) => {
   try {
     const orgId = (req as any).user.organizationId;
     const { id } = req.params;
-    const { name, description, price, cost_price, category_id, item_type, prep_time_min, calories, is_available, is_featured, tags, sort_order } = req.body;
+    const { name, description, price, cost_price, category_id, item_type, prep_time_min, calories, is_available, is_featured, tags, sort_order, photo_url } = req.body;
     const result = await db.execute(sql`
       UPDATE menu_items SET
         name = COALESCE(${name || null}, name),
@@ -154,6 +186,7 @@ router.patch('/menu/items/:id', async (req, res) => {
         is_featured = COALESCE(${is_featured ?? null}, is_featured),
         tags = COALESCE(${tags ? JSON.stringify(tags) : null}::jsonb, tags),
         sort_order = COALESCE(${sort_order ?? null}, sort_order),
+        photo_url = COALESCE(${photo_url ?? null}, photo_url),
         updated_at = NOW()
       WHERE id = ${parseInt(id)} AND organization_id = ${orgId}
       RETURNING *
@@ -199,22 +232,50 @@ router.get('/tables', async (req, res) => {
   }
 });
 
+router.post('/tables', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { table_number, section, capacity, notes } = req.body;
+    if (!table_number) return res.status(400).json({ error: 'table_number required' });
+    const result = await db.execute(sql`
+      INSERT INTO restaurant_tables (organization_id, table_number, section, capacity, notes, status, is_active)
+      VALUES (${orgId}, ${String(table_number)}, ${section || 'Зал'}, ${capacity || 4}, ${notes || null}, 'free', TRUE)
+      RETURNING *
+    `);
+    res.status(201).json({ table: result.rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.patch('/tables/:id', async (req, res) => {
   try {
     const orgId = (req as any).user.organizationId;
     const { id } = req.params;
-    const { status, section, capacity, notes } = req.body;
+    const { status, section, capacity, notes, table_number } = req.body;
     const result = await db.execute(sql`
       UPDATE restaurant_tables SET
         status = COALESCE(${status || null}::table_status, status),
         section = COALESCE(${section || null}, section),
         capacity = COALESCE(${capacity ?? null}, capacity),
         notes = COALESCE(${notes || null}, notes),
+        table_number = COALESCE(${table_number || null}, table_number),
         updated_at = NOW()
       WHERE id = ${parseInt(id)} AND organization_id = ${orgId}
       RETURNING *
     `);
     res.json({ table: result.rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/tables/:id', async (req, res) => {
+  try {
+    const orgId = (req as any).user.organizationId;
+    const { id } = req.params;
+    await db.execute(sql`UPDATE restaurant_tables SET is_active = FALSE, updated_at = NOW() WHERE id = ${parseInt(id)} AND organization_id = ${orgId}`);
+    res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
