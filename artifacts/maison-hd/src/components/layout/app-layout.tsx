@@ -7,7 +7,8 @@ import {
   PartyPopper, UtensilsCrossed, Zap, Bot, Building2, Globe,
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
-  ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package,
+  ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package, QrCode, Coins,
+  Smartphone, Leaf,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,13 +53,15 @@ const NAV: NavSection[] = [
       { name: "Тех. служба",    path: "/maintenance",  icon: Wrench,   roles: null },
       { name: "Активності",     path: "/activities",   icon: Bike,     roles: null },
       { name: "Проживання",     path: "/accommodation",icon: BedDouble,roles: null },
-      { name: "Внутрішні операції", path: "/operations",icon: Layers, roles: null },
+      { name: "Внутрішні операції", path: "/operations",   icon: Layers,       roles: null },
+      { name: "Розклад персоналу", path: "/staff-schedule", icon: CalendarDays, roles: ["super_admin","owner","manager"] },
     ],
   },
   {
     label: "Дохід",
     items: [
-      { name: "Revenue Mgmt",  path: "/revenue", icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
+      { name: "Revenue Mgmt",      path: "/revenue",           icon: TrendingUp, roles: ["super_admin", "owner", "manager"] },
+      { name: "Rate Intelligence", path: "/rate-intelligence",  icon: Activity,   roles: ["super_admin", "owner", "manager"] },
       { name: "OTA Канали",    path: "/ota",     icon: Globe,      roles: ["super_admin", "owner", "manager"] },
       { name: "Оренда",        path: "/rentals", icon: Building2,  roles: ["super_admin", "owner", "manager"] },
     ],
@@ -68,6 +71,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Inbox",           path: "/inbox",            icon: MessageSquare, roles: null },
       { name: "Guest Experience",path: "/guest-experience", icon: Heart,         roles: ["super_admin", "owner", "manager", "reception"] },
+      { name: "Digital Key",     path: "/digital-keys",     icon: Smartphone,    roles: null },
       { name: "Hotel TV",        path: "/hotel-tv",         icon: Monitor,       roles: ["super_admin", "owner", "manager"] },
     ],
   },
@@ -76,8 +80,9 @@ const NAV: NavSection[] = [
     items: [
       { name: "SPA & Wellness",  path: "/spa",      icon: Waves,           roles: null },
       { name: "Events & Банкети",path: "/events",   icon: PartyPopper,     roles: null },
-      { name: "Ресторан & F&B",  path: "/fb",       icon: UtensilsCrossed, roles: null },
-      { name: "Мінібар",         path: "/minibar",  icon: Wine,            roles: null },
+      { name: "Ресторан & F&B",  path: "/fb",           icon: UtensilsCrossed, roles: null },
+      { name: "QR-замовлення",   path: "/qr-ordering", icon: QrCode,          roles: null },
+      { name: "Мінібар",         path: "/minibar",      icon: Wine,            roles: null },
     ],
   },
   {
@@ -86,6 +91,8 @@ const NAV: NavSection[] = [
       { name: "AI Hub",       path: "/ai-hub",     icon: Brain, roles: ["super_admin", "owner", "manager"] },
       { name: "Автоматизація",path: "/automation", icon: Bot,   roles: ["super_admin", "owner", "manager"] },
       { name: "Пакети",       path: "/packages",   icon: Package, roles: ["super_admin", "owner", "manager"] },
+      { name: "Лояльність",   path: "/loyalty",    icon: Coins,   roles: ["super_admin", "owner", "manager"] },
+      { name: "Upsell Engine",path: "/upsell",     icon: Zap,     roles: ["super_admin", "owner", "manager"] },
     ],
   },
   {
@@ -103,6 +110,12 @@ const NAV: NavSection[] = [
     items: [
       { name: "Аналітика", path: "/analytics", icon: BarChart3,  roles: ["super_admin", "owner", "manager"] },
       { name: "Звіти",     path: "/reports",   icon: FileText,   roles: null },
+    ],
+  },
+  {
+    label: "Sustainability",
+    items: [
+      { name: "ESG & Екологія", path: "/sustainability", icon: Leaf, roles: ["super_admin", "owner", "manager"] },
     ],
   },
   {

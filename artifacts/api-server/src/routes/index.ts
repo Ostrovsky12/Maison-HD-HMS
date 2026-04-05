@@ -51,6 +51,12 @@ import reportsRouter from "./reports.js";
 import posterRouter from "./poster.js";
 import minibarRouter from "./minibar.js";
 import packagesRouter from "./packages.js";
+import loyaltyRouter from "./loyalty.js";
+import staffScheduleRouter from "./staff-schedule.js";
+import upsellRouter from "./upsell.js";
+import rateIntelRouter from "./rate-intelligence.js";
+import digitalKeysRouter from "./digital-keys.js";
+import sustainabilityRouter from "./sustainability.js";
 
 const router: IRouter = Router();
 
@@ -106,5 +112,11 @@ router.use("/reports", reportsRouter);
 router.use("/poster", posterRouter);
 router.use("/minibar", minibarRouter);
 router.use("/packages", packagesRouter);
+router.use("/loyalty", loyaltyRouter);
+router.use("/schedule", staffScheduleRouter);
+router.use("/upsell", upsellRouter);
+router.use("/rate-intel", rateIntelRouter);
+router.use("/digital-keys", digitalKeysRouter);
+router.use("/sustainability", sustainabilityRouter);
 
 export default router;

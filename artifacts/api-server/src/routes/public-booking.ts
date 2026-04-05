@@ -3,8 +3,9 @@ import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import {
   propertiesTable, unitsTable, bookingsTable, organizationsTable,
+  fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable,
 } from "@workspace/db";
-import { eq, and, or, gte, lte, ne, inArray, notInArray, sql } from "drizzle-orm";
+import { eq, and, or, gte, lte, ne, inArray, notInArray, sql, asc } from "drizzle-orm";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
 import { fireBookingEvent } from "../lib/automation-runner.js";
 import { sendGuestConfirmationEmail, sendGuestConfirmationSms, notifyBookingCreated } from "../lib/notify.js";
@@ -341,6 +342,97 @@ router.post("/liqpay/callback", async (req, res) => {
     }
 
     res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── GET /menu/:orgSlug — public F&B menu for QR ordering ────────────────────
+router.get("/menu/:orgSlug", async (req, res) => {
+  try {
+    const { orgSlug } = req.params;
+    const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
+    if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
+    const orgId = orgs[0].id;
+
+    const cats = await db.select().from(fbCategoriesTable)
+      .where(and(eq(fbCategoriesTable.organizationId, orgId), eq(fbCategoriesTable.isActive, true)))
+      .orderBy(asc(fbCategoriesTable.sortOrder));
+
+    const items = await db.select().from(fbItemsTable)
+      .where(and(eq(fbItemsTable.organizationId, orgId), eq(fbItemsTable.isAvailable, true)))
+      .orderBy(asc(fbItemsTable.sortOrder));
+
+    const catMap = cats.map(cat => ({
+      ...cat,
+      items: items.filter(i => i.categoryId === cat.id),
+    }));
+
+    res.json({ org: { id: orgId, name: orgs[0].name, slug: orgs[0].slug }, categories: catMap });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── GET /table/:orgSlug/:tableId — get table info ───────────────────────────
+router.get("/table/:orgSlug/:tableId", async (req, res) => {
+  try {
+    const { orgSlug, tableId } = req.params;
+    const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
+    if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
+    const orgId = orgs[0].id;
+
+    const tables = await db.select().from(fbTablesTable)
+      .where(and(eq(fbTablesTable.organizationId, orgId), eq(fbTablesTable.id, parseInt(tableId)), eq(fbTablesTable.isActive, true)));
+    if (!tables.length) return res.status(404).json({ error: "Table not found" });
+
+    res.json({ table: tables[0], org: { name: orgs[0].name } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── POST /menu-order — place QR order from guest ────────────────────────────
+router.post("/menu-order", async (req, res) => {
+  try {
+    const { orgSlug, tableId, guestName, guestCount, items, notes } = req.body;
+    if (!orgSlug || !items?.length) return res.status(400).json({ error: "orgSlug та items обов'язкові" });
+
+    const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
+    if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
+    const orgId = orgs[0].id;
+
+    let tableRecord: any = null;
+    if (tableId) {
+      const tables = await db.select().from(fbTablesTable).where(and(eq(fbTablesTable.id, parseInt(tableId)), eq(fbTablesTable.organizationId, orgId)));
+      tableRecord = tables[0] || null;
+    }
+
+    const totalAmount = items.reduce((s: number, i: any) => s + parseFloat(i.price || 0) * (i.quantity || 1), 0);
+
+    const [order] = await db.insert(fbOrdersTable).values({
+      organizationId: orgId,
+      tableId: tableRecord?.id || null,
+      orderType: tableRecord ? "dine_in" : "room_service",
+      guestName: guestName || "Гість (QR)",
+      guestCount: guestCount || 1,
+      roomNumber: tableRecord ? `Стіл ${tableRecord.number}` : null,
+      status: "open",
+      totalAmount: String(totalAmount),
+      notes: notes || null,
+    }).returning();
+
+    const itemValues = items.map((i: any) => ({
+      orderId: order.id,
+      organizationId: orgId,
+      itemId: i.id || null,
+      name: i.name,
+      price: String(i.price),
+      quantity: i.quantity || 1,
+      totalPrice: String(parseFloat(i.price) * (i.quantity || 1)),
+      notes: i.notes || null,
+    }));
+    await db.insert(fbOrderItemsTable).values(itemValues);
+
+    if (tableRecord) {
+      await db.update(fbTablesTable).set({ status: "occupied", currentOrderId: order.id }).where(eq(fbTablesTable.id, tableRecord.id));
+    }
+
+    res.status(201).json({ orderId: order.id, orderNumber: order.id, total: totalAmount });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

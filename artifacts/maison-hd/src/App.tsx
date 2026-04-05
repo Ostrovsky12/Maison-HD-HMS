@@ -56,6 +56,14 @@ import PricingPage from "@/pages/pricing";
 import PitchPage from "@/pages/pitch";
 import NightAuditPage from "@/pages/night-audit";
 import PackagesPage from "@/pages/packages";
+import QrOrderingPage from "@/pages/qr-ordering";
+import QrMenuPage from "@/pages/qr-menu";
+import LoyaltyPage from "@/pages/loyalty";
+import StaffSchedulePage from "@/pages/staff-schedule";
+import UpsellPage from "@/pages/upsell";
+import RateIntelligencePage from "@/pages/rate-intelligence";
+import DigitalKeysPage from "@/pages/digital-keys";
+import SustainabilityPage from "@/pages/sustainability";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -165,6 +173,15 @@ function Router() {
       <Route path="/pricing"><ProtectedRoute component={PricingPage} /></Route>
       <Route path="/night-audit"><ProtectedRoute component={NightAuditPage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/packages"><ProtectedRoute component={PackagesPage} roles={["super_admin","owner","manager"]} /></Route>
+      <Route path="/qr-ordering"><ProtectedRoute component={QrOrderingPage} /></Route>
+      <Route path="/loyalty"><ProtectedRoute component={LoyaltyPage} /></Route>
+      <Route path="/staff-schedule"><ProtectedRoute component={StaffSchedulePage} roles={["super_admin","owner","manager"]} /></Route>
+      <Route path="/upsell"><ProtectedRoute component={UpsellPage} roles={["super_admin","owner","manager"]} /></Route>
+      <Route path="/rate-intelligence"><ProtectedRoute component={RateIntelligencePage} roles={["super_admin","owner","manager"]} /></Route>
+      <Route path="/digital-keys"><ProtectedRoute component={DigitalKeysPage} /></Route>
+      <Route path="/sustainability"><ProtectedRoute component={SustainabilityPage} roles={["super_admin","owner","manager"]} /></Route>
+      <Route path="/qr-menu/:orgSlug/:tableId" component={QrMenuPage} />
+      <Route path="/qr-menu/:orgSlug" component={QrMenuPage} />
 
       <Route path="/" component={HomeRoute} />
 

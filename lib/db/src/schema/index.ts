@@ -35,3 +35,5 @@ export * from "./guest-experience";
 export * from "./accounting";
 export * from "./minibar";
 export * from "./packages";
+export * from "./loyalty";
+export * from "./staff-schedule";
