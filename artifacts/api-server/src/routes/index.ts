@@ -48,6 +48,7 @@ import consoleRouter from "./console.js";
 import paymentLayerRouter from "./payment-layer.js";
 import superAdminRouter from "./super-admin.js";
 import reportsRouter from "./reports.js";
+import posterRouter from "./poster.js";
 
 const router: IRouter = Router();
 
@@ -100,5 +101,6 @@ router.use("/console", consoleRouter);
 router.use("/payment-layer", paymentLayerRouter);
 router.use("/super-admin", superAdminRouter);
 router.use("/reports", reportsRouter);
+router.use("/poster", posterRouter);
 
 export default router;
