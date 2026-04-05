@@ -7,7 +7,7 @@ import {
   PartyPopper, UtensilsCrossed, Zap, Bot, Building2, Globe,
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
-  ChevronRight, Menu, Sparkles, Search,
+  ChevronRight, Menu, Sparkles, Search, Wine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -74,9 +74,10 @@ const NAV: NavSection[] = [
   {
     label: "Гостинність",
     items: [
-      { name: "SPA & Wellness",  path: "/spa",    icon: Waves,           roles: null },
-      { name: "Events & Банкети",path: "/events", icon: PartyPopper,     roles: null },
-      { name: "Ресторан & F&B",  path: "/fb",     icon: UtensilsCrossed, roles: null },
+      { name: "SPA & Wellness",  path: "/spa",      icon: Waves,           roles: null },
+      { name: "Events & Банкети",path: "/events",   icon: PartyPopper,     roles: null },
+      { name: "Ресторан & F&B",  path: "/fb",       icon: UtensilsCrossed, roles: null },
+      { name: "Мінібар",         path: "/minibar",  icon: Wine,            roles: null },
     ],
   },
   {

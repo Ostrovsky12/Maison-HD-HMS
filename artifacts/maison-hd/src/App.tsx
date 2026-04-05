@@ -50,6 +50,8 @@ import RestaurantPage from "@/pages/restaurant";
 import ActivitiesPage from "@/pages/activities";
 import AccommodationPage from "@/pages/accommodation";
 import StaffConsolePage from "@/pages/staff-console";
+import MinibarPage from "@/pages/minibar";
+import MinibarGuestPage from "@/pages/minibar-guest";
 import PricingPage from "@/pages/pricing";
 import PitchPage from "@/pages/pitch";
 
@@ -138,6 +140,8 @@ function Router() {
       <Route path="/fb"><ProtectedRoute component={FbPage} /></Route>
       <Route path="/hq"><ProtectedRoute component={HqPage} /></Route>
       <Route path="/automation"><ProtectedRoute component={AutomationPage} /></Route>
+      <Route path="/minibar" component={() => <ProtectedRoute component={MinibarPage} />} />
+      <Route path="/minibar-guest/:unitId" component={MinibarGuestPage} />
       <Route path="/book" component={BookPage} />
       <Route path="/rentals"><ProtectedRoute component={RentalsPage} /></Route>
       <Route path="/ota"><ProtectedRoute component={OtaPage} /></Route>

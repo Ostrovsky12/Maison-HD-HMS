@@ -33,3 +33,4 @@ export * from "./ai-knowledge";
 export * from "./budgets";
 export * from "./guest-experience";
 export * from "./accounting";
+export * from "./minibar";
