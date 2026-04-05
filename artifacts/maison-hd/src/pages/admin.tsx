@@ -15,7 +15,7 @@ import {
   TrendingUp, BarChart3, Shield, Zap, RefreshCw, Loader2,
   Globe, Database, Server, Settings, CreditCard, LifeBuoy, Flag,
   Activity, DollarSign, Package, Star, Eye, Edit3, ToggleLeft, ToggleRight,
-  Copy, Check, Search, Plus,
+  Copy, Check, Search, Plus, LogIn, Receipt,
   Cpu, Key, Building,
 } from "lucide-react";
 
@@ -508,18 +508,58 @@ function TenantDetailModal({ tenant, onClose, onSaved }: { tenant: any; onClose:
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [impersonating, setImpersonating] = useState(false);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [form, setForm] = useState({ plan: tenant.plan, subscriptionStatus: tenant.subscription_status, isActive: tenant.is_active });
   const [note, setNote] = useState("");
   const [modules, setModules] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
+
+  const impersonate = async () => {
+    setImpersonating(true);
+    try {
+      const r = await apiFetch(`/super-admin/tenants/${tenant.id}/impersonate`, { method: "POST" });
+      const d = await r.json();
+      if (r.ok) {
+        const oldToken = localStorage.getItem("hms_token") || "";
+        localStorage.setItem("hms_super_admin_token", oldToken);
+        localStorage.setItem("hms_token", d.token);
+        toast({ title: `🔑 Увійшли як ${d.user.name}`, description: `${d.user.email} · ${d.user.role}` });
+        onClose();
+        window.location.href = "/";
+      } else {
+        toast({ title: "Помилка", description: d.error, variant: "destructive" });
+      }
+    } finally { setImpersonating(false); }
+  };
+
+  const createInvoice = async () => {
+    setCreatingInvoice(true);
+    try {
+      const r = await apiFetch(`/super-admin/tenants/${tenant.id}/invoice`, {
+        method: "POST",
+        body: JSON.stringify({ period: "monthly", status: "pending" }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        toast({ title: `✅ Рахунок ${d.invoice.invoice_number} створено`, description: `Сума: ${d.invoice.total} UAH` });
+      } else {
+        toast({ title: "Помилка", description: d.error, variant: "destructive" });
+      }
+    } finally { setCreatingInvoice(false); }
+  };
 
   useEffect(() => {
     apiFetch(`/super-admin/tenants/${tenant.id}`)
       .then(r => r.json())
       .then(d => {
         setDetail(d);
-        const defaults = MODULE_LIST.reduce((acc, m) => ({ ...acc, [m.key]: true }), {} as Record<string, boolean>);
-        setModules(defaults);
+        if (d.org?.enabled_modules && typeof d.org.enabled_modules === "object") {
+          setModules(d.org.enabled_modules as Record<string, boolean>);
+        } else {
+          const defaults = MODULE_LIST.reduce((acc, m) => ({ ...acc, [m.key]: true }), {} as Record<string, boolean>);
+          setModules(defaults);
+        }
       })
       .finally(() => setLoading(false));
   }, [tenant.id]);
@@ -691,11 +731,33 @@ function TenantDetailModal({ tenant, onClose, onSaved }: { tenant: any; onClose:
           </div>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Закрити</Button>
-          <Button onClick={save} disabled={saving || loading} className="bg-indigo-600 hover:bg-indigo-700">
-            {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Зберігаю...</> : "Зберегти зміни"}
-          </Button>
+        <DialogFooter className="flex flex-wrap gap-2 sm:justify-between">
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              onClick={impersonate}
+              disabled={impersonating || loading}
+              className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
+            >
+              {impersonating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+              Увійти як адмін
+            </Button>
+            <Button
+              variant="outline"
+              onClick={createInvoice}
+              disabled={creatingInvoice || loading}
+              className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            >
+              {creatingInvoice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Receipt className="w-4 h-4" />}
+              Створити рахунок
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Закрити</Button>
+            <Button onClick={save} disabled={saving || loading} className="bg-indigo-600 hover:bg-indigo-700">
+              {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Зберігаю...</> : "Зберегти зміни"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1016,16 +1078,43 @@ function BillingTab() {
 function FeatureFlagsTab() {
   const [flags, setFlags] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const { toast } = useToast();
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true);
     apiFetch("/super-admin/feature-flags").then(r => r.json()).then(d => setFlags(d.flags || {})).finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggle = async (key: string) => {
+    const flag = flags[key];
+    if (!flag) return;
+    setToggling(key);
+    try {
+      const r = await apiFetch(`/super-admin/feature-flags/${key}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !flag.enabled }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setFlags(prev => ({ ...prev, [key]: d.flag }));
+        toast({ title: `${d.flag.enabled ? "✅ Увімкнено" : "⏸️ Вимкнено"}: ${key}` });
+      }
+    } finally { setToggling(null); }
+  };
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold text-gray-800">Platform Feature Flags</h2>
-        <p className="text-xs text-gray-500">Статус включення функцій на рівні платформи та відсоток rollout</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-800">Platform Feature Flags</h2>
+          <p className="text-xs text-gray-500">Управління функціями на рівні платформи — зміни застосовуються миттєво</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={load} disabled={loading} className="gap-1.5">
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Оновити
+        </Button>
       </div>
 
       {loading ? (
@@ -1033,32 +1122,40 @@ function FeatureFlagsTab() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {Object.entries(flags).map(([key, flag]) => (
-            <div key={key} className={`p-4 border rounded-xl flex items-start gap-3 ${flag.enabled ? "border-indigo-200 bg-indigo-50/50" : "border-gray-200 bg-gray-50"}`}>
-              <div className={`mt-0.5 w-3 h-3 rounded-full shrink-0 ${flag.enabled ? "bg-emerald-400" : "bg-gray-300"}`} />
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-semibold text-gray-800">{key}</span>
-                  <Badge className={`text-xs ${flag.enabled ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
-                    {flag.enabled ? "Enabled" : "Disabled"}
-                  </Badge>
-                </div>
-                <p className="text-xs text-gray-500 mt-0.5">{flag.description}</p>
-                <div className="flex items-center gap-2 mt-2">
-                  <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${flag.rollout === 100 ? "bg-emerald-500" : flag.rollout === 0 ? "bg-gray-300" : "bg-amber-500"}`}
-                      style={{ width: `${flag.rollout}%` }} />
+            <div key={key} className={`p-4 border rounded-xl transition-colors ${flag.enabled ? "border-indigo-200 bg-indigo-50/50" : "border-gray-200 bg-gray-50"}`}>
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-gray-800">{key}</span>
+                    <Badge className={`text-xs ${flag.enabled ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                      {flag.enabled ? "Enabled" : "Disabled"}
+                    </Badge>
                   </div>
-                  <span className="text-xs text-gray-500 w-10 text-right">Rollout: {flag.rollout}%</span>
+                  <p className="text-xs text-gray-500 mt-0.5">{flag.description}</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${flag.rollout === 100 ? "bg-emerald-500" : flag.rollout === 0 ? "bg-gray-300" : "bg-amber-500"}`}
+                        style={{ width: `${flag.rollout}%` }} />
+                    </div>
+                    <span className="text-xs text-gray-500 w-16 text-right">{flag.rollout}% rollout</span>
+                  </div>
                 </div>
+                <button
+                  onClick={() => toggle(key)}
+                  disabled={toggling === key}
+                  className={`shrink-0 w-12 h-6 rounded-full transition-colors relative ${flag.enabled ? "bg-indigo-500" : "bg-gray-300"} ${toggling === key ? "opacity-50" : ""}`}
+                >
+                  <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${flag.enabled ? "translate-x-6" : "translate-x-0.5"}`} />
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-        <p className="text-blue-700 font-semibold text-sm">ℹ️ Feature Flags — Read-only</p>
-        <p className="text-blue-600 text-xs mt-1">Наразі feature flags є конфігурацією коду. Редагування через UI — в наступній версії платформи.</p>
+      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+        <p className="text-amber-700 font-semibold text-sm">⚠️ Примітка</p>
+        <p className="text-amber-600 text-xs mt-1">Feature flags зберігаються в пам'яті сервера. Перезапуск сервера відновить значення за замовчуванням. Для персистентності — використовуйте конфіг у БД (наступна версія).</p>
       </div>
     </div>
   );

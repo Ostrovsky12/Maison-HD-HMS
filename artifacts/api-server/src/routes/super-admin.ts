@@ -6,7 +6,24 @@ import {
 } from "@workspace/db/schema";
 import { eq, sql, desc, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
-import { requireAuth, requireRole } from "../lib/auth.js";
+import { requireAuth, requireRole, signToken } from "../lib/auth.js";
+
+// ── In-memory feature flags store (resets on server restart, editable via API) ─
+const FEATURE_FLAGS: Record<string, { enabled: boolean; description: string; rollout: number }> = {
+  aiHub:             { enabled: true,  description: "AI Hub module (GPT-5 copilot, sales, insights)",          rollout: 100 },
+  hotelTv:           { enabled: true,  description: "Hotel TV kiosk display module",                           rollout: 100 },
+  guestPortal:       { enabled: true,  description: "Public guest portal / booking page",                      rollout: 100 },
+  advancedAnalytics: { enabled: true,  description: "KPI analytics, forecasts, revenue reports",               rollout: 80  },
+  automation:        { enabled: true,  description: "Automation triggers & workflows",                         rollout: 60  },
+  channelManager:    { enabled: false, description: "OTA channel manager (Booking.com, Airbnb)",               rollout: 0   },
+  revenueManagement: { enabled: true,  description: "Dynamic pricing & revenue optimization",                  rollout: 50  },
+  spaModule:         { enabled: true,  description: "SPA & Wellness management",                               rollout: 100 },
+  eventsModule:      { enabled: true,  description: "Events & banquets management",                            rollout: 100 },
+  mobileApp:         { enabled: false, description: "Native mobile app for staff",                             rollout: 0   },
+  multiProperty:     { enabled: true,  description: "Multi-property management (HQ view)",                    rollout: 100 },
+  apiAccess:         { enabled: false, description: "Developer API access with keys",                          rollout: 0   },
+  whiteLabel:        { enabled: false, description: "White-label branding for enterprise",                     rollout: 0   },
+};
 
 const router = Router();
 
@@ -119,13 +136,13 @@ router.get("/tenants/:id", async (req, res) => {
     const db_ = db as any;
 
     const orgRow = await db_.$client.query(
-      `SELECT id, name, slug, plan, subscription_status, is_active, email, phone, address, max_units, max_users, created_at, trial_ends_at, subscription_ends_at FROM organizations WHERE id = $1 LIMIT 1`,
+      `SELECT id, name, slug, plan, subscription_status, is_active, email, phone, address, max_units, max_users, created_at, trial_ends_at, subscription_ends_at, enabled_modules FROM organizations WHERE id = $1 LIMIT 1`,
       [id]
     );
     if (!orgRow.rows.length) return res.status(404).json({ error: "Not found" });
 
     const members = await db_.$client.query(
-      `SELECT id, name, email, role, is_active, last_login, created_at FROM users WHERE organization_id = $1 ORDER BY created_at`,
+      `SELECT id, name, email, role, is_active, created_at FROM users WHERE organization_id = $1 ORDER BY created_at`,
       [id]
     );
 
@@ -192,6 +209,10 @@ router.patch("/tenants/:id", async (req, res) => {
       vals.push(isActive);
       setClauses.push(`is_active = $${vals.length}`);
     }
+    if (enabledModules !== undefined) {
+      vals.push(JSON.stringify(enabledModules));
+      setClauses.push(`enabled_modules = $${vals.length}`);
+    }
 
     if (setClauses.length === 0) return res.json({ message: "No changes" });
 
@@ -201,7 +222,7 @@ router.patch("/tenants/:id", async (req, res) => {
     );
 
     const updated = await db_.$client.query(
-      `SELECT id, name, slug, plan, subscription_status, is_active, email, max_units, max_users FROM organizations WHERE id = $1`, [id]
+      `SELECT id, name, slug, plan, subscription_status, is_active, email, max_units, max_users, enabled_modules FROM organizations WHERE id = $1`, [id]
     );
     res.json(updated.rows[0]);
   } catch (e: any) {
@@ -254,24 +275,20 @@ router.get("/health", async (_req, res) => {
 });
 
 // ── PLATFORM FEATURE FLAGS ────────────────────────────────────────────────────
-router.get("/feature-flags", async (_req, res) => {
-  res.json({
-    flags: {
-      aiHub: { enabled: true, description: "AI Hub module (GPT-5 copilot, sales, insights)", rollout: 100 },
-      hotelTv: { enabled: true, description: "Hotel TV kiosk display module", rollout: 100 },
-      guestPortal: { enabled: true, description: "Public guest portal / booking page", rollout: 100 },
-      advancedAnalytics: { enabled: true, description: "KPI analytics, forecasts, revenue reports", rollout: 80 },
-      automation: { enabled: true, description: "Automation triggers & workflows", rollout: 60 },
-      channelManager: { enabled: false, description: "OTA channel manager (Booking.com, Airbnb)", rollout: 0 },
-      revenueManagement: { enabled: true, description: "Dynamic pricing & revenue optimization", rollout: 50 },
-      spaModule: { enabled: true, description: "SPA & Wellness management", rollout: 100 },
-      eventsModule: { enabled: true, description: "Events & banquets management", rollout: 100 },
-      mobileApp: { enabled: false, description: "Native mobile app for staff", rollout: 0 },
-      multiProperty: { enabled: true, description: "Multi-property management (HQ view)", rollout: 100 },
-      apiAccess: { enabled: false, description: "Developer API access with keys", rollout: 0 },
-      whiteLabel: { enabled: false, description: "White-label branding for enterprise", rollout: 0 },
-    },
-  });
+router.get("/feature-flags", (_req, res) => {
+  res.json({ flags: FEATURE_FLAGS });
+});
+
+router.patch("/feature-flags/:key", (req, res) => {
+  const { key } = req.params;
+  const { enabled, rollout } = req.body;
+  if (!FEATURE_FLAGS[key]) {
+    res.status(404).json({ error: "Flag not found" });
+    return;
+  }
+  if (typeof enabled === "boolean") FEATURE_FLAGS[key].enabled = enabled;
+  if (typeof rollout === "number") FEATURE_FLAGS[key].rollout = Math.min(100, Math.max(0, rollout));
+  res.json({ key, flag: FEATURE_FLAGS[key] });
 });
 
 // ── SUPPORT TICKETS PLACEHOLDER ───────────────────────────────────────────────
@@ -475,6 +492,117 @@ router.post("/provision-dogoda", async (_req, res) => {
         reception: "reception@dogoda.com.ua / reception123",
       },
     });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── IMPERSONATE TENANT ───────────────────────────────────────────────────────
+// Returns a short-lived JWT token for the tenant's owner/admin so super admin
+// can debug their account without needing the password.
+router.post("/tenants/:id/impersonate", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const db_ = db as any;
+
+    // Find the owner (or first admin) of the org
+    const userRow = await db_.$client.query(
+      `SELECT id, email, name, role, organization_id, property_id FROM users
+       WHERE organization_id = $1 AND is_active = true AND role IN ('owner', 'manager', 'reception')
+       ORDER BY CASE role WHEN 'owner' THEN 1 WHEN 'manager' THEN 2 ELSE 3 END
+       LIMIT 1`,
+      [id]
+    );
+
+    if (!userRow.rows.length) {
+      res.status(404).json({ error: "No active users found for this tenant" });
+      return;
+    }
+
+    const user = userRow.rows[0];
+    const token = signToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      organizationId: user.organization_id,
+      propertyId: user.property_id,
+    });
+
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      note: "Impersonation token — valid 7 days. Store as hms_token.",
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── CREATE SUBSCRIPTION INVOICE ──────────────────────────────────────────────
+router.post("/tenants/:id/invoice", async (req, res) => {
+  try {
+    const orgId = parseInt(req.params.id);
+    const db_ = db as any;
+
+    // Check org exists
+    const orgRow = await db_.$client.query(
+      `SELECT id, name, plan FROM organizations WHERE id = $1 LIMIT 1`, [orgId]
+    );
+    if (!orgRow.rows.length) {
+      res.status(404).json({ error: "Organization not found" });
+      return;
+    }
+
+    const { plan } = orgRow.rows[0];
+    const { period = "monthly", status = "pending", notes } = req.body;
+
+    const PRICES: Record<string, number> = { basic: 990, pro: 2490, enterprise: 4990 };
+    const amount = PRICES[plan] || 990;
+    const tax = Math.round(amount * 0.2);
+    const total = amount + tax;
+
+    // Generate invoice number
+    const countRow = await db_.$client.query(
+      `SELECT COUNT(*)::int AS cnt FROM subscription_invoices WHERE organization_id = $1`, [orgId]
+    );
+    const cnt = (countRow.rows[0]?.cnt || 0) + 1;
+    const invoiceNumber = `INV-${orgId}-${String(cnt).padStart(4, "0")}`;
+
+    const periodStart = new Date();
+    const periodEnd = new Date();
+    if (period === "monthly") periodEnd.setMonth(periodEnd.getMonth() + 1);
+    else periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+
+    const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+    const inserted = await db_.$client.query(`
+      INSERT INTO subscription_invoices
+        (organization_id, invoice_number, tier, period, amount, tax, total, currency, status, period_start, period_end, due_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'UAH', $8, $9, $10, $11)
+      RETURNING *
+    `, [orgId, invoiceNumber, plan, period, amount, tax, total, status, periodStart, periodEnd, dueDate]);
+
+    res.status(201).json({ invoice: inserted.rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── MARK INVOICE PAID ─────────────────────────────────────────────────────────
+router.patch("/invoices/:id/mark-paid", async (req, res) => {
+  try {
+    const invoiceId = parseInt(req.params.id);
+    const db_ = db as any;
+
+    const r = await db_.$client.query(
+      `UPDATE subscription_invoices SET status = 'paid', paid_at = NOW() WHERE id = $1 RETURNING *`,
+      [invoiceId]
+    );
+    if (!r.rows.length) {
+      res.status(404).json({ error: "Invoice not found" });
+      return;
+    }
+    res.json({ invoice: r.rows[0] });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

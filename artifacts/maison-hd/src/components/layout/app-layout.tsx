@@ -388,6 +388,24 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
+        {/* Impersonation banner */}
+        {typeof window !== "undefined" && localStorage.getItem("hms_super_admin_token") && (
+          <div className="bg-amber-500 text-white text-xs px-4 py-2 flex items-center justify-between gap-3">
+            <span className="font-semibold">🔑 Режим імперсонації — ви переглядаєте акаунт тенанта від імені Super Admin</span>
+            <button
+              onClick={() => {
+                const superToken = localStorage.getItem("hms_super_admin_token") || "";
+                localStorage.setItem("hms_token", superToken);
+                localStorage.removeItem("hms_super_admin_token");
+                window.location.href = "/admin";
+              }}
+              className="shrink-0 bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg font-bold transition-colors"
+            >
+              ← Повернутись до Super Admin
+            </button>
+          </div>
+        )}
+
         {/* Page content */}
         <div className="flex-1 overflow-auto">
           {children}

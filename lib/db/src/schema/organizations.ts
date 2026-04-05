@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, decimal, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, decimal, varchar, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -28,6 +28,8 @@ export const organizationsTable = pgTable("organizations", {
   timezone: text("timezone").default("Europe/Kiev"),
   currency: text("currency").default("UAH"),
   taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).default("20.0"),
+
+  enabledModules: jsonb("enabled_modules"),
 
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
