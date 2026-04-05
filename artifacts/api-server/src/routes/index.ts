@@ -50,6 +50,7 @@ import superAdminRouter from "./super-admin.js";
 import reportsRouter from "./reports.js";
 import posterRouter from "./poster.js";
 import minibarRouter from "./minibar.js";
+import packagesRouter from "./packages.js";
 
 const router: IRouter = Router();
 
@@ -104,5 +105,6 @@ router.use("/super-admin", superAdminRouter);
 router.use("/reports", reportsRouter);
 router.use("/poster", posterRouter);
 router.use("/minibar", minibarRouter);
+router.use("/packages", packagesRouter);
 
 export default router;

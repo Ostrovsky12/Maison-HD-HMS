@@ -11,6 +11,8 @@ Key capabilities include:
 - Dedicated dashboards for owners, unified inbox for communications, and guest portals.
 - Extensive integration and accounting export capabilities.
 - Advanced modules for revenue management, OTA channel management, online booking, AI automation, guest experience management, maintenance, F&B/Restaurant operations (unified with Kitchen Display), events, SPA & wellness, and rentals & activities.
+- **Night Audit** (`/night-audit`) — full night audit lifecycle: pre-audit checklist with live KPI snapshot, run audit button with date picker, last audit summary card, expandable audit history table. API: GET/POST `/api/audit/night`.
+- **Package Builder** (`/packages`) — create/edit/delete hotel packages (romantic, family, wellness, etc.) with inclusions, pricing, validity dates, featured toggle. Full CRUD. API: GET/POST/PATCH/DELETE `/api/packages`.
 - Unified F&B/Restaurant module (`/fb`) — merged from two parallel systems; kitchen display with auto-refresh, order types: dine_in/room_service/takeaway/bar/breakfast/banquet/corporate.
 - Staff Console (`/console`) — mobile-optimized operational dashboard with arrivals/departures/in-house, quick check-in/out, payment collection, alerts, housekeeping summary, and live activity feed.
 - The project's vision is to offer a premium, scalable, and intelligent PMS solution for the hospitality industry, supporting complex operational workflows and enhancing guest experiences.

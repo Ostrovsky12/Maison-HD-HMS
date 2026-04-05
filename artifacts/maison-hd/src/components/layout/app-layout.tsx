@@ -7,7 +7,7 @@ import {
   PartyPopper, UtensilsCrossed, Zap, Bot, Building2, Globe,
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
-  ChevronRight, Menu, Sparkles, Search, Wine,
+  ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -85,15 +85,17 @@ const NAV: NavSection[] = [
     items: [
       { name: "AI Hub",       path: "/ai-hub",     icon: Brain, roles: ["super_admin", "owner", "manager"] },
       { name: "Автоматизація",path: "/automation", icon: Bot,   roles: ["super_admin", "owner", "manager"] },
+      { name: "Пакети",       path: "/packages",   icon: Package, roles: ["super_admin", "owner", "manager"] },
     ],
   },
   {
     label: "Фінанси",
     items: [
-      { name: "Фінанси",      path: "/finance",    icon: Wallet,   roles: ["super_admin", "owner", "manager", "reception"] },
-      { name: "Рахунки",      path: "/invoices",   icon: FileText, roles: null },
-      { name: "Бухгалтерія",  path: "/accounting", icon: Landmark, roles: ["super_admin", "owner", "manager"] },
-      { name: "Продажі & CRM",path: "/sales",      icon: Target,   roles: ["super_admin", "owner", "manager", "reception"] },
+      { name: "Фінанси",      path: "/finance",      icon: Wallet,   roles: ["super_admin", "owner", "manager", "reception"] },
+      { name: "Рахунки",      path: "/invoices",     icon: FileText, roles: null },
+      { name: "Бухгалтерія",  path: "/accounting",   icon: Landmark, roles: ["super_admin", "owner", "manager"] },
+      { name: "Нічний аудит", path: "/night-audit",  icon: Moon,     roles: ["super_admin", "owner", "manager"] },
+      { name: "Продажі & CRM",path: "/sales",        icon: Target,   roles: ["super_admin", "owner", "manager", "reception"] },
     ],
   },
   {
