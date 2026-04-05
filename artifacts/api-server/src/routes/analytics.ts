@@ -385,6 +385,117 @@ router.get("/summary", requireAuth, async (req, res) => {
   });
 });
 
+// GET /analytics/channels — booking source breakdown + occupancy heatmap
+router.get("/channels", requireAuth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const days = parseInt(req.query.days as string) || 90;
+
+    // Get org's property IDs
+    const propRows = await db.select({ id: propertiesTable.id, totalUnits: sql<number>`count(${unitsTable.id})` })
+      .from(propertiesTable)
+      .leftJoin(unitsTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(propertiesTable.organizationId, user.organizationId))
+      .groupBy(propertiesTable.id);
+
+    if (propRows.length === 0) {
+      return res.json({ channels: [], occupancyHeatmap: [], totalBookings: 0, totalRevenue: 0 });
+    }
+
+    const propIds = propRows.map(p => p.id);
+    const unitRows = await db.select({ id: unitsTable.id }).from(unitsTable).where(inArray(unitsTable.propertyId, propIds));
+    const unitIds = unitRows.map(u => u.id);
+    const totalUnits = unitIds.length;
+
+    if (unitIds.length === 0) return res.json({ channels: [], occupancyHeatmap: [], totalBookings: 0, totalRevenue: 0 });
+
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - days + 1);
+    const fromStr = dateFrom.toISOString().slice(0, 10);
+    const toStr = new Date().toISOString().slice(0, 10);
+
+    // Fetch all bookings in range
+    const bookings = await db.select({
+      id: bookingsTable.id,
+      source: bookingsTable.source,
+      checkIn: bookingsTable.checkIn,
+      checkOut: bookingsTable.checkOut,
+      totalAmount: bookingsTable.totalAmount,
+      status: bookingsTable.status,
+      createdAt: bookingsTable.createdAt,
+    }).from(bookingsTable)
+      .where(and(
+        inArray(bookingsTable.unitId, unitIds),
+        gte(bookingsTable.checkIn, fromStr),
+        lte(bookingsTable.checkIn, toStr),
+      ));
+
+    // Group by source
+    const sourceMap: Record<string, { bookings: number; revenue: number }> = {};
+    for (const b of bookings) {
+      const src = (b.source as string) || "direct";
+      if (!sourceMap[src]) sourceMap[src] = { bookings: 0, revenue: 0 };
+      sourceMap[src].bookings++;
+      sourceMap[src].revenue += parseFloat(b.totalAmount?.toString() || "0");
+    }
+
+    const totalBookings = bookings.length;
+    const totalRevenue = bookings.reduce((s, b) => s + parseFloat(b.totalAmount?.toString() || "0"), 0);
+
+    const SOURCE_LABELS: Record<string, string> = {
+      direct: "Прямі бронювання",
+      booking: "Booking.com",
+      airbnb: "Airbnb",
+      expedia: "Expedia",
+      phone: "Телефон",
+      other: "Інше",
+    };
+    const SOURCE_COLORS: Record<string, string> = {
+      direct: "#4f46e5",
+      booking: "#2563eb",
+      airbnb: "#e11d48",
+      expedia: "#d97706",
+      phone: "#059669",
+      other: "#6b7280",
+    };
+
+    const channels = Object.entries(sourceMap).map(([source, data]) => ({
+      source,
+      label: SOURCE_LABELS[source] || source,
+      color: SOURCE_COLORS[source] || "#6b7280",
+      bookings: data.bookings,
+      revenue: Math.round(data.revenue),
+      pct: totalBookings > 0 ? Math.round((data.bookings / totalBookings) * 100) : 0,
+      revenuePct: totalRevenue > 0 ? Math.round((data.revenue / totalRevenue) * 100) : 0,
+    })).sort((a, b) => b.bookings - a.bookings);
+
+    // Occupancy heatmap: last 35 days (5 weeks)
+    const heatmapDays = 35;
+    const heatmap: Array<{ date: string; occupancy: number; bookings: number }> = [];
+    for (let i = heatmapDays - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+
+      // Count bookings where checkIn <= date < checkOut
+      const activeBookings = bookings.filter(b =>
+        b.status !== "cancelled" &&
+        b.checkIn <= dateStr && b.checkOut > dateStr
+      );
+      const occupancy = totalUnits > 0 ? Math.min(100, Math.round((activeBookings.length / totalUnits) * 100)) : 0;
+      heatmap.push({ date: dateStr, occupancy, bookings: activeBookings.length });
+    }
+
+    res.json({
+      channels,
+      occupancyHeatmap: heatmap,
+      totalBookings,
+      totalRevenue: Math.round(totalRevenue),
+      period: { from: fromStr, to: toStr, days },
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.get("/reports/monthly", requireAuth, async (req, res) => {
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
   const month = parseInt(req.query.month as string) || (new Date().getMonth() + 1);

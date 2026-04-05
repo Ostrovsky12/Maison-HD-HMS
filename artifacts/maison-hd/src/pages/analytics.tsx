@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useListKpiHistory,
   useListForecasts,
@@ -30,6 +30,8 @@ import {
   XCircle,
   Clock,
   Wifi,
+  Layers,
+  Globe,
 } from "lucide-react";
 import {
   AreaChart,
@@ -85,6 +87,24 @@ export default function AnalyticsPage() {
 
   const generateKpiMutation = useGenerateKpi();
   const generateForecastMutation = useGenerateForecast();
+
+  // Channels data
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const API = BASE.replace("/maison-hd", "") + "/api";
+  const authFetch = (url: string, opts?: RequestInit) =>
+    fetch(url, { ...opts, headers: { ...(opts?.headers || {}), Authorization: `Bearer ${localStorage.getItem("hms_token")}`, "Content-Type": "application/json" } });
+
+  const [channelDays, setChannelDays] = useState(90);
+  const [channelsData, setChannelsData] = useState<any>(null);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+
+  useEffect(() => {
+    setChannelsLoading(true);
+    authFetch(`${API}/analytics/channels?days=${channelDays}`)
+      .then(r => r.json())
+      .then(d => { setChannelsData(d); setChannelsLoading(false); })
+      .catch(() => setChannelsLoading(false));
+  }, [channelDays]);
 
   const handleGenerateKpi = () => {
     generateKpiMutation.mutate(undefined, {
@@ -162,6 +182,7 @@ export default function AnalyticsPage() {
             <TabsTrigger value="overview" className="gap-2"><Activity className="w-4 h-4" /> Огляд</TabsTrigger>
             <TabsTrigger value="monthly" className="gap-2"><Calendar className="w-4 h-4" /> Місячний звіт</TabsTrigger>
             <TabsTrigger value="forecast" className="gap-2"><Target className="w-4 h-4" /> Прогноз</TabsTrigger>
+            <TabsTrigger value="channels" className="gap-2"><Globe className="w-4 h-4" /> Канали</TabsTrigger>
           </TabsList>
 
           {/* ── OVERVIEW TAB ───────────────────────────────── */}
@@ -584,6 +605,231 @@ export default function AnalyticsPage() {
                   </Button>
                 </CardContent>
               </Card>
+            )}
+          </TabsContent>
+
+          {/* ── CHANNELS TAB ────────────────────────────────── */}
+          <TabsContent value="channels" className="space-y-6">
+            {/* Period selector */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Канали бронювання</h2>
+                <p className="text-sm text-muted-foreground">Розподіл бронювань та доходу по джерелах</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {[30, 60, 90].map(d => (
+                  <button
+                    key={d}
+                    onClick={() => setChannelDays(d)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${channelDays === d ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}
+                  >{d} днів</button>
+                ))}
+              </div>
+            </div>
+
+            {channelsLoading ? (
+              <div className="flex items-center justify-center py-24">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            ) : !channelsData || channelsData.totalBookings === 0 ? (
+              <Card className="border-2 border-dashed">
+                <CardContent className="py-16 text-center">
+                  <Globe className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-40" />
+                  <p className="text-muted-foreground font-medium">Немає даних за обраний період</p>
+                  <p className="text-sm text-muted-foreground mt-1">Бронювання з'являться тут після їх додавання</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                {/* KPI row */}
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    { label: "Всього бронювань", value: channelsData.totalBookings, icon: <Layers className="w-4 h-4" />, color: "text-primary" },
+                    { label: "Загальний дохід", value: formatUAH(channelsData.totalRevenue), icon: <DollarSign className="w-4 h-4" />, color: "text-emerald-600" },
+                    { label: "Середній чек", value: formatUAH(channelsData.totalBookings > 0 ? Math.round(channelsData.totalRevenue / channelsData.totalBookings) : 0), icon: <TrendingUp className="w-4 h-4" />, color: "text-violet-600" },
+                  ].map(kpi => (
+                    <Card key={kpi.label} className="shadow-sm">
+                      <CardContent className="pt-4 pb-3">
+                        <div className={`flex items-center gap-1.5 text-sm font-medium mb-1 ${kpi.color}`}>
+                          {kpi.icon} {kpi.label}
+                        </div>
+                        <p className="text-2xl font-bold">{kpi.value}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Main charts row */}
+                <div className="grid grid-cols-5 gap-4">
+                  {/* Bar chart — bookings by channel */}
+                  <Card className="col-span-3 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <BarChart3 className="w-4 h-4 text-primary" /> Бронювання по каналах
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={channelsData.channels} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
+                            <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                            <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--foreground))" }} width={120} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
+                              formatter={(v: number, name: string) => [name === "bookings" ? `${v} бронювань` : formatUAH(v), name === "bookings" ? "Кількість" : "Дохід"]}
+                            />
+                            <Bar dataKey="bookings" radius={[0, 4, 4, 0]}>
+                              {channelsData.channels.map((c: any) => <Cell key={c.source} fill={c.color} />)}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Pie chart — revenue share */}
+                  <Card className="col-span-2 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Globe className="w-4 h-4 text-primary" /> Частка доходу
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={channelsData.channels} dataKey="revenue" nameKey="label" cx="50%" cy="50%" outerRadius={72} innerRadius={36}>
+                              {channelsData.channels.map((c: any) => <Cell key={c.source} fill={c.color} />)}
+                            </Pie>
+                            <Tooltip
+                              contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
+                              formatter={(v: number, name: string) => [formatUAH(v), name]}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      {/* Legend */}
+                      <div className="space-y-1.5 mt-2">
+                        {channelsData.channels.map((c: any) => (
+                          <div key={c.source} className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
+                              <span className="text-muted-foreground">{c.label}</span>
+                            </div>
+                            <span className="font-medium">{c.revenuePct}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Detailed table */}
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Детальний розбір по каналах</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
+                          <th className="text-left pb-2">Канал</th>
+                          <th className="text-right pb-2">Бронювань</th>
+                          <th className="text-right pb-2">% від загалу</th>
+                          <th className="text-right pb-2">Дохід</th>
+                          <th className="text-right pb-2">Частка доходу</th>
+                          <th className="text-right pb-2">Ср. чек</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {channelsData.channels.map((c: any) => (
+                          <tr key={c.source} className="hover:bg-muted/30 transition-colors">
+                            <td className="py-2.5">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
+                                <span className="font-medium">{c.label}</span>
+                              </div>
+                            </td>
+                            <td className="text-right py-2.5 font-mono">{c.bookings}</td>
+                            <td className="text-right py-2.5">
+                              <div className="flex items-center justify-end gap-2">
+                                <div className="w-16 bg-muted rounded-full h-1.5 overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${c.pct}%`, backgroundColor: c.color }} />
+                                </div>
+                                <span className="w-8 text-right text-muted-foreground">{c.pct}%</span>
+                              </div>
+                            </td>
+                            <td className="text-right py-2.5 font-mono">{formatUAH(c.revenue)}</td>
+                            <td className="text-right py-2.5 text-muted-foreground">{c.revenuePct}%</td>
+                            <td className="text-right py-2.5 font-mono">{c.bookings > 0 ? formatUAH(Math.round(c.revenue / c.bookings)) : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+
+                {/* Occupancy heatmap */}
+                {channelsData.occupancyHeatmap?.length > 0 && (
+                  <Card className="shadow-sm">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Activity className="w-4 h-4 text-primary" /> Теплова карта зайнятості (35 днів)
+                      </CardTitle>
+                      <CardDescription>Кожна клітинка — один день; колір — % завантаження</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {/* Day-of-week labels */}
+                      <div className="grid grid-cols-7 gap-1.5 mb-1">
+                        {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"].map(d => (
+                          <div key={d} className="text-center text-xs text-muted-foreground">{d}</div>
+                        ))}
+                      </div>
+                      {/* Heatmap grid */}
+                      <div className="grid grid-cols-7 gap-1.5">
+                        {channelsData.occupancyHeatmap.map((day: any) => {
+                          const occ = day.occupancy;
+                          const bg = occ === 0
+                            ? "bg-muted/40"
+                            : occ < 25 ? "bg-emerald-100 dark:bg-emerald-950"
+                            : occ < 50 ? "bg-emerald-300 dark:bg-emerald-800"
+                            : occ < 75 ? "bg-amber-400 dark:bg-amber-700"
+                            : "bg-red-500 dark:bg-red-700";
+                          const textColor = occ >= 50 ? "text-white" : "text-foreground";
+                          const d = new Date(day.date + "T12:00:00");
+                          return (
+                            <div
+                              key={day.date}
+                              title={`${day.date}: ${occ}% (${day.bookings} бронювань)`}
+                              className={`${bg} ${textColor} rounded-md h-12 flex flex-col items-center justify-center cursor-default transition-transform hover:scale-105`}
+                            >
+                              <span className="text-xs font-medium">{d.getDate()}</span>
+                              <span className="text-[10px] opacity-75">{occ}%</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Legend */}
+                      <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
+                        <span>Завантаження:</span>
+                        {[
+                          { label: "0%", bg: "bg-muted/40" },
+                          { label: "1–24%", bg: "bg-emerald-100" },
+                          { label: "25–49%", bg: "bg-emerald-300" },
+                          { label: "50–74%", bg: "bg-amber-400" },
+                          { label: "75–100%", bg: "bg-red-500" },
+                        ].map(l => (
+                          <div key={l.label} className="flex items-center gap-1">
+                            <span className={`w-3 h-3 rounded ${l.bg} inline-block`} />
+                            {l.label}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </>
             )}
           </TabsContent>
         </Tabs>

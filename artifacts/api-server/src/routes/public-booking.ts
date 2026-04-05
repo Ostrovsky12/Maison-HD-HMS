@@ -6,6 +6,7 @@ import {
 import { eq, and, or, gte, lte, ne, inArray, notInArray, sql } from "drizzle-orm";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
 import { fireBookingEvent } from "../lib/automation-runner.js";
+import { sendGuestConfirmationEmail, sendGuestConfirmationSms, notifyBookingCreated } from "../lib/notify.js";
 
 const router = Router();
 
@@ -188,13 +189,59 @@ router.post("/bookings", async (req, res) => {
       source: "direct" as any,
     } as any).returning();
 
-    // Fire automation event (non-blocking)
+    // Fire automation event + notifications (non-blocking)
     if ((booking as any).id) {
-      const [unitWithProp] = await db.select({ orgId: propertiesTable.organizationId })
-        .from(unitsTable).innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      const [unitWithProp] = await db.select({
+        orgId: propertiesTable.organizationId,
+        orgEmail: organizationsTable.email,
+        orgPhone: organizationsTable.phone,
+        orgName: organizationsTable.name,
+      })
+        .from(unitsTable)
+        .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+        .innerJoin(organizationsTable, eq(propertiesTable.organizationId, organizationsTable.id))
         .where(eq(unitsTable.id, unit.id)).limit(1).catch(() => []);
+
       if (unitWithProp?.orgId) {
-        fireBookingEvent("booking_created", unitWithProp.orgId, (booking as any).id).catch(() => {});
+        const orgId = unitWithProp.orgId;
+
+        // Fire automation engine
+        fireBookingEvent("booking_created", orgId, (booking as any).id).catch(() => {});
+
+        // Notify admin (email + telegram + SMS)
+        notifyBookingCreated(orgId, {
+          id: (booking as any).id,
+          guestName: `${firstName} ${lastName}`,
+          unitName: unit.name,
+          checkIn, checkOut,
+          totalAmount: Math.round(totalAmount),
+        }).catch(() => {});
+
+        // Guest confirmation email
+        if (email) {
+          sendGuestConfirmationEmail(orgId, email, {
+            bookingRef,
+            guestName: `${firstName} ${lastName}`,
+            unitName: unit.name,
+            propertyName: prop?.name || "Готель",
+            checkIn, checkOut, nights,
+            totalAmount: Math.round(totalAmount),
+            guestsCount: totalGuests,
+            orgName: unitWithProp.orgName || undefined,
+            orgEmail: unitWithProp.orgEmail || undefined,
+            orgPhone: unitWithProp.orgPhone || undefined,
+          }).catch(() => {});
+        }
+
+        // Guest confirmation SMS
+        if (phone) {
+          sendGuestConfirmationSms(orgId, phone, {
+            bookingRef,
+            propertyName: prop?.name || "Готель",
+            checkIn, checkOut,
+            totalAmount: Math.round(totalAmount),
+          }).catch(() => {});
+        }
       }
     }
 

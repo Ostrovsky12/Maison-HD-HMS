@@ -5,7 +5,9 @@ import { eq, and, desc } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import {
   getEmailConfig, saveEmailConfig, getTelegramConfig, saveTelegramConfig,
-  sendEmail, sendTelegram, EmailConfig, TelegramConfig,
+  getSmsConfig, saveSmsConfig,
+  sendEmail, sendTelegram, sendSms,
+  EmailConfig, TelegramConfig, SmsConfig,
 } from "../lib/notify.js";
 
 const router = Router();
@@ -60,22 +62,17 @@ router.get("/channels", requireAuth, async (req: any, res) => {
   const orgId = req.user.organizationId;
   if (!orgId) { res.status(400).json({ error: "No organization" }); return; }
 
-  const [email, telegram] = await Promise.all([
+  const [email, telegram, sms] = await Promise.all([
     getEmailConfig(orgId),
     getTelegramConfig(orgId),
+    getSmsConfig(orgId),
   ]);
 
-  // Mask secrets before sending
-  const emailMasked = email ? {
-    ...email,
-    pass: email.pass ? "••••••••" : "",
-  } : null;
-  const telegramMasked = telegram ? {
-    ...telegram,
-    botToken: telegram.botToken ? telegram.botToken.slice(0, 8) + "••••••••" : "",
-  } : null;
+  const emailMasked = email ? { ...email, pass: email.pass ? "••••••••" : "" } : null;
+  const telegramMasked = telegram ? { ...telegram, botToken: telegram.botToken ? telegram.botToken.slice(0, 8) + "••••••••" : "" } : null;
+  const smsMasked = sms ? { ...sms, apiKey: sms.apiKey ? sms.apiKey.slice(0, 6) + "••••••••" : "" } : null;
 
-  res.json({ email: emailMasked, telegram: telegramMasked });
+  res.json({ email: emailMasked, telegram: telegramMasked, sms: smsMasked });
 });
 
 // PUT /notifications/channels/email — зберегти SMTP конфіг
@@ -114,12 +111,46 @@ router.put("/channels/telegram", requireAuth, async (req: any, res) => {
   res.json({ ok: true, message: "Telegram конфігурацію збережено" });
 });
 
+// PUT /notifications/channels/sms — зберегти SMS конфіг
+router.put("/channels/sms", requireAuth, async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  if (!orgId) { res.status(400).json({ error: "No organization" }); return; }
+
+  const body = req.body as SmsConfig;
+  let cfg = body;
+  if (body.apiKey?.includes("••••••••")) {
+    const existing = await getSmsConfig(orgId);
+    cfg = { ...body, apiKey: existing?.apiKey || "" };
+  }
+
+  await saveSmsConfig(orgId, cfg);
+  res.json({ ok: true, message: "SMS конфігурацію збережено" });
+});
+
 // POST /notifications/test — надіслати тестове повідомлення
 router.post("/test", requireAuth, async (req: any, res) => {
   const orgId = req.user.organizationId;
   if (!orgId) { res.status(400).json({ error: "No organization" }); return; }
 
-  const { channel } = req.body as { channel: "email" | "telegram" };
+  const { channel } = req.body as { channel: "email" | "telegram" | "sms" };
+
+  if (channel === "sms") {
+    const cfg = await getSmsConfig(orgId);
+    if (!cfg?.adminPhones?.length) {
+      res.status(400).json({ ok: false, error: "Вкажіть хоча б один номер телефону адміністратора" });
+      return;
+    }
+    const results = await Promise.all(
+      cfg.adminPhones.map(phone => sendSms(orgId, phone, `✅ Тест Maison HD — SMS сповіщення працює! ${new Date().toLocaleString("uk-UA")}`))
+    );
+    const failed = results.filter(r => !r.ok);
+    if (failed.length > 0) {
+      res.status(400).json({ ok: false, error: failed[0].error });
+      return;
+    }
+    res.json({ ok: true });
+    return;
+  }
 
   if (channel === "email") {
     const cfg = await getEmailConfig(orgId);

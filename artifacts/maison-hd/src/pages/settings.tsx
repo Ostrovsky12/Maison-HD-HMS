@@ -16,8 +16,9 @@ import {
   Save, KeyRound, User, Hotel, Eye, EyeOff, CreditCard, ExternalLink,
   Crown, Users2, Loader2, ChevronRight, Clock, CheckCircle2, AlertCircle,
   Copy, RefreshCw, Globe, Phone, Mail, Lock, Hash,
-  Bell, Send, Bot, ToggleLeft, ToggleRight, Sparkles,
+  Bell, Send, Bot, ToggleLeft, ToggleRight, Sparkles, MessageSquare,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api";
@@ -613,15 +614,18 @@ function DiscountTypesTab() {
 // ── Notifications Tab ──────────────────────────────────────────────
 function NotificationsTab() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<"email" | "telegram" | null>(null);
-  const [testing, setTesting] = useState<"email" | "telegram" | null>(null);
+  const [saving, setSaving] = useState<"email" | "telegram" | "sms" | null>(null);
+  const [testing, setTesting] = useState<"email" | "telegram" | "sms" | null>(null);
 
   const emptyEmail = { enabled: false, host: "", port: 587, secure: false, user: "", pass: "", from: "", fromName: "Maison HD", adminEmails: [] as string[] };
   const emptyTelegram = { enabled: false, botToken: "", chatId: "" };
+  const emptySms = { enabled: false, provider: "smsclub", apiKey: "", senderId: "Hotel", apiUrl: "https://im.smsclub.mobi/sms/send", adminPhones: [] as string[], guestSmsEnabled: true };
 
   const [email, setEmail] = useState<any>(emptyEmail);
   const [telegram, setTelegram] = useState<any>(emptyTelegram);
+  const [sms, setSms] = useState<any>(emptySms);
   const [adminEmailInput, setAdminEmailInput] = useState("");
+  const [adminPhoneInput, setAdminPhoneInput] = useState("");
 
   useEffect(() => {
     authFetch(`${API}/notifications/channels`).then(async r => {
@@ -629,6 +633,7 @@ function NotificationsTab() {
         const d = await r.json();
         if (d.email) setEmail(d.email);
         if (d.telegram) setTelegram(d.telegram);
+        if (d.sms) setSms(d.sms);
       }
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -650,12 +655,20 @@ function NotificationsTab() {
     else toast({ title: "Помилка", description: "Не вдалось зберегти", variant: "destructive" });
   };
 
-  const testChannel = async (channel: "email" | "telegram") => {
+  const saveSms = async () => {
+    setSaving("sms");
+    const r = await authFetch(`${API}/notifications/channels/sms`, { method: "PUT", body: JSON.stringify(sms) });
+    setSaving(null);
+    if (r.ok) toast({ title: "✅ SMS збережено", description: "Налаштування SMS оновлено" });
+    else toast({ title: "Помилка", description: "Не вдалось зберегти", variant: "destructive" });
+  };
+
+  const testChannel = async (channel: "email" | "telegram" | "sms") => {
     setTesting(channel);
     const r = await authFetch(`${API}/notifications/test`, { method: "POST", body: JSON.stringify({ channel }) });
     const d = await r.json();
     setTesting(null);
-    if (d.ok) toast({ title: "✅ Тест успішний!", description: channel === "email" ? "Лист надіслано на вказані адреси" : "Повідомлення надіслано в Telegram" });
+    if (d.ok) toast({ title: "✅ Тест успішний!", description: channel === "email" ? "Лист надіслано на вказані адреси" : channel === "telegram" ? "Повідомлення надіслано в Telegram" : "SMS надіслано" });
     else toast({ title: "Помилка відправки", description: d.error || "Перевірте налаштування", variant: "destructive" });
   };
 
@@ -664,6 +677,14 @@ function NotificationsTab() {
     if (!val || !val.includes("@")) return;
     if (!email.adminEmails.includes(val)) setEmail((e: any) => ({ ...e, adminEmails: [...e.adminEmails, val] }));
     setAdminEmailInput("");
+  };
+
+  const addAdminPhone = () => {
+    const val = adminPhoneInput.trim().replace(/\D/g, "");
+    if (!val || val.length < 10) return;
+    const formatted = val.startsWith("380") ? `+${val}` : val.startsWith("0") ? `+38${val}` : `+${val}`;
+    if (!sms.adminPhones.includes(formatted)) setSms((s: any) => ({ ...s, adminPhones: [...s.adminPhones, formatted] }));
+    setAdminPhoneInput("");
   };
 
   if (loading) return <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Завантаження...</div>;
@@ -811,13 +832,124 @@ function NotificationsTab() {
         </CardContent>
       </Card>
 
+      {/* SMS */}
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-emerald-500" />
+              <CardTitle className="text-base">SMS сповіщення</CardTitle>
+            </div>
+            <button
+              onClick={() => setSms((s: any) => ({ ...s, enabled: !s.enabled }))}
+              className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${sms.enabled ? "text-emerald-600" : "text-muted-foreground"}`}
+            >
+              {sms.enabled ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
+              {sms.enabled ? "Увімкнено" : "Вимкнено"}
+            </button>
+          </div>
+          <CardDescription>
+            SMS-повідомлення адміністраторам і гостям. Підтримка SMSclub, AlphaSMS, Twilio.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Провайдер</Label>
+              <select
+                className="mt-1 w-full border rounded-md px-3 py-2 text-sm bg-background"
+                value={sms.provider}
+                onChange={e => {
+                  const p = e.target.value;
+                  const urls: Record<string, string> = {
+                    smsclub: "https://im.smsclub.mobi/sms/send",
+                    alphasms: "https://alphasms.ua/api/json.php",
+                    twilio: "https://api.twilio.com/2010-04-01/Accounts/ACXXXXX/Messages.json",
+                    generic: "",
+                  };
+                  setSms((s: any) => ({ ...s, provider: p, apiUrl: urls[p] || s.apiUrl }));
+                }}
+              >
+                <option value="smsclub">SMSclub (Україна)</option>
+                <option value="alphasms">AlphaSMS (Україна)</option>
+                <option value="twilio">Twilio (міжнародний)</option>
+                <option value="generic">Власний API</option>
+              </select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Sender ID (ім'я)</Label>
+              <Input className="mt-1" placeholder="Hotel" value={sms.senderId} onChange={e => setSms((s: any) => ({ ...s, senderId: e.target.value }))} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">API Key / Token</Label>
+            <Input className="mt-1 font-mono text-sm" type="password" placeholder="••••••••" value={sms.apiKey} onChange={e => setSms((s: any) => ({ ...s, apiKey: e.target.value }))} />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">API URL</Label>
+            <Input className="mt-1 font-mono text-sm" placeholder="https://im.smsclub.mobi/sms/send" value={sms.apiUrl} onChange={e => setSms((s: any) => ({ ...s, apiUrl: e.target.value }))} />
+          </div>
+
+          {/* Phones */}
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Телефони адміністраторів</Label>
+            <div className="flex gap-2 mt-1">
+              <Input
+                placeholder="+380501234567"
+                value={adminPhoneInput}
+                onChange={e => setAdminPhoneInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addAdminPhone()}
+              />
+              <Button variant="outline" size="sm" onClick={addAdminPhone}><Plus className="w-3.5 h-3.5" /></Button>
+            </div>
+            {sms.adminPhones?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {sms.adminPhones.map((ph: string) => (
+                  <Badge key={ph} variant="secondary" className="gap-1 pr-1">
+                    {ph}
+                    <button onClick={() => setSms((s: any) => ({ ...s, adminPhones: s.adminPhones.filter((x: string) => x !== ph) }))}>
+                      <X className="w-3 h-3 opacity-50 hover:opacity-100" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Guest SMS toggle */}
+          <div className="flex items-center gap-3 pt-1">
+            <Switch
+              checked={sms.guestSmsEnabled}
+              onCheckedChange={v => setSms((s: any) => ({ ...s, guestSmsEnabled: v }))}
+            />
+            <div>
+              <Label className="text-sm cursor-pointer" onClick={() => setSms((s: any) => ({ ...s, guestSmsEnabled: !s.guestSmsEnabled }))}>
+                SMS-підтвердження гостю
+              </Label>
+              <p className="text-xs text-muted-foreground">Надсилати SMS гостю після онлайн-бронювання</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pt-2">
+            <Button onClick={saveSms} disabled={!!saving} className="gap-1.5">
+              {saving === "sms" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Зберегти
+            </Button>
+            <Button variant="outline" onClick={() => testChannel("sms")} disabled={!sms.enabled || !!testing} className="gap-1.5">
+              {testing === "sms" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Надіслати тест
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Guide */}
       <Card className="bg-indigo-50/50 border-indigo-100">
         <CardContent className="pt-5 pb-4">
           <p className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2"><Bell className="w-4 h-4" /> Коли надсилаються сповіщення?</p>
           <ul className="space-y-1.5 text-sm text-indigo-800/70">
             {[
-              "📋 Нове бронювання — миттєво після підтвердження",
+              "📋 Нове бронювання — Email + Telegram + SMS адміністраторам, Email + SMS підтвердження гостю",
               "✅ Check-in гостя — при оформленні заїзду",
               "💳 Оплата отримана — при успішному платежі LiqPay",
             ].map(t => <li key={t}>{t}</li>)}
