@@ -3,7 +3,7 @@ import { organizationsTable } from "./organizations";
 import { bookingsTable } from "./bookings";
 
 export const fbOrderStatusEnum = pgEnum("fb_order_status", ["open", "in_kitchen", "ready", "served", "billed", "cancelled"]);
-export const fbOrderTypeEnum = pgEnum("fb_order_type", ["dine_in", "room_service", "takeaway", "bar"]);
+export const fbOrderTypeEnum = pgEnum("fb_order_type", ["dine_in", "room_service", "takeaway", "bar", "breakfast", "banquet", "corporate"]);
 export const fbItemStatusEnum = pgEnum("fb_item_status", ["pending", "cooking", "ready", "served", "cancelled"]);
 export const fbTableStatusEnum = pgEnum("fb_table_status", ["free", "occupied", "reserved", "cleaning"]);
 

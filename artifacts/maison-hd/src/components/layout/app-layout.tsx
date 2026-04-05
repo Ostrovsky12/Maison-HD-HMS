@@ -74,10 +74,9 @@ const NAV: NavSection[] = [
   {
     label: "Гостинність",
     items: [
-      { name: "SPA & Wellness",  path: "/spa",        icon: Waves,         roles: null },
-      { name: "Events & Банкети",path: "/events",     icon: PartyPopper,   roles: null },
-      { name: "Ресторан & POS",  path: "/restaurant", icon: ChefHat,       roles: null },
-      { name: "F&B",             path: "/fb",         icon: UtensilsCrossed, roles: null },
+      { name: "SPA & Wellness",  path: "/spa",    icon: Waves,           roles: null },
+      { name: "Events & Банкети",path: "/events", icon: PartyPopper,     roles: null },
+      { name: "Ресторан & F&B",  path: "/fb",     icon: UtensilsCrossed, roles: null },
     ],
   },
   {

@@ -10,7 +10,9 @@ Key capabilities include:
 - Financial operations such as quote/invoice generation and integration with payment layers like LiqPay.
 - Dedicated dashboards for owners, unified inbox for communications, and guest portals.
 - Extensive integration and accounting export capabilities.
-- Advanced modules for revenue management, OTA channel management, online booking, AI automation, guest experience management, maintenance, F&B operations, events, SPA & wellness, and rentals & activities.
+- Advanced modules for revenue management, OTA channel management, online booking, AI automation, guest experience management, maintenance, F&B/Restaurant operations (unified with Kitchen Display), events, SPA & wellness, and rentals & activities.
+- Unified F&B/Restaurant module (`/fb`) — merged from two parallel systems; kitchen display with auto-refresh, order types: dine_in/room_service/takeaway/bar/breakfast/banquet/corporate.
+- Staff Console (`/console`) — mobile-optimized operational dashboard with arrivals/departures/in-house, quick check-in/out, payment collection, alerts, housekeeping summary, and live activity feed.
 - The project's vision is to offer a premium, scalable, and intelligent PMS solution for the hospitality industry, supporting complex operational workflows and enhancing guest experiences.
 
 ## User Preferences

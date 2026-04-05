@@ -373,6 +373,53 @@ router.post("/orders/:id/items", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Kitchen Display ──────────────────────────────────────────────────────────
+router.get("/kitchen", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const kitchenItems = await db.select({
+      itemId: fbOrderItemsTable.id,
+      itemName: fbOrderItemsTable.name,
+      itemStatus: fbOrderItemsTable.status,
+      itemNotes: fbOrderItemsTable.notes,
+      quantity: fbOrderItemsTable.quantity,
+      sentAt: fbOrderItemsTable.sentAt,
+      createdAt: fbOrderItemsTable.createdAt,
+      orderId: fbOrdersTable.id,
+      orderType: fbOrdersTable.orderType,
+      guestName: fbOrdersTable.guestName,
+      roomNumber: fbOrdersTable.roomNumber,
+      tableNumber: fbTablesTable.number,
+      tableLocation: fbTablesTable.location,
+    })
+      .from(fbOrderItemsTable)
+      .innerJoin(fbOrdersTable, eq(fbOrderItemsTable.orderId, fbOrdersTable.id))
+      .leftJoin(fbTablesTable, eq(fbOrdersTable.tableId, fbTablesTable.id))
+      .where(and(
+        eq(fbOrderItemsTable.organizationId, orgId),
+        sql`${fbOrderItemsTable.status} IN ('pending', 'cooking')`
+      ))
+      .orderBy(asc(fbOrderItemsTable.createdAt));
+
+    const grouped: Record<number, any> = {};
+    for (const item of kitchenItems) {
+      if (!grouped[item.orderId]) {
+        grouped[item.orderId] = {
+          orderId: item.orderId,
+          orderType: item.orderType,
+          tableNumber: item.tableNumber,
+          tableLocation: item.tableLocation,
+          guestName: item.guestName,
+          roomNumber: item.roomNumber,
+          items: [],
+        };
+      }
+      grouped[item.orderId].items.push(item);
+    }
+    res.json({ orders: Object.values(grouped) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Update order item status ─────────────────────────────────────────────────
 router.patch("/order-items/:id", requireAuth, async (req: any, res) => {
   try {

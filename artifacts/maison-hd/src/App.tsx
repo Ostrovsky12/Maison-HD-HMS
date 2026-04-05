@@ -151,7 +151,7 @@ function Router() {
       <Route path="/payments-layer"><ProtectedRoute component={PaymentsLayerPage} /></Route>
       <Route path="/sales"><ProtectedRoute component={SalesPage} /></Route>
       <Route path="/maintenance"><ProtectedRoute component={MaintenancePage} /></Route>
-      <Route path="/restaurant"><ProtectedRoute component={RestaurantPage} /></Route>
+      <Route path="/restaurant"><Redirect to="/fb" /></Route>
       <Route path="/activities"><ProtectedRoute component={ActivitiesPage} /></Route>
       <Route path="/accommodation"><ProtectedRoute component={AccommodationPage} /></Route>
       <Route path="/console"><ProtectedRoute component={StaffConsolePage} /></Route>

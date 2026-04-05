@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,9 +11,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useToast } from "@/hooks/use-toast";
 import {
   UtensilsCrossed, Users, ChefHat, ReceiptText, Plus, ArrowLeft,
-  Clock, CheckCircle2, XCircle, Loader2, Star, Leaf, Coffee,
-  Smartphone, ShoppingBag, Wine, Home, ChevronRight, RefreshCw,
-  SquarePlus, Minus, Search,
+  Clock, CheckCircle2, Loader2, Star, ShoppingBag, Wine, Home,
+  ChevronRight, RefreshCw, SquarePlus, Minus, Search, Flame,
+  Sunrise, PartyPopper, Building2, AlarmClock, Truck,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -29,7 +29,10 @@ const TABLE_STATUS_COLORS: Record<string, string> = {
   reserved: "bg-yellow-100 border-yellow-300 text-yellow-800",
   cleaning: "bg-blue-100 border-blue-300 text-blue-800",
 };
-const ORDER_STATUS_UA: Record<string, string> = { open: "Відкрито", in_kitchen: "На кухні", ready: "Готово", served: "Подано", billed: "Закрито", cancelled: "Скасовано" };
+const ORDER_STATUS_UA: Record<string, string> = {
+  open: "Відкрито", in_kitchen: "На кухні", ready: "Готово",
+  served: "Подано", billed: "Закрито", cancelled: "Скасовано",
+};
 const ORDER_STATUS_COLORS: Record<string, string> = {
   open: "bg-gray-100 text-gray-700 border-gray-200",
   in_kitchen: "bg-orange-100 text-orange-700 border-orange-200",
@@ -38,19 +41,41 @@ const ORDER_STATUS_COLORS: Record<string, string> = {
   billed: "bg-purple-100 text-purple-700 border-purple-200",
   cancelled: "bg-red-100 text-red-600 border-red-200",
 };
-const ORDER_TYPE_UA: Record<string, string> = { dine_in: "В залі", room_service: "Рум-сервіс", takeaway: "З собою", bar: "Бар" };
-const ORDER_TYPE_ICON: Record<string, any> = { dine_in: UtensilsCrossed, room_service: Home, takeaway: ShoppingBag, bar: Wine };
-const ITEM_STATUS_UA: Record<string, string> = { pending: "Очікує", cooking: "Готується", ready: "Готово", served: "Подано", cancelled: "Скасовано" };
+const ORDER_TYPE_UA: Record<string, string> = {
+  dine_in: "В залі", room_service: "Рум-сервіс", takeaway: "З собою",
+  bar: "Бар", breakfast: "Сніданок", banquet: "Банкет", corporate: "Корпоратив",
+};
+const ORDER_TYPE_ICON: Record<string, any> = {
+  dine_in: UtensilsCrossed, room_service: Home, takeaway: ShoppingBag,
+  bar: Wine, breakfast: Sunrise, banquet: PartyPopper, corporate: Building2,
+};
+const ITEM_STATUS_UA: Record<string, string> = {
+  pending: "Очікує", cooking: "Готується", ready: "Готово", served: "Подано", cancelled: "Скасовано",
+};
 const ITEM_STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-600", cooking: "bg-orange-100 text-orange-700",
   ready: "bg-green-100 text-green-700", served: "bg-blue-100 text-blue-600",
   cancelled: "bg-red-100 text-red-600",
 };
 
+function minutesAgo(ts: string) {
+  return Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
+}
+function waitColor(mins: number) {
+  if (mins < 10) return "border-green-300 bg-green-50";
+  if (mins < 20) return "border-yellow-300 bg-yellow-50";
+  return "border-red-300 bg-red-50";
+}
+function waitLabel(mins: number) {
+  if (mins < 1) return "щойно";
+  return `${mins} хв`;
+}
+
 const TABS = [
-  { id: "hall", label: "Зал", icon: UtensilsCrossed },
-  { id: "orders", label: "Замовлення", icon: ReceiptText },
-  { id: "menu", label: "Меню", icon: ChefHat },
+  { id: "hall",   label: "Зал",         icon: UtensilsCrossed },
+  { id: "orders", label: "Замовлення",  icon: ReceiptText },
+  { id: "kitchen",label: "Кухня",       icon: ChefHat },
+  { id: "menu",   label: "Меню",        icon: SquarePlus },
 ];
 
 export default function FbPage() {
@@ -60,6 +85,7 @@ export default function FbPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [kitchenOrders, setKitchenOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [orderDetail, setOrderDetail] = useState<any>(null);
   const [showNewOrder, setShowNewOrder] = useState(false);
@@ -70,32 +96,49 @@ export default function FbPage() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [menuSearch, setMenuSearch] = useState("");
   const [menuCatFilter, setMenuCatFilter] = useState("all");
+  const [kitchenLoading, setKitchenLoading] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const kitchenInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const { toast } = useToast();
+
+  // Tick every minute for wait time display
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   const loadStats = async () => { const r = await apiFetch("/stats"); if (r.ok) setStats(await r.json()); };
   const loadTables = async () => { const r = await apiFetch("/tables"); if (r.ok) { const d = await r.json(); setTables(d.tables || []); } };
   const loadOrders = async (s?: string, t?: string) => {
     const params = new URLSearchParams();
-    const sv = s || statusFilter; const tv = t || typeFilter;
+    const sv = s ?? statusFilter; const tv = t ?? typeFilter;
     if (sv === "open") params.set("open", "true");
     else if (sv !== "all") params.set("status", sv);
     if (tv !== "all") params.set("type", tv);
     const r = await apiFetch(`/orders?${params}`);
     if (r.ok) { const d = await r.json(); setOrders(d.orders || []); }
   };
-  const loadItems = async () => {
-    const r = await apiFetch("/items"); if (r.ok) { const d = await r.json(); setItems(d.items || []); }
-  };
-  const loadCategories = async () => {
-    const r = await apiFetch("/categories"); if (r.ok) { const d = await r.json(); setCategories(d.categories || []); }
-  };
-  const loadOrderDetail = async (id: number) => {
-    const r = await apiFetch(`/orders/${id}`);
-    if (r.ok) { const d = await r.json(); setOrderDetail(d); }
-  };
+  const loadItems = async () => { const r = await apiFetch("/items"); if (r.ok) { const d = await r.json(); setItems(d.items || []); } };
+  const loadCategories = async () => { const r = await apiFetch("/categories"); if (r.ok) { const d = await r.json(); setCategories(d.categories || []); } };
+  const loadOrderDetail = async (id: number) => { const r = await apiFetch(`/orders/${id}`); if (r.ok) { const d = await r.json(); setOrderDetail(d); } };
+  const loadKitchen = useCallback(async () => {
+    setKitchenLoading(true);
+    const r = await apiFetch("/kitchen");
+    if (r.ok) { const d = await r.json(); setKitchenOrders(d.orders || []); }
+    setKitchenLoading(false);
+  }, []);
 
   useEffect(() => { loadStats(); loadTables(); loadCategories(); loadItems(); }, []);
   useEffect(() => { if (tab === "orders") loadOrders(); }, [tab, statusFilter, typeFilter]);
+  useEffect(() => {
+    if (tab === "kitchen") {
+      loadKitchen();
+      kitchenInterval.current = setInterval(loadKitchen, 20000);
+    } else {
+      if (kitchenInterval.current) clearInterval(kitchenInterval.current);
+    }
+    return () => { if (kitchenInterval.current) clearInterval(kitchenInterval.current); };
+  }, [tab, loadKitchen]);
 
   const handleTableClick = async (table: any) => {
     if (table.status === "occupied" && table.currentOrderId) {
@@ -124,10 +167,18 @@ export default function FbPage() {
 
   const handleItemStatus = async (itemId: number, status: string, orderId: number) => {
     const r = await apiFetch(`/order-items/${itemId}`, { method: "PATCH", body: JSON.stringify({ status }) });
-    if (r.ok) { await loadOrderDetail(orderId); }
+    if (r.ok) {
+      await loadOrderDetail(orderId);
+      if (tab === "kitchen") loadKitchen();
+    }
   };
 
-  // Full-screen order detail view
+  const handleKitchenItemStatus = async (itemId: number, status: string) => {
+    const r = await apiFetch(`/order-items/${itemId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    if (r.ok) { toast({ title: status === "cooking" ? "🔥 Готується" : "✓ Готово" }); loadKitchen(); loadStats(); }
+  };
+
+  // ── Full-screen order detail ────────────────────────────────────────────────
   if (selectedOrder && orderDetail) {
     const ord = orderDetail.order;
     const orderItems = orderDetail.items || [];
@@ -156,7 +207,6 @@ export default function FbPage() {
             </div>
           </div>
 
-          {/* Order items */}
           <Card className="border-0 shadow-sm">
             <CardHeader className="pb-2">
               <div className="flex justify-between items-center">
@@ -171,7 +221,7 @@ export default function FbPage() {
               {orderItems.map((it: any) => (
                 <div key={it.id} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-sm">{it.name}</span>
                       <Badge className={`text-xs ${ITEM_STATUS_COLORS[it.status]}`}>{ITEM_STATUS_UA[it.status]}</Badge>
                     </div>
@@ -190,7 +240,6 @@ export default function FbPage() {
             </CardContent>
           </Card>
 
-          {/* Status actions */}
           {!["billed", "cancelled"].includes(ord.status) && (
             <Card className="border-0 shadow-sm">
               <CardContent className="p-4">
@@ -209,6 +258,7 @@ export default function FbPage() {
               </CardContent>
             </Card>
           )}
+
           {ord.status === "billed" && (
             <Card className="border-0 shadow-sm bg-green-50"><CardContent className="p-4 text-center">
               <CheckCircle2 className="h-8 w-8 text-green-600 mx-auto mb-2" />
@@ -217,7 +267,6 @@ export default function FbPage() {
           )}
         </div>
 
-        {/* Add item dialog */}
         <AddItemDialog open={showAddItem} onClose={() => setShowAddItem(false)} items={items} categories={categories}
           onAdd={async (itemId: number, qty: number, notes: string) => {
             const r = await apiFetch(`/orders/${ord.id}/items`, { method: "POST", body: JSON.stringify({ itemId, quantity: qty, notes }) });
@@ -227,7 +276,7 @@ export default function FbPage() {
     );
   }
 
-  // ── Main page ─────────────────────────────────────────────────────────────────
+  // ── Main page ─────────────────────────────────────────────────────────────
   const groupedTables = tables.reduce((acc: Record<string, any[]>, t) => {
     const loc = t.location || "Зал";
     if (!acc[loc]) acc[loc] = [];
@@ -248,6 +297,8 @@ export default function FbPage() {
     return acc;
   }, {});
 
+  const totalKitchenItems = kitchenOrders.reduce((s, o) => s + o.items.length, 0);
+
   return (
     <AppLayout>
       <div className="p-4 md:p-6 space-y-4">
@@ -255,9 +306,9 @@ export default function FbPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
-              <UtensilsCrossed className="h-7 w-7 text-orange-600" /> F&B / Ресторан
+              <UtensilsCrossed className="h-7 w-7 text-orange-600" /> Ресторан & F&B
             </h1>
-            <p className="text-gray-500 text-sm mt-0.5">Столи, замовлення, меню, рум-сервіс</p>
+            <p className="text-gray-500 text-sm mt-0.5">Столи, замовлення, кухня, меню</p>
           </div>
           <Button className="bg-orange-600 hover:bg-orange-700" onClick={() => { setNewOrderTable(null); setShowNewOrder(true); }}>
             <Plus className="h-4 w-4 mr-2" /> Нове замовлення
@@ -293,13 +344,16 @@ export default function FbPage() {
         <div className="flex gap-1 border-b border-gray-200">
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? "border-orange-600 text-orange-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+              className={`relative flex items-center gap-1.5 px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? "border-orange-600 text-orange-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
               <t.icon className="h-4 w-4" />{t.label}
+              {t.id === "kitchen" && totalKitchenItems > 0 && tab !== "kitchen" && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">{totalKitchenItems}</span>
+              )}
             </button>
           ))}
         </div>
 
-        {/* ── HALL / TABLE MAP ── */}
+        {/* ── HALL ── */}
         {tab === "hall" && (
           <div className="space-y-6">
             {Object.entries(groupedTables).map(([location, tbls]) => (
@@ -323,7 +377,7 @@ export default function FbPage() {
                 </div>
               </div>
             ))}
-            <div className="flex gap-3 text-xs text-gray-500">
+            <div className="flex flex-wrap gap-3 text-xs text-gray-500">
               {Object.entries(TABLE_STATUS_UA).map(([s, l]) => (
                 <span key={s} className="flex items-center gap-1">
                   <span className={`w-3 h-3 rounded-sm border ${TABLE_STATUS_COLORS[s].split(" ")[0]}`} />{l}
@@ -346,7 +400,7 @@ export default function FbPage() {
                 </SelectContent>
               </Select>
               <Select value={typeFilter} onValueChange={v => { setTypeFilter(v); loadOrders(statusFilter, v); }}>
-                <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Всі типи</SelectItem>
                   {Object.entries(ORDER_TYPE_UA).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
@@ -367,12 +421,12 @@ export default function FbPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold">
-                          {ord.tableNumber ? `Стіл ${ord.tableNumber}` : ord.roomNumber ? `Кімната ${ord.roomNumber}` : "Замовлення"}
+                          {ord.tableNumber ? `Стіл ${ord.tableNumber}` : ord.roomNumber ? `Кімната ${ord.roomNumber}` : (ord.guestName || "Замовлення")}
                         </span>
                         <Badge className={`text-xs border ${ORDER_STATUS_COLORS[ord.status]}`}>{ORDER_STATUS_UA[ord.status]}</Badge>
                         <Badge variant="outline" className="text-xs">{ORDER_TYPE_UA[ord.orderType]}</Badge>
                       </div>
-                      <p className="text-sm text-gray-500 truncate">{ord.guestName} · {ord.guestCount} ос.</p>
+                      <p className="text-sm text-gray-500 truncate">{ord.guestName}{ord.guestCount ? ` · ${ord.guestCount} ос.` : ""}</p>
                       <p className="text-xs text-gray-400">{new Date(ord.openedAt).toLocaleTimeString("uk", { hour: "2-digit", minute: "2-digit" })}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
@@ -383,6 +437,95 @@ export default function FbPage() {
                 </Card>
               );
             })}
+          </div>
+        )}
+
+        {/* ── KITCHEN DISPLAY ── */}
+        {tab === "kitchen" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-gray-500">
+                  {kitchenOrders.length === 0 ? "Нових замовлень немає" : `${kitchenOrders.length} замовлень · ${totalKitchenItems} позицій`}
+                </p>
+                <span className="flex items-center gap-1 text-xs text-gray-400">
+                  <AlarmClock className="h-3 w-3" /> оновлення кожні 20 сек
+                </span>
+              </div>
+              <Button variant="outline" size="sm" onClick={loadKitchen} disabled={kitchenLoading} className="h-8">
+                {kitchenLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+
+            {/* Legend */}
+            <div className="flex gap-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border border-green-300 bg-green-50" /> &lt;10 хв</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border border-yellow-300 bg-yellow-50" /> 10–20 хв</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border border-red-300 bg-red-50" /> &gt;20 хв</span>
+            </div>
+
+            {kitchenOrders.length === 0 ? (
+              <Card className="border-dashed"><CardContent className="py-16 text-center">
+                <ChefHat className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-400 font-medium">Кухня вільна</p>
+                <p className="text-gray-300 text-sm">Нових замовлень немає</p>
+              </CardContent></Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {kitchenOrders.map((ko: any) => {
+                  const TypeIcon = ORDER_TYPE_ICON[ko.orderType] || UtensilsCrossed;
+                  const oldest = ko.items.reduce((min: any, i: any) => (!min || new Date(i.createdAt) < new Date(min.createdAt)) ? i : min, null);
+                  const waitMins = oldest ? minutesAgo(oldest.createdAt) : 0;
+                  return (
+                    <Card key={ko.orderId} className={`border-2 shadow-sm ${waitColor(waitMins)}`}>
+                      <CardHeader className="pb-2 pt-3 px-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <TypeIcon className="h-4 w-4 text-gray-600" />
+                            <span className="font-bold text-sm">
+                              {ko.tableNumber ? `Стіл ${ko.tableNumber}` : ko.roomNumber ? `Кімната ${ko.roomNumber}` : ko.guestName || `#${ko.orderId}`}
+                            </span>
+                          </div>
+                          <Badge variant="outline" className={`text-xs font-bold ${waitMins >= 20 ? "border-red-400 text-red-600" : waitMins >= 10 ? "border-yellow-500 text-yellow-700" : "border-green-400 text-green-700"}`}>
+                            <Clock className="h-3 w-3 mr-1" />{waitLabel(waitMins)}
+                          </Badge>
+                        </div>
+                        {ko.guestName && <p className="text-xs text-gray-500 mt-0.5">{ko.guestName}</p>}
+                      </CardHeader>
+                      <CardContent className="px-3 pb-3 space-y-2">
+                        {ko.items.map((it: any) => {
+                          const isCooking = it.itemStatus === "cooking";
+                          return (
+                            <div key={it.itemId} className={`flex items-center gap-2 p-2 rounded-lg ${isCooking ? "bg-orange-50 border border-orange-200" : "bg-white border border-gray-100"}`}>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  {isCooking && <Flame className="h-3.5 w-3.5 text-orange-500 flex-shrink-0" />}
+                                  <span className="text-sm font-medium truncate">{it.itemName}</span>
+                                  <span className="text-xs text-gray-500 flex-shrink-0">× {it.quantity}</span>
+                                </div>
+                                {it.itemNotes && <p className="text-xs text-orange-700 mt-0.5">⚠ {it.itemNotes}</p>}
+                              </div>
+                              <div className="flex gap-1 flex-shrink-0">
+                                {it.itemStatus === "pending" && (
+                                  <Button size="sm" className="h-7 w-7 p-0 bg-orange-500 hover:bg-orange-600" onClick={() => handleKitchenItemStatus(it.itemId, "cooking")}>
+                                    <Flame className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                                {it.itemStatus === "cooking" && (
+                                  <Button size="sm" className="h-7 w-7 p-0 bg-green-600 hover:bg-green-700" onClick={() => handleKitchenItemStatus(it.itemId, "ready")}>
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -413,9 +556,9 @@ export default function FbPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-medium text-sm">{it.name}</span>
-                          {it.isPopular && <Star className="h-3.5 w-3.5 text-yellow-500 fill-yellow-400" />}
-                          {it.isVegetarian && <Leaf className="h-3.5 w-3.5 text-green-500" />}
-                          {!it.isAvailable && <Badge variant="outline" className="text-xs text-gray-400">Недоступно</Badge>}
+                          {it.isPopular && <Star className="h-3 w-3 text-yellow-400 fill-yellow-400" />}
+                          {it.isVegetarian && <span className="text-xs">🌿</span>}
+                          {!it.isAvailable && <Badge variant="outline" className="text-xs text-gray-400">Немає</Badge>}
                         </div>
                         {it.description && <p className="text-xs text-gray-500 truncate">{it.description}</p>}
                         <div className="flex items-center gap-2 mt-1">
@@ -425,10 +568,10 @@ export default function FbPage() {
                       </div>
                       <button className="text-xs px-2 py-1 rounded-lg border transition hover:border-orange-300"
                         onClick={async () => {
-                          const r = await apiFetch(`/items/${it.id}`, { method: "PATCH", body: JSON.stringify({ isAvailable: !it.isAvailable }) });
-                          if (r.ok) loadItems();
+                          await apiFetch(`/items/${it.id}`, { method: "PATCH", body: JSON.stringify({ isAvailable: !it.isAvailable }) });
+                          loadItems();
                         }}>
-                        {it.isAvailable ? "✓" : "○"}
+                        {it.isAvailable ? "✓ Є" : "○ Немає"}
                       </button>
                     </div>
                   ))}
@@ -450,7 +593,10 @@ export default function FbPage() {
             const d = await r.json();
             loadTables(); loadStats(); loadOrders();
             setSelectedOrder(d.order); await loadOrderDetail(d.order.id);
-          } else { const e = await r.json(); toast({ title: "Помилка", description: e.error, variant: "destructive" }); }
+          } else {
+            const e = await r.json();
+            toast({ title: "Помилка", description: e.error, variant: "destructive" });
+          }
         }} />
 
       <NewMenuItemDialog open={showNewItem} categories={categories} onClose={() => setShowNewItem(false)}
@@ -462,7 +608,7 @@ export default function FbPage() {
   );
 }
 
-// ── Add item to order dialog ───────────────────────────────────────────────────
+// ── Add item to order dialog ──────────────────────────────────────────────────
 function AddItemDialog({ open, onClose, items, categories, onAdd }: any) {
   const [catFilter, setCatFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -477,12 +623,10 @@ function AddItemDialog({ open, onClose, items, categories, onAdd }: any) {
   });
 
   const setQty = (id: number, qty: number) => setQuantities(q => ({ ...q, [id]: Math.max(0, qty) }));
-
   const total = Object.entries(quantities).reduce((s, [id, qty]) => {
     const item = items.find((it: any) => it.id === parseInt(id));
     return s + (item ? parseFloat(item.price) * qty : 0);
   }, 0);
-
   const selectedItems = Object.entries(quantities).filter(([, qty]) => qty > 0);
 
   return (
@@ -535,29 +679,39 @@ function AddItemDialog({ open, onClose, items, categories, onAdd }: any) {
   );
 }
 
-// ── New order dialog ───────────────────────────────────────────────────────────
+// ── New order dialog ──────────────────────────────────────────────────────────
 function NewOrderDialog({ open, onClose, tables, defaultTable, onSave }: any) {
   const [form, setForm] = useState({ orderType: "dine_in", tableId: "", guestName: "", roomNumber: "", guestCount: 2, notes: "" });
   const [loading, setLoading] = useState(false);
-  useEffect(() => { if (open && defaultTable) setForm(f => ({ ...f, tableId: String(defaultTable.id), orderType: "dine_in" })); }, [open, defaultTable]);
+
+  useEffect(() => {
+    if (open && defaultTable) setForm(f => ({ ...f, tableId: String(defaultTable.id), orderType: "dine_in" }));
+  }, [open, defaultTable]);
+
   const handleSubmit = async () => {
     setLoading(true);
     await onSave({ ...form, tableId: form.tableId ? parseInt(form.tableId) : null, guestCount: parseInt(String(form.guestCount)) });
     setLoading(false);
   };
+
   const freeTables = tables.filter((t: any) => t.status === "free");
+  const needsTable = form.orderType === "dine_in" || form.orderType === "bar";
+  const needsRoom = form.orderType === "room_service";
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Нове замовлення</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label>Тип замовлення</Label>
-            <Select value={form.orderType} onValueChange={v => setForm(f => ({ ...f, orderType: v }))}>
+            <Select value={form.orderType} onValueChange={v => setForm(f => ({ ...f, orderType: v, tableId: "", roomNumber: "" }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{Object.entries(ORDER_TYPE_UA).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                {Object.entries(ORDER_TYPE_UA).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+              </SelectContent>
             </Select>
           </div>
-          {form.orderType === "dine_in" && (
+          {needsTable && (
             <div><Label>Стіл</Label>
               <Select value={form.tableId} onValueChange={v => setForm(f => ({ ...f, tableId: v }))}>
                 <SelectTrigger><SelectValue placeholder="Оберіть вільний стіл" /></SelectTrigger>
@@ -565,7 +719,7 @@ function NewOrderDialog({ open, onClose, tables, defaultTable, onSave }: any) {
               </Select>
             </div>
           )}
-          {form.orderType === "room_service" && (
+          {needsRoom && (
             <div><Label>Номер кімнати</Label><Input placeholder="205" value={form.roomNumber} onChange={e => setForm(f => ({ ...f, roomNumber: e.target.value }))} /></div>
           )}
           <div className="grid grid-cols-2 gap-2">
@@ -583,16 +737,23 @@ function NewOrderDialog({ open, onClose, tables, defaultTable, onSave }: any) {
   );
 }
 
-// ── New menu item dialog ───────────────────────────────────────────────────────
+// ── New menu item dialog ──────────────────────────────────────────────────────
 function NewMenuItemDialog({ open, onClose, categories, onSave }: any) {
   const [form, setForm] = useState({ name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, tags: "" });
   const [loading, setLoading] = useState(false);
+
   const handleSubmit = async () => {
     if (!form.name || !form.price) return;
     setLoading(true);
-    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)), tags: form.tags.split(",").map((s: string) => s.trim()).filter(Boolean) });
+    await onSave({
+      ...form,
+      categoryId: form.categoryId ? parseInt(form.categoryId) : null,
+      cookMinutes: parseInt(String(form.cookMinutes)),
+      tags: form.tags.split(",").map((s: string) => s.trim()).filter(Boolean),
+    });
     setLoading(false);
   };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
