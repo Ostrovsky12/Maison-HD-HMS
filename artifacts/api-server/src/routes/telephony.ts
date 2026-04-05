@@ -7,6 +7,16 @@ import {
   pgTable, serial, integer, smallint, varchar, text, boolean,
   timestamp, date, numeric,
 } from "drizzle-orm/pg-core";
+import { broadcastToAll } from "../lib/ws-broadcaster.js";
+
+// Binotel server IPs (for webhook security)
+const BINOTEL_IPS = new Set([
+  "194.88.218.116","194.88.218.114","194.88.218.117","194.88.218.118",
+  "194.88.219.67","194.88.219.78","194.88.219.70","194.88.219.71",
+  "194.88.219.72","194.88.219.79","194.88.219.80","194.88.219.81",
+  "194.88.219.82","194.88.219.83","194.88.219.84","194.88.219.85",
+  "194.88.219.86","194.88.219.87",
+]);
 
 // ── Inline schemas ────────────────────────────────────────────────────────────
 const settingsTable = pgTable("telephony_settings", {
@@ -23,6 +33,12 @@ const settingsTable = pgTable("telephony_settings", {
   recordingEnabled: boolean("recording_enabled").notNull().default(true),
   aiSummaryEnabled: boolean("ai_summary_enabled").notNull().default(true),
   mainNumber: varchar("main_number", { length: 30 }),
+  // Binotel integration
+  binotelEnabled: boolean("binotel_enabled").notNull().default(false),
+  binotelCompanyId: varchar("binotel_company_id", { length: 50 }),
+  binotelApiKey: varchar("binotel_api_key", { length: 255 }),
+  binotelApiSecret: varchar("binotel_api_secret", { length: 255 }),
+  binotelSecretToken: varchar("binotel_secret_token", { length: 255 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -60,6 +76,11 @@ const callLogsTable = pgTable("call_logs", {
   aiActionItems: text("ai_action_items"),
   recordingUrl: text("recording_url"),
   ivrPath: text("ivr_path"),
+  // Binotel integration fields
+  externalCallId: varchar("external_call_id", { length: 100 }),
+  operatorName: varchar("operator_name", { length: 255 }),
+  operatorEmail: varchar("operator_email", { length: 255 }),
+  isNewCaller: boolean("is_new_caller").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -121,7 +142,11 @@ router.get("/settings", requireAuth, async (req: any, res) => {
 router.patch("/settings", requireAuth, async (req: any, res) => {
   const orgId = getOrgId(req);
   const upd: any = {};
-  for (const f of ["isEnabled","greetingMessage","businessHoursStart","businessHoursEnd","afterHoursAction","maxQueueSize","ringTimeoutSec","ivrEnabled","recordingEnabled","aiSummaryEnabled","mainNumber"]) {
+  for (const f of [
+    "isEnabled","greetingMessage","businessHoursStart","businessHoursEnd","afterHoursAction",
+    "maxQueueSize","ringTimeoutSec","ivrEnabled","recordingEnabled","aiSummaryEnabled","mainNumber",
+    "binotelEnabled","binotelCompanyId","binotelApiKey","binotelApiSecret","binotelSecretToken",
+  ]) {
     if (req.body[f] !== undefined) upd[f] = req.body[f];
   }
   upd.updatedAt = new Date();
@@ -430,4 +455,225 @@ router.get("/stats", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Binotel Webhooks (no auth — IP filtered) ──────────────────────────────────
+
+// Helper: look up guest by phone number
+async function findGuestByPhone(orgId: number, phone: string) {
+  try {
+    // Normalize: remove spaces, dashes; ensure 38 prefix for Ukrainian numbers
+    const clean = phone.replace(/[\s\-\(\)]/g, "");
+    const variants = [clean, clean.replace(/^380/, "0"), clean.replace(/^0/, "380")];
+    const rows = await db.execute(sql`
+      SELECT id, first_name || ' ' || last_name AS name FROM guests
+      WHERE organization_id = ${orgId}
+        AND REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', '') = ANY(${variants})
+      LIMIT 1
+    `);
+    return rows.rows[0] as { id: number; name: string } | undefined;
+  } catch { return undefined; }
+}
+
+// Helper: get org by Binotel company ID (for webhook routing)
+async function findOrgByBinotelCompanyId(companyId: string) {
+  try {
+    const rows = await db.execute(sql`
+      SELECT ts.organization_id as id FROM telephony_settings ts
+      WHERE ts.binotel_company_id = ${companyId} AND ts.binotel_enabled = true
+      LIMIT 1
+    `);
+    return rows.rows[0] as { id: number } | undefined;
+  } catch { return undefined; }
+}
+
+// Middleware to check Binotel IP (allow local for testing)
+function binotelIpGuard(req: any, res: any, next: any) {
+  const ip = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").toString().split(",")[0].trim();
+  // Allow Binotel IPs + localhost for dev testing
+  if (BINOTEL_IPS.has(ip) || ip === "127.0.0.1" || ip === "::1" || ip?.startsWith("::ffff:127.") || ip?.startsWith("10.") || ip?.startsWith("172.") || ip?.startsWith("192.168.")) {
+    return next();
+  }
+  return res.status(403).json({ error: "Forbidden" });
+}
+
+// POST /telephony/binotel/call-settings
+// Called by Binotel on EVERY incoming call (before operator answers)
+// We respond with customerData to show caller info in Binotel's Chrome plugin
+router.post("/binotel/call-settings", binotelIpGuard, async (req: any, res) => {
+  try {
+    const body = req.body;
+    const companyId = String(body.companyID || "");
+    const callerNumber = String(body.callerIDNum || body.externalNumber || "");
+    const callType = Number(body.callType ?? 0); // 0=in, 1=out, 2=internal
+
+    // Find org
+    const org = await findOrgByBinotelCompanyId(companyId);
+    if (!org) return res.json({}); // Unknown org — return empty, Binotel continues normally
+
+    const orgId = org.id;
+
+    // Look up guest by phone
+    const guest = callerNumber ? await findGuestByPhone(orgId, callerNumber) : undefined;
+
+    // Broadcast real-time incoming call notification to all connected staff
+    broadcastToAll({
+      type: "binotel-incoming",
+      callerNumber,
+      callerName: guest?.name || null,
+      guestId: guest?.id || null,
+      generalCallId: body.generalCallID,
+      internalNumber: body.internalNumber,
+      isGuest: !!guest,
+      callType,
+    });
+
+    // Respond with customer data for Binotel Chrome plugin
+    const baseUrl = process.env["PUBLIC_URL"] || "";
+    if (guest) {
+      return res.json({
+        customerData: {
+          name: guest.name,
+          description: "Гість ДОГОДА",
+          linkToCrmUrl: `${baseUrl}/maison-hd/guests`,
+          linkToCrmTitle: "Відкрити в CRM",
+        },
+      });
+    }
+
+    // New caller — show link to create guest
+    return res.json({
+      customerData: {
+        name: "Новий гість",
+        linkToCrmUrl: `${baseUrl}/maison-hd/guests`,
+        linkToCrmTitle: "Додати гостя",
+      },
+    });
+  } catch (e: any) {
+    console.error("Binotel call-settings error:", e.message);
+    res.json({});
+  }
+});
+
+// POST /telephony/binotel/call-completed
+// Called by Binotel after each call ends — auto-log the call
+router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => {
+  try {
+    const body = req.body;
+    const callDetails = body.callDetails || {};
+
+    for (const [generalCallId, call] of Object.entries(callDetails as Record<string, any>)) {
+      const companyId = String(call.companyID || "");
+      const org = await findOrgByBinotelCompanyId(companyId);
+      if (!org) continue;
+
+      const orgId = org.id;
+      const externalNumber = call.externalNumber || call.callerIDNum || "";
+      const callType: number = call.callType ?? 0;
+      const direction = callType === 1 ? "outbound" : callType === 2 ? "internal" : "inbound";
+      const billsec: number = call.billsec || 0;
+      const waitsec: number = call.waitsec || 0;
+      const disposition: string = call.disposition || "NOANSWER";
+      const startTime: number = call.startTime || Math.floor(Date.now() / 1000);
+      const operatorName: string = call.employeeData?.name || "";
+      const operatorEmail: string = call.employeeData?.email || "";
+      const clientName: string = call.customerData?.name || "";
+      const isNewCaller: boolean = (call.isNewCall ?? 0) === 1;
+      const recordingUrl: string = call.recordingURL || call.recordingUrl || "";
+
+      // Map Binotel disposition to our status
+      let status = "completed";
+      if (disposition === "NOANSWER" || disposition === "BUSY" || disposition === "FAILED") {
+        status = "missed";
+      }
+
+      // Find guest by phone
+      const guest = externalNumber ? await findGuestByPhone(orgId, externalNumber) : undefined;
+
+      // Look up settings for AI summary toggle
+      const [settings] = await db.select({ aiEnabled: settingsTable.aiSummaryEnabled })
+        .from(settingsTable).where(eq(settingsTable.organizationId, orgId));
+
+      // Create call log entry
+      const [callLog] = await db.insert(callLogsTable).values({
+        organizationId: orgId,
+        direction,
+        callerNumber: externalNumber,
+        callerName: clientName || guest?.name || null,
+        status,
+        durationSec: billsec,
+        waitTimeSec: waitsec,
+        startedAt: new Date(startTime * 1000),
+        endedAt: billsec > 0 ? new Date((startTime + billsec) * 1000) : new Date(),
+        recordingUrl: recordingUrl || null,
+        externalCallId: String(generalCallId),
+        operatorName: operatorName || null,
+        operatorEmail: operatorEmail || null,
+        guestId: guest?.id || null,
+        isNewCaller,
+        notes: `Binotel: ${direction === "inbound" ? "Вхідний" : "Вихідний"} дзвінок. Оператор: ${operatorName || "невідомо"}`,
+      }).returning();
+
+      // Auto AI summary for completed calls
+      if (settings?.aiEnabled && status === "completed" && billsec > 30) {
+        try {
+          const completion = await openai.chat.completions.create({
+            model: "gpt-5-nano",
+            max_completion_tokens: 512,
+            messages: [{
+              role: "system",
+              content: `Ти асистент call-центру готелю. Відповідай в JSON: {"summary":"...","sentiment":"positive|neutral|negative","actionItems":["..."]}`
+            }, {
+              role: "user",
+              content: `Дзвінок від ${clientName || externalNumber}, тривалість ${billsec}с, оператор ${operatorName}. Тип: ${direction}. Нові гості: ${isNewCaller}.`,
+            }],
+          });
+          const raw = completion.choices[0]?.message?.content || "{}";
+          const parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+          await db.update(callLogsTable).set({
+            aiSummary: parsed.summary,
+            aiSentiment: parsed.sentiment,
+            aiActionItems: JSON.stringify(parsed.actionItems || []),
+          }).where(eq(callLogsTable.id, callLog.id));
+        } catch { /* AI summary optional */ }
+      }
+
+      // Broadcast completion to UI
+      broadcastToAll({
+        type: "binotel-completed",
+        callLogId: callLog.id,
+        callerNumber: externalNumber,
+        callerName: clientName || guest?.name || null,
+        status,
+        durationSec: billsec,
+        direction,
+        operatorName,
+        isNewCaller,
+      });
+    }
+
+    res.json({ status: "ok" });
+  } catch (e: any) {
+    console.error("Binotel call-completed error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /telephony/binotel/test
+// Test endpoint — allows manual testing of the webhook (no IP check)
+router.get("/binotel/test", requireAuth, async (req: any, res) => {
+  const domain = req.headers.host || "your-domain.replit.app";
+  const protocol = req.headers["x-forwarded-proto"] || "https";
+  const base = `${protocol}://${domain}/api/telephony/binotel`;
+  res.json({
+    callSettingsUrl: `${base}/call-settings`,
+    callCompletedUrl: `${base}/call-completed`,
+    instructions: {
+      step1: "Зайдіть в Binotel кабінет → API та інтеграції",
+      step2: `Вставте URL API CALL SETTINGS: ${base}/call-settings`,
+      step3: `Вставте URL API CALL COMPLETED: ${base}/call-completed`,
+      step4: "Збережіть Company ID з Binotel в налаштуваннях системи",
+    },
+  });
+});
+
 export default router;
+

@@ -5,6 +5,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
+import { registerClient, unregisterClient, getOnlinePeers, sendToClient } from "./lib/ws-broadcaster.js";
 
 const rawPort = process.env["PORT"];
 
@@ -187,8 +188,6 @@ async function bootstrap() {
 
   // ── WebSocket signaling server for WebRTC internal calls ───────────────────
   const wss = new WebSocketServer({ server, path: "/ws/telephony" });
-  // Map: userId -> WebSocket
-  const peers = new Map<string, WebSocket>();
 
   wss.on("connection", (ws, req) => {
     let myId: string | null = null;
@@ -199,35 +198,24 @@ async function bootstrap() {
         // Register: { type: "register", userId: "user-123" }
         if (msg.type === "register" && msg.userId) {
           myId = String(msg.userId);
-          peers.set(myId, ws);
-          ws.send(JSON.stringify({ type: "registered", userId: myId, peers: [...peers.keys()].filter(k => k !== myId) }));
+          registerClient(myId, ws);
+          ws.send(JSON.stringify({ type: "registered", userId: myId, peers: getOnlinePeers(myId) }));
           // Notify others
-          peers.forEach((peer, id) => {
-            if (id !== myId && peer.readyState === WebSocket.OPEN) {
-              peer.send(JSON.stringify({ type: "peer-online", userId: myId }));
-            }
-          });
+          getOnlinePeers(myId).forEach(id => sendToClient(id, { type: "peer-online", userId: myId }));
           return;
         }
         // Relay signals: offer, answer, ice-candidate, call, hangup
         const { to, ...payload } = msg;
-        if (to && peers.has(String(to))) {
-          const target = peers.get(String(to))!;
-          if (target.readyState === WebSocket.OPEN) {
-            target.send(JSON.stringify({ ...payload, from: myId }));
-          }
+        if (to) {
+          sendToClient(String(to), { ...payload, from: myId });
         }
       } catch { /* ignore malformed */ }
     });
 
     ws.on("close", () => {
       if (myId) {
-        peers.delete(myId);
-        peers.forEach((peer) => {
-          if (peer.readyState === WebSocket.OPEN) {
-            peer.send(JSON.stringify({ type: "peer-offline", userId: myId }));
-          }
-        });
+        unregisterClient(myId);
+        getOnlinePeers().forEach(id => sendToClient(id, { type: "peer-offline", userId: myId }));
       }
     });
   });

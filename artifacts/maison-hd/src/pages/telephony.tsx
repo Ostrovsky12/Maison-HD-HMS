@@ -21,7 +21,8 @@ import {
   Plus, Edit3, Trash2, Bot, CheckCircle2, Clock, AlertTriangle,
   MessageSquare, Settings, Layers, Radio, Signal, PhoneForwarded,
   User, Users, Zap, TrendingUp, ArrowDownLeft, ArrowUpRight,
-  Smile, Meh, Frown, X, ChevronRight, Save, Sparkles,
+  Smile, Meh, Frown, X, ChevronRight, Save, Sparkles, Copy, ExternalLink,
+  Link2, Building2,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -76,7 +77,7 @@ const SCENARIO_LABELS: Record<string, string> = {
 // ── WebRTC hook ───────────────────────────────────────────────────────────────
 const STUN = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
 
-function useWebRTC(userId: string | null) {
+function useWebRTC(userId: string | null, onBinotelEvent?: (evt: any) => void) {
   const ws = useRef<WebSocket | null>(null);
   const pc = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<MediaStream | null>(null);
@@ -144,6 +145,9 @@ function useWebRTC(userId: string | null) {
       if (msg.type === "registered") { setOnline(msg.peers || []); }
       else if (msg.type === "peer-online") setOnline(p => [...new Set([...p, msg.userId])]);
       else if (msg.type === "peer-offline") setOnline(p => p.filter(x => x !== msg.userId));
+      else if (msg.type === "binotel-incoming" || msg.type === "binotel-completed") {
+        onBinotelEvent?.(msg);
+      }
       else if (msg.type === "call") {
         setCallPeer(msg.from);
         setCallState("ringing");
@@ -232,7 +236,33 @@ export default function TelephonyPage() {
     } catch { return "anon"; }
   });
 
-  const { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup } = useWebRTC(myUserId);
+  // Binotel incoming call state
+  const [binotelCall, setBinotelCall] = useState<any>(null);
+  const [webhookUrls, setWebhookUrls] = useState<any>(null);
+
+  const handleBinotelEvent = useCallback((evt: any) => {
+    if (evt.type === "binotel-incoming") {
+      setBinotelCall(evt);
+      toast({
+        title: `📞 Вхідний дзвінок від ${evt.callerName || evt.callerNumber}`,
+        description: evt.isGuest ? "Гість є в базі" : "Новий гість",
+      });
+    } else if (evt.type === "binotel-completed") {
+      setBinotelCall(null);
+      // Refresh call log
+      load();
+    }
+  }, []);
+
+  const { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup } = useWebRTC(myUserId, handleBinotelEvent);
+
+  // Load webhook URLs for settings
+  useEffect(() => {
+    fetch(`${API}/binotel/test`, { headers: h() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setWebhookUrls(d))
+      .catch(() => {});
+  }, []);
 
   // Call log detail
   const [selectedCall, setSelectedCall] = useState<any>(null);
@@ -488,6 +518,31 @@ export default function TelephonyPage() {
               </div>
               <Button variant="destructive" size="sm" onClick={hangup}>
                 <PhoneOff size={13} className="mr-1" /> Завершити
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Binotel incoming call banner */}
+        {binotelCall && (
+          <Card className="border-orange-400 bg-orange-50 animate-pulse">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center animate-bounce">
+                  <PhoneIncoming size={20} className="text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-orange-800 flex items-center gap-2">
+                    <span>Binotel: Вхідний дзвінок</span>
+                    {binotelCall.isGuest && <Badge className="bg-green-100 text-green-700 text-xs">Гість в базі</Badge>}
+                    {binotelCall.isNewCaller && <Badge className="bg-blue-100 text-blue-700 text-xs">Новий гість</Badge>}
+                  </p>
+                  <p className="text-sm text-orange-700 font-mono">{binotelCall.callerName || binotelCall.callerNumber}</p>
+                  {binotelCall.internalNumber && <p className="text-xs text-orange-600">→ Лінія {binotelCall.internalNumber}</p>}
+                </div>
+              </div>
+              <Button size="sm" variant="outline" className="border-orange-400" onClick={() => setBinotelCall(null)}>
+                <X size={13} />
               </Button>
             </CardContent>
           </Card>
@@ -976,6 +1031,83 @@ export default function TelephonyPage() {
                     </div>
                   </CardContent>
                 </Card>
+                {/* Binotel Integration */}
+                <Card className={settingsForm.binotelEnabled ? "border-orange-300" : ""}>
+                  <CardHeader>
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <Building2 size={15} className="text-orange-500" /> Binotel інтеграція
+                      </span>
+                      <Switch checked={!!settingsForm.binotelEnabled} onCheckedChange={v => setSettingsForm({ ...settingsForm, binotelEnabled: v })} />
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {settingsForm.binotelEnabled ? (
+                      <>
+                        <div className="bg-orange-50 rounded-lg p-3 text-sm text-orange-800 space-y-1">
+                          <p className="font-medium">Як підключити Binotel:</p>
+                          <p>1. Зайдіть в Binotel → API та інтеграції</p>
+                          <p>2. Знайдіть ваш Company ID і вставте нижче</p>
+                          <p>3. Скопіюйте URL вебхуків і вставте в Binotel кабінет</p>
+                          <p>4. Збережіть налаштування</p>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label>Company ID (з кабінету Binotel)</Label>
+                          <Input
+                            value={settingsForm.binotelCompanyId || ""}
+                            onChange={e => setSettingsForm({ ...settingsForm, binotelCompanyId: e.target.value })}
+                            placeholder="12345"
+                          />
+                        </div>
+
+                        {webhookUrls && (
+                          <div className="space-y-2">
+                            <Label className="flex items-center gap-1"><Link2 size={12} />URL вебхуків для Binotel</Label>
+                            <div className="space-y-2">
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">API CALL SETTINGS (вхідний дзвінок):</p>
+                                <div className="flex gap-1">
+                                  <code className="flex-1 text-xs bg-muted p-2 rounded font-mono truncate block">
+                                    {webhookUrls.callSettingsUrl}
+                                  </code>
+                                  <Button size="sm" variant="outline" onClick={() => {
+                                    navigator.clipboard.writeText(webhookUrls.callSettingsUrl);
+                                    toast({ title: "URL скопійовано" });
+                                  }}><Copy size={12} /></Button>
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">API CALL COMPLETED (дзвінок завершено):</p>
+                                <div className="flex gap-1">
+                                  <code className="flex-1 text-xs bg-muted p-2 rounded font-mono truncate block">
+                                    {webhookUrls.callCompletedUrl}
+                                  </code>
+                                  <Button size="sm" variant="outline" onClick={() => {
+                                    navigator.clipboard.writeText(webhookUrls.callCompletedUrl);
+                                    toast({ title: "URL скопійовано" });
+                                  }}><Copy size={12} /></Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="bg-green-50 rounded p-2 text-xs text-green-700 space-y-1">
+                          <p className="font-medium">Що отримаєте після підключення:</p>
+                          <p>✓ Автоматичний журнал кожного дзвінка</p>
+                          <p>✓ Спливаюче сповіщення з ім'ям гостя під час дзвінка</p>
+                          <p>✓ AI підсумок після кожної розмови</p>
+                          <p>✓ Пошук гостя в базі по номеру телефону</p>
+                          <p>✓ Розпізнавання нових vs існуючих клієнтів</p>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Увімкніть для налаштування інтеграції з вашою АТС Binotel</p>
+                    )}
+                  </CardContent>
+                </Card>
+
                 <Button onClick={handleSaveSettings} disabled={savingSettings}>
                   <Save size={14} className="mr-1" /> {savingSettings ? "Збереження..." : "Зберегти налаштування"}
                 </Button>
