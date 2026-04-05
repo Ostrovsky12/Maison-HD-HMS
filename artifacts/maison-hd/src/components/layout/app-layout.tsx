@@ -8,7 +8,7 @@ import {
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
   ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package, QrCode, Coins,
-  Smartphone, Leaf,
+  Smartphone, Leaf, Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +72,7 @@ const NAV: NavSection[] = [
       { name: "Inbox",           path: "/inbox",            icon: MessageSquare, roles: null },
       { name: "Guest Experience",path: "/guest-experience", icon: Heart,         roles: ["super_admin", "owner", "manager", "reception"] },
       { name: "Digital Key",     path: "/digital-keys",     icon: Smartphone,    roles: null },
+      { name: "Telephony AI",    path: "/telephony",        icon: Phone,         roles: null },
       { name: "Hotel TV",        path: "/hotel-tv",         icon: Monitor,       roles: ["super_admin", "owner", "manager"] },
     ],
   },

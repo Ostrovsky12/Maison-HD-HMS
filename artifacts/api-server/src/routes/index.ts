@@ -57,6 +57,7 @@ import upsellRouter from "./upsell.js";
 import rateIntelRouter from "./rate-intelligence.js";
 import digitalKeysRouter from "./digital-keys.js";
 import sustainabilityRouter from "./sustainability.js";
+import telephonyRouter from "./telephony.js";
 
 const router: IRouter = Router();
 
@@ -118,5 +119,6 @@ router.use("/upsell", upsellRouter);
 router.use("/rate-intel", rateIntelRouter);
 router.use("/digital-keys", digitalKeysRouter);
 router.use("/sustainability", sustainabilityRouter);
+router.use("/telephony", telephonyRouter);
 
 export default router;
