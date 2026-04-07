@@ -262,11 +262,12 @@ function HotelTab() {
           <SelectTrigger id="propType"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="hotel">🏨 Готель</SelectItem>
-            <SelectItem value="hostel">🛏 Хостел</SelectItem>
-            <SelectItem value="apart">🏢 Апарт-готель</SelectItem>
-            <SelectItem value="resort">🌿 Курорт</SelectItem>
-            <SelectItem value="villa">🏡 Вілла</SelectItem>
+            <SelectItem value="house">🏡 Котедж / Будинок</SelectItem>
+            <SelectItem value="apartment">🏢 Апарт-готель</SelectItem>
+            <SelectItem value="villa">🏖 Вілла</SelectItem>
+            <SelectItem value="glamping">🌿 Курорт / Глемпінг</SelectItem>
             <SelectItem value="camping">⛺ Кемпінг</SelectItem>
+            <SelectItem value="other">⚙️ Інше</SelectItem>
           </SelectContent>
         </Select>
       </div>

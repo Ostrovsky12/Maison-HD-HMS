@@ -90,21 +90,22 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
     return;
   }
   const { name, address, type, description, sortOrder, touristTaxRate } = req.body;
-  const [updated] = await db.update(propertiesTable).set({
-    ...(name !== undefined && { name }),
-    ...(address !== undefined && { address }),
-    ...(type !== undefined && { type }),
-    ...(description !== undefined && { description }),
-  }).where(eq(propertiesTable.id, propertyId)).returning();
-  if (sortOrder !== undefined) {
-    await db.execute(sql`UPDATE properties SET sort_order = ${sortOrder} WHERE id = ${propertyId}`);
-  }
-  if (touristTaxRate !== undefined) {
-    await db.execute(sql`UPDATE properties SET tourist_tax_rate = ${parseFloat(String(touristTaxRate))} WHERE id = ${propertyId}`);
-  }
+  // Use raw SQL to avoid Drizzle's enum type constraint issues (property_type enum)
+  await db.execute(sql`
+    UPDATE properties SET
+      ${name !== undefined ? sql`name = ${name},` : sql``}
+      ${address !== undefined ? sql`address = ${address},` : sql``}
+      ${type !== undefined ? sql`type = ${type},` : sql``}
+      ${description !== undefined ? sql`description = ${description},` : sql``}
+      ${sortOrder !== undefined ? sql`sort_order = ${sortOrder},` : sql``}
+      ${touristTaxRate !== undefined ? sql`tourist_tax_rate = ${parseFloat(String(touristTaxRate))},` : sql``}
+      updated_at = NOW()
+    WHERE id = ${propertyId}
+  `);
+  const rawRows = await db.execute<any>(sql`SELECT *, COALESCE(tourist_tax_rate, 0)::numeric as tourist_tax_rate FROM properties WHERE id = ${propertyId}`);
+  const updated = rawRows.rows[0] || {};
   const [unitCountRow] = await db.select({ count: count() }).from(unitsTable).where(eq(unitsTable.propertyId, propertyId));
-  const taxRate = touristTaxRate ?? (updated as any).tourist_tax_rate ?? 0;
-  res.json({ ...updated, sort_order: sortOrder, tourist_tax_rate: taxRate, unitCount: Number(unitCountRow?.count || 0) });
+  res.json({ ...updated, unitCount: Number(unitCountRow?.count || 0) });
 });
 
 router.delete("/:propertyId", requireAuth, async (req, res) => {
