@@ -132,14 +132,20 @@ export async function sendTelegram(orgId: number, message: string): Promise<{ ok
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: cfg.chatId, text: message, parse_mode: "HTML" }),
+      signal: AbortSignal.timeout(10000),
     });
 
     const json = await res.json() as any;
-    if (!json.ok) return { ok: false, error: json.description || "Telegram API error" };
+    if (!json.ok) {
+      const errDesc = json.description || "Telegram API error";
+      console.error("[notify] telegram API error:", errDesc, "chatId:", cfg.chatId);
+      return { ok: false, error: errDesc };
+    }
     return { ok: true };
   } catch (err: any) {
-    console.error("[notify] telegram error:", err.message);
-    return { ok: false, error: err.message };
+    const msg = err.name === "TimeoutError" ? "Telegram API не відповідає (timeout 10s)" : err.message;
+    console.error("[notify] telegram error:", msg);
+    return { ok: false, error: msg };
   }
 }
 
