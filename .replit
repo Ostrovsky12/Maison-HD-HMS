@@ -34,19 +34,3 @@ channel = "stable-25_05"
 MAISONHD_TG_BOT_TOKEN = "8438373695:AAHOlmdsfXbz58dpFLqta9gmuH3a1ZB9o1o"
 MAISONHD_TG_CHAT_ID = "442439928"
 ELEVENLABS_API_KEY = "sk_41d69ebc6d48f86625cef63d460ee7a2169bed412f1eae4a"
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
-
-[[ports]]
-localPort = 8081
-externalPort = 8081
-
-[[ports]]
-localPort = 22938
-externalPort = 80
-
-[[ports]]
-localPort = 26242
-externalPort = 3000

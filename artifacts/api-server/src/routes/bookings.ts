@@ -264,7 +264,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
   }
 
   const propertiesRaw = propIds.length > 0
-    ? await db.execute<any>(sql`SELECT id, name, COALESCE(sort_order, 0) as sort_order FROM properties WHERE id = ANY(${propIds}) ORDER BY COALESCE(sort_order, 0), id`)
+    ? await db.execute<any>(sql`SELECT id, name, COALESCE(sort_order, 0) as sort_order FROM properties WHERE id IN (${sql.join(propIds.map(id => sql`${id}`), sql`, `)}) ORDER BY COALESCE(sort_order, 0), id`)
     : { rows: [] };
   const propertiesData = propertiesRaw.rows;
   const propNameMap = new Map(propertiesData.map((p: any) => [p.id, p.name]));
