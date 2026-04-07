@@ -137,7 +137,7 @@ function Router() {
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
       <Route path="/analytics"><ProtectedRoute component={AnalyticsPage} /></Route>
       <Route path="/integrations"><ProtectedRoute component={IntegrationsPage} /></Route>
-      <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
+      <Route path="/settings"><ProtectedRoute component={SettingsPage} roles={["super_admin", "owner", "manager"]} /></Route>
       <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} /></Route>
       <Route path="/admin"><ProtectedRoute component={AdminPage} roles={["super_admin"]} /></Route>
       <Route path="/pitch" component={PitchPage} />

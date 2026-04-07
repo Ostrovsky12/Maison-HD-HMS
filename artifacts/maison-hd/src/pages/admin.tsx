@@ -44,18 +44,44 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; ic
 };
 
 const MODULE_LIST = [
-  { key: "inbox",       label: "Комунікації (Inbox)",   icon: "💬" },
-  { key: "ai_hub",      label: "AI Hub (GPT-5)",        icon: "🤖" },
-  { key: "hotel_tv",    label: "Hotel TV Kiosk",        icon: "📺" },
-  { key: "analytics",   label: "Аналітика та KPI",      icon: "📊" },
-  { key: "events",      label: "Заходи та банкети",     icon: "🎭" },
-  { key: "spa",         label: "SPA & Wellness",        icon: "🌿" },
-  { key: "revenue",     label: "Revenue Management",    icon: "💰" },
-  { key: "automation",  label: "Автоматизація",         icon: "⚡" },
-  { key: "guest_portal",label: "Гостьовий портал",      icon: "🏨" },
-  { key: "hq_dashboard",label: "HQ Multi-property",     icon: "🏢" },
-  { key: "fb",          label: "Ресторан & F&B",        icon: "🍽️" },
-  { key: "accounting",  label: "Бухгалтерія",           icon: "📋" },
+  // ── Ядро (завжди доступно) ──────────────────────────
+  { key: "bookings",       label: "Бронювання",                icon: "📅", plan: "basic",      group: "core" },
+  { key: "units",          label: "Номерний фонд",             icon: "🛏️", plan: "basic",      group: "core" },
+  { key: "guests",         label: "Гості та CRM",              icon: "👥", plan: "basic",      group: "core" },
+  { key: "invoices",       label: "Рахунки та оплата",         icon: "💳", plan: "basic",      group: "core" },
+
+  // ── Налаштування ────────────────────────────────────
+  { key: "liqpay",         label: "LiqPay — онлайн оплата",   icon: "💰", plan: "basic",      group: "settings" },
+  { key: "telegram",       label: "Telegram сповіщення",      icon: "✈️", plan: "basic",      group: "settings" },
+  { key: "binotel",        label: "Binotel — телефонія",      icon: "📞", plan: "pro",        group: "settings" },
+  { key: "legal_entities", label: "Юридичні особи та рекв.",  icon: "🏛️", plan: "basic",      group: "settings" },
+  { key: "discounts",      label: "Знижки та акції",          icon: "🏷️", plan: "basic",      group: "settings" },
+  { key: "services",       label: "Додаткові послуги",        icon: "🛎️", plan: "basic",      group: "settings" },
+  { key: "guest_card",     label: "Анкета гостя",             icon: "📋", plan: "basic",      group: "settings" },
+  { key: "invoice_templates", label: "Шаблони найменувань",   icon: "📄", plan: "pro",        group: "settings" },
+
+  // ── Операції ────────────────────────────────────────
+  { key: "housekeeping",   label: "Прибирання (HK)",          icon: "🧹", plan: "basic",      group: "operations" },
+  { key: "maintenance",    label: "Технічна служба",          icon: "🔧", plan: "basic",      group: "operations" },
+  { key: "night_audit",    label: "Нічний аудит",             icon: "🌙", plan: "pro",        group: "operations" },
+
+  // ── Аналітика та Revenue ────────────────────────────
+  { key: "analytics",      label: "Аналітика та KPI",         icon: "📊", plan: "pro",        group: "analytics" },
+  { key: "revenue",        label: "Revenue Management",       icon: "📈", plan: "enterprise", group: "analytics" },
+  { key: "accounting",     label: "Бухгалтерія",              icon: "📋", plan: "pro",        group: "analytics" },
+
+  // ── Комунікації ─────────────────────────────────────
+  { key: "inbox",          label: "Комунікації (Inbox)",      icon: "💬", plan: "pro",        group: "comms" },
+  { key: "guest_portal",   label: "Гостьовий портал",         icon: "🏨", plan: "pro",        group: "comms" },
+  { key: "hotel_tv",       label: "Hotel TV Kiosk",           icon: "📺", plan: "pro",        group: "comms" },
+
+  // ── Розширені модулі ────────────────────────────────
+  { key: "ai_hub",         label: "AI Hub",                   icon: "🤖", plan: "enterprise", group: "advanced" },
+  { key: "automation",     label: "Автоматизація",            icon: "⚡", plan: "pro",        group: "advanced" },
+  { key: "events",         label: "Заходи та банкети",        icon: "🎭", plan: "pro",        group: "advanced" },
+  { key: "spa",            label: "SPA & Wellness",           icon: "🌿", plan: "pro",        group: "advanced" },
+  { key: "fb",             label: "Ресторан & F&B",           icon: "🍽️", plan: "pro",        group: "advanced" },
+  { key: "hq_dashboard",   label: "HQ Multi-property",        icon: "🏢", plan: "enterprise", group: "advanced" },
 ];
 
 const TICKET_STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
@@ -697,24 +723,37 @@ function TenantDetailModal({ tenant, onClose, onSaved }: { tenant: any; onClose:
             )}
 
             {/* Enabled Modules */}
-            <div className="p-4 border rounded-xl space-y-3">
-              <p className="font-semibold text-sm text-gray-700">Включені модулі</p>
-              <div className="grid grid-cols-2 gap-2">
-                {MODULE_LIST.map(m => (
-                  <button
-                    key={m.key}
-                    onClick={() => setModules(prev => ({ ...prev, [m.key]: !prev[m.key] }))}
-                    className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors ${modules[m.key] ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-gray-50 text-gray-400"}`}
-                  >
-                    <span>{m.icon}</span>
-                    <span className="text-xs flex-1">{m.label}</span>
-                    {modules[m.key]
-                      ? <CheckCircle2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                      : <XCircle className="w-3.5 h-3.5 text-gray-300 shrink-0" />
-                    }
-                  </button>
-                ))}
+            <div className="p-4 border rounded-xl space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-sm text-gray-700">Доступні модулі</p>
+                <div className="flex gap-1.5">
+                  <button onClick={() => setModules(MODULE_LIST.reduce((a, m) => ({ ...a, [m.key]: true }), {} as Record<string, boolean>))} className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">Всі</button>
+                  <button onClick={() => setModules(MODULE_LIST.reduce((a, m) => ({ ...a, [m.key]: false }), {} as Record<string, boolean>))} className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 hover:bg-gray-200">Жодного</button>
+                </div>
               </div>
+              {(["core", "settings", "operations", "analytics", "comms", "advanced"] as const).map(group => {
+                const groupLabels: Record<string, string> = { core: "Ядро", settings: "Налаштування", operations: "Операції", analytics: "Аналітика", comms: "Комунікації", advanced: "Розширені" };
+                const groupItems = MODULE_LIST.filter(m => m.group === group);
+                const planColors: Record<string, string> = { basic: "text-emerald-600 bg-emerald-50", pro: "text-indigo-600 bg-indigo-50", enterprise: "text-violet-600 bg-violet-50" };
+                return (
+                  <div key={group}>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">{groupLabels[group]}</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {groupItems.map(m => (
+                        <button
+                          key={m.key}
+                          onClick={() => setModules(prev => ({ ...prev, [m.key]: !prev[m.key] }))}
+                          className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors ${modules[m.key] ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-gray-50 text-gray-400"}`}
+                        >
+                          <span className="shrink-0">{m.icon}</span>
+                          <span className="text-xs flex-1 truncate">{m.label}</span>
+                          <span className={`text-[9px] font-semibold px-1 rounded shrink-0 ${planColors[m.plan]}`}>{m.plan}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Admin Note */}

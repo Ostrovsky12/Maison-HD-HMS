@@ -321,15 +321,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Bottom user section */}
       <div className="p-3 border-t border-white/8 space-y-0.5">
-        <button
-          onClick={() => goTo("/settings")}
-          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all ${
-            isActive("/settings") ? "bg-white/12 text-white" : "text-white/50 hover:bg-white/7 hover:text-white/80"
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          <span>Налаштування</span>
-        </button>
+        {(userRole === "super_admin" || userRole === "owner" || userRole === "manager") && (
+          <button
+            onClick={() => goTo("/settings")}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all ${
+              isActive("/settings") ? "bg-white/12 text-white" : "text-white/50 hover:bg-white/7 hover:text-white/80"
+            }`}
+          >
+            <Settings className="w-4 h-4" />
+            <span>Налаштування</span>
+          </button>
+        )}
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-white/50 hover:bg-white/7 hover:text-white/80 transition-all"

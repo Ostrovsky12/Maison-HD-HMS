@@ -1744,6 +1744,18 @@ function GuestCardRulesSection() {
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
   const { data: user, isLoading: userLoading } = useGetMe();
+  const isSAEarly = user?.role === "super_admin";
+
+  // Fetch org modules (only for hotel admins, not super_admin)
+  const { data: settingsOrg } = useQuery<any>({
+    queryKey: ["org-settings-modules"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/organizations/me`);
+      if (!r.ok) return null;
+      return r.json();
+    },
+    enabled: !!user && !isSAEarly,
+  });
 
   // Wait for user data before rendering — avoids hook-order flicker
   if (userLoading || !user) {
@@ -1757,6 +1769,14 @@ export default function SettingsPage() {
   }
 
   const isSA = user.role === "super_admin";
+
+  // Module access check: if enabledModules not set → all enabled (default)
+  const mod = (key: string) => {
+    if (isSA) return true;
+    const em = settingsOrg?.enabledModules;
+    if (!em || typeof em !== "object") return true;
+    return em[key] !== false;
+  };
 
   return (
     <AppLayout>
@@ -1811,11 +1831,11 @@ export default function SettingsPage() {
             <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
               <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
               <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
-              <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>
-              <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>
-              <TabsTrigger value="notifications" className="gap-1.5"><Bell className="w-3.5 h-3.5" /> Сповіщення</TabsTrigger>
-              <TabsTrigger value="services" className="gap-1.5"><Sparkles className="w-3.5 h-3.5" /> Послуги</TabsTrigger>
-              <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Оплата</TabsTrigger>
+              {mod("legal_entities") && <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>}
+              {mod("discounts") && <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>}
+              {(mod("telegram") || mod("liqpay") || mod("binotel")) && <TabsTrigger value="notifications" className="gap-1.5"><Bell className="w-3.5 h-3.5" /> Сповіщення & Інтеграції</TabsTrigger>}
+              {mod("services") && <TabsTrigger value="services" className="gap-1.5"><Sparkles className="w-3.5 h-3.5" /> Послуги</TabsTrigger>}
+              <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Підписка</TabsTrigger>
             </TabsList>
             <TabsContent value="profile"><ProfileTab /></TabsContent>
             <TabsContent value="hotel">
@@ -1830,42 +1850,50 @@ export default function SettingsPage() {
                 <GuestCardRulesSection />
               </div>
             </TabsContent>
-            <TabsContent value="legal">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Юридичні особи</CardTitle>
-                  <CardDescription>Реквізити для формування рахунків та приймання онлайн-оплат через LiqPay.</CardDescription>
-                </CardHeader>
-                <CardContent><LegalEntitiesTab /></CardContent>
-              </Card>
-            </TabsContent>
-            <TabsContent value="discounts">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Типи знижок</CardTitle>
-                  <CardDescription>Визначте знижки для окремих категорій гостей (УБД, день народження, постійний гість тощо).</CardDescription>
-                </CardHeader>
-                <CardContent><DiscountTypesTab /></CardContent>
-              </Card>
-            </TabsContent>
-            <TabsContent value="notifications">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><Bell className="w-4 h-4" /> Сповіщення</CardTitle>
-                  <CardDescription>Налаштуйте Email та Telegram — система сповіщатиме вас про нові бронювання, заїзди та платежі.</CardDescription>
-                </CardHeader>
-                <CardContent><NotificationsTab /></CardContent>
-              </Card>
-            </TabsContent>
-            <TabsContent value="services">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4" /> Додаткові послуги</CardTitle>
-                  <CardDescription>Налаштуйте послуги вашого об'єкту — вони з'являться в кабінеті гостя для замовлення онлайн.</CardDescription>
-                </CardHeader>
-                <CardContent><AddonsTab /></CardContent>
-              </Card>
-            </TabsContent>
+            {mod("legal_entities") && (
+              <TabsContent value="legal">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Юридичні особи</CardTitle>
+                    <CardDescription>Реквізити для формування рахунків та приймання онлайн-оплат через LiqPay.</CardDescription>
+                  </CardHeader>
+                  <CardContent><LegalEntitiesTab /></CardContent>
+                </Card>
+              </TabsContent>
+            )}
+            {mod("discounts") && (
+              <TabsContent value="discounts">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Типи знижок</CardTitle>
+                    <CardDescription>Визначте знижки для окремих категорій гостей (УБД, день народження, постійний гість тощо).</CardDescription>
+                  </CardHeader>
+                  <CardContent><DiscountTypesTab /></CardContent>
+                </Card>
+              </TabsContent>
+            )}
+            {(mod("telegram") || mod("liqpay") || mod("binotel")) && (
+              <TabsContent value="notifications">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Bell className="w-4 h-4" /> Сповіщення & Інтеграції</CardTitle>
+                    <CardDescription>Email, Telegram, SMS-сповіщення, LiqPay та Binotel — підключення та налаштування для вашого об'єкту.</CardDescription>
+                  </CardHeader>
+                  <CardContent><NotificationsTab /></CardContent>
+                </Card>
+              </TabsContent>
+            )}
+            {mod("services") && (
+              <TabsContent value="services">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4" /> Додаткові послуги</CardTitle>
+                    <CardDescription>Налаштуйте послуги вашого об'єкту — вони з'являться в кабінеті гостя для замовлення онлайн.</CardDescription>
+                  </CardHeader>
+                  <CardContent><AddonsTab /></CardContent>
+                </Card>
+              </TabsContent>
+            )}
             <TabsContent value="billing">
               <Card>
                 <CardHeader>
