@@ -7,8 +7,9 @@ import {
   ChevronRight, Plus, Send, Copy, CheckCheck, AlertTriangle, Link2,
   Star, ShoppingBag, Waves, Bike, Zap, StickyNote, CheckCircle2, Circle,
   BadgeCheck, TrendingUp, Smartphone, FileText, ExternalLink, Loader2,
-  Download, ChevronDown,
+  Download, ChevronDown, ClipboardSignature,
 } from "lucide-react";
+import { openGuestCard } from "./guest-card-print";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API  = BASE.replace("/maison-hd", "") + "/api";
@@ -824,6 +825,15 @@ export function BookingPanel({ booking: b, open, onClose, onCheckin, onCheckout,
                 className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm shadow-blue-500/25"
               >
                 <LogOut className="w-4 h-4" /> Check-out
+              </button>
+            )}
+            {(b.status === "confirmed" || b.status === "checked_in") && (
+              <button
+                onClick={() => openGuestCard(b)}
+                title="Анкета гостя (друк)"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-violet-200 bg-violet-50 text-sm text-violet-700 font-semibold hover:bg-violet-100 transition-colors"
+              >
+                <ClipboardSignature className="w-4 h-4" /> Анкета
               </button>
             )}
             <button
