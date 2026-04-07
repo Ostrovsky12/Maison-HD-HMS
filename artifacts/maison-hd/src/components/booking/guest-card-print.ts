@@ -4,7 +4,18 @@ function fmt(dateStr: string) {
   return d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-export function openGuestCard(b: any) {
+const DEFAULT_RULES = [
+  "Заїзд з {checkinTime}, виїзд до {checkoutTime}. Пізній виїзд за домовленістю та за додаткову плату.",
+  "Тихий час з 23:00 до 08:00. Прохання дотримуватися тиші та поважати відпочинок інших гостей.",
+  "Паління дозволено лише у спеціально відведених місцях. Паління у приміщеннях заборонено та тягне за собою штраф.",
+  "Тварини допускаються за попереднім погодженням з адміністрацією.",
+  "Забороняється самовільно переставляти або виносити меблі та інвентар з номера/будинку.",
+  "Гість несе матеріальну відповідальність за збитки, завдані майну комплексу.",
+  "У разі виявлення несправностей або поломок просимо негайно повідомити адміністрацію.",
+  "Адміністрація не несе відповідальності за речі, залишені без нагляду на території комплексу.",
+];
+
+export function openGuestCard(b: any, orgRules?: string | null) {
   const fullName =
     [b.lastName, b.firstName, b.middleName].filter(Boolean).join(" ") ||
     b.guestName ||
@@ -20,6 +31,23 @@ export function openGuestCard(b: any) {
   const checkoutTime = b.checkoutTime || "12:00";
   const unitName     = b.unitName || (b.unitId ? `Юніт #${b.unitId}` : "—");
   const propertyName = b.propertyName || b.unit?.propertyName || "";
+
+  // Build rules list from org custom rules or defaults
+  let ruleLines: string[] = [];
+  if (orgRules && orgRules.trim()) {
+    ruleLines = orgRules
+      .split("\n")
+      .map(l => l.trim())
+      .filter(l => l.length > 0);
+  } else {
+    ruleLines = DEFAULT_RULES.map(r =>
+      r.replace("{checkinTime}", checkinTime).replace("{checkoutTime}", checkoutTime)
+    );
+  }
+
+  const rulesHtml = ruleLines
+    .map((rule, i) => `<li data-n="${i + 1}">${rule}</li>`)
+    .join("\n    ");
 
   const extraRows = Array.from({ length: 5 }, (_, i) => `
     <tr>
@@ -245,14 +273,7 @@ export function openGuestCard(b: any) {
 <div class="section">
   <div class="section-title">Правила комплексу</div>
   <ul class="rules-list">
-    <li data-n="1">Заїзд з ${checkinTime}, виїзд до ${checkoutTime}. Пізній виїзд за домовленістю та за додаткову плату.</li>
-    <li data-n="2">Тихий час з 23:00 до 08:00. Прохання дотримуватися тиші та поважати відпочинок інших гостей.</li>
-    <li data-n="3">Паління дозволено лише у спеціально відведених місцях. Паління у приміщеннях заборонено та тягне за собою штраф.</li>
-    <li data-n="4">Тварини допускаються за попереднім погодженням з адміністрацією.</li>
-    <li data-n="5">Забороняється самовільно переставляти або виносити меблі та інвентар з номера/будинку.</li>
-    <li data-n="6">Гість несе матеріальну відповідальність за збитки, завдані майну комплексу.</li>
-    <li data-n="7">У разі виявлення несправностей або поломок просимо негайно повідомити адміністрацію.</li>
-    <li data-n="8">Адміністрація не несе відповідальності за речі, залишені без нагляду на території комплексу.</li>
+    ${rulesHtml}
   </ul>
 </div>
 

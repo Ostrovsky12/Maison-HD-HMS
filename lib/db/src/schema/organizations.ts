@@ -30,6 +30,7 @@ export const organizationsTable = pgTable("organizations", {
   taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).default("20.0"),
 
   enabledModules: jsonb("enabled_modules"),
+  guestCardRules: text("guest_card_rules"),
 
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),

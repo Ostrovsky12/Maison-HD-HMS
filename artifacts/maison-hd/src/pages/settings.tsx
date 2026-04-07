@@ -17,8 +17,10 @@ import {
   Crown, Users2, Loader2, ChevronRight, Clock, CheckCircle2, AlertCircle,
   Copy, RefreshCw, Globe, Phone, Mail, Lock, Hash,
   Bell, Send, Bot, ToggleLeft, ToggleRight, Sparkles, MessageSquare,
+  ScrollText, RotateCcw,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api";
@@ -1626,6 +1628,119 @@ function AddonsTab() {
   );
 }
 
+// ── Guest Card Rules Section ───────────────────────────────────────
+const DEFAULT_GUEST_CARD_RULES = `Заїзд з 14:00, виїзд до 12:00. Пізній виїзд за домовленістю та за додаткову плату.
+Тихий час з 23:00 до 08:00. Прохання дотримуватися тиші та поважати відпочинок інших гостей.
+Паління дозволено лише у спеціально відведених місцях. Паління у приміщеннях заборонено та тягне за собою штраф.
+Тварини допускаються за попереднім погодженням з адміністрацією.
+Забороняється самовільно переставляти або виносити меблі та інвентар з номера/будинку.
+Гість несе матеріальну відповідальність за збитки, завдані майну комплексу.
+У разі виявлення несправностей або поломок просимо негайно повідомити адміністрацію.
+Адміністрація не несе відповідальності за речі, залишені без нагляду на території комплексу.`;
+
+function GuestCardRulesSection() {
+  const qc = useQueryClient();
+  const { data: user } = useGetMe();
+  const [rules, setRules] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  const { data: org } = useQuery<any>({
+    queryKey: ["org-current"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/organizations/me`);
+      if (!r.ok) return null;
+      return r.json();
+    },
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (org && !loaded) {
+      setRules(org.guestCardRules || "");
+      setLoaded(true);
+    }
+  }, [org]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const orgId = org?.id || user?.organizationId;
+      if (!orgId) throw new Error("Організацію не знайдено");
+      const r = await authFetch(`${API}/organizations/${orgId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ guestCardRules: rules }),
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.message || "Помилка"); }
+      return r.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org-current"] });
+      toast({ title: "Збережено", description: "Правила анкети оновлено" });
+    },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  const lineCount = rules.trim() ? rules.trim().split("\n").filter(l => l.trim()).length : 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ScrollText className="w-4 h-4" />
+          Правила комплексу для анкети гостя
+        </CardTitle>
+        <CardDescription>
+          Ці правила друкуються в анкеті гостя при заселенні. Кожен рядок — окремий пункт.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm text-muted-foreground">
+              {lineCount > 0 ? `${lineCount} пункт${lineCount === 1 ? "" : lineCount < 5 ? "и" : "ів"}` : "Порожньо — будуть застосовані стандартні правила"}
+            </Label>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+              onClick={() => setRules(DEFAULT_GUEST_CARD_RULES)}
+            >
+              <RotateCcw className="w-3 h-3" />
+              Стандартні правила
+            </Button>
+          </div>
+          <Textarea
+            value={rules}
+            onChange={e => setRules(e.target.value)}
+            placeholder={`Введіть правила — кожен рядок окремий пункт:\n\nЗаїзд з 14:00, виїзд до 12:00...\nТихий час з 23:00 до 08:00...`}
+            className="min-h-[220px] font-mono text-sm leading-relaxed resize-y"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Якщо поле порожнє — в анкеті будуть використані стандартні правила Maison HD.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRules(org?.guestCardRules || "")}
+          >
+            Скасувати
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+            className="gap-1.5"
+          >
+            {saveMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Зберегти правила
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
   const { data: user, isLoading: userLoading } = useGetMe();
@@ -1704,13 +1819,16 @@ export default function SettingsPage() {
             </TabsList>
             <TabsContent value="profile"><ProfileTab /></TabsContent>
             <TabsContent value="hotel">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><Hotel className="w-4 h-4" /> Налаштування об'єкту</CardTitle>
-                  <CardDescription>Основна інформація про готель, що відображається у системі.</CardDescription>
-                </CardHeader>
-                <CardContent><HotelTab /></CardContent>
-              </Card>
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Hotel className="w-4 h-4" /> Налаштування об'єкту</CardTitle>
+                    <CardDescription>Основна інформація про готель, що відображається у системі.</CardDescription>
+                  </CardHeader>
+                  <CardContent><HotelTab /></CardContent>
+                </Card>
+                <GuestCardRulesSection />
+              </div>
             </TabsContent>
             <TabsContent value="legal">
               <Card>

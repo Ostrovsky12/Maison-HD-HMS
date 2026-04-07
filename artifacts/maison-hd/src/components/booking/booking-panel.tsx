@@ -829,7 +829,14 @@ export function BookingPanel({ booking: b, open, onClose, onCheckin, onCheckout,
             )}
             {(b.status === "confirmed" || b.status === "checked_in") && (
               <button
-                onClick={() => openGuestCard(b)}
+                onClick={async () => {
+                  let rules: string | null = null;
+                  try {
+                    const r = await apiFetch(`${API}/organizations/me`);
+                    if (r.ok) { const org = await r.json(); rules = org.guestCardRules || null; }
+                  } catch {}
+                  openGuestCard(b, rules);
+                }}
                 title="Анкета гостя (друк)"
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-violet-200 bg-violet-50 text-sm text-violet-700 font-semibold hover:bg-violet-100 transition-colors"
               >
