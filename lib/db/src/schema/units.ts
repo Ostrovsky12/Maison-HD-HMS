@@ -23,6 +23,7 @@ export const unitsTable = pgTable("units", {
   hasView: text("has_view"),
   hasBalcony: boolean("has_balcony").default(false),
   squareMeters: numeric("square_meters", { precision: 6, scale: 1 }),
+  isHidden: boolean("is_hidden").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

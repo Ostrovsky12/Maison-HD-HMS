@@ -41,6 +41,7 @@ router.get("/availability", requireAuth, async (req, res) => {
   if (propIds.length > 0) unitConditions.push(inArray(unitsTable.propertyId, propIds));
   if (category) unitConditions.push(eq(unitsTable.category, category as string));
   unitConditions.push(eq(unitsTable.status, "active"));
+  unitConditions.push(sql`COALESCE(${unitsTable.isHidden}, false) = false`);
 
   const units = unitConditions.length > 0
     ? await db.select().from(unitsTable).where(and(...unitConditions))
@@ -190,7 +191,7 @@ router.get("/:unitId", requireAuth, async (req, res) => {
 
 router.put("/:unitId", requireAuth, async (req, res) => {
   const unitId = parseInt(req.params.unitId);
-  const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters, propertyId, sortOrder } = req.body;
+  const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters, propertyId, sortOrder, isHidden } = req.body;
   const [unit] = await db.update(unitsTable).set({
     ...(name !== undefined && { name }),
     ...(category !== undefined && { category }),
@@ -206,13 +207,13 @@ router.put("/:unitId", requireAuth, async (req, res) => {
     ...(hasBalcony !== undefined && { hasBalcony }),
     ...(squareMeters !== undefined && { squareMeters: squareMeters ? String(squareMeters) : null }),
     ...(propertyId !== undefined && { propertyId: Number(propertyId) }),
+    ...(isHidden !== undefined && { isHidden: Boolean(isHidden) }),
     updatedAt: new Date(),
   }).where(eq(unitsTable.id, unitId)).returning();
   if (!unit) {
     res.status(404).json({ error: "Not Found", message: "Unit not found" });
     return;
   }
-  // Update sort_order if provided (raw SQL since schema might not have it)
   if (sortOrder !== undefined) {
     await db.execute(sql`UPDATE units SET sort_order = ${sortOrder} WHERE id = ${unitId}`);
   }
@@ -227,6 +228,14 @@ router.patch("/bulk-sort", requireAuth, async (req, res) => {
     await db.execute(sql`UPDATE units SET sort_order = ${sortOrder} WHERE id = ${id}`);
   }
   res.json({ ok: true });
+});
+
+// PATCH /units/bulk-visibility — bulk hide/show units
+router.patch("/bulk-visibility", requireAuth, async (req, res) => {
+  const { ids, isHidden } = req.body; // { ids: number[], isHidden: boolean }
+  if (!Array.isArray(ids) || ids.length === 0) { res.status(400).json({ error: "ids required" }); return; }
+  await db.execute(sql`UPDATE units SET is_hidden = ${Boolean(isHidden)}, updated_at = NOW() WHERE id = ANY(ARRAY[${sql.join(ids.map((id: number) => sql`${id}`), sql`, `)}]::int[])`);
+  res.json({ ok: true, updated: ids.length });
 });
 
 export default router;

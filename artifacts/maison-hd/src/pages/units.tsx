@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Plus, Search, BedDouble, Wrench, Sparkles, Loader2, Calendar,
-  CheckCircle2, XCircle, Eye, Wind, Maximize2, Edit2, Trash2,
-  Building2, X, ChevronRight, RefreshCw, AlertTriangle,
+  CheckCircle2, XCircle, Eye, EyeOff, Wind, Maximize2, Edit2, Trash2,
+  Building2, X, ChevronRight, RefreshCw, AlertTriangle, CheckSquare,
+  Square, MousePointerClick,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -325,6 +326,13 @@ export default function UnitsPage() {
   const [checkOut, setCheckOut] = useState(getTomorrowStr());
   const [filterAvail, setFilterAvail] = useState<"all" | "available" | "busy">("all");
 
+  // Visibility filter
+  const [visFilter, setVisFilter] = useState<"visible" | "hidden" | "all">("visible");
+
+  // Select mode
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
   // Search
   const [search, setSearch] = useState("");
 
@@ -381,6 +389,36 @@ export default function UnitsPage() {
     else toast({ title: "Помилка оновлення статусу", variant: "destructive" });
   };
 
+  const handleBulkVisibility = async (hide: boolean) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const r = await apiFetch("/units/bulk-visibility", { method: "PATCH", body: JSON.stringify({ ids, isHidden: hide }) });
+    if (r.ok) {
+      toast({ title: hide ? `Приховано ${ids.length} юнітів` : `Показано ${ids.length} юнітів` });
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      loadUnits();
+    } else {
+      toast({ title: "Помилка", variant: "destructive" });
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (visibleIds: number[]) => {
+    if (visibleIds.every(id => selectedIds.has(id))) {
+      setSelectedIds(prev => { const n = new Set(prev); visibleIds.forEach(id => n.delete(id)); return n; });
+    } else {
+      setSelectedIds(prev => { const n = new Set(prev); visibleIds.forEach(id => n.add(id)); return n; });
+    }
+  };
+
   // Filtered units
   const displayUnits = unitViewMode === "availability"
     ? (availability?.results || [])
@@ -389,8 +427,16 @@ export default function UnitsPage() {
         .filter((r: any) => propFilter === "all" || String(r.unit.propertyId) === propFilter)
         .map((r: any) => ({ ...r.unit, _available: r.isAvailable }))
     : units
+        .filter(u => {
+          if (visFilter === "visible") return !u.isHidden;
+          if (visFilter === "hidden") return !!u.isHidden;
+          return true;
+        })
         .filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || (u.category || "").toLowerCase().includes(search.toLowerCase()))
         .filter(u => propFilter === "all" || String(u.propertyId) === propFilter);
+
+  const hiddenCount = units.filter(u => !!u.isHidden).length;
+  const visibleCount = units.filter(u => !u.isHidden).length;
 
   return (
     <AppLayout>
@@ -438,11 +484,11 @@ export default function UnitsPage() {
         {/* ── UNITS TAB ── */}
         {mainTab === "units" && (
           <>
-            {/* Filters */}
+            {/* Filters row 1: view mode + search + property */}
             <div className="flex flex-wrap gap-3 items-center">
-              <Tabs value={unitViewMode} onValueChange={v => setUnitViewMode(v as any)}>
+              <Tabs value={unitViewMode} onValueChange={v => { setUnitViewMode(v as any); setSelectMode(false); setSelectedIds(new Set()); }}>
                 <TabsList>
-                  <TabsTrigger value="all">Всі</TabsTrigger>
+                  <TabsTrigger value="all">Список</TabsTrigger>
                   <TabsTrigger value="availability" className="gap-1.5"><Calendar className="h-3.5 w-3.5" />Доступність</TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -475,6 +521,66 @@ export default function UnitsPage() {
               )}
             </div>
 
+            {/* Filters row 2: visibility tabs + select mode (list view only) */}
+            {unitViewMode === "all" && (
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex rounded-xl border border-gray-200 overflow-hidden text-xs font-semibold">
+                  {([
+                    { key: "visible", label: `Видимі`, count: visibleCount },
+                    { key: "hidden",  label: `Приховані`, count: hiddenCount },
+                    { key: "all",     label: "Всі", count: units.length },
+                  ] as const).map(({ key, label, count }) => (
+                    <button key={key} onClick={() => setVisFilter(key)}
+                      className={`px-3 py-1.5 flex items-center gap-1.5 transition-colors ${visFilter === key ? "bg-violet-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>
+                      {key === "hidden" && <EyeOff className="h-3 w-3" />}
+                      {key === "visible" && <Eye className="h-3 w-3" />}
+                      {label}
+                      <span className={`rounded-full px-1.5 text-[10px] ${visFilter === key ? "bg-white/20" : "bg-gray-100 text-gray-400"}`}>{count}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setSelectMode(v => !v); if (selectMode) setSelectedIds(new Set()); }}
+                  className={`flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border transition-colors ${selectMode ? "bg-violet-100 border-violet-300 text-violet-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+                >
+                  <MousePointerClick className="h-3.5 w-3.5" />
+                  {selectMode ? "Завершити вибір" : "Обрати"}
+                </button>
+                {selectMode && displayUnits.length > 0 && (
+                  <button
+                    onClick={() => toggleSelectAll((displayUnits as any[]).map((u: any) => u.id))}
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    {(displayUnits as any[]).every((u: any) => selectedIds.has(u.id))
+                      ? <><CheckSquare className="h-3.5 w-3.5 text-violet-500" />Скасувати все</>
+                      : <><Square className="h-3.5 w-3.5" />Обрати всі</>
+                    }
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Bulk action toolbar */}
+            {selectMode && selectedIds.size > 0 && (
+              <div className="flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5">
+                <span className="text-sm font-semibold text-violet-800">Обрано: {selectedIds.size}</span>
+                <div className="flex gap-2 ml-auto">
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
+                    onClick={() => handleBulkVisibility(true)}>
+                    <EyeOff className="h-3.5 w-3.5" />Приховати
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
+                    onClick={() => handleBulkVisibility(false)}>
+                    <Eye className="h-3.5 w-3.5" />Показати
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-8 text-xs text-gray-500"
+                    onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}>
+                    Скасувати
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {/* Availability summary */}
             {unitViewMode === "availability" && availability && (
               <div className="flex items-center gap-4 text-sm p-3 bg-gray-50 rounded-xl border">
@@ -490,8 +596,9 @@ export default function UnitsPage() {
             ) : displayUnits.length === 0 ? (
               <div className="text-center py-16 text-gray-400">
                 <BedDouble className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                <p className="font-medium">Немає юнітів</p>
-                <p className="text-sm">Натисніть "Додати юніт" щоб створити перший</p>
+                <p className="font-medium">{visFilter === "hidden" ? "Немає прихованих юнітів" : "Немає юнітів"}</p>
+                {visFilter === "hidden" && <p className="text-sm mt-1">Приховані юніти не відображаються у шахматці та бронюваннях</p>}
+                {visFilter !== "hidden" && <p className="text-sm">Натисніть "Додати юніт" щоб створити перший</p>}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -499,21 +606,53 @@ export default function UnitsPage() {
                   const hk = HK_CONFIG[unit.housekeepingStatus] || HK_CONFIG.dirty;
                   const HkIcon = hk.icon;
                   const propName = properties.find(p => p.id === unit.propertyId)?.name;
+                  const isHidden = !!unit.isHidden;
+                  const isSelected = selectedIds.has(unit.id);
                   return (
-                    <Card key={unit.id} className="flex flex-col overflow-hidden transition-all hover:shadow-md group">
-                      <div className={`h-1.5 w-full ${unitViewMode === "availability" ? (unit._available ? "bg-emerald-400" : "bg-rose-400") : unit.status === "maintenance" ? "bg-amber-400" : "bg-violet-400"}`} />
+                    <Card key={unit.id}
+                      onClick={selectMode ? () => toggleSelect(unit.id) : undefined}
+                      className={`flex flex-col overflow-hidden transition-all hover:shadow-md group relative ${
+                        isHidden ? "opacity-60 bg-gray-50" : ""
+                      } ${selectMode ? "cursor-pointer" : ""} ${
+                        isSelected ? "ring-2 ring-violet-500 ring-offset-1" : ""
+                      }`}
+                    >
+                      {/* Checkbox in select mode */}
+                      {selectMode && (
+                        <div className="absolute top-2 left-2 z-10">
+                          {isSelected
+                            ? <CheckSquare className="h-5 w-5 text-violet-600 bg-white rounded" />
+                            : <Square className="h-5 w-5 text-gray-400 bg-white rounded" />
+                          }
+                        </div>
+                      )}
+                      {/* Hidden overlay badge */}
+                      {isHidden && (
+                        <div className="absolute top-2 right-2 z-10">
+                          <span className="flex items-center gap-1 text-[10px] font-bold bg-gray-700 text-white px-1.5 py-0.5 rounded-full">
+                            <EyeOff className="h-2.5 w-2.5" />Приховано
+                          </span>
+                        </div>
+                      )}
+                      <div className={`h-1.5 w-full ${isHidden ? "bg-gray-300" : unitViewMode === "availability" ? (unit._available ? "bg-emerald-400" : "bg-rose-400") : unit.status === "maintenance" ? "bg-amber-400" : "bg-violet-400"}`} />
                       <CardHeader className="pb-2 pt-3 px-4">
                         <div className="flex justify-between items-start gap-2">
-                          <div className="min-w-0">
-                            <CardTitle className="text-base font-bold truncate">{unit.name}</CardTitle>
+                          <div className={`min-w-0 ${selectMode ? "pl-6" : ""}`}>
+                            <CardTitle className={`text-base font-bold truncate ${isHidden ? "text-gray-500" : ""}`}>{unit.name}</CardTitle>
                             <p className="text-xs text-gray-400 truncate">{propName || "—"}</p>
                           </div>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                            <button onClick={() => setUnitModal({ open: true, unit })}
-                              className="p-1.5 hover:bg-violet-100 rounded-lg text-violet-600"><Edit2 className="h-3.5 w-3.5" /></button>
-                            <button onClick={() => setDeleteUnit(unit)}
-                              className="p-1.5 hover:bg-red-100 rounded-lg text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
-                          </div>
+                          {!selectMode && (
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                              <button onClick={e => { e.stopPropagation(); setUnitModal({ open: true, unit }); }}
+                                className="p-1.5 hover:bg-violet-100 rounded-lg text-violet-600"><Edit2 className="h-3.5 w-3.5" /></button>
+                              <button onClick={async e => { e.stopPropagation(); const r = await apiFetch(`/units/${unit.id}`, { method: "PUT", body: JSON.stringify({ isHidden: !isHidden }) }); if (r.ok) { loadUnits(); toast({ title: isHidden ? "Юніт показано" : "Юніт приховано" }); } }}
+                                className={`p-1.5 rounded-lg ${isHidden ? "hover:bg-emerald-100 text-emerald-600" : "hover:bg-gray-100 text-gray-500"}`} title={isHidden ? "Показати" : "Приховати"}>
+                                {isHidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); setDeleteUnit(unit); }}
+                                className="p-1.5 hover:bg-red-100 rounded-lg text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                            </div>
+                          )}
                         </div>
                       </CardHeader>
                       <CardContent className="flex-1 px-4 pb-2 space-y-1.5">
@@ -538,22 +677,24 @@ export default function UnitsPage() {
                           {unit.squareMeters && !unit.hasView && !unit.hasBalcony && <span className="text-xs bg-gray-50 text-gray-500 border border-gray-200 rounded px-1.5 py-0.5 flex items-center gap-1"><Maximize2 className="h-3 w-3" />{unit.squareMeters} м²</span>}
                         </div>
                       </CardContent>
-                      <CardFooter className="px-4 py-3 border-t bg-gray-50/60">
-                        <div className="w-full flex items-center justify-between gap-2">
-                          <div className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border ${hk.color}`}>
-                            <HkIcon className="h-3 w-3" />{hk.label}
+                      {!isHidden && (
+                        <CardFooter className="px-4 py-3 border-t bg-gray-50/60">
+                          <div className="w-full flex items-center justify-between gap-2">
+                            <div className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border ${hk.color}`}>
+                              <HkIcon className="h-3 w-3" />{hk.label}
+                            </div>
+                            <Select value={unit.housekeepingStatus || "dirty"} onValueChange={v => handleHkStatus(unit.id, v)}>
+                              <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="clean">Чисто</SelectItem>
+                                <SelectItem value="dirty">Брудно</SelectItem>
+                                <SelectItem value="in_progress">Прибирають</SelectItem>
+                                <SelectItem value="inspected">Перевірено</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
-                          <Select value={unit.housekeepingStatus || "dirty"} onValueChange={v => handleHkStatus(unit.id, v)}>
-                            <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="clean">Чисто</SelectItem>
-                              <SelectItem value="dirty">Брудно</SelectItem>
-                              <SelectItem value="in_progress">Прибирають</SelectItem>
-                              <SelectItem value="inspected">Перевірено</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </CardFooter>
+                        </CardFooter>
+                      )}
                     </Card>
                   );
                 })}

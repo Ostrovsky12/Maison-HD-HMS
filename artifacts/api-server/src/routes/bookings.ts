@@ -276,8 +276,8 @@ router.get("/calendar", requireAuth, async (req, res) => {
 
   const unitRows = await db.execute<any>(
     unitConditions.length > 0
-      ? sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units WHERE ${and(...unitConditions)} ORDER BY COALESCE(sort_order, 0), name`
-      : sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units ORDER BY COALESCE(sort_order, 0), name`
+      ? sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units WHERE ${and(...unitConditions)} AND COALESCE(is_hidden, false) = false ORDER BY COALESCE(sort_order, 0), name`
+      : sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units WHERE COALESCE(is_hidden, false) = false ORDER BY COALESCE(sort_order, 0), name`
   );
 
   const units = unitRows.rows.map((u: any) => ({
