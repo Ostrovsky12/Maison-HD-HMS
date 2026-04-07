@@ -61,9 +61,10 @@ function TodayBar({ bookings }: { bookings: any[] }) {
   const today = todayStr();
   const arrivals   = bookings.filter(b => b.checkIn === today && ["confirmed","pending"].includes(b.status));
   const departures = bookings.filter(b => b.checkOut === today && b.status === "checked_in");
-  const staying    = bookings.filter(b => b.status === "checked_in");
+  const staying    = bookings.filter(b => b.status === "checked_in" && b.checkOut > today && b.checkIn <= today);
+  const overdue    = bookings.filter(b => b.status === "checked_in" && b.checkOut < today);
 
-  if (arrivals.length === 0 && departures.length === 0 && staying.length === 0) return null;
+  if (arrivals.length === 0 && departures.length === 0 && staying.length === 0 && overdue.length === 0) return null;
 
   return (
     <div className="flex gap-3 mb-4 flex-wrap">
@@ -94,6 +95,15 @@ function TodayBar({ bookings }: { bookings: any[] }) {
           </div>
         </div>
       )}
+      {overdue.length > 0 && (
+        <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          <LogOut className="w-4 h-4 text-red-500 shrink-0" />
+          <div>
+            <div className="text-xs text-red-600 font-medium">Прострочено виїзд</div>
+            <div className="font-bold text-red-700 text-base leading-tight">{overdue.length}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -105,15 +115,17 @@ function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout }: {
 }) {
   const nights = differenceInDays(new Date(booking.checkOut), new Date(booking.checkIn));
   const today = todayStr();
-  const isArrivalToday  = booking.checkIn === today && booking.status === "confirmed";
+  const isArrivalToday   = booking.checkIn === today && booking.status === "confirmed";
   const isDepartureToday = booking.checkOut === today && booking.status === "checked_in";
+  const isOverdue        = booking.status === "checked_in" && booking.checkOut < today;
 
   return (
     <div
       onClick={onClick}
       className={`group bg-white rounded-2xl border-2 px-4 py-3.5 cursor-pointer transition-all hover:shadow-sm ${
-        isSelected ? "border-indigo-400 shadow-sm shadow-indigo-100/60" :
-        isArrivalToday ? "border-emerald-300/80 bg-emerald-50/30" :
+        isSelected      ? "border-indigo-400 shadow-sm shadow-indigo-100/60" :
+        isOverdue       ? "border-red-300/80 bg-red-50/20" :
+        isArrivalToday  ? "border-emerald-300/80 bg-emerald-50/30" :
         isDepartureToday ? "border-amber-300/80 bg-amber-50/30" :
         "border-gray-200/80 hover:border-gray-300"
       }`}
@@ -121,7 +133,8 @@ function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout }: {
       <div className="flex items-center gap-3">
         {/* Avatar */}
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0 ${
-          isArrivalToday ? "bg-gradient-to-br from-emerald-400 to-teal-500" :
+          isOverdue        ? "bg-gradient-to-br from-red-400 to-rose-500" :
+          isArrivalToday   ? "bg-gradient-to-br from-emerald-400 to-teal-500" :
           isDepartureToday ? "bg-gradient-to-br from-amber-400 to-orange-500" :
           "bg-gradient-to-br from-indigo-400 to-violet-500"
         }`}>
@@ -133,10 +146,13 @@ function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout }: {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-gray-900 text-sm truncate">{booking.guestName || "—"}</span>
             <StatusPill status={booking.status} />
-            {isArrivalToday && (
+            {isOverdue && (
+              <span className="text-[10px] font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded-full">ПРОСТРОЧЕНО</span>
+            )}
+            {!isOverdue && isArrivalToday && (
               <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">ЗАЇЗД</span>
             )}
-            {isDepartureToday && (
+            {!isOverdue && isDepartureToday && (
               <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">ВИЇЗД</span>
             )}
           </div>
@@ -152,8 +168,8 @@ function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout }: {
           </div>
         </div>
 
-        {/* Quick actions for today */}
-        {(isArrivalToday || isDepartureToday) && (
+        {/* Quick actions for today / overdue */}
+        {(isArrivalToday || isDepartureToday || isOverdue) && (
           <div className="shrink-0 hidden sm:block" onClick={e => e.stopPropagation()}>
             {isArrivalToday && (
               <button
@@ -167,6 +183,14 @@ function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout }: {
               <button
                 onClick={() => onCheckout(booking.id)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+              >
+                <LogOut className="w-3 h-3" /> Виселити
+              </button>
+            )}
+            {isOverdue && (
+              <button
+                onClick={() => onCheckout(booking.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
               >
                 <LogOut className="w-3 h-3" /> Виселити
               </button>
@@ -242,15 +266,28 @@ export default function BookingsPage() {
     });
   };
 
-  const filtered = (bookings || []).filter(b => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || b.guestName?.toLowerCase().includes(q) || b.unitName?.toLowerCase().includes(q) || String(b.id).includes(q);
-    const matchFilter = filter === "all" || b.status === filter;
-    return matchSearch && matchFilter;
-  });
+  const today = todayStr();
+
+  const filtered = (bookings || [])
+    .filter(b => {
+      const q = search.toLowerCase();
+      const matchSearch = !q || b.guestName?.toLowerCase().includes(q) || b.unitName?.toLowerCase().includes(q) || String(b.id).includes(q);
+      const matchFilter = filter === "all" || b.status === filter;
+      return matchSearch && matchFilter;
+    })
+    .sort((a, b) => {
+      if (filter !== "checked_in") return 0;
+      const aOverdue = a.status === "checked_in" && a.checkOut < today;
+      const bOverdue = b.status === "checked_in" && b.checkOut < today;
+      if (aOverdue && !bOverdue) return -1;
+      if (!aOverdue && bOverdue) return 1;
+      return 0;
+    });
 
   const counts: Record<string, number> = { all: bookings?.length || 0 };
   bookings?.forEach(b => { counts[b.status] = (counts[b.status] || 0) + 1; });
+  const inHouseCount = (bookings || []).filter(b => b.status === "checked_in" && b.checkOut > today && b.checkIn <= today).length;
+  const overdueCount = (bookings || []).filter(b => b.status === "checked_in" && b.checkOut < today).length;
 
   const openDrawer = useCallback((b: any) => { setDrawerBooking(b); setDrawerOpen(true); }, []);
 
@@ -287,7 +324,9 @@ export default function BookingsPage() {
             <div>
               <h1 className="text-xl font-bold text-gray-900 font-display">Бронювання</h1>
               <p className="text-xs text-gray-400 mt-0.5">
-                {counts.all} всього · {counts.checked_in || 0} проживають · {counts.confirmed || 0} підтверджено
+                {counts.all} всього · {inHouseCount} проживають
+                {overdueCount > 0 && <span className="text-red-500 font-medium"> · {overdueCount} прострочено</span>}
+                {" "}· {counts.confirmed || 0} підтверджено
               </p>
             </div>
             <div className="flex items-center gap-2">

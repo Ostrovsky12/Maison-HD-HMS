@@ -303,6 +303,9 @@ router.get("/blocks", requireAuth, async (req: any, res) => {
     const orgId = getOrgId(req);
     const { active } = req.query as any;
     const today = new Date().toISOString().slice(0, 10);
+    const activeFilter = active === "true" ? sql`AND ab.is_active = true`
+                       : active === "false" ? sql`AND ab.is_active = false`
+                       : sql``;
 
     const rows = await db.execute<any>(sql`
       SELECT ab.*,
@@ -314,7 +317,7 @@ router.get("/blocks", requireAuth, async (req: any, res) => {
         ) AS units_detail
       FROM accommodation_blocks ab
       WHERE ab.organization_id = ${orgId}
-        AND (${active}::text IS NULL OR ab.is_active = (${active}::text = 'true'))
+        ${activeFilter}
         AND ab.end_date >= ${today}::date
       ORDER BY ab.start_date ASC
     `);
