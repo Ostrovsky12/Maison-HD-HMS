@@ -140,7 +140,7 @@ function Router() {
       <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
       <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} /></Route>
       <Route path="/admin"><ProtectedRoute component={AdminPage} roles={["super_admin"]} /></Route>
-      <Route path="/pitch"><ProtectedRoute component={PitchPage} /></Route>
+      <Route path="/pitch" component={PitchPage} />
       <Route path="/demo-requests"><ProtectedRoute component={DemoRequestsPage} roles={["super_admin"]} /></Route>
       <Route path="/migration"><ProtectedRoute component={MigrationPage} roles={["super_admin", "owner", "manager"]} /></Route>
       <Route path="/demo" component={DemoPage} />
