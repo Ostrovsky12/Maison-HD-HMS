@@ -655,20 +655,33 @@ async function insertBatchItem(
 
 // ── CSV IMPORT ────────────────────────────────────────────────────
 
-/** GET /api/migration/csv/template — download CSV template with examples */
-router.get("/csv/template", requireAuth, (_req, res) => {
-  const BOM = "\uFEFF";
-  const lines = [
-    "Підтвердження,Прізвище,Ім'я,По батькові,Телефон,Email,Кімната,Заїзд,Виїзд,Статус,Дорослих,Дітей до 6,Дітей 6+,Сума,Оплачено,Джерело,Примітки",
-    "CONF-001,Петренко,Олексій,Іванович,+380501234567,petro@gmail.com,Будинок 1,2025-07-01,2025-07-05,CheckedOut,2,0,0,8000,8000,Телефон,",
-    "CONF-002,Іванченко,Марія,,+380671234567,,Бунгало 3,2025-08-10,2025-08-15,Confirmed,3,1,0,12000,6000,Сайт,",
-    "CONF-003,Шевченко,Андрій,Петрович,+380931234567,andrii@gmail.com,Стандарт 101,2025-09-01,2025-09-03,CheckedIn,2,0,0,4800,4800,Booking.com,VIP-гість",
-  ];
-  res.set({
-    "Content-Type": "text/csv; charset=utf-8",
-    "Content-Disposition": 'attachment; filename="servio_bookings_template.csv"',
-  });
-  res.send(BOM + lines.join("\r\n"));
+/** GET /api/migration/csv/template — download CSV template with org's real unit names as examples */
+router.get("/csv/template", requireAuth, async (req, res) => {
+  try {
+    const orgId = req.user!.organizationId;
+
+    // Fetch up to 5 real unit names so the example rows use actual unit names
+    const sampleUnits = await db.select({ name: unitsTable.name })
+      .from(unitsTable)
+      .innerJoin(propertiesTable, eq(propertiesTable.id, unitsTable.propertyId))
+      .where(eq(propertiesTable.organizationId, orgId))
+      .limit(5);
+
+    const u = (i: number) => sampleUnits[i]?.name ?? `Юніт ${i + 1}`;
+
+    const BOM = "\uFEFF";
+    const lines = [
+      "Підтвердження,Прізвище,Ім'я,По батькові,Телефон,Email,Кімната,Заїзд,Виїзд,Статус,Дорослих,Дітей до 6,Дітей 6+,Сума,Оплачено,Джерело,Примітки",
+      `CONF-001,Петренко,Олексій,Іванович,+380501234567,petro@gmail.com,${u(0)},2025-07-01,2025-07-05,CheckedOut,2,0,0,8000,8000,Телефон,`,
+      `CONF-002,Іванченко,Марія,,+380671234567,,${u(1)},2025-08-10,2025-08-15,Confirmed,3,1,0,12000,6000,Сайт,`,
+      `CONF-003,Шевченко,Андрій,Петрович,+380931234567,andrii@gmail.com,${u(2)},2025-09-01,2025-09-03,CheckedIn,2,0,0,4800,4800,Booking.com,VIP-гість`,
+    ];
+    res.set({
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="servio_bookings_template.csv"',
+    });
+    res.send(BOM + lines.join("\r\n"));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 /** POST /api/migration/csv/preview — parse CSV rows, match units, return preview */
@@ -848,48 +861,38 @@ router.post("/csv/import", requireAuth, async (req, res) => {
       }
 
       try {
-        // Duplicate check by confirmation number (raw SQL — column exists in prod DB)
+        // Duplicate check by confirmation number
         if (row.confirmationNo && skipExisting !== false) {
-          const dupResult = await db.execute<{ id: number }>(
-            sql`SELECT id FROM bookings WHERE confirmation_no = ${row.confirmationNo} LIMIT 1`
-          );
-          const dupRows = Array.isArray(dupResult) ? dupResult : (dupResult as any)?.rows ?? [];
-          if (dupRows.length > 0) { skipped++; continue; }
+          const [dup] = await db.select({ id: bookingsTable.id })
+            .from(bookingsTable)
+            .where(eq(bookingsTable.confirmationNo, row.confirmationNo))
+            .limit(1);
+          if (dup) { skipped++; continue; }
         }
 
-        // Insert booking via raw SQL to use org-scoped + confirmation_no columns that exist in prod DB
-        await db.execute(sql`
-          INSERT INTO bookings (
-            unit_id, check_in, check_out, status, payment_status, source,
-            adults, children_under_6, children_over_6, guests_count,
-            first_name, last_name, middle_name, phone, email,
-            total_amount, paid_amount, notes,
-            organization_id, confirmation_no,
-            created_at, updated_at
-          ) VALUES (
-            ${row.unitId},
-            ${row.checkIn}::date,
-            ${row.checkOut}::date,
-            ${row.status}::booking_status,
-            ${row.paymentStatus}::payment_status,
-            ${row.source}::booking_source,
-            ${row.adults},
-            ${row.childrenUnder6},
-            ${row.childrenOver6},
-            ${row.adults + row.childrenUnder6 + row.childrenOver6},
-            ${row.firstName},
-            ${row.lastName},
-            ${row.middleName},
-            ${row.phone},
-            ${row.email},
-            ${String(row.totalAmount)},
-            ${String(row.paidAmount)},
-            ${row.notes},
-            ${orgId},
-            ${row.confirmationNo},
-            NOW(), NOW()
-          )
-        `);
+        // Insert booking via Drizzle ORM (all columns now in schema)
+        await db.insert(bookingsTable).values({
+          unitId:          row.unitId,
+          organizationId:  orgId,
+          checkIn:         row.checkIn,
+          checkOut:        row.checkOut,
+          status:          row.status,
+          paymentStatus:   row.paymentStatus,
+          source:          row.source,
+          adults:          row.adults,
+          childrenUnder6:  row.childrenUnder6,
+          childrenOver6:   row.childrenOver6,
+          guestsCount:     row.adults + row.childrenUnder6 + row.childrenOver6,
+          firstName:       row.firstName || null,
+          lastName:        row.lastName  || null,
+          middleName:      row.middleName || null,
+          phone:           row.phone || null,
+          email:           row.email || null,
+          totalAmount:     String(row.totalAmount),
+          paidAmount:      String(row.paidAmount),
+          notes:           row.notes || null,
+          confirmationNo:  row.confirmationNo || null,
+        });
         success++;
       } catch (e: any) {
         failed++;

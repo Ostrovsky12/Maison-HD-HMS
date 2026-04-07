@@ -446,8 +446,10 @@ export default function MigrationPage() {
               <Button variant="outline" onClick={() => { setShowCsvImport(v => !v); setCsvPreview(null); setCsvResult(null); setCsvFile(null); }} className="gap-2">
                 <Database className="w-4 h-4" /> Імпорт CSV
               </Button>
-              <Button onClick={() => { setShowWizard(true); setStep(0); }} className="gap-2">
-                <Play className="w-4 h-4" /> Servio Wizard
+              <Button variant="outline" onClick={() => { setShowWizard(true); setStep(0); }} className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-50">
+                <Play className="w-4 h-4" />
+                Servio Wizard
+                <span className="text-[10px] font-bold bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded uppercase tracking-wide">Demo</span>
               </Button>
             </div>
           </div>
@@ -775,7 +777,10 @@ export default function MigrationPage() {
             <ArrowLeft className="w-4 h-4" /> Назад
           </Button>
           <div className="h-5 w-px bg-gray-200" />
-          <h1 className="text-lg font-semibold text-gray-800">Майстер міграції Servio → Maison HD</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-gray-800">Майстер міграції Servio → Maison HD</h1>
+            <span className="text-[10px] font-bold bg-amber-100 text-amber-600 border border-amber-200 px-2 py-0.5 rounded uppercase tracking-wide">Demo режим</span>
+          </div>
         </div>
 
         {/* Step indicator */}
@@ -807,9 +812,13 @@ export default function MigrationPage() {
               <p className="text-sm text-gray-500">Вкажіть параметри вашої інсталяції Servio HMS. Для тестування використайте режим "demo".</p>
             </div>
 
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex gap-2 text-sm text-blue-700">
-              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>Залиште URL як "demo" для тестового режиму з реалістичними даними українського готелю</span>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex gap-2 text-sm text-amber-800">
+              <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
+              <div>
+                <span className="font-semibold">Це тестовий/демонстраційний режим.</span>{" "}
+                Реальне підключення до Servio API ще не реалізовано — майстер генерує синтетичні дані для демонстрації процесу.
+                Для реального імпорту бронювань використовуйте кнопку <span className="font-semibold">«Імпорт CSV»</span> на попередньому екрані.
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
