@@ -4,7 +4,7 @@ import DemoVideoPlayer from "@/components/DemoVideoPlayer";
 import {
   ChevronRight, ArrowRight, Check, BedDouble, BarChart3,
   MessageSquare, Users, Zap, Globe2, Shield, TrendingUp,
-  Calendar, Star, Hotel, Clock, Play, X,
+  Calendar, Star, Hotel, Clock, Sparkles, X,
   Wand2, Tv, LayoutDashboard, QrCode, BrainCircuit,
 } from "lucide-react";
 import { MaisonLogo } from "@/components/MaisonLogo";
@@ -322,7 +322,6 @@ export default function DemoPage() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", propertiesCount: "1", message: "" });
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [videoOpen, setVideoOpen] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
 
   const f = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
@@ -411,15 +410,15 @@ export default function DemoPage() {
               >
                 Запросити демо <ArrowRight className="w-4 h-4" />
               </a>
-              <button
-                onClick={() => setVideoOpen(true)}
-                className="flex items-center gap-2 px-6 py-3.5 border border-white/10 hover:border-white/25 bg-white/5 hover:bg-white/10 text-white/80 font-semibold text-sm rounded-2xl transition-all"
+              <a
+                href={`${BASE}/pitch`}
+                className="flex items-center gap-2 px-6 py-3.5 border border-white/10 hover:border-indigo-500/50 bg-white/5 hover:bg-indigo-600/10 text-white/80 hover:text-white font-semibold text-sm rounded-2xl transition-all"
               >
-                <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center">
-                  <Play className="w-2.5 h-2.5 text-white fill-white ml-0.5" />
+                <div className="w-5 h-5 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                  <Sparkles className="w-3 h-3 text-indigo-400" />
                 </div>
-                Подивитись як це працює
-              </button>
+                Переглянути презентацію
+              </a>
             </div>
 
             {/* Trust line */}
@@ -910,10 +909,6 @@ export default function DemoPage() {
         </div>
       </footer>
 
-      {/* ── Video fullscreen ── */}
-      {videoOpen && (
-        <VideoFullscreen onClose={() => setVideoOpen(false)} />
-      )}
     </div>
   );
 }
