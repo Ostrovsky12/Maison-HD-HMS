@@ -510,7 +510,23 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
     }
     const result = await onConfirm("confirmed", type, extra);
     if (result && type === "link") {
-      setPaymentLink(`https://pay.maisonhd.com/b/${result.id}`);
+      try {
+        const lr = await authFetch(`${API}/bookings/${result.id}/payment-link`, { method: "POST" });
+        const ld = await lr.json();
+        if (lr.ok && ld.paymentLink) {
+          setPaymentLink(ld.paymentLink);
+        } else if (ld.error === "liqpay_not_configured") {
+          toast({
+            title: "LiqPay не налаштований",
+            description: "Перейдіть у Налаштування → Юридичні особи та додайте LiqPay ключі",
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: "Помилка генерації посилання", description: ld.error || "Спробуйте пізніше", variant: "destructive" });
+        }
+      } catch {
+        toast({ title: "Помилка генерації посилання", variant: "destructive" });
+      }
     }
   };
 
@@ -952,7 +968,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         discountType: form.discountType || undefined,
         selectedAddons: form.selectedAddons,
         notes: form.notes || undefined,
-        ...(paymentMethod && paymentMethod !== "arrival" && { paymentMethod }),
+        ...(paymentMethod && paymentMethod !== "arrival" && paymentMethod !== "link" && paymentMethod !== "invoice" && { paymentMethod }),
         ...(extra?.payOnArrival && { payOnArrival: true }),
         ...(extra?.partialAmount && extra.partialAmount < form.totalAmount && { partialAmount: extra.partialAmount }),
       };

@@ -912,10 +912,9 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
 
     const [unit] = await db.select().from(unitsTable).where(eq(unitsTable.id, booking.unitId)).limit(1);
 
-    let publicKey = process.env.LIQPAY_PUBLIC_KEY || "sandbox_public_key";
-    let privateKey = process.env.LIQPAY_PRIVATE_KEY || "sandbox_private_key";
+    let publicKey = process.env.LIQPAY_PUBLIC_KEY || "";
+    let privateKey = process.env.LIQPAY_PRIVATE_KEY || "";
     let entityName = "Maison HD";
-    const isSandbox = !process.env.LIQPAY_PUBLIC_KEY;
 
     if (legalEntityId) {
       const { legalEntitiesTable } = await import("@workspace/db/schema");
@@ -927,11 +926,20 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
       }
     }
 
-    const amount = Number(booking.totalAmount) - Number(booking.paidAmount);
+    if (!publicKey || !privateKey) {
+      return res.status(503).json({ error: "liqpay_not_configured" });
+    }
+
+    const amount = Number(booking.totalAmount) - Number(booking.paidAmount || 0);
+    if (amount <= 0) {
+      return res.status(400).json({ error: "Сума оплати має бути більше 0" });
+    }
+
     const orderId = `booking-${bookingId}-${Date.now()}`;
     const description = `Бронювання #${bookingId} — ${unit?.name || "Номер"}`;
 
     const liqpayData = generateLiqPayForm({
+      action: "pay",
       publicKey,
       privateKey,
       amount,
@@ -942,12 +950,10 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
       resultUrl: `${process.env.APP_URL || ""}/maison-hd/bookings/${bookingId}`,
     });
 
-    const paymentLink = `https://www.liqpay.ua/api/3/checkout?data=${encodeURIComponent(liqpayData.data)}&signature=${encodeURIComponent(liqpayData.signature)}`;
-
-    await db.update(bookingsTable).set({ paymentLink, legalEntityId: legalEntityId || null, updatedAt: new Date() })
+    await db.update(bookingsTable).set({ paymentLink: liqpayData.url, legalEntityId: legalEntityId || null, updatedAt: new Date() })
       .where(eq(bookingsTable.id, bookingId));
 
-    res.json({ paymentLink, isSandbox, entityName, amount, orderId });
+    res.json({ paymentLink: liqpayData.url, entityName, amount, orderId });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

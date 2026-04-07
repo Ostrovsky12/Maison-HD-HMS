@@ -8,16 +8,18 @@ export interface LiqPayParams {
   orderId: string;
   resultUrl?: string;
   serverUrl?: string;
+  publicKey?: string;
+  privateKey?: string;
 }
 
-function getKeys() {
-  const pub = process.env.LIQPAY_PUBLIC_KEY || "";
-  const priv = process.env.LIQPAY_PRIVATE_KEY || "";
+function getKeys(overridePublic?: string, overridePrivate?: string) {
+  const pub = overridePublic || process.env.LIQPAY_PUBLIC_KEY || "";
+  const priv = overridePrivate || process.env.LIQPAY_PRIVATE_KEY || "";
   return { pub, priv };
 }
 
 export function generateLiqPayForm(params: LiqPayParams): { data: string; signature: string; url: string } {
-  const { pub, priv } = getKeys();
+  const { pub, priv } = getKeys(params.publicKey, params.privateKey);
   const payload = {
     public_key: pub,
     version: 3,
