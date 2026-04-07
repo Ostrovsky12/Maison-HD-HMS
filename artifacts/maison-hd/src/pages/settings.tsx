@@ -204,7 +204,15 @@ function HotelTab() {
     if (properties.length > 0 && !propertyId) {
       const p = properties[0];
       setPropertyId(p.id);
-      setForm({ name: p.name || "", address: p.address || "", type: p.type || "hotel", description: p.description || "" });
+      setForm({
+        name: p.name || "",
+        address: p.address || "",
+        type: p.type || "hotel",
+        description: p.description || "",
+        checkInTime: p.check_in_time || "14:00",
+        checkOutTime: p.check_out_time || "12:00",
+        touristTaxRate: p.tourist_tax_rate != null ? parseFloat(p.tourist_tax_rate) : 0,
+      });
     }
   }, [properties]);
 
@@ -241,7 +249,18 @@ function HotelTab() {
           <Label>Об'єкт</Label>
           <Select value={String(propertyId)} onValueChange={v => {
             const p = properties.find(x => x.id === Number(v));
-            if (p) { setPropertyId(p.id); setForm({ name: p.name || "", address: p.address || "", type: p.type || "hotel", description: p.description || "" }); }
+            if (p) {
+              setPropertyId(p.id);
+              setForm({
+                name: p.name || "",
+                address: p.address || "",
+                type: p.type || "hotel",
+                description: p.description || "",
+                checkInTime: p.check_in_time || "14:00",
+                checkOutTime: p.check_out_time || "12:00",
+                touristTaxRate: p.tourist_tax_rate != null ? parseFloat(p.tourist_tax_rate) : 0,
+              });
+            }
           }}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -263,10 +282,13 @@ function HotelTab() {
           <SelectContent>
             <SelectItem value="hotel">🏨 Готель</SelectItem>
             <SelectItem value="house">🏡 Котедж / Будинок</SelectItem>
-            <SelectItem value="apartment">🏢 Апарт-готель</SelectItem>
+            <SelectItem value="bungalow">🛖 Бунгало</SelectItem>
             <SelectItem value="villa">🏖 Вілла</SelectItem>
+            <SelectItem value="apartment">🏢 Апарт-готель</SelectItem>
             <SelectItem value="glamping">🌿 Курорт / Глемпінг</SelectItem>
             <SelectItem value="camping">⛺ Кемпінг</SelectItem>
+            <SelectItem value="spa">💆 SPA-комплекс</SelectItem>
+            <SelectItem value="pool">🏊 Аквапарк / Купальня</SelectItem>
             <SelectItem value="other">⚙️ Інше</SelectItem>
           </SelectContent>
         </Select>
@@ -293,6 +315,35 @@ function HotelTab() {
           <Input value={selectedProp?.currency || "UAH (₴)"} disabled className="bg-muted/50 cursor-not-allowed" />
           <p className="text-xs text-muted-foreground">Встановлюється під час онбордингу</p>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="checkInTime">Час заїзду за замовчуванням</Label>
+          <Input id="checkInTime" type="time" value={form.checkInTime || "14:00"} onChange={e => fv("checkInTime", e.target.value)} />
+          <p className="text-xs text-muted-foreground">Використовується при створенні бронювань</p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="checkOutTime">Час виїзду за замовчуванням</Label>
+          <Input id="checkOutTime" type="time" value={form.checkOutTime || "12:00"} onChange={e => fv("checkOutTime", e.target.value)} />
+          <p className="text-xs text-muted-foreground">Використовується при створенні бронювань</p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="touristTax">Туристичний збір (%)</Label>
+        <Input
+          id="touristTax"
+          type="number"
+          min="0"
+          max="100"
+          step="0.5"
+          value={form.touristTaxRate ?? ""}
+          onChange={e => fv("touristTaxRate", e.target.value === "" ? null : parseFloat(e.target.value))}
+          placeholder="0"
+          className="w-40"
+        />
+        <p className="text-xs text-muted-foreground">Наприклад: 5 — додається до суми рахунку автоматично</p>
       </div>
 
       <div className="flex justify-end pt-2">

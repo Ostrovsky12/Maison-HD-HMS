@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, numeric } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, numeric, varchar } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./organizations";
@@ -15,6 +15,8 @@ export const propertiesTable = pgTable("properties", {
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").default(0),
   touristTaxRate: numeric("tourist_tax_rate", { precision: 5, scale: 2 }).default("0"),
+  checkInTime: varchar("check_in_time", { length: 5 }).default("14:00"),
+  checkOutTime: varchar("check_out_time", { length: 5 }).default("12:00"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -40,10 +40,9 @@ router.post("/", requireAuth, async (req, res) => {
     type: type || "house",
     address,
     description,
+    sortOrder: sortOrder ?? nextOrder,
   }).returning();
-  // Set sort_order via raw SQL since schema might not have it
-  await db.execute(sql`UPDATE properties SET sort_order = ${sortOrder ?? nextOrder} WHERE id = ${prop.id}`);
-  res.status(201).json({ ...prop, sort_order: sortOrder ?? nextOrder, unitCount: 0 });
+  res.status(201).json({ ...prop, sort_order: prop.sortOrder, unitCount: 0 });
 });
 
 // PATCH /properties/bulk-sort — reorder groups (must be before /:propertyId to avoid Express eating "bulk-sort")
@@ -89,8 +88,8 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden", message: "Insufficient permissions" });
     return;
   }
-  const { name, address, type, description, sortOrder, touristTaxRate } = req.body;
-  // Use raw SQL to avoid Drizzle's enum type constraint issues (property_type enum)
+  const { name, address, type, description, sortOrder, touristTaxRate, checkInTime, checkOutTime } = req.body;
+  // Use raw SQL for the update — handles property_type enum cast and all optional columns cleanly
   await db.execute(sql`
     UPDATE properties SET
       ${name !== undefined ? sql`name = ${name},` : sql``}
@@ -99,6 +98,8 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
       ${description !== undefined ? sql`description = ${description},` : sql``}
       ${sortOrder !== undefined ? sql`sort_order = ${sortOrder},` : sql``}
       ${touristTaxRate !== undefined ? sql`tourist_tax_rate = ${parseFloat(String(touristTaxRate))},` : sql``}
+      ${checkInTime !== undefined ? sql`check_in_time = ${checkInTime},` : sql``}
+      ${checkOutTime !== undefined ? sql`check_out_time = ${checkOutTime},` : sql``}
       updated_at = NOW()
     WHERE id = ${propertyId}
   `);

@@ -417,7 +417,7 @@ router.get("/payment-summary", requireAuth, async (req, res) => {
     )
   );
 
-  // Get pay_on_arrival counts via raw SQL (new column, not in schema yet)
+  // Count bookings with pay_on_arrival flag
   const poaResult = await db.execute<any>(sql`
     SELECT COUNT(*) AS cnt FROM bookings
     WHERE id = ANY(ARRAY[${sql.join(bookings.map((b: any) => sql`${b.id}`), sql`, `)}]::int[])
