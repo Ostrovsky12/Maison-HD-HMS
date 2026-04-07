@@ -157,6 +157,15 @@ export default function MigrationPage() {
   const [cutoverMode, setCutoverMode] = useState(false);
   const [enablingCutover, setEnablingCutover] = useState(false);
 
+  // CSV Import state
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvPreview, setCsvPreview] = useState<any>(null);
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvResult, setCsvResult] = useState<any>(null);
+  const csvInputRef = useRef<HTMLInputElement | null>(null);
+
   const cutoverItems = [
     { key: "data_verified", label: "Дані перевірені та підтверджені" },
     { key: "conflicts_resolved", label: "Всі конфлікти вирішені" },
@@ -332,6 +341,84 @@ export default function MigrationPage() {
     }
   };
 
+  // ── CSV Import helpers ────────────────────────────────────────
+  const parseCSVText = (text: string): string[][] => {
+    const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
+    return lines.map(line => {
+      const cells: string[] = [];
+      let i = 0;
+      while (i < line.length) {
+        if (line[i] === '"') {
+          let j = i + 1;
+          while (j < line.length && !(line[j] === '"' && (j + 1 >= line.length || line[j + 1] === ','))) j++;
+          cells.push(line.slice(i + 1, j).replace(/""/g, '"'));
+          i = j + 2;
+        } else {
+          const j = line.indexOf(',', i);
+          if (j === -1) { cells.push(line.slice(i)); i = line.length; }
+          else { cells.push(line.slice(i, j)); i = j + 1; }
+        }
+      }
+      return cells;
+    });
+  };
+
+  const handleCsvFileChange = async (file: File) => {
+    if (!file) return;
+    setCsvFile(file);
+    setCsvPreview(null);
+    setCsvResult(null);
+    setCsvLoading(true);
+    try {
+      const text = await file.text();
+      const rows = parseCSVText(text);
+      const res = await apiFetch(`${API}/migration/csv/preview`, {
+        method: "POST", body: JSON.stringify({ rows }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setCsvPreview(await res.json());
+    } catch (e: any) {
+      toast({ title: "Помилка парсингу CSV", description: e.message, variant: "destructive" });
+    } finally {
+      setCsvLoading(false);
+    }
+  };
+
+  const handleCsvImport = async () => {
+    if (!csvPreview) return;
+    const validRows = csvPreview.rows.filter((r: any) => r.isValid);
+    if (!validRows.length) {
+      toast({ title: "Немає валідних рядків", description: "Переконайтесь що кімнати відповідають юнітам системи", variant: "destructive" });
+      return;
+    }
+    setCsvImporting(true);
+    try {
+      const res = await apiFetch(`${API}/migration/csv/import`, {
+        method: "POST", body: JSON.stringify({ rows: validRows, skipExisting: true }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const result = await res.json();
+      setCsvResult(result);
+      fetchStats();
+      if (result.success > 0) {
+        toast({ title: `✅ Імпортовано ${result.success} бронювань!`, description: result.failed > 0 ? `${result.failed} не вдалося` : "Всі записи успішно збережені" });
+      }
+    } catch (e: any) {
+      toast({ title: "Помилка імпорту", description: e.message, variant: "destructive" });
+    } finally {
+      setCsvImporting(false);
+    }
+  };
+
+  const downloadTemplate = async () => {
+    const res = await apiFetch(`${API}/migration/csv/template`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "servio_bookings_template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // ── Progress helpers ──────────────────────────────────────────
   const getProgress = (batch: Batch) => {
     if (!batch.totalItems) return 0;
@@ -355,10 +442,207 @@ export default function MigrationPage() {
               <h1 className="text-2xl font-bold text-gray-900">Міграція з Servio</h1>
               <p className="text-sm text-gray-500 mt-0.5">Перенесіть дані з Servio HMS в Maison HD без втрат і простою</p>
             </div>
-            <Button onClick={() => { setShowWizard(true); setStep(0); }} className="gap-2">
-              <Play className="w-4 h-4" /> Новий імпорт
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => { setShowCsvImport(v => !v); setCsvPreview(null); setCsvResult(null); setCsvFile(null); }} className="gap-2">
+                <Database className="w-4 h-4" /> Імпорт CSV
+              </Button>
+              <Button onClick={() => { setShowWizard(true); setStep(0); }} className="gap-2">
+                <Play className="w-4 h-4" /> Servio Wizard
+              </Button>
+            </div>
           </div>
+
+          {/* ── CSV Import Panel ───────────────────────────────── */}
+          {showCsvImport && (
+            <div className="bg-white border-2 border-blue-200 rounded-xl shadow-sm p-6 space-y-5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Database className="w-5 h-5 text-blue-600" /> Імпорт бронювань з CSV
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Завантажте CSV-файл експортований з Servio або заповніть наш шаблон
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={downloadTemplate} className="gap-1.5 text-blue-600 hover:text-blue-700">
+                  <ArrowRight className="w-4 h-4 rotate-90" /> Шаблон CSV
+                </Button>
+              </div>
+
+              {/* Upload area */}
+              {!csvResult && (
+                <div
+                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${csvFile ? "border-green-300 bg-green-50" : "border-gray-200 hover:border-blue-300 hover:bg-blue-50"}`}
+                  onClick={() => csvInputRef.current?.click()}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleCsvFileChange(f); }}
+                >
+                  <input
+                    ref={csvInputRef}
+                    type="file"
+                    accept=".csv,.txt"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleCsvFileChange(f); }}
+                  />
+                  {csvLoading ? (
+                    <div className="flex items-center justify-center gap-2 text-blue-600">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span className="text-sm">Аналіз файлу...</span>
+                    </div>
+                  ) : csvFile ? (
+                    <div className="flex items-center justify-center gap-2 text-green-700">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span className="text-sm font-medium">{csvFile.name}</span>
+                    </div>
+                  ) : (
+                    <div className="text-gray-400">
+                      <Database className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      <p className="text-sm font-medium">Перетягніть CSV або натисніть для вибору</p>
+                      <p className="text-xs mt-1">Підтримуються файли .csv з кодуванням UTF-8</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Preview */}
+              {csvPreview && !csvResult && (
+                <div className="space-y-4">
+                  {/* Summary stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { label: "Всього рядків", val: csvPreview.totalRows, color: "text-gray-700", bg: "bg-gray-50" },
+                      { label: "Кімнати знайдено", val: csvPreview.matched, color: "text-green-700", bg: "bg-green-50" },
+                      { label: "Готово до імпорту", val: csvPreview.valid, color: "text-blue-700", bg: "bg-blue-50" },
+                      { label: "Не знайдено", val: csvPreview.totalRows - csvPreview.matched, color: csvPreview.unmatchedRooms?.length > 0 ? "text-amber-700" : "text-gray-400", bg: csvPreview.unmatchedRooms?.length > 0 ? "bg-amber-50" : "bg-gray-50" },
+                    ].map(s => (
+                      <div key={s.label} className={`${s.bg} rounded-lg p-3 text-center`}>
+                        <p className={`text-2xl font-bold ${s.color}`}>{s.val}</p>
+                        <p className="text-xs text-gray-500">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Unmatched rooms warning */}
+                  {csvPreview.unmatchedRooms?.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-sm font-medium text-amber-800 mb-1">
+                        <AlertTriangle className="w-4 h-4 inline mr-1" />
+                        {csvPreview.unmatchedRooms.length} назв кімнат не знайдено в системі:
+                      </p>
+                      <p className="text-xs text-amber-700 font-mono">{csvPreview.unmatchedRooms.slice(0, 10).join(", ")}{csvPreview.unmatchedRooms.length > 10 ? "..." : ""}</p>
+                      <p className="text-xs text-amber-600 mt-1">Доступні юніти: {csvPreview.availableUnits?.slice(0, 5).join(", ")}{csvPreview.availableUnits?.length > 5 ? "..." : ""}</p>
+                    </div>
+                  )}
+
+                  {/* Preview table */}
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>
+                          {["Рядок", "Прізвище", "Кімната", "Юніт", "Заїзд", "Виїзд", "Статус", "Сума", ""].map(h => (
+                            <th key={h} className="px-3 py-2 text-left font-medium text-gray-500">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {csvPreview.rows.slice(0, 15).map((row: any) => (
+                          <tr key={row.rowIndex} className={!row.isValid ? "bg-red-50" : ""}>
+                            <td className="px-3 py-2 text-gray-400">{row.rowIndex}</td>
+                            <td className="px-3 py-2">{row.lastName} {row.firstName}</td>
+                            <td className="px-3 py-2 text-gray-500">{row.roomRaw || "—"}</td>
+                            <td className="px-3 py-2">
+                              {row.unitMatched ? (
+                                <span className="text-green-700 font-medium">{row.unitName}</span>
+                              ) : (
+                                <span className="text-red-500">Не знайдено</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">{row.checkIn || <span className="text-red-400">—</span>}</td>
+                            <td className="px-3 py-2">{row.checkOut || <span className="text-red-400">—</span>}</td>
+                            <td className="px-3 py-2">
+                              <Badge className={`text-xs ${row.status === "checked_out" ? "bg-gray-100 text-gray-600" : row.status === "confirmed" ? "bg-green-100 text-green-700" : row.status === "checked_in" ? "bg-blue-100 text-blue-700" : row.status === "cancelled" ? "bg-red-100 text-red-600" : "bg-yellow-100 text-yellow-700"}`}>
+                                {row.statusRaw || row.status}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2">{row.totalAmount > 0 ? `${row.totalAmount.toLocaleString()} ₴` : "—"}</td>
+                            <td className="px-3 py-2">
+                              {row.isValid ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <AlertCircle className="w-3.5 h-3.5 text-red-400" />}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {csvPreview.rows.length > 15 && (
+                      <div className="px-3 py-2 text-xs text-gray-400 border-t">
+                        ...ще {csvPreview.rows.length - 15} рядків
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Import button */}
+                  <div className="flex items-center justify-between">
+                    <Button variant="outline" onClick={() => { setCsvFile(null); setCsvPreview(null); csvInputRef.current && (csvInputRef.current.value = ""); }} className="gap-1.5">
+                      <RefreshCw className="w-4 h-4" /> Новий файл
+                    </Button>
+                    <Button
+                      onClick={handleCsvImport}
+                      disabled={csvImporting || csvPreview.valid === 0}
+                      className="gap-2"
+                    >
+                      {csvImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                      Імпортувати {csvPreview.valid} бронювань
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Result */}
+              {csvResult && (
+                <div className="space-y-4">
+                  <div className={`rounded-xl p-5 ${csvResult.success > 0 ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+                    <div className="flex items-center gap-3 mb-3">
+                      {csvResult.success > 0 ? (
+                        <CheckCircle2 className="w-6 h-6 text-green-600" />
+                      ) : (
+                        <AlertCircle className="w-6 h-6 text-red-600" />
+                      )}
+                      <div>
+                        <p className={`font-semibold ${csvResult.success > 0 ? "text-green-800" : "text-red-800"}`}>
+                          {csvResult.success > 0 ? `Успішно імпортовано ${csvResult.success} бронювань` : "Імпорт не вдався"}
+                        </p>
+                        {csvResult.skipped > 0 && <p className="text-xs text-gray-500">Пропущено (дублікати): {csvResult.skipped}</p>}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-white rounded-lg p-3 text-center">
+                        <p className="text-xl font-bold text-green-700">{csvResult.success}</p>
+                        <p className="text-xs text-gray-500">Імпортовано</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 text-center">
+                        <p className="text-xl font-bold text-blue-600">{csvResult.skipped}</p>
+                        <p className="text-xs text-gray-500">Пропущено</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 text-center">
+                        <p className="text-xl font-bold text-red-600">{csvResult.failed}</p>
+                        <p className="text-xs text-gray-500">Помилок</p>
+                      </div>
+                    </div>
+                    {csvResult.errors?.length > 0 && (
+                      <div className="mt-3 bg-red-100 rounded-lg p-3">
+                        <p className="text-xs font-medium text-red-700 mb-1">Помилки:</p>
+                        {csvResult.errors.map((e: string, i: number) => (
+                          <p key={i} className="text-xs text-red-600">{e}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <Button variant="outline" onClick={() => { setCsvResult(null); setCsvPreview(null); setCsvFile(null); csvInputRef.current && (csvInputRef.current.value = ""); }} className="gap-1.5">
+                    <RefreshCw className="w-4 h-4" /> Новий CSV
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Stats cards */}
           {loadingStats ? (

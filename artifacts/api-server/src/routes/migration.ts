@@ -653,4 +653,253 @@ async function insertBatchItem(
   });
 }
 
+// ── CSV IMPORT ────────────────────────────────────────────────────
+
+/** GET /api/migration/csv/template — download CSV template with examples */
+router.get("/csv/template", requireAuth, (_req, res) => {
+  const BOM = "\uFEFF";
+  const lines = [
+    "Підтвердження,Прізвище,Ім'я,По батькові,Телефон,Email,Кімната,Заїзд,Виїзд,Статус,Дорослих,Дітей до 6,Дітей 6+,Сума,Оплачено,Джерело,Примітки",
+    "CONF-001,Петренко,Олексій,Іванович,+380501234567,petro@gmail.com,Будинок 1,2025-07-01,2025-07-05,CheckedOut,2,0,0,8000,8000,Телефон,",
+    "CONF-002,Іванченко,Марія,,+380671234567,,Бунгало 3,2025-08-10,2025-08-15,Confirmed,3,1,0,12000,6000,Сайт,",
+    "CONF-003,Шевченко,Андрій,Петрович,+380931234567,andrii@gmail.com,Стандарт 101,2025-09-01,2025-09-03,CheckedIn,2,0,0,4800,4800,Booking.com,VIP-гість",
+  ];
+  res.set({
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": 'attachment; filename="servio_bookings_template.csv"',
+  });
+  res.send(BOM + lines.join("\r\n"));
+});
+
+/** POST /api/migration/csv/preview — parse CSV rows, match units, return preview */
+router.post("/csv/preview", requireAuth, async (req, res) => {
+  try {
+    const orgId = req.user!.organizationId;
+    const { rows } = req.body as { rows: string[][] };
+
+    if (!Array.isArray(rows) || rows.length < 2) {
+      return res.status(400).json({ error: "CSV повинен містити заголовки та хоча б 1 рядок даних" });
+    }
+
+    // Load all units for the org (via property → organization)
+    const orgUnits = await db.select({
+      id: unitsTable.id,
+      name: unitsTable.name,
+      category: unitsTable.category,
+      propertyId: unitsTable.propertyId,
+    }).from(unitsTable)
+      .innerJoin(propertiesTable, eq(propertiesTable.id, unitsTable.propertyId))
+      .where(eq(propertiesTable.organizationId, orgId));
+
+    // Flexible unit matcher: tries exact → substring → number-only
+    function matchUnit(roomStr: string): { id: number; name: string } | null {
+      if (!roomStr) return null;
+      const normalized = roomStr.trim().toLowerCase();
+      let found = orgUnits.find(u => u.name.toLowerCase() === normalized);
+      if (found) return found;
+      found = orgUnits.find(u => u.name.toLowerCase().includes(normalized));
+      if (found) return found;
+      found = orgUnits.find(u => normalized.includes(u.name.toLowerCase()));
+      if (found) return found;
+      const roomNum = normalized.replace(/\D+/g, "");
+      if (roomNum) {
+        found = orgUnits.find(u => u.name.replace(/\D+/g, "") === roomNum);
+      }
+      return found || null;
+    }
+
+    // Header detection helpers
+    const headers = rows[0].map(h => h.trim().toLowerCase());
+    const colIdx = (...aliases: string[]): number => {
+      for (const alias of aliases) {
+        const i = headers.findIndex(h => h.includes(alias));
+        if (i >= 0) return i;
+      }
+      return -1;
+    };
+
+    const cols = {
+      confirmation: colIdx("підтвер", "confirm", "номер підтв"),
+      lastName:     colIdx("прізвищ", "lastname", "фамілія"),
+      firstName:    colIdx("ім'я", "ім`я", "firstname", "name"),
+      middleName:   colIdx("по батьков", "patronymic", "middlename"),
+      phone:        colIdx("телефон", "phone"),
+      email:        colIdx("email", "пошта", "e-mail"),
+      room:         colIdx("кімнат", "room", "юніт", "unit", "об'єкт"),
+      checkIn:      colIdx("заїзд", "checkin", "прибуття", "дата заїзд"),
+      checkOut:     colIdx("виїзд", "checkout", "відбуття", "дата виїзд"),
+      status:       colIdx("статус", "status"),
+      adults:       colIdx("дорослих", "adults"),
+      childrenU6:   colIdx("до 6", "under6", "дітей до"),
+      childrenO6:   colIdx("після 6", "6+", "over6", "дітей 6"),
+      totalAmount:  colIdx("сума", "total", "amount", "вартість"),
+      paidAmount:   colIdx("оплачено", "paid", "сплачено"),
+      source:       colIdx("джерело", "source", "канал"),
+      notes:        colIdx("примітк", "note", "comment"),
+    };
+
+    const get = (row: string[], col: number) => (col >= 0 && col < row.length ? (row[col] || "").trim() : "");
+
+    const parseDate = (str: string): string | null => {
+      if (!str) return null;
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+      const m = str.match(/^(\d{1,2})[.\\/](\d{1,2})[.\\/](\d{4})/);
+      return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null;
+    };
+
+    const statusMap: Record<string, string> = {
+      "checkedout": "checked_out", "виїхав": "checked_out", "виїхали": "checked_out", "виїзд": "checked_out",
+      "checkedin": "checked_in", "заїхав": "checked_in", "заїхали": "checked_in", "заїзд": "checked_in",
+      "confirmed": "confirmed", "підтверджено": "confirmed", "підтверджений": "confirmed", "confirm": "confirmed",
+      "cancelled": "cancelled", "скасовано": "cancelled", "скасований": "cancelled", "cancel": "cancelled",
+      "noshow": "cancelled", "no_show": "cancelled",
+      "pending": "pending", "очікується": "pending",
+    };
+
+    const sourceMap: Record<string, string> = {
+      "booking.com": "booking", "booking": "booking", "букінг": "booking",
+      "airbnb": "airbnb", "ейрбнб": "airbnb",
+      "телефон": "direct", "phone": "direct", "телефон/пошта": "direct",
+      "direct": "direct", "прямий": "direct", "пряме": "direct",
+      "сайт": "other", "website": "other", "instagram": "other",
+      "telegram": "other", "viber": "other",
+    };
+
+    const dataRows = rows.slice(1).filter(r => r.some(c => c.trim()));
+    const results = dataRows.map((row, i) => {
+      const roomRaw = get(row, cols.room);
+      const matchedUnit = matchUnit(roomRaw);
+      const checkIn = parseDate(get(row, cols.checkIn));
+      const checkOut = parseDate(get(row, cols.checkOut));
+      const statusRaw = get(row, cols.status);
+      const statusKey = statusRaw.toLowerCase().replace(/[^а-яіїєa-z_]/gi, "");
+      const sourceRaw = get(row, cols.source).toLowerCase();
+      const sourceKey = Object.keys(sourceMap).find(k => sourceRaw.includes(k));
+      const totalAmt = parseFloat(get(row, cols.totalAmount).replace(/\s/g, "").replace(",", ".")) || 0;
+      const paidAmt = parseFloat(get(row, cols.paidAmount).replace(/\s/g, "").replace(",", ".")) || 0;
+      const adults = Math.max(1, parseInt(get(row, cols.adults)) || 1);
+      const childrenU6 = parseInt(get(row, cols.childrenU6)) || 0;
+      const childrenO6 = parseInt(get(row, cols.childrenO6)) || 0;
+
+      return {
+        rowIndex: i + 2,
+        confirmationNo: get(row, cols.confirmation) || null,
+        lastName:   get(row, cols.lastName) || null,
+        firstName:  get(row, cols.firstName) || null,
+        middleName: get(row, cols.middleName) || null,
+        phone:      get(row, cols.phone) || null,
+        email:      get(row, cols.email) || null,
+        roomRaw,
+        unitId:    matchedUnit?.id   || null,
+        unitName:  matchedUnit?.name || null,
+        unitMatched: !!matchedUnit,
+        checkIn,
+        checkOut,
+        statusRaw,
+        status: statusMap[statusKey] || "confirmed",
+        adults,
+        childrenUnder6: childrenU6,
+        childrenOver6:  childrenO6,
+        totalAmount: totalAmt,
+        paidAmount:  paidAmt,
+        paymentStatus: paidAmt >= totalAmt && totalAmt > 0 ? "paid" : paidAmt > 0 ? "partial" : "unpaid",
+        source: (sourceKey ? sourceMap[sourceKey] : null) || "direct",
+        notes: get(row, cols.notes) || null,
+        isValid: !!matchedUnit && !!checkIn && !!checkOut,
+      };
+    });
+
+    const matched  = results.filter(r => r.unitMatched).length;
+    const valid    = results.filter(r => r.isValid).length;
+    const unmatched = [...new Set(results.filter(r => !r.unitMatched && r.roomRaw).map(r => r.roomRaw))];
+
+    res.json({
+      totalRows: results.length,
+      matched,
+      valid,
+      unmatchedRooms: unmatched,
+      availableUnits: orgUnits.map(u => u.name).slice(0, 30),
+      rows: results,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/** POST /api/migration/csv/import — save valid parsed rows as bookings */
+router.post("/csv/import", requireAuth, async (req, res) => {
+  try {
+    const orgId = req.user!.organizationId;
+    const { rows, skipExisting } = req.body as { rows: any[]; skipExisting?: boolean };
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "Немає рядків для імпорту" });
+    }
+
+    let success = 0;
+    let skipped = 0;
+    let failed  = 0;
+    const errors: string[] = [];
+
+    for (const row of rows) {
+      if (!row.isValid || !row.unitId || !row.checkIn || !row.checkOut) {
+        failed++;
+        const reason = !row.unitId ? `кімнату «${row.roomRaw}» не знайдено` : "невалідні дати";
+        errors.push(`Рядок ${row.rowIndex}: ${reason}`);
+        continue;
+      }
+
+      try {
+        // Duplicate check by confirmation number (raw SQL — column exists in prod DB)
+        if (row.confirmationNo && skipExisting !== false) {
+          const dupResult = await db.execute<{ id: number }>(
+            sql`SELECT id FROM bookings WHERE confirmation_no = ${row.confirmationNo} LIMIT 1`
+          );
+          const dupRows = Array.isArray(dupResult) ? dupResult : (dupResult as any)?.rows ?? [];
+          if (dupRows.length > 0) { skipped++; continue; }
+        }
+
+        // Insert booking via raw SQL to use org-scoped + confirmation_no columns that exist in prod DB
+        await db.execute(sql`
+          INSERT INTO bookings (
+            unit_id, check_in, check_out, status, payment_status, source,
+            adults, children_under_6, children_over_6, guests_count,
+            first_name, last_name, middle_name, phone, email,
+            total_amount, paid_amount, notes,
+            organization_id, confirmation_no,
+            created_at, updated_at
+          ) VALUES (
+            ${row.unitId},
+            ${row.checkIn}::date,
+            ${row.checkOut}::date,
+            ${row.status}::booking_status,
+            ${row.paymentStatus}::payment_status,
+            ${row.source}::booking_source,
+            ${row.adults},
+            ${row.childrenUnder6},
+            ${row.childrenOver6},
+            ${row.adults + row.childrenUnder6 + row.childrenOver6},
+            ${row.firstName},
+            ${row.lastName},
+            ${row.middleName},
+            ${row.phone},
+            ${row.email},
+            ${String(row.totalAmount)},
+            ${String(row.paidAmount)},
+            ${row.notes},
+            ${orgId},
+            ${row.confirmationNo},
+            NOW(), NOW()
+          )
+        `);
+        success++;
+      } catch (e: any) {
+        failed++;
+        errors.push(`Рядок ${row.rowIndex}: ${e.message?.split("\n")[0] || e.message}`);
+      }
+    }
+
+    res.json({ success, skipped, failed, errors: errors.slice(0, 30) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
+
