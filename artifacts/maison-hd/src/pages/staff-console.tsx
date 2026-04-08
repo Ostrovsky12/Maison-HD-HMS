@@ -60,13 +60,17 @@ export default function StaffConsolePage() {
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiInput, setAiInput] = useState("");
+  const [aiSending, setAiSending] = useState(false);
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "ai"; text: string }[]>([
     { role: "ai", text: "Вітаю! Я AI-асистент Staff Console. Що потрібно? Можу перевірити доступність, знайти бронювання, порахувати оплату або підготувати відповідь гостю." }
   ]);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConv, setActiveConv] = useState<any>(null);
+  const [convLoading, setConvLoading] = useState(false);
   const [msgInput, setMsgInput] = useState("");
+  const [msgSending, setMsgSending] = useState(false);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
   const [quickBookOpen, setQuickBookOpen] = useState(false);
   const [qbStep, setQbStep] = useState<"guest" | "unit" | "confirm">("guest");
   const [qbForm, setQbForm] = useState({ firstName: "", lastName: "", phone: "", email: "", checkIn: format(new Date(), "yyyy-MM-dd"), checkOut: format(addDays(new Date(), 2), "yyyy-MM-dd"), adults: 1, children: 0, source: "direct", notes: "", unitId: "", paidAmount: 0 });
@@ -87,6 +91,47 @@ export default function StaffConsolePage() {
   const loadInbox = async () => {
     const r = await apiFetch("/inbox/conversations");
     if (r.ok) { const d = await r.json(); setConversations(d.conversations || []); }
+  };
+
+  const loadConversation = async (conv: any) => {
+    setConvLoading(true);
+    setActiveConv({ ...conv, messages: [] });
+    try {
+      const r = await apiFetch(`/inbox/conversations/${conv.id}`);
+      if (r.ok) {
+        const d = await r.json();
+        setActiveConv({ ...d.conversation, messages: d.messages || [] });
+        setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unreadCount: 0 } : c));
+      }
+    } finally { setConvLoading(false); }
+  };
+
+  const sendReply = async () => {
+    if (!activeConv || !msgInput.trim() || msgSending) return;
+    const content = msgInput.trim();
+    setMsgInput("");
+    setMsgSending(true);
+    const optimistic = { id: Date.now(), direction: "outbound", content, senderName: "Адмін", createdAt: new Date().toISOString() };
+    setActiveConv((c: any) => ({ ...c, messages: [...(c.messages || []), optimistic] }));
+    try {
+      const r = await apiFetch(`/inbox/conversations/${activeConv.id}/reply`, { method: "POST", body: JSON.stringify({ content }) });
+      if (r.ok) {
+        const d = await r.json();
+        setActiveConv((c: any) => ({ ...c, messages: [...(c.messages || []).filter((m: any) => m.id !== optimistic.id), d.message] }));
+        loadInbox();
+      }
+    } finally { setMsgSending(false); }
+  };
+
+  const aiSuggestReply = async () => {
+    if (!activeConv || aiSuggesting) return;
+    setAiSuggesting(true);
+    try {
+      const r = await apiFetch(`/inbox/conversations/${activeConv.id}/ai-suggest`, { method: "POST" });
+      if (r.ok) { const d = await r.json(); setMsgInput(d.suggestion || ""); }
+      else toast({ title: "AI не доступний", variant: "destructive" });
+    } catch { toast({ title: "Помилка AI", variant: "destructive" }); }
+    finally { setAiSuggesting(false); }
   };
 
   useEffect(() => { load(); }, []);
@@ -132,33 +177,44 @@ export default function StaffConsolePage() {
   };
 
   const aiSend = async () => {
-    if (!aiInput.trim()) return;
-    const userMsg = aiInput; setAiInput("");
+    if (!aiInput.trim() || aiSending) return;
+    const userMsg = aiInput.trim();
+    setAiInput("");
+    setAiSending(true);
     setAiMessages(m => [...m, { role: "user", text: userMsg }]);
-    // Contextual AI based on data
-    const kpis = data?.kpis || {};
-    let reply = "";
-    const q = userMsg.toLowerCase();
-    if (q.includes("вільн") || q.includes("доступн")) {
-      reply = `Сьогодні вільних номерів/об'єктів: ${kpis.free_units || 0}. ${kpis.arrivals_today > 0 ? `Сьогодні очікуємо ${kpis.arrivals_today} заїздів.` : "Нових заїздів сьогодні немає."} Хочете забронювати конкретний об'єкт?`;
-    } else if (q.includes("оплат") || q.includes("борг")) {
-      reply = `Непідтверджені оплати: ${kpis.unpaid || 0} бронювань. Борги гостей що зараз проживають: перевіряю... Хочете список?`;
-    } else if (q.includes("заїзд") || q.includes("arrival")) {
-      const arr = data?.arrivals || [];
-      if (arr.length === 0) reply = "Сьогодні заїздів немає.";
-      else reply = `Сьогодні ${arr.length} заїздів:\n${arr.map((a: any) => `• ${a.first_name} ${a.last_name} — ${a.unit_name} о ${a.checkin_time}`).join("\n")}`;
-    } else if (q.includes("виїзд") || q.includes("checkout")) {
-      const dep = data?.departures || [];
-      if (dep.length === 0) reply = "Сьогодні виїздів немає.";
-      else reply = `Сьогодні ${dep.length} виїздів:\n${dep.map((d: any) => `• ${d.first_name} ${d.last_name} — ${d.unit_name} о ${d.checkout_time}`).join("\n")}`;
-    } else if (q.includes("дякую") || q.includes("дякуємо")) {
-      reply = "Будь ласка! Якщо щось ще потрібно — звертайтеся. 😊";
-    } else if (q.includes("гостей") || q.includes("проживає")) {
-      reply = `Зараз проживає ${kpis.in_house || 0} бронювань. Виїздить сьогодні: ${kpis.departures_today || 0}.`;
-    } else {
-      reply = `Зрозумів: «${userMsg}». Я можу допомогти з: ✓ Перевірка вільних номерів ✓ Список заїздів/виїздів ✓ Статус оплат ✓ Швидке бронювання. Що конкретно потрібно?`;
-    }
-    setTimeout(() => setAiMessages(m => [...m, { role: "ai", text: reply }]), 600);
+    const placeholder = { role: "ai" as const, text: "" };
+    setAiMessages(m => [...m, placeholder]);
+    try {
+      const history = aiMessages.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
+      const kpis = data?.kpis || {};
+      const context = `Поточні KPI: Вільних: ${kpis.free_units || 0}, Заїздів сьогодні: ${kpis.arrivals_today || 0}, Виїздів: ${kpis.departures_today || 0}, Проживають: ${kpis.in_house || 0}, Очікують: ${kpis.pending || 0}.`;
+      const r = await fetch(`${API_BASE}/ai/copilot`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMsg + `\n\n[Контекст: ${context}]`, history }),
+      });
+      if (!r.ok || !r.body) throw new Error("AI недоступний");
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let full = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const lines = dec.decode(value).split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const d = JSON.parse(line.slice(6));
+            if (d.content) { full += d.content; setAiMessages(m => [...m.slice(0, -1), { role: "ai", text: full }]); }
+            if (d.error) { full = `⚠️ ${d.error}`; setAiMessages(m => [...m.slice(0, -1), { role: "ai", text: full }]); }
+            if (d.done) break;
+          } catch {}
+        }
+      }
+      if (!full) setAiMessages(m => [...m.slice(0, -1), { role: "ai", text: "Вибачте, не можу відповісти зараз. Спробуйте ще раз." }]);
+    } catch (e: any) {
+      setAiMessages(m => [...m.slice(0, -1), { role: "ai", text: `⚠️ Помилка: ${e.message}. Перевірте підключення до AI сервісу в налаштуваннях.` }]);
+    } finally { setAiSending(false); }
   };
 
   const kpis = data?.kpis || {};
@@ -247,8 +303,8 @@ export default function StaffConsolePage() {
               </button>
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setInboxOpen(true); }}>
                 <MessageSquare className="h-3.5 w-3.5 mr-1 text-blue-500" /> Inbox
-                {conversations.filter(c => c.unread_count > 0).length > 0 && (
-                  <span className="ml-1 bg-red-500 text-white text-[9px] rounded-full px-1 font-bold">{conversations.filter(c => c.unread_count > 0).length}</span>
+                {conversations.filter(c => c.unreadCount > 0).length > 0 && (
+                  <span className="ml-1 bg-red-500 text-white text-[9px] rounded-full px-1 font-bold">{conversations.filter(c => c.unreadCount > 0).length}</span>
                 )}
               </Button>
               <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700" onClick={() => { setQuickBookOpen(true); setQbStep("guest"); }}>
@@ -411,7 +467,7 @@ export default function StaffConsolePage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold">AI Асистент</p>
-                        <p className="text-[10px] text-green-500 font-medium">● онлайн</p>
+                        <p className="text-[10px] font-medium">{aiSending ? <span className="text-amber-500">● друкує…</span> : <span className="text-green-500">● онлайн</span>}</p>
                       </div>
                     </div>
                     <button onClick={() => setAiOpen(false)} className="p-1 hover:bg-gray-100 rounded-lg">
@@ -427,7 +483,13 @@ export default function StaffConsolePage() {
                           </div>
                         )}
                         <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap leading-relaxed ${m.role === "user" ? "bg-blue-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 rounded-tl-sm"}`}>
-                          {m.text}
+                          {m.text || (m.role === "ai" && aiSending && i === aiMessages.length - 1 ? (
+                            <span className="flex gap-1 items-center py-1">
+                              <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                              <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                              <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                            </span>
+                          ) : "…")}
                         </div>
                       </div>
                     ))}
@@ -444,9 +506,11 @@ export default function StaffConsolePage() {
                   <div className="flex-shrink-0 p-3 border-t border-gray-100">
                     <div className="flex gap-2">
                       <Input placeholder="Запит до AI…" value={aiInput} onChange={e => setAiInput(e.target.value)}
-                        onKeyDown={e => e.key === "Enter" && aiSend()} className="text-sm h-9" />
-                      <Button size="sm" onClick={aiSend} className="bg-purple-600 hover:bg-purple-700 h-9">
-                        <Send className="h-3.5 w-3.5" />
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSend(); } }}
+                        disabled={aiSending}
+                        className="text-sm h-9" />
+                      <Button size="sm" onClick={aiSend} disabled={aiSending || !aiInput.trim()} className="bg-purple-600 hover:bg-purple-700 h-9">
+                        {aiSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                       </Button>
                     </div>
                   </div>
@@ -472,16 +536,16 @@ export default function StaffConsolePage() {
                 <div className="p-4 text-center text-gray-400 text-sm">Повідомлень немає</div>
               )}
               {conversations.map(c => (
-                <button key={c.id} onClick={() => setActiveConv(c)}
+                <button key={c.id} onClick={() => loadConversation(c)}
                   className={`w-full text-left px-3 py-2.5 border-b border-gray-50 hover:bg-gray-50 transition ${activeConv?.id === c.id ? "bg-blue-50" : ""}`}>
                   <div className="flex items-center gap-2">
                     <span className="text-base">{CHANNEL_ICON[c.channel] || "💬"}</span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-gray-800 truncate">{c.guest_name}</p>
-                      <p className="text-[10px] text-gray-400 truncate">{c.last_message_preview || c.subject}</p>
+                      <p className="text-xs font-semibold text-gray-800 truncate">{c.guestName}</p>
+                      <p className="text-[10px] text-gray-400 truncate">{c.lastMessagePreview || c.subject}</p>
                     </div>
-                    {c.unread_count > 0 && (
-                      <span className="bg-blue-600 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold flex-shrink-0">{c.unread_count}</span>
+                    {c.unreadCount > 0 && (
+                      <span className="bg-blue-600 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold flex-shrink-0">{c.unreadCount}</span>
                     )}
                   </div>
                 </button>
@@ -499,30 +563,50 @@ export default function StaffConsolePage() {
               ) : (
                 <>
                   <div className="px-4 py-2.5 border-b border-gray-100 flex-shrink-0 bg-gray-50">
-                    <p className="text-sm font-semibold">{activeConv.guest_name}</p>
-                    <p className="text-xs text-gray-500">{activeConv.guest_phone} · {activeConv.channel}</p>
+                    <p className="text-sm font-semibold">{activeConv.guest_name || activeConv.guestName}</p>
+                    <p className="text-xs text-gray-500">{activeConv.guest_phone || activeConv.guestPhone} · {activeConv.channel}</p>
                   </div>
                   <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                    {(activeConv.messages || []).map((m: any, i: number) => (
-                      <div key={i} className={`flex ${m.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[75%] px-3 py-2 rounded-xl text-sm ${m.direction === "outbound" ? "bg-blue-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 rounded-tl-sm"}`}>
-                          {m.content}
+                    {convLoading ? (
+                      <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-gray-300" /></div>
+                    ) : (activeConv.messages || []).length === 0 ? (
+                      <div className="flex items-center justify-center h-full text-gray-400 text-sm">Немає повідомлень</div>
+                    ) : (
+                      (activeConv.messages || []).map((m: any, i: number) => (
+                        <div key={m.id || i} className={`flex ${m.direction === "outbound" ? "justify-end" : "justify-start"}`}>
+                          <div className={`max-w-[75%] px-3 py-2 rounded-xl text-sm ${m.direction === "outbound" ? "bg-blue-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 rounded-tl-sm"}`}>
+                            {m.content}
+                            {m.senderName && m.direction === "outbound" && (
+                              <p className="text-[10px] opacity-70 mt-0.5">{m.senderName}</p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                   {/* Quick actions for inbox */}
                   <div className="px-3 py-2 border-t border-gray-100 bg-gray-50 flex gap-2 flex-wrap">
                     <Button size="sm" variant="outline" className="text-xs h-7"
-                      onClick={() => { setInboxOpen(false); setQuickBookOpen(true); setQbStep("guest"); setQbForm(f => ({ ...f, firstName: activeConv.guest_name?.split(" ")[0] || "", lastName: activeConv.guest_name?.split(" ")[1] || "", phone: activeConv.guest_phone || "" })); }}>
+                      onClick={() => { setInboxOpen(false); setQuickBookOpen(true); setQbStep("guest"); const gn = (activeConv.guest_name || activeConv.guestName || ""); setQbForm(f => ({ ...f, firstName: gn.split(" ")[0] || "", lastName: gn.split(" ")[1] || "", phone: activeConv.guest_phone || activeConv.guestPhone || "" })); }}>
                       <Plus className="h-3 w-3 mr-1" /> Забронювати
                     </Button>
-                    <Button size="sm" variant="outline" className="text-xs h-7"><Phone className="h-3 w-3 mr-1" /> Зателефонувати</Button>
+                    <Button size="sm" variant="outline" className="text-xs h-7" onClick={aiSuggestReply} disabled={aiSuggesting}>
+                      {aiSuggesting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Bot className="h-3 w-3 mr-1 text-purple-500" />}
+                      AI відповідь
+                    </Button>
                   </div>
                   <div className="flex-shrink-0 p-3 border-t border-gray-100">
                     <div className="flex gap-2">
-                      <Input placeholder="Відповісти…" value={msgInput} onChange={e => setMsgInput(e.target.value)} className="text-sm h-9" />
-                      <Button size="sm" className="bg-blue-600 hover:bg-blue-700 h-9"><Send className="h-3.5 w-3.5" /></Button>
+                      <Input
+                        placeholder="Відповісти…"
+                        value={msgInput}
+                        onChange={e => setMsgInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
+                        className="text-sm h-9"
+                      />
+                      <Button size="sm" className="bg-blue-600 hover:bg-blue-700 h-9" onClick={sendReply} disabled={msgSending || !msgInput.trim()}>
+                        {msgSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                      </Button>
                     </div>
                   </div>
                 </>

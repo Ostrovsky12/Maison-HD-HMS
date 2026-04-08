@@ -424,7 +424,7 @@ router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
 9. НЕ додавай фраз "Чернетка:", "AI:", "Пропонована відповідь:" — одразу текст відповіді.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+      model: "gpt-5.2",
       max_completion_tokens: 400,
       messages: [
         { role: "system", content: systemPrompt },
