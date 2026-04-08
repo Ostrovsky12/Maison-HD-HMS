@@ -129,6 +129,7 @@ export default function ChessPage() {
   const [detailBk, setDetailBk] = useState<any>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
+  const [hoveredBk, setHoveredBk] = useState<{ bk: any; x: number; y: number } | null>(null);
 
   const today = ds(new Date());
 
@@ -453,6 +454,64 @@ export default function ChessPage() {
           )}
         </div>
 
+        {/* ─── BOOKING HOVER TOOLTIP ──────────────────────────────────── */}
+        {hoveredBk && (() => {
+          const { bk, x, y } = hoveredBk;
+          const status = getStatusFromBooking(bk);
+          const def = STATUS_DEF[status] || STATUS_DEF.confirmed;
+          const total = Number(bk.totalAmount || 0);
+          const paid = Number(bk.paidAmount || 0);
+          const balance = total - paid;
+          const uah = (n: number) => new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", maximumFractionDigits: 0 }).format(n);
+          const fmt = (s: string) => format(parseISO(s), "d MMM", { locale: uk });
+          const tooltipW = 220;
+          const tooltipH = 140;
+          const left = x + 14 + tooltipW > window.innerWidth ? x - tooltipW - 8 : x + 14;
+          const top  = y + 14 + tooltipH > window.innerHeight ? y - tooltipH - 8 : y + 14;
+          return (
+            <div
+              className="fixed z-[9999] pointer-events-none"
+              style={{ left, top }}
+            >
+              <div className="bg-white border border-gray-200 rounded-xl shadow-xl w-56 overflow-hidden">
+                {/* Status stripe */}
+                <div className={`px-3 py-2 flex items-center gap-2 ${def.bg}`}>
+                  <span className={`text-[11px] font-bold ${def.text}`}>{def.label}</span>
+                  <span className={`text-[11px] ${def.text} opacity-80 ml-auto`}>#{bk.id}</span>
+                </div>
+                <div className="px-3 py-2.5 space-y-1.5">
+                  {/* Guest */}
+                  <p className="text-sm font-semibold text-gray-800 truncate">{bk.guestName || "—"}</p>
+                  {/* Dates */}
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <span>{fmt(bk.checkIn)}</span>
+                    <span className="text-gray-300">→</span>
+                    <span>{fmt(bk.checkOut)}</span>
+                    <span className="ml-auto text-gray-400">{bk.nights}н</span>
+                  </div>
+                  {/* Amount */}
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500">Сума</span>
+                    <span className="font-semibold text-gray-800">{uah(total)}</span>
+                  </div>
+                  {paid > 0 && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">Оплачено</span>
+                      <span className="font-semibold text-emerald-600">{uah(paid)}</span>
+                    </div>
+                  )}
+                  {balance > 0 && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">Залишок</span>
+                      <span className="font-semibold text-red-500">{uah(balance)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ─── CHESS GRID ──────────────────────────────────────────────── */}
         <div className="flex-1 overflow-hidden flex relative">
 
@@ -586,7 +645,10 @@ export default function ChessPage() {
                               ${b.status === "cancelled" ? "opacity-50" : ""}
                               ${isOverflow ? "rounded-l-none" : ""} ${isUnderflow ? "rounded-r-none" : ""}`}
                             style={{ left: startIdx * dayW + 2, width: w * dayW - 4 }}
-                            onClick={(e) => { e.stopPropagation(); setDetailBk(b); }}
+                            onClick={(e) => { e.stopPropagation(); setDetailBk(b); setHoveredBk(null); }}
+                            onMouseEnter={(e) => setHoveredBk({ bk: b, x: e.clientX, y: e.clientY })}
+                            onMouseMove={(e) => setHoveredBk(h => h ? { ...h, x: e.clientX, y: e.clientY } : null)}
+                            onMouseLeave={() => setHoveredBk(null)}
                           >
                             {/* Striped pattern for blocked/maintenance */}
                             {(def.pattern === "striped" || def.pattern === "cancelled") && (
