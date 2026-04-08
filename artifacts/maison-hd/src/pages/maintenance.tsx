@@ -14,11 +14,15 @@ import {
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_ROOT = BASE.replace("/maison-hd", "");
 const tok = () => localStorage.getItem("hms_token") || "";
-const apiFetch = (path: string, opts: RequestInit = {}) =>
-  fetch(API_ROOT + path, {
+const apiFetch = async (path: string, opts: RequestInit = {}) => {
+  const r = await fetch(API_ROOT + path, {
     ...opts,
     headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) },
-  }).then(r => r.json());
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+  return data;
+};
 
 const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string; icon: any }> = {
   critical: { label: "Критичний", color: "text-red-700", bg: "bg-red-100 border-red-300", icon: AlertTriangle },
@@ -119,6 +123,9 @@ export default function MaintenancePage() {
       toast({ title: "Заявку створено" });
       setShowNewRequest(false);
       setNewReq({ title: "", description: "", category: "other", priority: "medium", estimatedDurationMin: "", estimatedCost: "", vendorName: "", notes: "", dueDate: "" });
+    },
+    onError: (e: any) => {
+      toast({ title: "Помилка", description: e.message, variant: "destructive" });
     },
   });
 

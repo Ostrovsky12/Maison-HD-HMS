@@ -158,6 +158,9 @@ router.post("/", requireAuth, async (req: any, res) => {
       partsCost, laborCost, vendorName, notes, dueDate, tags
     } = req.body;
 
+    const nullStr = (v: any) => (v === "" || v === null || v === undefined) ? null : v;
+    const nullNum = (v: any) => (v === "" || v === null || v === undefined) ? null : Number(v);
+
     const r = await db.execute(sql`
       INSERT INTO maintenance_requests (
         organization_id, property_id, unit_id, title, description, category, priority,
@@ -165,15 +168,15 @@ router.post("/", requireAuth, async (req: any, res) => {
         parts_cost, labor_cost, vendor_name, notes, due_date, tags
       ) VALUES (
         ${orgId},
-        ${propertyId ?? null}, ${unitId ?? null},
-        ${title}, ${description ?? null},
+        ${nullNum(propertyId)}, ${nullNum(unitId)},
+        ${title}, ${nullStr(description)},
         ${category ?? 'other'}::maintenance_category,
         ${priority ?? 'medium'}::maintenance_priority,
-        ${userId}, ${assignedToUserId ?? null},
-        ${estimatedDurationMin ?? null}, ${estimatedCost ?? null},
-        ${partsCost ?? null}, ${laborCost ?? null},
-        ${vendorName ?? null}, ${notes ?? null},
-        ${dueDate ?? null},
+        ${userId}, ${nullNum(assignedToUserId)},
+        ${nullNum(estimatedDurationMin)}, ${nullNum(estimatedCost)},
+        ${nullNum(partsCost)}, ${nullNum(laborCost)},
+        ${nullStr(vendorName)}, ${nullStr(notes)},
+        ${nullStr(dueDate)},
         ${JSON.stringify(tags ?? [])}::jsonb
       )
       RETURNING *
