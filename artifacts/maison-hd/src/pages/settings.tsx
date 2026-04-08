@@ -17,7 +17,7 @@ import {
   Crown, Users2, Loader2, ChevronRight, Clock, CheckCircle2, AlertCircle,
   Copy, RefreshCw, Globe, Phone, Mail, Lock, Hash,
   Bell, Send, Bot, ToggleLeft, ToggleRight, Sparkles, MessageSquare,
-  ScrollText, RotateCcw,
+  ScrollText, RotateCcw, CalendarDays, Moon, Ban,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -1014,6 +1014,308 @@ function NotificationsTab() {
   );
 }
 
+// ── Calendar Settings Tab ─────────────────────────────────────────
+const DAYS_UA = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+
+function CalendarSettingsTab() {
+  const API = BASE.replace("/maison-hd", "") + "/api";
+  const tok = () => localStorage.getItem("hms_token") || "";
+  const qc = useQueryClient();
+
+  // ── Holidays ──
+  const { data: holidays = [], isLoading: hLoad } = useQuery<any[]>({
+    queryKey: ["calendar-holidays"],
+    queryFn: () => fetch(`${API}/calendar-settings/holidays`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()),
+  });
+
+  const [hForm, setHForm] = useState({ date: "", name: "", color: "#ef4444", isRecurring: false });
+  const [addingH, setAddingH] = useState(false);
+
+  const saveHoliday = async () => {
+    if (!hForm.date || !hForm.name) return toast({ title: "Заповніть дату і назву", variant: "destructive" });
+    const r = await fetch(`${API}/calendar-settings/holidays`, {
+      method: "POST", headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json" },
+      body: JSON.stringify(hForm),
+    });
+    if (r.ok) {
+      toast({ title: "Свято додано ✓" });
+      setHForm({ date: "", name: "", color: "#ef4444", isRecurring: false });
+      setAddingH(false);
+      qc.invalidateQueries({ queryKey: ["calendar-holidays"] });
+    } else {
+      const e = await r.json();
+      toast({ title: "Помилка", description: e.error, variant: "destructive" });
+    }
+  };
+
+  const deleteHoliday = async (id: number) => {
+    await fetch(`${API}/calendar-settings/holidays/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${tok()}` } });
+    qc.invalidateQueries({ queryKey: ["calendar-holidays"] });
+    toast({ title: "Видалено" });
+  };
+
+  // ── Restrictions ──
+  const { data: restrictions = [], isLoading: rLoad } = useQuery<any[]>({
+    queryKey: ["calendar-restrictions"],
+    queryFn: () => fetch(`${API}/calendar-settings/restrictions`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()),
+  });
+
+  const emptyR = { name: "", type: "min_nights", minNights: 2, maxNights: "", daysOfWeek: [] as number[], dateFrom: "", dateTo: "", applyToHolidays: false };
+  const [rForm, setRForm] = useState({ ...emptyR });
+  const [addingR, setAddingR] = useState(false);
+
+  const toggleDay = (d: number) =>
+    setRForm(f => ({ ...f, daysOfWeek: f.daysOfWeek.includes(d) ? f.daysOfWeek.filter(x => x !== d) : [...f.daysOfWeek, d] }));
+
+  const saveRestriction = async () => {
+    if (!rForm.name) return toast({ title: "Введіть назву правила", variant: "destructive" });
+    const r = await fetch(`${API}/calendar-settings/restrictions`, {
+      method: "POST", headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...rForm,
+        minNights: rForm.minNights ? Number(rForm.minNights) : null,
+        maxNights: rForm.maxNights ? Number(rForm.maxNights) : null,
+        dateFrom: rForm.dateFrom || null,
+        dateTo: rForm.dateTo || null,
+      }),
+    });
+    if (r.ok) {
+      toast({ title: "Обмеження додано ✓" });
+      setRForm({ ...emptyR });
+      setAddingR(false);
+      qc.invalidateQueries({ queryKey: ["calendar-restrictions"] });
+    } else {
+      const e = await r.json();
+      toast({ title: "Помилка", description: e.error, variant: "destructive" });
+    }
+  };
+
+  const toggleActive = async (id: number, isActive: boolean) => {
+    await fetch(`${API}/calendar-settings/restrictions/${id}`, {
+      method: "PUT", headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive }),
+    });
+    qc.invalidateQueries({ queryKey: ["calendar-restrictions"] });
+  };
+
+  const deleteRestriction = async (id: number) => {
+    await fetch(`${API}/calendar-settings/restrictions/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${tok()}` } });
+    qc.invalidateQueries({ queryKey: ["calendar-restrictions"] });
+    toast({ title: "Видалено" });
+  };
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Holidays ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2"><Moon className="w-4 h-4 text-blue-500" /> Святкові дні</CardTitle>
+              <CardDescription className="mt-1">Дні, що виділятимуться на шахматці та впливатимуть на обмеження за мін. ночами.</CardDescription>
+            </div>
+            <Button size="sm" onClick={() => setAddingH(v => !v)}>
+              <Plus className="w-4 h-4 mr-1" /> Додати свято
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {addingH && (
+            <div className="mb-4 p-4 bg-blue-50 rounded-xl border border-blue-100 space-y-3">
+              <p className="text-sm font-semibold text-blue-800">Нове свято</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Дата *</Label>
+                  <Input type="date" value={hForm.date} onChange={e => setHForm(f => ({ ...f, date: e.target.value }))} className="h-8 text-sm" />
+                </div>
+                <div>
+                  <Label className="text-xs">Назва *</Label>
+                  <Input value={hForm.name} onChange={e => setHForm(f => ({ ...f, name: e.target.value }))} placeholder="Великдень, 1 Травня…" className="h-8 text-sm" />
+                </div>
+                <div>
+                  <Label className="text-xs">Колір на календарі</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={hForm.color} onChange={e => setHForm(f => ({ ...f, color: e.target.value }))} className="w-8 h-8 cursor-pointer rounded border" />
+                    <span className="text-xs text-gray-500">{hForm.color}</span>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Щорічне повторення</Label>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <Switch checked={hForm.isRecurring} onCheckedChange={v => setHForm(f => ({ ...f, isRecurring: v }))} />
+                    <span className="text-xs text-gray-600">{hForm.isRecurring ? "Так — повторюється щороку" : "Ні — лише цього року"}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={saveHoliday}><Check className="w-4 h-4 mr-1" /> Зберегти</Button>
+                <Button size="sm" variant="ghost" onClick={() => setAddingH(false)}><X className="w-4 h-4" /></Button>
+              </div>
+            </div>
+          )}
+
+          {hLoad ? (
+            <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+          ) : holidays.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">Свят не додано. Натисніть «Додати свято».</p>
+          ) : (
+            <div className="space-y-1.5">
+              {holidays.map((h: any) => (
+                <div key={h.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100 hover:bg-gray-50">
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: h.color }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800">{h.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {new Date(h.date).toLocaleDateString("uk-UA", { day: "numeric", month: "long", year: "numeric" })}
+                      {h.is_recurring && <span className="ml-2 text-blue-500">🔄 щорічно</span>}
+                    </p>
+                  </div>
+                  <button onClick={() => deleteHoliday(h.id)} aria-label="Видалити свято" className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Restrictions ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2"><Ban className="w-4 h-4 text-orange-500" /> Обмеження бронювання</CardTitle>
+              <CardDescription className="mt-1">Мінімальна / максимальна кількість ночей залежно від дня тижня, свят або дат.</CardDescription>
+            </div>
+            <Button size="sm" onClick={() => setAddingR(v => !v)}>
+              <Plus className="w-4 h-4 mr-1" /> Додати правило
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {addingR && (
+            <div className="mb-4 p-4 bg-orange-50 rounded-xl border border-orange-100 space-y-3">
+              <p className="text-sm font-semibold text-orange-800">Нове правило обмеження</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Label className="text-xs">Назва правила *</Label>
+                  <Input value={rForm.name} onChange={e => setRForm(f => ({ ...f, name: e.target.value }))} placeholder="Вихідні мін. 2 ночі" className="h-8 text-sm" />
+                </div>
+                <div>
+                  <Label className="text-xs">Тип обмеження</Label>
+                  <select value={rForm.type} onChange={e => setRForm(f => ({ ...f, type: e.target.value }))}
+                    className="w-full h-8 text-sm border rounded-md px-2 bg-white">
+                    <option value="min_nights">Мінімум ночей</option>
+                    <option value="max_nights">Максимум ночей</option>
+                    <option value="min_max_nights">Мін. і макс. ночей</option>
+                    <option value="closed_to_arrival">Заборона заїзду</option>
+                    <option value="closed_to_departure">Заборона виїзду</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  {(rForm.type === "min_nights" || rForm.type === "min_max_nights") && (
+                    <div className="flex-1">
+                      <Label className="text-xs">Мін. ночей</Label>
+                      <Input type="number" min={1} max={365} value={rForm.minNights} onChange={e => setRForm(f => ({ ...f, minNights: Number(e.target.value) }))} className="h-8 text-sm" />
+                    </div>
+                  )}
+                  {(rForm.type === "max_nights" || rForm.type === "min_max_nights") && (
+                    <div className="flex-1">
+                      <Label className="text-xs">Макс. ночей</Label>
+                      <Input type="number" min={1} max={365} value={rForm.maxNights} onChange={e => setRForm(f => ({ ...f, maxNights: e.target.value }))} className="h-8 text-sm" />
+                    </div>
+                  )}
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs mb-2 block">Дні тижня (коли правило діє)</Label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {DAYS_UA.map((d, i) => (
+                      <button key={i} type="button"
+                        onClick={() => toggleDay(i)}
+                        className={`w-9 h-9 rounded-lg text-xs font-semibold border transition-all
+                          ${rForm.daysOfWeek.includes(i)
+                            ? (i === 0 || i === 6 ? "bg-rose-500 border-rose-600 text-white" : "bg-blue-500 border-blue-600 text-white")
+                            : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"}`}>
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">Порожньо = діє щодня</p>
+                </div>
+                <div>
+                  <Label className="text-xs">Дата від (опціонально)</Label>
+                  <Input type="date" value={rForm.dateFrom} onChange={e => setRForm(f => ({ ...f, dateFrom: e.target.value }))} className="h-8 text-sm" />
+                </div>
+                <div>
+                  <Label className="text-xs">Дата до (опціонально)</Label>
+                  <Input type="date" value={rForm.dateTo} onChange={e => setRForm(f => ({ ...f, dateTo: e.target.value }))} className="h-8 text-sm" />
+                </div>
+                <div className="col-span-2">
+                  <div className="flex items-center gap-2">
+                    <Switch checked={rForm.applyToHolidays} onCheckedChange={v => setRForm(f => ({ ...f, applyToHolidays: v }))} />
+                    <Label className="text-xs cursor-pointer">Застосовувати також до святкових днів</Label>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={saveRestriction}><Check className="w-4 h-4 mr-1" /> Зберегти</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setAddingR(false); setRForm({ ...emptyR }); }}><X className="w-4 h-4" /></Button>
+              </div>
+            </div>
+          )}
+
+          {rLoad ? (
+            <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+          ) : restrictions.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">Обмежень не додано. Натисніть «Додати правило».</p>
+          ) : (
+            <div className="space-y-2">
+              {restrictions.map((r: any) => {
+                const dows: number[] = Array.isArray(r.days_of_week) ? r.days_of_week : (typeof r.days_of_week === "string" ? JSON.parse(r.days_of_week) : []);
+                const typeLabel: Record<string, string> = {
+                  min_nights: "Мін. ночей", max_nights: "Макс. ночей",
+                  min_max_nights: "Мін./макс.", closed_to_arrival: "Заборона заїзду", closed_to_departure: "Заборона виїзду",
+                };
+                return (
+                  <div key={r.id} className={`p-3 rounded-xl border transition-all ${r.is_active ? "border-gray-200 bg-white" : "border-gray-100 bg-gray-50 opacity-60"}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-gray-800">{r.name}</p>
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">{typeLabel[r.type] || r.type}</Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {r.min_nights && <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">Мін: <b>{r.min_nights}н</b></span>}
+                          {r.max_nights && <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">Макс: <b>{r.max_nights}н</b></span>}
+                          {dows.length > 0 && (
+                            <span className="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                              {dows.map(d => DAYS_UA[d]).join(", ")}
+                            </span>
+                          )}
+                          {r.date_from && <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">{r.date_from} → {r.date_to || "…"}</span>}
+                          {r.apply_to_holidays && <span className="text-xs text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full">+ святкові</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <Switch checked={!!r.is_active} onCheckedChange={v => toggleActive(r.id, v)} />
+                        <button onClick={() => deleteRestriction(r.id)} aria-label="Видалити обмеження" className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded ml-1">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── Billing Tab ───────────────────────────────────────────────────
 function BillingTab() {
   const [, navigate] = useLocation();
@@ -1835,6 +2137,7 @@ export default function SettingsPage() {
               {mod("discounts") && <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>}
               {(mod("telegram") || mod("liqpay") || mod("binotel")) && <TabsTrigger value="notifications" className="gap-1.5"><Bell className="w-3.5 h-3.5" /> Сповіщення & Інтеграції</TabsTrigger>}
               {mod("services") && <TabsTrigger value="services" className="gap-1.5"><Sparkles className="w-3.5 h-3.5" /> Послуги</TabsTrigger>}
+              <TabsTrigger value="calendar" className="gap-1.5"><CalendarDays className="w-3.5 h-3.5" /> Календар</TabsTrigger>
               <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Підписка</TabsTrigger>
             </TabsList>
             <TabsContent value="profile"><ProfileTab /></TabsContent>
@@ -1894,6 +2197,15 @@ export default function SettingsPage() {
                 </Card>
               </TabsContent>
             )}
+            <TabsContent value="calendar">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><CalendarDays className="w-4 h-4" /> Налаштування календаря</CardTitle>
+                  <CardDescription>Свята та обмеження бронювання — відображаються на шахматці та впливають на мінімальний строк проживання.</CardDescription>
+                </CardHeader>
+                <CardContent><CalendarSettingsTab /></CardContent>
+              </Card>
+            </TabsContent>
             <TabsContent value="billing">
               <Card>
                 <CardHeader>

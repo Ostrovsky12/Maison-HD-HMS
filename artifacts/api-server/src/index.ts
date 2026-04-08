@@ -170,6 +170,31 @@ async function ensureSchema() {
       notes TEXT,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS calendar_holidays (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      property_id INTEGER REFERENCES properties(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      color VARCHAR(20) NOT NULL DEFAULT '#ef4444',
+      is_recurring BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS calendar_restrictions (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      property_id INTEGER REFERENCES properties(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      type VARCHAR(50) NOT NULL DEFAULT 'min_nights',
+      min_nights INTEGER,
+      max_nights INTEGER,
+      days_of_week JSONB NOT NULL DEFAULT '[]',
+      date_from DATE,
+      date_to DATE,
+      apply_to_holidays BOOLEAN NOT NULL DEFAULT false,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
   `);
 }
 
