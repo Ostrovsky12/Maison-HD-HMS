@@ -27,14 +27,14 @@ const tok = () => localStorage.getItem("hms_token") || "";
 const apiFetch = (path: string, opts: RequestInit = {}) =>
   fetch(API + path, { ...opts, headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
 
-const SIDEBAR_W = 48;
+const SIDEBAR_W = 96;
 const HEADER_H = 76;
-const MIN_DAY_W = 16;
+const MIN_DAY_W = 32;
 const MAX_DAY_W = 110;
-const ROW_H_COMPACT = 34;
-const ROW_H_NORMAL = 52;
-const ROW_H_EXTENDED = 68;
-const CAT_H = 30;
+const ROW_H_COMPACT = 18;
+const ROW_H_NORMAL = 26;
+const ROW_H_EXTENDED = 34;
+const CAT_H = 16;
 
 const ds = (d: Date | string) => typeof d === "string" ? d : format(d, "yyyy-MM-dd");
 const dp = (s: string) => parseISO(s);
@@ -101,7 +101,7 @@ export default function ChessPage() {
   // ── View state ──
   const [startDate, setStartDate] = useState(() => ds(new Date()));
   const [days, setDays] = useState(21);
-  const [dayW, setDayW] = useState(32);
+  const [dayW, setDayW] = useState(64);
   const [rowMode, setRowMode] = useState<"compact" | "normal" | "extended">("normal");
   const [compact, setCompact] = useState(false);
   const rowH = compact ? ROW_H_COMPACT : rowMode === "compact" ? ROW_H_COMPACT : rowMode === "extended" ? ROW_H_EXTENDED : ROW_H_NORMAL;
@@ -459,25 +459,25 @@ export default function ChessPage() {
           {/* Sticky left sidebar */}
           <div className="flex-shrink-0 z-20" style={{ width: SIDEBAR_W }}>
             {/* Corner */}
-            <div className="bg-gray-50 border-b border-r border-gray-200 flex items-end px-1 pb-2" style={{ height: HEADER_H }}>
-              <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide truncate">№</span>
+            <div className="bg-gray-50 border-b border-r border-gray-200 flex items-end px-2 pb-2" style={{ height: HEADER_H }}>
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Номер</span>
             </div>
             {/* Unit names — scrollable vertically but synced */}
             <div ref={sidebarRef} className="overflow-hidden border-r border-gray-200 bg-white" style={{ height: `calc(100% - ${HEADER_H}px)` }}>
               {rows.map((row, i) => {
                 if (row.type === "group") {
                   return (
-                    <div key={i} className="flex items-center px-1 bg-gray-50 border-b border-gray-200" style={{ height: CAT_H }}>
-                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tight truncate">{row.label}</span>
+                    <div key={i} className="flex items-center px-2 bg-gray-50 border-b border-gray-200" style={{ height: CAT_H }}>
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider truncate">{row.label}</span>
                     </div>
                   );
                 }
                 const u = row.unit;
                 return (
-                  <div key={i} className="flex items-center gap-0.5 px-1 border-b border-gray-100 hover:bg-blue-50/30 transition-colors cursor-default" style={{ height: rowH }}>
-                    <p className="text-[10px] font-semibold text-gray-800 truncate leading-tight flex-1 min-w-0" title={u.name}>{u.name}</p>
+                  <div key={i} className="flex items-center gap-1 px-2 border-b border-gray-100 hover:bg-blue-50/30 transition-colors cursor-default" style={{ height: rowH }}>
+                    <p className="text-xs font-semibold text-gray-800 truncate leading-tight flex-1 min-w-0">{u.name}</p>
                     {overlay === "housekeeping" && (
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${u.housekeepingStatus === "clean" ? "bg-green-400" : u.housekeepingStatus === "dirty" ? "bg-red-400" : u.housekeepingStatus === "in_progress" ? "bg-amber-400" : "bg-gray-300"}`} title={u.housekeepingStatus} />
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${u.housekeepingStatus === "clean" ? "bg-green-400" : u.housekeepingStatus === "dirty" ? "bg-red-400" : u.housekeepingStatus === "in_progress" ? "bg-amber-400" : "bg-gray-300"}`} title={u.housekeepingStatus} />
                     )}
                   </div>
                 );
@@ -498,15 +498,15 @@ export default function ChessPage() {
                   return (
                     <div key={d} className={`flex-shrink-0 flex flex-col items-center justify-end pb-2 border-r border-gray-200 transition-colors relative ${isWeekend && !isToday ? "bg-rose-50/30" : ""}`}
                       style={{ width: dayW }}>
-                      {isMonthStart && dayW >= 36 && (
-                        <span className="absolute top-1 left-0 right-0 text-center text-[8px] font-bold text-gray-400 uppercase tracking-wide truncate px-0.5">{fmtMonth(d)}</span>
+                      {isMonthStart && (
+                        <span className="absolute top-2 left-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{fmtMonth(d)}</span>
                       )}
                       {isToday && <div className="absolute top-0 left-0 right-0 bottom-0 bg-blue-50/80 border-x border-blue-300" />}
                       {overlay === "heatmap" && occ > 0 && (
                         <div className="absolute bottom-0 left-0 right-0" style={{ height: `${occ * 100}%`, background: `rgba(239,68,68,${occ * 0.5})`, opacity: 0.5 }} />
                       )}
-                      <span className={`text-[8px] font-medium leading-none relative z-10 ${isToday ? "text-blue-500 font-semibold" : isWeekend ? "text-rose-400" : "text-gray-400"}`}>{fmtWeekday(d)}</span>
-                      <span className={`text-sm font-bold leading-none mt-0.5 relative z-10 ${isToday ? "text-blue-700" : isWeekend ? "text-rose-600" : "text-gray-700"}`}>{fmtDay(d)}</span>
+                      <span className={`text-[10px] font-medium leading-none relative z-10 ${isToday ? "text-blue-500 font-semibold" : isWeekend ? "text-rose-400" : "text-gray-400"}`}>{fmtWeekday(d)}</span>
+                      <span className={`text-base font-bold leading-none mt-0.5 relative z-10 ${isToday ? "text-blue-700" : isWeekend ? "text-rose-600" : "text-gray-700"}`}>{fmtDay(d)}</span>
                       {isToday && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 z-20" />}
                     </div>
                   );
