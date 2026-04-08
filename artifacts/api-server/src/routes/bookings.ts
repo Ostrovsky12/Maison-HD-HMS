@@ -850,13 +850,15 @@ router.post("/liqpay/callback", async (req, res) => {
       return;
     }
 
-    if (!verifyLiqPayCallback(data, signature)) {
-      logger.warn("LiqPay callback signature mismatch");
-      res.status(403).json({ error: "Invalid signature" });
+    // Parse first to get booking id, then verify with the correct key
+    let parsed: Record<string, any>;
+    try {
+      parsed = parseLiqPayData(data);
+    } catch {
+      res.status(400).json({ error: "Invalid data payload" });
       return;
     }
 
-    const parsed = parseLiqPayData(data);
     logger.info({ parsed }, "LiqPay callback received");
 
     const orderId: string = parsed.order_id || "";
@@ -867,19 +869,49 @@ router.post("/liqpay/callback", async (req, res) => {
     }
 
     const bookingId = parseInt(match[1]);
-    const status = parsed.status;
+
+    // Look up the legal entity private key used for this booking
+    const { legalEntitiesTable } = await import("@workspace/db/schema");
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+
+    let verificationKey = process.env.LIQPAY_PRIVATE_KEY || "";
+    if (booking?.legalEntityId) {
+      const [entity] = await db.select().from(legalEntitiesTable).where(eq(legalEntitiesTable.id, booking.legalEntityId)).limit(1);
+      if (entity?.liqpayPrivateKey) verificationKey = entity.liqpayPrivateKey;
+    }
+
+    // Verify signature with the correct key
+    const crypto = await import("crypto");
+    const expectedSig = crypto.default
+      .createHash("sha1")
+      .update(verificationKey + data + verificationKey)
+      .digest("base64");
+
+    if (expectedSig !== signature) {
+      logger.warn({ orderId }, "LiqPay callback signature mismatch");
+      res.status(403).json({ error: "Invalid signature" });
+      return;
+    }
+
+    const liqStatus = parsed.status;
     const amount = Number(parsed.amount || 0);
 
-    if (status === "success" || status === "sandbox") {
-      const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (liqStatus === "success" || liqStatus === "sandbox") {
       if (booking) {
         const newPaid = Number(booking.paidAmount) + amount;
         const total = Number(booking.totalAmount);
         const paymentStatus = newPaid >= total ? "paid" : "partial";
 
+        // Auto-confirm pending bookings when payment arrives
+        const newBookingStatus =
+          (booking.status === "pending" || booking.status === "confirmed")
+            ? "confirmed"
+            : booking.status;
+
         await db.update(bookingsTable).set({
           paidAmount: String(newPaid),
           paymentStatus,
+          status: newBookingStatus,
           updatedAt: new Date(),
         }).where(eq(bookingsTable.id, bookingId));
 
@@ -888,10 +920,33 @@ router.post("/liqpay/callback", async (req, res) => {
           amount: String(amount),
           method: "liqpay",
           status: "completed",
+          paymentType: "payment",
+          legalEntityId: booking.legalEntityId || null,
+          liqpayOrderId: orderId,
+          liqpayStatus: liqStatus,
+          externalId: parsed.payment_id ? String(parsed.payment_id) : null,
           reference: parsed.payment_id ? String(parsed.payment_id) : null,
           notes: `LiqPay: ${parsed.description || ""}`,
+          processedAt: new Date(),
         });
+
+        logger.info({ bookingId, amount, paymentStatus, newPaid }, "LiqPay payment recorded");
       }
+    } else if (liqStatus === "failure" || liqStatus === "error") {
+      logger.warn({ bookingId, liqStatus, parsed }, "LiqPay payment failed");
+      await db.insert(paymentsTable).values({
+        bookingId,
+        amount: String(amount),
+        method: "liqpay",
+        status: "failed",
+        paymentType: "payment",
+        legalEntityId: booking?.legalEntityId || null,
+        liqpayOrderId: orderId,
+        liqpayStatus: liqStatus,
+        externalId: parsed.payment_id ? String(parsed.payment_id) : null,
+        notes: `LiqPay FAILED: ${parsed.err_description || liqStatus}`,
+        processedAt: new Date(),
+      }).catch(() => {});
     }
 
     res.json({ result: "ok" });
@@ -961,8 +1016,8 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
       currency: "UAH",
       description,
       orderId,
-      serverUrl: `${process.env.APP_URL || ""}/api/bookings/liqpay-callback`,
-      resultUrl: `${process.env.APP_URL || ""}/maison-hd/bookings/${bookingId}`,
+      serverUrl: `${process.env.APP_URL || "https://dogoda.me"}/api/bookings/liqpay/callback`,
+      resultUrl: `${process.env.APP_URL || "https://dogoda.me"}/maison-hd/bookings/${bookingId}`,
     });
 
     await db.update(bookingsTable).set({ paymentLink: liqpayData.url, legalEntityId: legalEntityId || null, updatedAt: new Date() })
