@@ -920,6 +920,19 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const selectedUnit = unitsData?.find((u: any) => u.id === form.unitId);
   const selectedProperty = propertiesData?.find((p: any) => p.id === (selectedUnit?.propertyId || selectedUnit?.property_id));
   const touristTaxRate = Number(selectedProperty?.tourist_tax_rate || 0);
+
+  // Auto-fill check-in/check-out times from property settings (not in edit mode)
+  useEffect(() => {
+    if (!open || isEdit || !selectedProperty) return;
+    const propIn  = selectedProperty.check_in_time  || selectedProperty.checkInTime;
+    const propOut = selectedProperty.check_out_time || selectedProperty.checkOutTime;
+    if (!propIn && !propOut) return;
+    setForm(prev => ({
+      ...prev,
+      ...(propIn  ? { checkinTime:  propIn  } : {}),
+      ...(propOut ? { checkoutTime: propOut } : {}),
+    }));
+  }, [selectedProperty?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
   const touristTax = touristTaxRate > 0 ? Math.round(touristTaxRate * (form.adults || 1) * nights * 100) / 100 : 0;
 
   const previewTotal = pricingPreview?.totalAmount || 0;
