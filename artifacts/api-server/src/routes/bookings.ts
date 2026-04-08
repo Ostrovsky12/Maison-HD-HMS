@@ -916,18 +916,33 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
     let privateKey = process.env.LIQPAY_PRIVATE_KEY || "";
     let entityName = "Maison HD";
 
+    // Always try to find a legal entity with LiqPay keys (from request body or org default)
+    const { legalEntitiesTable } = await import("@workspace/db/schema");
+    const user = (req as any).user;
+    const orgId = user?.organizationId;
+
     if (legalEntityId) {
-      const { legalEntitiesTable } = await import("@workspace/db/schema");
       const [entity] = await db.select().from(legalEntitiesTable).where(eq(legalEntitiesTable.id, legalEntityId)).limit(1);
       if (entity) {
         if (entity.liqpayPublicKey) publicKey = entity.liqpayPublicKey;
         if (entity.liqpayPrivateKey) privateKey = entity.liqpayPrivateKey;
         entityName = entity.name;
       }
+    } else if (orgId) {
+      // Auto-find: first legal entity with LiqPay keys (prefer default, else first available)
+      const entities = await db.select().from(legalEntitiesTable)
+        .where(eq(legalEntitiesTable.organizationId, orgId));
+      const withKeys = entities.filter(e => e.liqpayPublicKey && e.liqpayPrivateKey);
+      const entity = withKeys.find(e => e.isDefault) || withKeys[0];
+      if (entity) {
+        publicKey = entity.liqpayPublicKey!;
+        privateKey = entity.liqpayPrivateKey!;
+        entityName = entity.name;
+      }
     }
 
     if (!publicKey || !privateKey) {
-      return res.status(503).json({ error: "liqpay_not_configured" });
+      return res.status(503).json({ error: "liqpay_not_configured", message: "Додайте LiqPay ключі у Налаштування → Юридичні особи" });
     }
 
     const amount = Number(booking.totalAmount) - Number(booking.paidAmount || 0);

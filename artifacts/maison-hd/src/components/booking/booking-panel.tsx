@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useToast } from "@/hooks/use-toast";
 import { format, differenceInDays } from "date-fns";
 import { uk } from "date-fns/locale";
 import {
@@ -194,6 +195,7 @@ function TabGuest({ b }: { b: any }) {
 
 // ── Tab: Payments ──────────────────────────────────────────────────────────
 function TabPayments({ b }: { b: any }) {
+  const { toast } = useToast();
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -231,16 +233,20 @@ function TabPayments({ b }: { b: any }) {
     try {
       const res = await apiFetch(`${API}/bookings/${b.id}/payment-link`, { method: "POST" });
       const data = await res.json();
-      if (data.url || data.paymentLink) {
-        setPaymentLink(data.url || data.paymentLink);
+      if (data.paymentLink || data.url) {
+        setPaymentLink(data.paymentLink || data.url);
+        toast({ title: "Посилання для оплати сформовано ✓" });
       } else if (data.error === "liqpay_not_configured") {
-        // Fallback: generate guest portal payment URL
-        setPaymentLink(`${window.location.origin}${BASE}/guest/${b.guestAccessCode || b.id}`);
+        toast({
+          title: "LiqPay не налаштовано",
+          description: "Додайте LiqPay Public та Private ключі у Налаштування → Юридичні особи",
+          variant: "destructive",
+        });
       } else {
-        setPaymentLink(`${window.location.origin}${BASE}/guest/${b.guestAccessCode || b.id}`);
+        toast({ title: "Не вдалось сформувати посилання", description: data.message || data.error, variant: "destructive" });
       }
     } catch {
-      setPaymentLink(`${window.location.origin}${BASE}/guest/${b.guestAccessCode || b.id}`);
+      toast({ title: "Помилка підключення до сервера", variant: "destructive" });
     } finally {
       setLinkLoading(false);
     }
@@ -751,6 +757,7 @@ export interface BookingPanelProps {
 }
 
 export function BookingPanel({ booking: b, open, onClose, onCheckin, onCheckout, onCancel, onEdit, onDelete }: BookingPanelProps) {
+  const { toast } = useToast();
   const [tab, setTab] = useState("summary");
 
   useEffect(() => {

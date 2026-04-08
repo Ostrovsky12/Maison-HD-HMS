@@ -67,11 +67,22 @@ const STANDARD_ADDONS = [
 ];
 
 const SOURCE_OPTIONS = [
+  { value: "direct",    label: "🏨 Прямий (з сайту)" },
   { value: "phone",     label: "📞 Телефон" },
-  { value: "instagram", label: "📸 Інстаграм" },
-  { value: "telegram",  label: "✈️ Телеграм" },
-  { value: "booking",   label: "🏨 Букінг" },
-  { value: "other",     label: "💬 Інший" },
+  { value: "walk_in",   label: "🚶 Walk-in (з вулиці)" },
+  { value: "instagram", label: "📸 Instagram" },
+  { value: "telegram",  label: "✈️ Telegram" },
+  { value: "viber",     label: "💬 Viber" },
+  { value: "booking",   label: "🌐 Booking.com" },
+  { value: "airbnb",    label: "🏡 Airbnb" },
+  { value: "expedia",   label: "✈️ Expedia" },
+  { value: "olx",       label: "📋 OLX" },
+  { value: "email",     label: "📧 Email" },
+  { value: "corporate", label: "🏢 Корпоративний" },
+  { value: "agent",     label: "🤝 Агент / Партнер" },
+  { value: "referral",  label: "💎 Рекомендація" },
+  { value: "repeat",    label: "🔄 Повторний гість" },
+  { value: "other",     label: "❓ Інший" },
 ];
 
 const emptyForm = (unitId?: number, checkIn?: string, checkOut?: string): BookingForm => ({

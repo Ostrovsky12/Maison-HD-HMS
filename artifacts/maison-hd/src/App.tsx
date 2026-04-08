@@ -65,6 +65,7 @@ import RateIntelligencePage from "@/pages/rate-intelligence";
 import DigitalKeysPage from "@/pages/digital-keys";
 import SustainabilityPage from "@/pages/sustainability";
 import TelephonyPage from "@/pages/telephony";
+import RatesPage from "@/pages/rates";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -179,6 +180,7 @@ function Router() {
       <Route path="/staff-schedule"><ProtectedRoute component={StaffSchedulePage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/upsell"><ProtectedRoute component={UpsellPage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/rate-intelligence"><ProtectedRoute component={RateIntelligencePage} roles={["super_admin","owner","manager"]} /></Route>
+      <Route path="/rates"><ProtectedRoute component={RatesPage} roles={["super_admin","owner","manager","reception"]} /></Route>
       <Route path="/digital-keys"><ProtectedRoute component={DigitalKeysPage} /></Route>
       <Route path="/sustainability"><ProtectedRoute component={SustainabilityPage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/telephony"><ProtectedRoute component={TelephonyPage} /></Route>

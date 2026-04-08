@@ -41,6 +41,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Бронювання",  path: "/bookings",    icon: CalendarDays, roles: null },
       { name: "Шахматка",    path: "/chess",        icon: Grid3X3,      roles: null },
+      { name: "Тарифи",      path: "/rates",        icon: Tag,          roles: ["super_admin","owner","manager","reception"] },
       { name: "Номери",      path: "/units",        icon: KeyRound,     roles: null },
       { name: "Гості",       path: "/guests",       icon: Users,        roles: null },
       { name: "Бронювати онлайн", path: "/book",    icon: Sparkles,     roles: null },
