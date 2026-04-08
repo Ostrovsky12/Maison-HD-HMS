@@ -1037,7 +1037,9 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
 router.get("/:bookingId/invoice", requireAuth, async (req, res) => {
   try {
     const bookingId = parseInt(req.params.bookingId);
-    const { legalEntityId, payerDetails } = req.query;
+    const { legalEntityId } = req.query;
+    const user = (req as any).user;
+    const orgId = user?.organizationId;
 
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
     if (!booking) return res.status(404).json({ error: "Booking not found" });
@@ -1050,21 +1052,54 @@ router.get("/:bookingId/invoice", requireAuth, async (req, res) => {
       if (g) guestName = `${g.firstName} ${g.lastName}`;
     }
 
-    let seller: any = { name: "Maison HD", address: "", edrpou: "", iban: "", bank: "" };
+    const { legalEntitiesTable } = await import("@workspace/db/schema");
+    let seller: any = null;
+
     if (legalEntityId) {
-      const { legalEntitiesTable } = await import("@workspace/db/schema");
-      const [entity] = await db.select().from(legalEntitiesTable).where(eq(legalEntitiesTable.id, parseInt(legalEntityId as string))).limit(1);
+      const [entity] = await db.select().from(legalEntitiesTable)
+        .where(eq(legalEntitiesTable.id, parseInt(legalEntityId as string))).limit(1);
       if (entity) seller = entity;
     }
+
+    if (!seller && orgId) {
+      // Auto-detect: prefer default entity, else first active entity for this org
+      const entities = await db.select().from(legalEntitiesTable)
+        .where(eq(legalEntitiesTable.organizationId, orgId));
+      seller = entities.find((e: any) => e.isDefault) || entities.find((e: any) => e.isActive) || entities[0] || null;
+    }
+
+    // Fetch all legal entities for selector
+    const allEntities = orgId
+      ? await db.select({ id: legalEntitiesTable.id, name: legalEntitiesTable.name, isDefault: legalEntitiesTable.isDefault })
+          .from(legalEntitiesTable).where(eq(legalEntitiesTable.organizationId, orgId))
+      : [];
 
     const total = Number(booking.totalAmount);
     const paid = Number(booking.paidAmount);
     const due = total - paid;
     const nights = Math.round((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / 86400000);
+    const pricePerNight = nights > 0 ? Math.round((total / nights) * 100) / 100 : total;
+
+    // Line items
+    const items = [
+      {
+        description: `Послуга бронювання — ${unit?.name || `Номер ${booking.unitId}`}`,
+        detail: `${booking.checkIn} → ${booking.checkOut} · ${nights} ніч`,
+        qty: nights,
+        unit: "ніч",
+        price: pricePerNight,
+        amount: total,
+      },
+    ];
+
+    // Generate invoice number: Р-YYYY-BKID
+    const year = new Date().getFullYear();
+    const invoiceNumber = `Р-${year}-${String(bookingId).padStart(4, "0")}`;
 
     res.json({
-      invoiceNumber: `INV-${bookingId}-${Date.now().toString(36).toUpperCase()}`,
+      invoiceNumber,
       date: new Date().toISOString().split("T")[0],
+      dueDate: booking.checkIn,
       booking: {
         id: bookingId,
         checkIn: booking.checkIn,
@@ -1080,8 +1115,24 @@ router.get("/:bookingId/invoice", requireAuth, async (req, res) => {
         paidAmount: paid,
         dueAmount: due,
       },
-      seller,
-      buyer: payerDetails ? JSON.parse(payerDetails as string) : null,
+      seller: seller ? {
+        name:          seller.name,
+        type:          seller.type,
+        taxCode:       seller.taxCode,
+        vatNumber:     seller.vatNumber,
+        iban:          seller.iban,
+        bankName:      seller.bankName,
+        mfo:           seller.mfo,
+        address:       seller.address,
+        directorName:  seller.directorName,
+        accountantName: seller.accountantName,
+        logoUrl:       seller.logoUrl,
+        stamp:         seller.stamp,
+        signature:     seller.signature,
+      } : null,
+      buyer: { name: guestName || "", taxCode: "", vatNumber: "", address: "" },
+      items,
+      legalEntities: allEntities,
     });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

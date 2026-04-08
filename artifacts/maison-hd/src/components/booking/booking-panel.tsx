@@ -11,6 +11,7 @@ import {
   Download, ChevronDown, ClipboardSignature,
 } from "lucide-react";
 import { openGuestCard } from "./guest-card-print";
+import { InvoiceModal, type InvoiceData } from "./invoice-modal";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API  = BASE.replace("/maison-hd", "") + "/api";
@@ -206,9 +207,7 @@ function TabPayments({ b }: { b: any }) {
 
   // Invoice state
   const [invoiceLoading, setInvoiceLoading] = useState(false);
-  const [invoice, setInvoice] = useState<any | null>(null);
-  const [invoiceOpen, setInvoiceOpen] = useState(false);
-  const [invoiceCopied, setInvoiceCopied] = useState(false);
+  const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -259,44 +258,20 @@ function TabPayments({ b }: { b: any }) {
     setTimeout(() => setLinkCopied(false), 2500);
   };
 
-  // Generate invoice
-  const generateInvoice = async () => {
+  // Generate / open invoice
+  const generateInvoice = async (entityId?: number) => {
     setInvoiceLoading(true);
     try {
-      const res = await apiFetch(`${API}/bookings/${b.id}/invoice`);
+      const params = entityId ? `?legalEntityId=${entityId}` : "";
+      const res = await apiFetch(`${API}/bookings/${b.id}/invoice${params}`);
+      if (!res.ok) throw new Error("Failed to load invoice");
       const data = await res.json();
-      setInvoice(data);
-      setInvoiceOpen(true);
+      setInvoiceData(data as InvoiceData);
     } catch {
-      setInvoice(null);
+      toast({ title: "Помилка завантаження рахунку", variant: "destructive" });
     } finally {
       setInvoiceLoading(false);
     }
-  };
-
-  const copyInvoiceText = async () => {
-    if (!invoice) return;
-    const text = [
-      `РАХУНОК № ${invoice.invoiceNumber}`,
-      `Дата: ${invoice.date}`,
-      ``,
-      `Гість: ${invoice.booking?.guestName}`,
-      `Номер: ${invoice.booking?.unitName}`,
-      `Заїзд: ${invoice.booking?.checkIn} о ${invoice.booking?.checkinTime || "14:00"}`,
-      `Виїзд: ${invoice.booking?.checkOut} о ${invoice.booking?.checkoutTime || "12:00"}`,
-      `Ночей: ${invoice.booking?.nights}`,
-      ``,
-      `До сплати: ${uah(invoice.booking?.totalAmount)}`,
-      `Оплачено: ${uah(invoice.booking?.paidAmount)}`,
-      `Залишок: ${uah(invoice.booking?.dueAmount)}`,
-      ``,
-      invoice.seller?.name ? `Постачальник: ${invoice.seller.name}` : "",
-      invoice.seller?.edrpou ? `ЄДРПОУ: ${invoice.seller.edrpou}` : "",
-      invoice.seller?.iban ? `IBAN: ${invoice.seller.iban}` : "",
-    ].filter(Boolean).join("\n");
-    await navigator.clipboard.writeText(text).catch(() => {});
-    setInvoiceCopied(true);
-    setTimeout(() => setInvoiceCopied(false), 2500);
   };
 
   return (
@@ -350,7 +325,7 @@ function TabPayments({ b }: { b: any }) {
       <div className="grid grid-cols-2 gap-2.5">
         {/* Invoice */}
         <button
-          onClick={generateInvoice}
+          onClick={() => generateInvoice()}
           disabled={invoiceLoading}
           className="flex flex-col items-center gap-1.5 py-4 rounded-2xl border-2 border-indigo-100 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors disabled:opacity-60"
         >
@@ -401,91 +376,14 @@ function TabPayments({ b }: { b: any }) {
         </div>
       )}
 
-      {/* ── Generated invoice ── */}
-      {invoice && (
-        <div className="rounded-2xl border border-indigo-100 overflow-hidden">
-          <button
-            onClick={() => setInvoiceOpen(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-indigo-50 hover:bg-indigo-100 transition-colors"
-          >
-            <div className="flex items-center gap-2 text-xs font-bold text-indigo-700">
-              <FileText className="w-3.5 h-3.5" />
-              Рахунок № {invoice.invoiceNumber}
-            </div>
-            <ChevronDown className={`w-4 h-4 text-indigo-500 transition-transform ${invoiceOpen ? "rotate-180" : ""}`} />
-          </button>
-
-          {invoiceOpen && (
-            <div className="p-4 bg-white space-y-3 text-xs">
-              {/* Header */}
-              <div className="flex justify-between text-gray-500">
-                <span>Дата:</span>
-                <span className="font-semibold text-gray-800">{invoice.date}</span>
-              </div>
-
-              {/* Booking details */}
-              <div className="space-y-1.5 py-3 border-y border-gray-100">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Гість</span>
-                  <span className="font-semibold text-gray-800">{invoice.booking?.guestName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Номер / юніт</span>
-                  <span className="font-semibold text-gray-800">{invoice.booking?.unitName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Заїзд</span>
-                  <span className="font-semibold text-gray-800">{invoice.booking?.checkIn} о {invoice.booking?.checkinTime || "14:00"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Виїзд</span>
-                  <span className="font-semibold text-gray-800">{invoice.booking?.checkOut} о {invoice.booking?.checkoutTime || "12:00"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Ночей</span>
-                  <span className="font-semibold text-gray-800">{invoice.booking?.nights}</span>
-                </div>
-              </div>
-
-              {/* Amounts */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-gray-500">
-                  <span>Загальна сума</span>
-                  <span className="font-bold text-gray-900 text-sm">{uah(invoice.booking?.totalAmount)}</span>
-                </div>
-                <div className="flex justify-between text-gray-500">
-                  <span>Оплачено</span>
-                  <span className="font-semibold text-emerald-600">{uah(invoice.booking?.paidAmount)}</span>
-                </div>
-                {invoice.booking?.dueAmount > 0 && (
-                  <div className="flex justify-between font-bold border-t border-gray-100 pt-2">
-                    <span className="text-red-600">До сплати</span>
-                    <span className="text-red-600 text-sm">{uah(invoice.booking?.dueAmount)}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Seller info */}
-              {invoice.seller?.name && invoice.seller.name !== "Maison HD" && (
-                <div className="pt-2 border-t border-gray-100 space-y-1 text-gray-400">
-                  <div className="font-semibold text-gray-600 text-[11px] uppercase tracking-wide mb-1">Постачальник</div>
-                  <div>{invoice.seller.name}</div>
-                  {invoice.seller.edrpou && <div>ЄДРПОУ: {invoice.seller.edrpou}</div>}
-                  {invoice.seller.iban && <div>IBAN: {invoice.seller.iban}</div>}
-                  {invoice.seller.bank && <div>Банк: {invoice.seller.bank}</div>}
-                </div>
-              )}
-
-              {/* Copy button */}
-              <button
-                onClick={copyInvoiceText}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-indigo-100 text-indigo-600 hover:bg-indigo-50 text-xs font-semibold transition-colors"
-              >
-                {invoiceCopied ? <><CheckCheck className="w-3.5 h-3.5" /> Скопійовано!</> : <><Copy className="w-3.5 h-3.5" /> Копіювати рахунок</>}
-              </button>
-            </div>
-          )}
-        </div>
+      {/* InvoiceModal rendered as portal */}
+      {invoiceData && (
+        <InvoiceModal
+          data={invoiceData}
+          bookingId={b.id}
+          onClose={() => setInvoiceData(null)}
+          onReload={(entityId) => generateInvoice(entityId)}
+        />
       )}
 
       {/* ── Transaction list ── */}
