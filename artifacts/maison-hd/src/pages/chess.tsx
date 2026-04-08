@@ -28,7 +28,7 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
   fetch(API + path, { ...opts, headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
 
 const SIDEBAR_W = 96;
-const HEADER_H = 76;
+const HEADER_H = 48;
 const MIN_DAY_W = 32;
 const MAX_DAY_W = 110;
 const ROW_H_COMPACT = 18;
