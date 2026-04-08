@@ -283,11 +283,11 @@ export default function HousekeepingPage() {
   };
 
   const handleComplete = (taskId: number) => {
-    completeMutation.mutate({ taskId }, { onSuccess: invalidate });
+    completeMutation.mutate({ taskId, data: {} }, { onSuccess: invalidate });
   };
 
   const handleVerify = (taskId: number) => {
-    verifyMutation.mutate({ taskId }, {
+    verifyMutation.mutate({ taskId, data: {} }, {
       onSuccess: () => {
         invalidate();
         toast({ title: "Перевірено", description: "Задачу підтверджено" });
