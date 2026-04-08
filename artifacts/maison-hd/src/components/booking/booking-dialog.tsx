@@ -519,13 +519,16 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
     } else if (usePartial && partialAmount > 0 && partialAmount < totalAmount) {
       extra.partialAmount = partialAmount;
     }
-    const result = await onConfirm("confirmed", type, extra);
+    // Link = save as PENDING (awaiting online payment), everything else = confirmed
+    const saveStatus = type === "link" ? "pending" : "confirmed";
+    const result = await onConfirm(saveStatus, type, extra);
     if (result && type === "link") {
       try {
         const lr = await authFetch(`${API}/bookings/${result.id}/payment-link`, { method: "POST" });
         const ld = await lr.json();
         if (lr.ok && ld.paymentLink) {
           setPaymentLink(ld.paymentLink);
+          toast({ title: "✅ Посилання сформовано!", description: "Скопіюйте та надішліть гостю для оплати. Після оплати бронювання підтвердиться автоматично." });
         } else if (ld.error === "liqpay_not_configured") {
           toast({
             title: "LiqPay не налаштований",
@@ -1011,12 +1014,15 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
       qc.invalidateQueries({ queryKey: ["calendar"] });
       const payLabels: Record<string, string> = {
         invoice: "Рахунок виставлено",
-        link:    "Посилання згенеровано",
+        link:    "Бронювання збережено — генерую посилання…",
         card:    "Оплачено карткою",
         cash:    "Оплачено готівкою",
         arrival: "Збережено — оплата при заїзді",
       };
-      toast({ title: payLabels[paymentMethod || ""] || (isEdit ? "Бронювання оновлено" : "Бронювання створено") });
+      // Don't show "saved" toast for link — it will show after link generation
+      if (paymentMethod !== "link") {
+        toast({ title: payLabels[paymentMethod || ""] || (isEdit ? "Бронювання оновлено" : "Бронювання створено") });
+      }
       onSuccess?.(saved);
       if (paymentMethod !== "link") onClose();
       return saved;

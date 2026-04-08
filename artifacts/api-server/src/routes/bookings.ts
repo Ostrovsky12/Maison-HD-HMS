@@ -97,6 +97,8 @@ router.get("/", requireAuth, async (req, res) => {
     paidAmount: bookingsTable.paidAmount,
     notes: bookingsTable.notes,
     createdAt: bookingsTable.createdAt,
+    paymentLink: bookingsTable.paymentLink,
+    legalEntityId: bookingsTable.legalEntityId,
     guestName: sql<string>`COALESCE(NULLIF(concat(${guestsTable.firstName}, ' ', ${guestsTable.lastName}), ' '), NULLIF(trim(concat(${bookingsTable.lastName}, ' ', ${bookingsTable.firstName})), ''), 'Гість')`,
     unitName: unitsTable.name,
   }).from(bookingsTable)
@@ -331,6 +333,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
     adults: bookingsTable.adults,
     checkinTime: bookingsTable.checkinTime,
     checkoutTime: bookingsTable.checkoutTime,
+    paymentLink: bookingsTable.paymentLink,
   }).from(bookingsTable).where(
     and(
       inArray(bookingsTable.unitId, unitIds),
@@ -380,6 +383,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
       color: isDraft ? "#a0aec0" : bookingColor(b.id),
       isDraft,
       draftExpiresAt: b.draftExpiresAt,
+      paymentLink: b.paymentLink || null,
     };
   });
 

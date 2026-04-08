@@ -199,9 +199,9 @@ function TabPayments({ b }: { b: any }) {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Payment link state
+  // Payment link state — initialize from DB if already generated
   const [linkLoading, setLinkLoading] = useState(false);
-  const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  const [paymentLink, setPaymentLink] = useState<string | null>((b as any).paymentLink || null);
   const [linkCopied, setLinkCopied] = useState(false);
 
   // Invoice state
@@ -307,6 +307,44 @@ function TabPayments({ b }: { b: any }) {
         <Tile label="Оплачено" value={uah(paid)} color="text-emerald-600" />
         <Tile label="Залишок"  value={uah(Math.max(0, balance))} color={balance > 0 ? "text-red-600" : "text-gray-400"} />
       </div>
+
+      {/* ── PENDING PAYMENT BANNER ── */}
+      {b.status === "pending" && paymentLink && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3.5 space-y-2.5">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span className="text-xs font-bold text-amber-800">Очікує оплати від гостя</span>
+          </div>
+          <div className="text-[11px] text-amber-700 bg-white border border-amber-200 rounded-xl px-3 py-2 font-mono break-all">
+            {paymentLink}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={copyPaymentLink}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors"
+            >
+              {linkCopied ? <><CheckCheck className="w-3.5 h-3.5" /> Скопійовано!</> : <><Copy className="w-3.5 h-3.5" /> Копіювати</>}
+            </button>
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(`Оплатіть бронювання за посиланням: ${paymentLink}`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-green-500 hover:bg-green-600 text-white text-xs font-semibold transition-colors"
+            >
+              WhatsApp
+            </a>
+            <a
+              href={paymentLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center px-3 rounded-xl border border-amber-200 text-amber-600 hover:bg-amber-100 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+          <p className="text-[10px] text-amber-600">Після оплати бронювання підтвердиться автоматично</p>
+        </div>
+      )}
 
       {/* ── ACTION BUTTONS ── */}
       <div className="grid grid-cols-2 gap-2.5">
