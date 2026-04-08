@@ -843,9 +843,15 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     ? Math.max(0, differenceInCalendarDays(new Date(form.checkOut), new Date(form.checkIn)))
     : 0;
 
-  // Reset to step 0 when opening fresh
+  // Reset form + step when opening fresh (not edit mode)
   useEffect(() => {
-    if (open) setStep(0);
+    if (open) {
+      setStep(0);
+      if (!booking) {
+        setForm(emptyForm(unitId, initCheckIn, initCheckOut));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // Escape key

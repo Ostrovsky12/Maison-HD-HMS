@@ -280,14 +280,14 @@ export default function ChessPage() {
     drag.current.end = date;
     setDragVis({ unitId, start: drag.current.start, end: date });
   };
-  const onCellUp = (unitId: number, date: string) => {
+  const onCellUp = (_unitId: number, _date: string) => {
     if (!drag.current?.active) return;
-    const { start, end } = drag.current;
+    const { unitId: dragUnitId, start, end } = drag.current;
     drag.current = null;
     setDragVis(null);
     const a = start <= end ? start : end;
     const b = start <= end ? end : start;
-    setNewBk({ open: true, unitId, checkIn: a, checkOut: ds(addDays(dp(b), 1)) });
+    setNewBk({ open: true, unitId: dragUnitId, checkIn: a, checkOut: ds(addDays(dp(b), 1)) });
   };
   useEffect(() => {
     const up = () => { if (drag.current) { drag.current.active = false; drag.current = null; setDragVis(null); } };
