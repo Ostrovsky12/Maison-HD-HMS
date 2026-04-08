@@ -287,7 +287,7 @@ export default function ChessPage() {
     setDragVis(null);
     const a = start <= end ? start : end;
     const b = start <= end ? end : start;
-    setNewBk({ open: true, unitId: dragUnitId, checkIn: a, checkOut: ds(addDays(dp(b), 1)) });
+    setNewBk({ open: true, unitId: dragUnitId, checkIn: a, checkOut: b });
   };
   useEffect(() => {
     const up = () => { if (drag.current) { drag.current.active = false; drag.current = null; setDragVis(null); } };
