@@ -69,6 +69,10 @@ function RentalTab() {
   const [updatingItem, setUpdatingItem] = useState<number | null>(null);
   const [showConditionEdit, setShowConditionEdit] = useState<any>(null);
   const [conditionForm, setConditionForm] = useState({ condition: 'good', notes: '' });
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [catForm, setCatForm] = useState({ name: '', description: '', icon: '🚲', color: '#6366f1', rental_unit: 'hour', deposit_required: false, deposit_amount: 0 });
+  const [showNewItem, setShowNewItem] = useState(false);
+  const [itemForm, setItemForm] = useState({ category_id: '', name: '', serial_number: '', condition: 'good', price_per_hour: '', price_per_half_day: '', price_per_day: '', size_info: '', notes: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -159,6 +163,35 @@ function RentalTab() {
     return Math.floor((end.getTime() - now.getTime()) / 60000);
   };
 
+  const createCategory = async () => {
+    if (!catForm.name) return;
+    setSaving(true);
+    await apiFetch('/activities/equipment/categories', { method: 'POST', body: JSON.stringify({ ...catForm, deposit_amount: Number(catForm.deposit_amount) }) });
+    setSaving(false);
+    setShowNewCategory(false);
+    setCatForm({ name: '', description: '', icon: '🚲', color: '#6366f1', rental_unit: 'hour', deposit_required: false, deposit_amount: 0 });
+    load();
+  };
+
+  const createItem = async () => {
+    if (!itemForm.name || !itemForm.category_id) return;
+    setSaving(true);
+    await apiFetch('/activities/equipment/items', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...itemForm,
+        category_id: Number(itemForm.category_id),
+        price_per_hour: itemForm.price_per_hour ? Number(itemForm.price_per_hour) : null,
+        price_per_half_day: itemForm.price_per_half_day ? Number(itemForm.price_per_half_day) : null,
+        price_per_day: itemForm.price_per_day ? Number(itemForm.price_per_day) : null,
+      })
+    });
+    setSaving(false);
+    setShowNewItem(false);
+    setItemForm({ category_id: '', name: '', serial_number: '', condition: 'good', price_per_hour: '', price_per_half_day: '', price_per_day: '', size_info: '', notes: '' });
+    load();
+  };
+
   return (
     <div>
       {/* Active rentals bar */}
@@ -194,13 +227,19 @@ function RentalTab() {
       )}
 
       {/* View mode toggle */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
           {([['inventory','📦 Інвентар'],['maintenance','🔧 Обслуговування'],['history','📋 Історія']] as [string,string][]).map(([v,l]) => (
             <button key={v} onClick={() => setViewMode(v as any)} className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${viewMode === v ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{l}</button>
           ))}
         </div>
-        <button onClick={load} className="ml-auto p-1.5 text-gray-400 hover:text-gray-700 border border-gray-200 rounded-lg bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
+        <button onClick={() => setShowNewCategory(true)} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 border border-indigo-200 text-indigo-600 text-xs font-medium rounded-lg hover:bg-indigo-50">
+          <Plus className="w-3.5 h-3.5" /> Категорія
+        </button>
+        <button onClick={() => { setShowNewItem(true); setItemForm(f => ({ ...f, category_id: categories.length > 0 ? String(categories[0].id) : '' })); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700">
+          <Plus className="w-3.5 h-3.5" /> Інвентар
+        </button>
+        <button onClick={load} className="p-1.5 text-gray-400 hover:text-gray-700 border border-gray-200 rounded-lg bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
       </div>
 
       {/* ── MAINTENANCE VIEW ── */}
@@ -338,7 +377,24 @@ function RentalTab() {
           ))}
         </div>
 
-        {loading ? <div className="text-center py-12 text-gray-400">Завантаження...</div> : (
+        {loading ? <div className="text-center py-12 text-gray-400">Завантаження...</div> : categories.length === 0 ? (
+          <div className="text-center py-16 bg-white border border-dashed border-gray-200 rounded-2xl">
+            <Package className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+            <p className="text-gray-500 font-medium mb-1">Немає категорій обладнання</p>
+            <p className="text-sm text-gray-400 mb-4">Спочатку додайте категорії (велосипеди, SUP-борди, рибальське спорядження тощо), потім — конкретні одиниці інвентарю</p>
+            <button onClick={() => setShowNewCategory(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+              <Plus className="w-4 h-4" /> Додати першу категорію
+            </button>
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="text-center py-12 bg-white border border-dashed border-gray-200 rounded-2xl">
+            <Package className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+            <p className="text-gray-500 mb-3">Інвентарю немає — додайте одиниці</p>
+            <button onClick={() => { setShowNewItem(true); setItemForm(f => ({ ...f, category_id: categories.length > 0 ? String(categories[0].id) : '' })); }} className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+              <Plus className="w-4 h-4" /> Додати інвентар
+            </button>
+          </div>
+        ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredItems.map((item: any) => {
               const activeRental = rentals.find((r: any) => r.item_id === item.id);
@@ -514,6 +570,107 @@ function RentalTab() {
           </div>
         </div>
       )}
+
+      {/* New Category Modal */}
+      {showNewCategory && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-900">Нова категорія обладнання</h3>
+              <button onClick={() => setShowNewCategory(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <input type="text" placeholder="Назва категорії *" value={catForm.name} onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" autoFocus />
+              <textarea placeholder="Опис" value={catForm.description} onChange={e => setCatForm(f => ({ ...f, description: e.target.value }))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" />
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Іконка</label>
+                  <input type="text" value={catForm.icon} onChange={e => setCatForm(f => ({ ...f, icon: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Колір</label>
+                  <input type="color" value={catForm.color} onChange={e => setCatForm(f => ({ ...f, color: e.target.value }))} className="w-full border border-gray-200 rounded-xl h-[38px] px-2 py-1" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Одиниця оренди</label>
+                  <select value={catForm.rental_unit} onChange={e => setCatForm(f => ({ ...f, rental_unit: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-2 py-2 text-sm bg-white">
+                    <option value="hour">Година</option>
+                    <option value="half_day">Пів-дня</option>
+                    <option value="day">День</option>
+                    <option value="session">Сесія</option>
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={catForm.deposit_required} onChange={e => setCatForm(f => ({ ...f, deposit_required: e.target.checked }))} className="rounded" />
+                Потрібна застава
+                {catForm.deposit_required && (
+                  <input type="number" min={0} placeholder="Сума" value={catForm.deposit_amount} onChange={e => setCatForm(f => ({ ...f, deposit_amount: Number(e.target.value) }))} className="ml-2 w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm" />
+                )}
+              </label>
+            </div>
+            <div className="flex gap-2 p-4 border-t">
+              <button onClick={() => setShowNewCategory(false)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
+              <button onClick={createCategory} disabled={!catForm.name || saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                {saving ? 'Збереження...' : 'Створити категорію'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Item Modal */}
+      {showNewItem && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl my-4">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-900">Новий інвентар</h3>
+              <button onClick={() => setShowNewItem(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Категорія *</label>
+                <select value={itemForm.category_id} onChange={e => setItemForm(f => ({ ...f, category_id: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
+                  <option value="">Оберіть категорію</option>
+                  {categories.map((c: any) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                </select>
+              </div>
+              <input type="text" placeholder="Назва *" value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" autoFocus />
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" placeholder="Серійний № / інв. №" value={itemForm.serial_number} onChange={e => setItemForm(f => ({ ...f, serial_number: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                <select value={itemForm.condition} onChange={e => setItemForm(f => ({ ...f, condition: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
+                  <option value="excellent">Відмінний</option>
+                  <option value="good">Добрий</option>
+                  <option value="fair">Задовільний</option>
+                  <option value="poor">Поганий</option>
+                </select>
+              </div>
+              <input type="text" placeholder="Розмір / параметри (напр. 26&quot;, S/M)" value={itemForm.size_info} onChange={e => setItemForm(f => ({ ...f, size_info: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Ціна/год (₴)</label>
+                  <input type="number" min={0} value={itemForm.price_per_hour} onChange={e => setItemForm(f => ({ ...f, price_per_hour: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Пів-дня (₴)</label>
+                  <input type="number" min={0} value={itemForm.price_per_half_day} onChange={e => setItemForm(f => ({ ...f, price_per_half_day: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">День (₴)</label>
+                  <input type="number" min={0} value={itemForm.price_per_day} onChange={e => setItemForm(f => ({ ...f, price_per_day: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <textarea placeholder="Примітки" value={itemForm.notes} onChange={e => setItemForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" />
+            </div>
+            <div className="flex gap-2 p-4 border-t">
+              <button onClick={() => setShowNewItem(false)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
+              <button onClick={createItem} disabled={!itemForm.name || !itemForm.category_id || saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                {saving ? 'Збереження...' : 'Додати інвентар'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -529,6 +686,8 @@ function ActivitiesTab() {
   const [saving, setSaving] = useState(false);
   const [showNewSession, setShowNewSession] = useState<any>(null);
   const [sessionForm, setSessionForm] = useState({ session_date: new Date().toISOString().split('T')[0], start_time: '10:00', instructor_name: '', max_participants: '', notes: '' });
+  const [showNewType, setShowNewType] = useState(false);
+  const [typeForm, setTypeForm] = useState({ name: '', description: '', category: 'sport', icon: '🏃', color: '#6366f1', difficulty: 'all_ages', duration_min: 60, max_participants: 10, price_per_person: 0, location: '', instructor_required: false, equipment_included: true });
 
   const today = new Date().toISOString().split('T')[0];
   const weekLater = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
@@ -586,6 +745,16 @@ function ActivitiesTab() {
     load();
   };
 
+  const createType = async () => {
+    if (!typeForm.name) return;
+    setSaving(true);
+    await apiFetch('/activities/types', { method: 'POST', body: JSON.stringify({ ...typeForm, duration_min: Number(typeForm.duration_min), max_participants: Number(typeForm.max_participants), price_per_person: Number(typeForm.price_per_person) }) });
+    setSaving(false);
+    setShowNewType(false);
+    setTypeForm({ name: '', description: '', category: 'sport', icon: '🏃', color: '#6366f1', difficulty: 'all_ages', duration_min: 60, max_participants: 10, price_per_person: 0, location: '', instructor_required: false, equipment_included: true });
+    load();
+  };
+
   return (
     <div>
       {/* Category filter */}
@@ -593,11 +762,24 @@ function ActivitiesTab() {
         {[['all','Всі'], ...categories.map(c => [c, CATEGORY_LABELS[c] || c])].map(([v, l]) => (
           <button key={v} onClick={() => setCatFilter(v)} className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${catFilter === v ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>{l}</button>
         ))}
-        <button onClick={load} className="ml-auto p-1.5 text-gray-400 hover:text-gray-700 border border-gray-200 rounded-lg bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
+        <button onClick={() => setShowNewType(true)} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700">
+          <Plus className="w-3.5 h-3.5" /> Новий тип
+        </button>
+        <button onClick={load} className="p-1.5 text-gray-400 hover:text-gray-700 border border-gray-200 rounded-lg bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
       </div>
 
       {loading ? <div className="text-center py-12 text-gray-400">Завантаження...</div> : (
         <div className="space-y-4">
+          {filteredTypes.length === 0 && (
+            <div className="text-center py-16 bg-white border border-dashed border-gray-200 rounded-2xl">
+              <Star className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+              <p className="text-gray-500 font-medium mb-1">Немає типів активностей</p>
+              <p className="text-sm text-gray-400 mb-4">Створіть перший тип активності — SUP, велосипеди, теніс, майстер-класи тощо</p>
+              <button onClick={() => setShowNewType(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+                <Plus className="w-4 h-4" /> Створити тип активності
+              </button>
+            </div>
+          )}
           {filteredTypes.map((type: any) => {
             const typeSessions = getTypeSessions(type.id);
             const todaySessions = typeSessions.filter((s: any) => s.session_date === today);
@@ -740,6 +922,85 @@ function ActivitiesTab() {
               <button onClick={() => setShowNewSession(null)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
               <button onClick={addSession} disabled={saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
                 {saving ? 'Збереження...' : 'Створити сесію'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New activity type modal */}
+      {showNewType && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl my-4">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-900">Новий тип активності</h3>
+              <button onClick={() => setShowNewType(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
+              <input type="text" placeholder="Назва *" value={typeForm.name} onChange={e => setTypeForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" autoFocus />
+              <textarea placeholder="Опис" value={typeForm.description} onChange={e => setTypeForm(f => ({ ...f, description: e.target.value }))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Категорія</label>
+                  <select value={typeForm.category} onChange={e => setTypeForm(f => ({ ...f, category: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
+                    <option value="water">🌊 Водні</option>
+                    <option value="sport">⚽ Спортивні</option>
+                    <option value="creative">🎨 Творчі</option>
+                    <option value="kids">🧒 Дитячі</option>
+                    <option value="wellness">🧘 Wellness</option>
+                    <option value="tour">🗺️ Тури</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Рівень складності</label>
+                  <select value={typeForm.difficulty} onChange={e => setTypeForm(f => ({ ...f, difficulty: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
+                    <option value="all_ages">Для всіх</option>
+                    <option value="beginner">Для початківців</option>
+                    <option value="intermediate">Середній</option>
+                    <option value="advanced">Досвідчені</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Тривалість (хв)</label>
+                  <input type="number" min={15} value={typeForm.duration_min} onChange={e => setTypeForm(f => ({ ...f, duration_min: Number(e.target.value) }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Макс. учасників</label>
+                  <input type="number" min={1} value={typeForm.max_participants} onChange={e => setTypeForm(f => ({ ...f, max_participants: Number(e.target.value) }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Ціна/особа (₴)</label>
+                  <input type="number" min={0} value={typeForm.price_per_person} onChange={e => setTypeForm(f => ({ ...f, price_per_person: Number(e.target.value) }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Іконка</label>
+                  <input type="text" value={typeForm.icon} onChange={e => setTypeForm(f => ({ ...f, icon: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" placeholder="🏃" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Колір</label>
+                  <input type="color" value={typeForm.color} onChange={e => setTypeForm(f => ({ ...f, color: e.target.value }))} className="w-full border border-gray-200 rounded-xl h-[38px] px-2 py-1" />
+                </div>
+              </div>
+              <input type="text" placeholder="Локація (напр. Пляж № 2, Корт № 1)" value={typeForm.location} onChange={e => setTypeForm(f => ({ ...f, location: e.target.value }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={typeForm.instructor_required} onChange={e => setTypeForm(f => ({ ...f, instructor_required: e.target.checked }))} className="rounded" />
+                  Потрібен інструктор
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={typeForm.equipment_included} onChange={e => setTypeForm(f => ({ ...f, equipment_included: e.target.checked }))} className="rounded" />
+                  Інвентар включено
+                </label>
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 border-t">
+              <button onClick={() => setShowNewType(false)} className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-xl text-sm hover:bg-gray-50">Скасувати</button>
+              <button onClick={createType} disabled={!typeForm.name || saving} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                {saving ? 'Збереження...' : 'Створити тип'}
               </button>
             </div>
           </div>
