@@ -239,12 +239,18 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
             <span className="font-bold text-indigo-700 text-xl">{nights}</span>
             <span className="text-indigo-500 ml-1 text-sm">{nightsLabel(nights)}</span>
           </div>
-          {pricingPreview?.totalAmount > 0 && (
-            <div className="text-right">
-              <div className="font-black text-indigo-700 text-xl">{fmt(pricingPreview.totalAmount)}</div>
-              <div className="text-xs text-indigo-400">{fmt(Math.round(pricingPreview.totalAmount / nights))}/ніч</div>
-            </div>
-          )}
+          {(() => {
+            const selRate = form.rateId ? ratesData?.find((r: any) => r.id === form.rateId) : null;
+            const rateTotal = selRate ? Number(selRate.pricePerNight) * nights : 0;
+            const displayTotal = rateTotal > 0 ? rateTotal : (pricingPreview?.totalAmount || 0);
+            const displayPerNight = nights > 0 ? Math.round(displayTotal / nights) : 0;
+            return displayTotal > 0 ? (
+              <div className="text-right">
+                <div className="font-black text-indigo-700 text-xl">{fmt(displayTotal)}</div>
+                <div className="text-xs text-indigo-400">{fmt(displayPerNight)}/ніч</div>
+              </div>
+            ) : null;
+          })()}
         </div>
       )}
 
@@ -950,9 +956,9 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const touristTax = touristTaxRate > 0 ? Math.round(touristTaxRate * (form.adults || 1) * nights * 100) / 100 : 0;
 
   const previewTotal = pricingPreview?.totalAmount || 0;
-  const base = previewTotal > 0
-    ? previewTotal
-    : (selectedRate ? Number(selectedRate.pricePerNight) * nights : 0);
+  // If a specific rate is selected, its price takes priority over the preview total
+  const rateBase = selectedRate ? Number(selectedRate.pricePerNight) * nights : 0;
+  const base = rateBase > 0 ? rateBase : previewTotal;
   const addonCost = STANDARD_ADDONS.reduce((s, { key }) => {
     return form.selectedAddons[key] ? s + (addonPriceMap[key] || 0) * nights : s;
   }, 0);
