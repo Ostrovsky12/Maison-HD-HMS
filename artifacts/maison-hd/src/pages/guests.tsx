@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import {
   Search, Plus, Mail, Phone, Loader2, Star, Users,
   Globe, Shield, ArrowRight, X, Edit2, UserPlus,
-  Calendar, FileText, ChevronDown,
+  Calendar, FileText, ChevronDown, Download, MapPin,
+  Moon, CreditCard, Clock, BadgeCheck,
 } from "lucide-react";
 import {
   useListGuests, useGetGuest, useCreateGuest, useUpdateGuest,
@@ -10,19 +11,43 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
-import { format } from "date-fns";
+import { format, differenceInYears } from "date-fns";
 import { uk } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const tok = () => localStorage.getItem("hms_token") || "";
+
 const fmtUAH = (n: number) =>
   new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", maximumFractionDigits: 0 }).format(n);
+
+const fmtDate = (d: string | null | undefined) =>
+  d ? format(new Date(d), "d MMM yyyy", { locale: uk }) : "—";
+
+const fmtShortDate = (d: string | null | undefined) =>
+  d ? format(new Date(d), "d MMM", { locale: uk }) : "—";
 
 const LOYALTY: Record<string, { label: string; bg: string; text: string; ring: string }> = {
   bronze:   { label: "Бронза",   bg: "bg-amber-50",   text: "text-amber-700",  ring: "ring-amber-200" },
   silver:   { label: "Срібло",   bg: "bg-slate-50",   text: "text-slate-600",  ring: "ring-slate-200" },
   gold:     { label: "Золото",   bg: "bg-yellow-50",  text: "text-yellow-700", ring: "ring-yellow-200" },
   platinum: { label: "Платина",  bg: "bg-violet-50",  text: "text-violet-700", ring: "ring-violet-200" },
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  direct: "Прямий",
+  booking_com: "Booking.com",
+  online: "Онлайн",
+  airbnb: "Airbnb",
+  phone: "Телефон",
+  walkin: "Без броні",
+};
+
+const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
+  pending:     { label: "Очікує",       cls: "bg-amber-50 text-amber-600" },
+  confirmed:   { label: "Підтверджено", cls: "bg-emerald-50 text-emerald-600" },
+  checked_in:  { label: "Проживає",     cls: "bg-blue-50 text-blue-600" },
+  checked_out: { label: "Виїхав",       cls: "bg-gray-100 text-gray-500" },
+  cancelled:   { label: "Скасовано",    cls: "bg-red-50 text-red-500" },
 };
 
 const AVATAR_GRADIENTS = [
@@ -53,9 +78,9 @@ function GuestFormDialog({
 
   const [form, setForm] = useState({
     firstName: "", lastName: "", middleName: "",
-    phone: "", email: "", dateOfBirth: "",
-    nationality: "", documentNumber: "", notes: "",
-    isVip: false, loyaltyLevel: "",
+    phone: "", email: "", birthDate: "",
+    nationality: "", passportNumber: "", notes: "",
+    loyaltyLevel: "",
   });
 
   useEffect(() => {
@@ -66,11 +91,10 @@ function GuestFormDialog({
         middleName:     guest?.middleName     || "",
         phone:          guest?.phone          || "",
         email:          guest?.email          || "",
-        dateOfBirth:    guest?.dateOfBirth    || "",
+        birthDate:      guest?.birthDate      || guest?.dateOfBirth || "",
         nationality:    guest?.nationality    || "",
-        documentNumber: guest?.documentNumber || "",
+        passportNumber: guest?.passportNumber || guest?.documentNumber || "",
         notes:          guest?.notes          || "",
-        isVip:          guest?.isVip          || false,
         loyaltyLevel:   guest?.loyaltyLevel   || "",
       });
     }
@@ -90,30 +114,28 @@ function GuestFormDialog({
       lastName:       form.lastName.trim(),
       phone:          form.phone.trim() || undefined,
       email:          form.email.trim() || undefined,
-      dateOfBirth:    form.dateOfBirth || undefined,
+      birthDate:      form.birthDate || undefined,
       nationality:    form.nationality.trim() || undefined,
-      documentNumber: form.documentNumber.trim() || undefined,
+      passportNumber: form.passportNumber.trim() || undefined,
       notes:          form.notes.trim() || undefined,
-      isVip:          form.isVip,
       loyaltyLevel:   form.loyaltyLevel || undefined,
     };
     if (form.middleName.trim()) data.middleName = form.middleName.trim();
 
     if (isEdit) {
       updateM.mutate({ guestId: guest.id, data }, {
-        onSuccess: () => { toast({ title: "✓ Гостя оновлено" }); onSuccess(); },
+        onSuccess: () => { toast({ title: "Гостя оновлено" }); onSuccess(); },
         onError:   (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" }),
       });
     } else {
       createM.mutate({ data }, {
-        onSuccess: () => { toast({ title: "✓ Гостя додано" }); onSuccess(); },
+        onSuccess: () => { toast({ title: "Гостя додано" }); onSuccess(); },
         onError:   (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" }),
       });
     }
   };
 
   const isPending = createM.isPending || updateM.isPending;
-
   const inputCls = "w-full h-9 px-3 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all placeholder-gray-300";
   const labelCls = "block text-xs font-semibold text-gray-500 mb-1";
 
@@ -121,8 +143,6 @@ function GuestFormDialog({
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
-
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-indigo-100 flex items-center justify-center">
@@ -138,10 +158,7 @@ function GuestFormDialog({
           </button>
         </div>
 
-        {/* Form */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-
-          {/* Name */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Прізвище *</label>
@@ -152,13 +169,10 @@ function GuestFormDialog({
               <input className={inputCls} value={form.firstName} onChange={e => set("firstName", e.target.value)} placeholder="Олексій" />
             </div>
           </div>
-
           <div>
             <label className={labelCls}>По батькові</label>
             <input className={inputCls} value={form.middleName} onChange={e => set("middleName", e.target.value)} placeholder="Миколайович" />
           </div>
-
-          {/* Contacts */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Телефон</label>
@@ -175,14 +189,12 @@ function GuestFormDialog({
               </div>
             </div>
           </div>
-
-          {/* Personal */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Дата народження</label>
               <div className="relative">
                 <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-300" />
-                <input type="date" className={`${inputCls} pl-8`} value={form.dateOfBirth} onChange={e => set("dateOfBirth", e.target.value)} />
+                <input type="date" className={`${inputCls} pl-8`} value={form.birthDate} onChange={e => set("birthDate", e.target.value)} />
               </div>
             </div>
             <div>
@@ -193,50 +205,30 @@ function GuestFormDialog({
               </div>
             </div>
           </div>
-
           <div>
             <label className={labelCls}>Документ (паспорт / ID)</label>
             <div className="relative">
               <FileText className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-300" />
-              <input className={`${inputCls} pl-8`} value={form.documentNumber} onChange={e => set("documentNumber", e.target.value)} placeholder="АА 123456" />
+              <input className={`${inputCls} pl-8`} value={form.passportNumber} onChange={e => set("passportNumber", e.target.value)} placeholder="АА 123456" />
             </div>
           </div>
-
-          {/* Loyalty + VIP */}
-          <div className="flex gap-3 items-end">
-            <div className="flex-1">
-              <label className={labelCls}>Рівень лояльності</label>
-              <div className="relative">
-                <select
-                  value={form.loyaltyLevel}
-                  onChange={e => set("loyaltyLevel", e.target.value)}
-                  className="w-full h-9 pl-3 pr-8 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 appearance-none cursor-pointer"
-                >
-                  <option value="">Без рівня</option>
-                  <option value="bronze">🥉 Бронза</option>
-                  <option value="silver">🥈 Срібло</option>
-                  <option value="gold">🥇 Золото</option>
-                  <option value="platinum">💎 Платина</option>
-                </select>
-                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-              </div>
-            </div>
-            <div className="pb-0.5">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <div
-                  onClick={() => set("isVip", !form.isVip)}
-                  className={`w-10 h-5 rounded-full transition-colors relative ${form.isVip ? "bg-amber-400" : "bg-gray-200"}`}
-                >
-                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.isVip ? "translate-x-5" : "translate-x-0.5"}`} />
-                </div>
-                <span className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-                  <Shield className="w-3 h-3 text-amber-500" /> VIP
-                </span>
-              </label>
+          <div>
+            <label className={labelCls}>Рівень лояльності</label>
+            <div className="relative">
+              <select
+                value={form.loyaltyLevel}
+                onChange={e => set("loyaltyLevel", e.target.value)}
+                className="w-full h-9 pl-3 pr-8 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 appearance-none cursor-pointer"
+              >
+                <option value="">Без рівня</option>
+                <option value="bronze">Бронза</option>
+                <option value="silver">Срібло</option>
+                <option value="gold">Золото</option>
+                <option value="platinum">Платина</option>
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
             </div>
           </div>
-
-          {/* Notes */}
           <div>
             <label className={labelCls}>Нотатки</label>
             <textarea
@@ -249,7 +241,6 @@ function GuestFormDialog({
           </div>
         </div>
 
-        {/* Footer */}
         <div className="flex gap-2 px-5 py-4 border-t border-gray-100 bg-gray-50/50">
           <button onClick={onClose} className="flex-1 h-9 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-100 transition-colors">
             Скасувати
@@ -283,13 +274,18 @@ function GuestDrawer({
   const initials = guest ? `${guest.firstName?.[0] || ""}${guest.lastName?.[0] || ""}`.toUpperCase() : "—";
   const grad = avatarGrad(guestId || 0);
 
+  const bookings: any[] = (guest as any)?.bookings || [];
+  const totalBookings = (guest as any)?.totalBookings ?? bookings.filter((b: any) => b.status !== "cancelled").length;
+  const totalRevenue  = (guest as any)?.totalRevenue  ?? 0;
+  const totalNights   = (guest as any)?.totalNightsCalc ?? guest?.totalNights ?? 0;
+
   return (
     <>
       <div
         onClick={onClose}
         className={`fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] transition-opacity duration-200 ${open ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       />
-      <div className={`fixed top-0 right-0 h-screen w-[420px] max-w-full z-50 bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-out ${open ? "translate-x-0" : "translate-x-full"}`}>
+      <div className={`fixed top-0 right-0 h-screen w-[460px] max-w-full z-50 bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-out ${open ? "translate-x-0" : "translate-x-full"}`}>
 
         {/* Header */}
         <div className="relative px-5 pt-6 pb-5 border-b border-gray-100">
@@ -326,14 +322,19 @@ function GuestDrawer({
                   {guest.lastName} {guest.firstName}
                   {(guest as any).middleName && ` ${(guest as any).middleName}`}
                 </h2>
-                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                   <LoyaltyChip level={guest.loyaltyLevel} />
-                  {(guest as any).isVip && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-200">
-                      <Shield className="w-2.5 h-2.5" /> VIP
-                    </span>
+                  {guest.phone && (
+                    <a href={`tel:${guest.phone}`} className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">
+                      <Phone className="w-3 h-3" />{guest.phone}
+                    </a>
                   )}
                 </div>
+                {guest.birthDate && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    {fmtDate(guest.birthDate)} · {differenceInYears(new Date(), new Date(guest.birthDate))} років
+                  </p>
+                )}
               </div>
             </div>
           ) : null}
@@ -347,30 +348,32 @@ function GuestDrawer({
               {/* Stats */}
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: "Бронювань", value: (guest as any).totalBookings ?? "—" },
-                  { label: "Ночей",     value: (guest as any).totalNights ?? "—" },
-                  { label: "LTV",       value: (guest as any).totalRevenue ? fmtUAH((guest as any).totalRevenue) : "—" },
+                  { icon: BadgeCheck, label: "Відвідувань", value: totalBookings, cls: "text-indigo-600" },
+                  { icon: Moon,       label: "Ночей",       value: totalNights,   cls: "text-violet-600" },
+                  { icon: CreditCard, label: "LTV",         value: totalRevenue > 0 ? fmtUAH(totalRevenue) : "—", cls: "text-emerald-600" },
                 ].map(s => (
                   <div key={s.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                    <s.icon className={`w-4 h-4 mx-auto mb-1 ${s.cls}`} />
                     <div className="font-bold text-gray-900 text-base">{s.value}</div>
                     <div className="text-[11px] text-gray-400">{s.label}</div>
                   </div>
                 ))}
               </div>
 
-              {/* Contacts */}
-              <div className="space-y-0">
+              {/* Contacts & Personal Info */}
+              <div className="space-y-0 bg-gray-50 rounded-xl overflow-hidden">
                 {[
-                  { icon: Phone, label: "Тел.", value: guest.phone, href: `tel:${guest.phone}` },
-                  { icon: Mail,  label: "Email", value: guest.email, href: `mailto:${guest.email}` },
-                  { icon: Globe, label: "Країна", value: (guest as any).nationality },
-                  { icon: Star,  label: "День нар.", value: guest.dateOfBirth
-                    ? format(new Date(guest.dateOfBirth), "d MMMM yyyy", { locale: uk }) : null },
-                  { icon: FileText, label: "Документ", value: (guest as any).documentNumber },
-                ].filter(r => r.value).map((row, i) => (
-                  <div key={i} className="flex items-center gap-3 py-2.5 border-b border-gray-50 last:border-0">
-                    <row.icon className="w-4 h-4 text-gray-300 shrink-0" />
-                    <span className="text-xs text-gray-400 w-16">{row.label}</span>
+                  { icon: Phone,    label: "Телефон",   value: guest.phone,        href: `tel:${guest.phone}` },
+                  { icon: Mail,     label: "Email",     value: guest.email,        href: `mailto:${guest.email}` },
+                  { icon: Calendar, label: "Народився", value: guest.birthDate
+                    ? `${fmtDate(guest.birthDate)} (${differenceInYears(new Date(), new Date(guest.birthDate))} р.)` : null },
+                  { icon: Globe,    label: "Країна",    value: (guest as any).nationality },
+                  { icon: FileText, label: "Документ",  value: (guest as any).passportNumber || (guest as any).documentNumber },
+                  { icon: Clock,    label: "Останній візит", value: guest.lastVisit ? fmtDate(guest.lastVisit as any) : null },
+                ].filter(r => r.value).map((row, i, arr) => (
+                  <div key={i} className={`flex items-center gap-3 px-3 py-2.5 ${i < arr.length - 1 ? "border-b border-gray-100" : ""}`}>
+                    <row.icon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    <span className="text-xs text-gray-400 w-24 shrink-0">{row.label}</span>
                     {row.href ? (
                       <a href={row.href} className="text-sm text-indigo-600 hover:underline truncate">{row.value}</a>
                     ) : (
@@ -388,40 +391,69 @@ function GuestDrawer({
                 </div>
               )}
 
-              {/* Booking history */}
-              {(guest as any).bookings?.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">
-                    Бронювання ({(guest as any).bookings.length})
-                  </p>
+              {/* Stay History */}
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">
+                  Історія перебування ({bookings.length})
+                </p>
+                {bookings.length === 0 ? (
+                  <div className="text-center py-6 text-sm text-gray-400">Бронювань не знайдено</div>
+                ) : (
                   <div className="space-y-2">
-                    {(guest as any).bookings.slice(0, 8).map((b: any) => (
-                      <div key={b.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl text-sm">
-                        <div>
-                          <div className="font-medium text-gray-800">{b.unitName || `Юніт #${b.unitId}`}</div>
-                          <div className="text-xs text-gray-400 mt-0.5">
-                            {format(new Date(b.checkIn), "d MMM", { locale: uk })} – {format(new Date(b.checkOut), "d MMM yyyy", { locale: uk })}
+                    {bookings.map((b: any) => {
+                      const st = STATUS_LABELS[b.status] || { label: b.status, cls: "bg-gray-100 text-gray-500" };
+                      return (
+                        <div key={b.id} className="border border-gray-100 rounded-xl p-3 bg-white hover:border-gray-200 transition-colors">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              {/* Property + Unit */}
+                              <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                {b.propertyName && (
+                                  <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                                    <MapPin className="w-2.5 h-2.5" />{b.propertyName}
+                                  </span>
+                                )}
+                                {b.propertyName && b.unitName && <span className="text-gray-200">·</span>}
+                                {b.unitName && (
+                                  <span className="text-xs font-semibold text-gray-700">{b.unitName}</span>
+                                )}
+                              </div>
+                              {/* Dates */}
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span>{fmtShortDate(b.checkIn)} – {fmtDate(b.checkOut)}</span>
+                                {b.nights > 0 && (
+                                  <span className="flex items-center gap-0.5 text-gray-400">
+                                    <Moon className="w-2.5 h-2.5" />{b.nights} н.
+                                  </span>
+                                )}
+                                {b.guestsCount > 1 && (
+                                  <span className="flex items-center gap-0.5 text-gray-400">
+                                    <Users className="w-2.5 h-2.5" />{b.guestsCount}
+                                  </span>
+                                )}
+                              </div>
+                              {/* Source */}
+                              {b.source && (
+                                <div className="text-[11px] text-gray-400 mt-0.5">
+                                  {SOURCE_LABELS[b.source] || b.source}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="font-semibold text-gray-900 text-sm">{fmtUAH(b.totalAmount)}</div>
+                              {b.paidAmount > 0 && b.paidAmount < b.totalAmount && (
+                                <div className="text-[11px] text-amber-600">Оплачено: {fmtUAH(b.paidAmount)}</div>
+                              )}
+                              <span className={`text-[11px] px-1.5 py-0.5 rounded-full mt-0.5 inline-block ${st.cls}`}>{st.label}</span>
+                            </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="font-semibold text-emerald-600">{fmtUAH(b.totalAmount)}</div>
-                          <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
-                            b.status === "checked_in"  ? "bg-blue-50 text-blue-600" :
-                            b.status === "confirmed"   ? "bg-emerald-50 text-emerald-600" :
-                            b.status === "cancelled"   ? "bg-red-50 text-red-500" :
-                            "bg-gray-100 text-gray-500"
-                          }`}>{
-                            b.status === "checked_in"  ? "Проживає" :
-                            b.status === "confirmed"   ? "Підтверджено" :
-                            b.status === "checked_out" ? "Виїхав" :
-                            b.status === "cancelled"   ? "Скасовано" : b.status
-                          }</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+
             </div>
           )}
         </div>
@@ -430,45 +462,79 @@ function GuestDrawer({
   );
 }
 
-// ── Guest Card ────────────────────────────────────────────────────────────────
-function GuestCard({ guest, onClick, isSelected }: { guest: any; onClick: () => void; isSelected: boolean }) {
+// ── Guest Row (Table View) ─────────────────────────────────────────────────────
+function GuestRow({ guest, onClick, isSelected }: { guest: any; onClick: () => void; isSelected: boolean }) {
   const initials = `${guest.firstName?.[0] || ""}${guest.lastName?.[0] || ""}`.toUpperCase();
   const grad = avatarGrad(guest.id);
+  const age = guest.birthDate
+    ? differenceInYears(new Date(), new Date(guest.birthDate))
+    : null;
+
   return (
-    <div
+    <tr
       onClick={onClick}
-      className={`group bg-white rounded-2xl border-2 p-4 cursor-pointer transition-all hover:shadow-sm ${
-        isSelected ? "border-indigo-400 shadow-sm shadow-indigo-100/60" : "border-gray-200/80 hover:border-gray-300"
-      }`}
+      className={`cursor-pointer transition-colors hover:bg-indigo-50/40 ${isSelected ? "bg-indigo-50" : ""}`}
     >
-      <div className="flex items-center gap-3">
-        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center text-white font-bold text-sm shrink-0`}>
-          {initials}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-            <span className="font-semibold text-gray-900 text-sm truncate">
+      {/* Name + Avatar */}
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${grad} flex items-center justify-center text-white font-bold text-xs shrink-0`}>
+            {initials}
+          </div>
+          <div>
+            <div className="font-semibold text-gray-900 text-sm">
               {guest.lastName} {guest.firstName}
-            </span>
-            <LoyaltyChip level={guest.loyaltyLevel} />
-            {guest.isVip && <Shield className="w-3 h-3 text-amber-500 shrink-0" />}
-          </div>
-          <div className="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
-            {guest.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{guest.phone}</span>}
-            {guest.email && <span className="truncate max-w-[160px]">{guest.email}</span>}
+              {guest.middleName && ` ${guest.middleName}`}
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <LoyaltyChip level={guest.loyaltyLevel} />
+              {guest.isVip && <Shield className="w-3 h-3 text-amber-500" />}
+            </div>
           </div>
         </div>
-        <div className="text-right shrink-0 hidden sm:block">
-          {guest.totalBookings !== undefined && (
-            <div className="font-semibold text-gray-900 text-sm">{guest.totalBookings} бр.</div>
-          )}
-          {guest.totalRevenue !== undefined && guest.totalRevenue > 0 && (
-            <div className="text-xs text-emerald-600 font-medium">{fmtUAH(guest.totalRevenue)}</div>
-          )}
-        </div>
-        <ArrowRight className="w-4 h-4 text-gray-200 group-hover:text-indigo-400 transition-colors shrink-0 ml-1" />
-      </div>
-    </div>
+      </td>
+      {/* Birth date + age */}
+      <td className="px-4 py-3 text-sm text-gray-600 hidden md:table-cell">
+        {guest.birthDate ? (
+          <span className="text-gray-700">{fmtDate(guest.birthDate)}<span className="text-gray-400 ml-1 text-xs">({age} р.)</span></span>
+        ) : <span className="text-gray-300">—</span>}
+      </td>
+      {/* Phone */}
+      <td className="px-4 py-3 text-sm hidden sm:table-cell">
+        {guest.phone ? (
+          <a href={`tel:${guest.phone}`} onClick={e => e.stopPropagation()} className="text-indigo-600 hover:underline flex items-center gap-1">
+            <Phone className="w-3 h-3" />{guest.phone}
+          </a>
+        ) : <span className="text-gray-300">—</span>}
+      </td>
+      {/* Email */}
+      <td className="px-4 py-3 text-sm hidden lg:table-cell">
+        {guest.email ? (
+          <a href={`mailto:${guest.email}`} onClick={e => e.stopPropagation()} className="text-indigo-600 hover:underline truncate max-w-[160px] block">
+            {guest.email}
+          </a>
+        ) : <span className="text-gray-300">—</span>}
+      </td>
+      {/* Visits */}
+      <td className="px-4 py-3 text-center">
+        <span className="inline-block min-w-[28px] py-0.5 text-center bg-indigo-50 text-indigo-700 font-bold text-sm rounded-lg">
+          {guest.bookingCount ?? 0}
+        </span>
+      </td>
+      {/* Total spent */}
+      <td className="px-4 py-3 text-right hidden sm:table-cell">
+        {guest.ltv > 0 ? (
+          <span className="font-semibold text-emerald-600 text-sm">{fmtUAH(guest.ltv || 0)}</span>
+        ) : <span className="text-gray-300">—</span>}
+      </td>
+      {/* Last visit */}
+      <td className="px-4 py-3 text-sm text-gray-500 hidden xl:table-cell">
+        {guest.lastVisit ? fmtShortDate(guest.lastVisit as any) : <span className="text-gray-300">—</span>}
+      </td>
+      <td className="pr-3">
+        <ArrowRight className="w-4 h-4 text-gray-200 group-hover:text-indigo-400" />
+      </td>
+    </tr>
   );
 }
 
@@ -483,14 +549,16 @@ export default function GuestsPage() {
   const [activeIdx, setActiveIdx]   = useState(-1);
   const [formOpen, setFormOpen]     = useState(false);
   const [editGuest, setEditGuest]   = useState<any>(null);
+  const [exporting, setExporting]   = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const { data: resp, isLoading } = useListGuests({});
   const guests = resp?.guests || [];
 
   const filtered = guests.filter(g => {
+    const fullName = `${g.lastName} ${g.firstName} ${(g as any).middleName || ""}`.toLowerCase();
     const matchSearch = !search ||
-      `${g.firstName} ${g.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
+      fullName.includes(search.toLowerCase()) ||
       g.email?.toLowerCase().includes(search.toLowerCase()) ||
       g.phone?.includes(search);
     const matchLoyalty = !filterLoyalty || g.loyaltyLevel === filterLoyalty;
@@ -501,16 +569,36 @@ export default function GuestsPage() {
     setSelectedId(id); setActiveIdx(idx); setDrawerOpen(true);
   };
 
-  const handleEdit = (g: any) => {
-    setEditGuest(g); setFormOpen(true);
-  };
+  const handleEdit = (g: any) => { setEditGuest(g); setFormOpen(true); };
 
   const handleSuccess = () => {
     qc.invalidateQueries({ queryKey: getListGuestsQueryKey() });
     setFormOpen(false); setEditGuest(null);
   };
 
-  // Keyboard
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch("/api/guests/export", {
+        headers: { "Authorization": `Bearer ${tok()}` },
+      });
+      if (!res.ok) throw new Error("Помилка вигрузки");
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `guests_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: `Вигрузка готова — ${filtered.length} гостей` });
+    } catch (e: any) {
+      toast({ title: e.message || "Помилка", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Keyboard navigation
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const inInput = ["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName || "");
@@ -527,7 +615,8 @@ export default function GuestsPage() {
     return () => window.removeEventListener("keydown", h);
   }, [filtered, activeIdx]);
 
-  const vipCount = guests.filter(g => g.isVip).length;
+  const totalVisits = guests.reduce((acc, g) => acc + (g.bookingCount ?? 0), 0);
+  const totalLtv    = guests.reduce((acc, g) => acc + (Number(g.ltv) || 0), 0);
 
   return (
     <AppLayout>
@@ -535,31 +624,40 @@ export default function GuestsPage() {
 
         {/* Toolbar */}
         <div className="px-6 pt-5 pb-4 bg-white border-b border-gray-100 shrink-0 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h1 className="text-xl font-bold text-gray-900 font-display">База гостей</h1>
               <p className="text-xs text-gray-400 mt-0.5">
-                {guests.length} гостей · {vipCount} VIP
+                {guests.length} гостей · {totalVisits} відвідувань · LTV {fmtUAH(totalLtv)}
               </p>
             </div>
-            <button
-              onClick={() => { setEditGuest(null); setFormOpen(true); }}
-              className="h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold flex items-center gap-1.5 shadow-sm shadow-indigo-500/25 transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Новий гість
-              <kbd className="ml-1 text-[10px] bg-indigo-500/50 px-1 py-0.5 rounded font-mono hidden sm:inline">N</kbd>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExport}
+                disabled={exporting || guests.length === 0}
+                className="h-9 px-4 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              >
+                {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Вигрузити CSV
+              </button>
+              <button
+                onClick={() => { setEditGuest(null); setFormOpen(true); }}
+                className="h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold flex items-center gap-1.5 shadow-sm shadow-indigo-500/25 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Новий гість
+                <kbd className="ml-1 text-[10px] bg-indigo-500/50 px-1 py-0.5 rounded font-mono hidden sm:inline">N</kbd>
+              </button>
+            </div>
           </div>
 
           <div className="flex gap-2">
-            {/* Search */}
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <input
                 ref={searchRef}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Пошук за ім'ям, email, телефоном..."
+                placeholder="Пошук за ПІБ, email, телефоном..."
                 className="w-full h-9 pl-9 pr-10 bg-gray-50 border border-gray-200 rounded-xl text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:bg-white transition-all"
               />
               {search && (
@@ -568,24 +666,25 @@ export default function GuestsPage() {
                 </button>
               )}
             </div>
-
-            {/* Loyalty filter */}
-            <select
-              value={filterLoyalty}
-              onChange={e => setFilterLoyalty(e.target.value)}
-              className="h-9 pl-2.5 pr-7 text-xs border border-gray-200 rounded-xl bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
-            >
-              <option value="">Всі</option>
-              <option value="bronze">Бронза</option>
-              <option value="silver">Срібло</option>
-              <option value="gold">Золото</option>
-              <option value="platinum">Платина</option>
-            </select>
+            <div className="relative">
+              <select
+                value={filterLoyalty}
+                onChange={e => setFilterLoyalty(e.target.value)}
+                className="h-9 pl-2.5 pr-7 text-xs border border-gray-200 rounded-xl bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer appearance-none"
+              >
+                <option value="">Всі рівні</option>
+                <option value="bronze">Бронза</option>
+                <option value="silver">Срібло</option>
+                <option value="gold">Золото</option>
+                <option value="platinum">Платина</option>
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
+            </div>
           </div>
         </div>
 
-        {/* List */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        {/* Table */}
+        <div className="flex-1 overflow-auto">
           {isLoading ? (
             <div className="flex items-center justify-center h-48">
               <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
@@ -593,7 +692,7 @@ export default function GuestsPage() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-3">
               <Users className="w-10 h-10 text-gray-200" />
-              <p className="text-sm text-gray-400">Гостей не знайдено</p>
+              <p className="text-sm text-gray-400">{search ? "Гостей не знайдено" : "База гостей порожня"}</p>
               {search && <button onClick={() => setSearch("")} className="text-xs text-indigo-500 hover:underline">Скинути</button>}
               {!search && (
                 <button
@@ -605,20 +704,34 @@ export default function GuestsPage() {
               )}
             </div>
           ) : (
-            <div className="space-y-2 max-w-3xl pb-8">
-              {filtered.map((g, i) => (
-                <GuestCard
-                  key={g.id}
-                  guest={g}
-                  isSelected={i === activeIdx && drawerOpen && selectedId === g.id}
-                  onClick={() => openGuest(g.id, i)}
-                />
-              ))}
-            </div>
+            <table className="w-full min-w-[600px]">
+              <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100">
+                <tr className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-2.5 text-left">ПІБ</th>
+                  <th className="px-4 py-2.5 text-left hidden md:table-cell">Дата народження</th>
+                  <th className="px-4 py-2.5 text-left hidden sm:table-cell">Телефон</th>
+                  <th className="px-4 py-2.5 text-left hidden lg:table-cell">Email</th>
+                  <th className="px-4 py-2.5 text-center">Відвід.</th>
+                  <th className="px-4 py-2.5 text-right hidden sm:table-cell">LTV</th>
+                  <th className="px-4 py-2.5 text-left hidden xl:table-cell">Ост. візит</th>
+                  <th className="w-8" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map((g, i) => (
+                  <GuestRow
+                    key={g.id}
+                    guest={g}
+                    isSelected={i === activeIdx && drawerOpen && selectedId === g.id}
+                    onClick={() => openGuest(g.id, i)}
+                  />
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
 
-        {/* Shortcuts */}
+        {/* Shortcuts bar */}
         <div className="hidden md:flex items-center gap-4 px-6 py-2 border-t border-gray-100 bg-gray-50/50 shrink-0">
           {[["N","новий"],["/ ","пошук"],["↑↓","навігація"],["↵","профіль"],["ESC","закрити"]].map(([k,l]) => (
             <div key={k} className="flex items-center gap-1">

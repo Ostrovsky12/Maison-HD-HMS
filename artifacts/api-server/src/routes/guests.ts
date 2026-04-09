@@ -79,6 +79,85 @@ router.post("/", requireAuth, async (req, res) => {
   res.status(201).json(formatGuest(guest));
 });
 
+// GET /api/guests/export — CSV export of all guests
+router.get("/export", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.organizationId;
+  if (!orgId) { res.status(400).json({ error: "No organization" }); return; }
+
+  const guests = await db
+    .select({
+      id: guestsTable.id,
+      lastName: guestsTable.lastName,
+      firstName: guestsTable.firstName,
+      middleName: guestsTable.middleName,
+      birthDate: guestsTable.birthDate,
+      phone: guestsTable.phone,
+      email: guestsTable.email,
+      nationality: guestsTable.nationality,
+      passportNumber: guestsTable.passportNumber,
+      bookingCount: guestsTable.bookingCount,
+      totalNights: guestsTable.totalNights,
+      totalSpent: guestsTable.totalSpent,
+      ltv: guestsTable.ltv,
+      loyaltyLevel: guestsTable.loyaltyLevel,
+      lastVisit: guestsTable.lastVisit,
+      notes: guestsTable.notes,
+      createdAt: guestsTable.createdAt,
+    })
+    .from(guestsTable)
+    .where(eq(guestsTable.organizationId, orgId))
+    .orderBy(desc(guestsTable.createdAt));
+
+  const headers = [
+    "ID", "Прізвище", "Ім'я", "По батькові",
+    "Дата народження", "Телефон", "Email",
+    "Громадянство", "Документ",
+    "Відвідувань", "Ночей", "Витрачено (грн)", "LTV (грн)",
+    "Рівень лояльності", "Останній візит", "Нотатки", "Дата реєстрації",
+  ];
+
+  const loyaltyLabels: Record<string, string> = {
+    bronze: "Бронза", silver: "Срібло", gold: "Золото", platinum: "Платина",
+  };
+
+  const escape = (v: any) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const rows = guests.map(g => [
+    g.id,
+    g.lastName,
+    g.firstName,
+    g.middleName || "",
+    g.birthDate || "",
+    g.phone || "",
+    g.email || "",
+    g.nationality || "",
+    g.passportNumber || "",
+    g.bookingCount ?? 0,
+    g.totalNights ?? 0,
+    g.totalSpent ? Number(g.totalSpent).toFixed(0) : "0",
+    g.ltv ? Number(g.ltv).toFixed(0) : "0",
+    g.loyaltyLevel ? (loyaltyLabels[g.loyaltyLevel] || g.loyaltyLevel) : "",
+    g.lastVisit ? new Date(g.lastVisit).toLocaleDateString("uk-UA") : "",
+    g.notes || "",
+    g.createdAt ? new Date(g.createdAt).toLocaleDateString("uk-UA") : "",
+  ].map(escape).join(","));
+
+  const csv = "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
+
+  const date = new Date().toISOString().slice(0, 10);
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="guests_${date}.csv"`);
+  res.send(csv);
+});
+
 // GET /api/guests/search?q= — quick autocomplete search
 router.get("/search", requireAuth, async (req, res) => {
   const user = (req as any).user;
@@ -140,19 +219,44 @@ router.get("/:guestId", requireAuth, async (req, res) => {
     notes: bookingsTable.notes,
     createdAt: bookingsTable.createdAt,
     unitName: unitsTable.name,
+    propertyId: unitsTable.propertyId,
+    propertyName: propertiesTable.name,
   }).from(bookingsTable)
     .leftJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
+    .leftJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
     .where(eq(bookingsTable.guestId, guestId))
     .orderBy(desc(bookingsTable.checkIn));
 
+  // Recalculate live stats from actual bookings
+  const completedBookings = bookings.filter(b => b.status !== "cancelled");
+  const totalNightsCalc = completedBookings.reduce((acc, b) => {
+    if (!b.checkIn || !b.checkOut) return acc;
+    const nights = Math.round((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000);
+    return acc + Math.max(0, nights);
+  }, 0);
+  const totalSpentCalc = completedBookings.reduce((acc, b) => acc + Number(b.totalAmount || 0), 0);
+  const lastVisitCalc = completedBookings.length > 0
+    ? completedBookings.reduce((latest, b) => b.checkOut > latest ? b.checkOut : latest, completedBookings[0].checkOut)
+    : null;
+
   res.json({
     ...formatGuest(guest),
-    bookings: bookings.map(b => ({
-      ...b,
-      totalAmount: Number(b.totalAmount),
-      paidAmount: Number(b.paidAmount),
-      guestName: `${guest.firstName} ${guest.lastName}`,
-    })),
+    totalBookings: completedBookings.length,
+    totalRevenue: totalSpentCalc,
+    totalNightsCalc,
+    lastVisitCalc,
+    bookings: bookings.map(b => {
+      const nights = (b.checkIn && b.checkOut)
+        ? Math.round((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000)
+        : 0;
+      return {
+        ...b,
+        nights: Math.max(0, nights),
+        totalAmount: Number(b.totalAmount),
+        paidAmount: Number(b.paidAmount),
+        guestName: `${guest.firstName} ${guest.lastName}`,
+      };
+    }),
   });
 });
 
