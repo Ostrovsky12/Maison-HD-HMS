@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import {
   propertiesTable, unitsTable, bookingsTable, organizationsTable,
   fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable,
+  ratesTable,
 } from "@workspace/db";
 import { eq, and, or, gte, lte, ne, inArray, notInArray, sql, asc } from "drizzle-orm";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
@@ -456,6 +457,48 @@ router.get("/bookings/:ref", async (req, res) => {
     if (!results.length) return res.status(404).json({ error: "Бронювання не знайдено" });
     res.json({ booking: results[0] });
   } catch (e: any) { console.error("GET BOOKING ERROR:", e.message); res.status(500).json({ error: e.message }); }
+});
+
+// ─── GET /rates — active rates for a property (public, no auth) ───────────────
+router.get("/rates", async (req, res) => {
+  try {
+    const { propertyId, unitId, checkIn, checkOut } = req.query as any;
+    if (!propertyId) return res.status(400).json({ error: "propertyId required" });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const checkDate = checkIn || today;
+
+    const rates = await db.select().from(ratesTable)
+      .where(
+        and(
+          eq(ratesTable.propertyId, parseInt(propertyId)),
+          eq(ratesTable.isStopSale, false),
+        )
+      )
+      .orderBy(ratesTable.id);
+
+    // Filter by date range if rates have date constraints
+    const activeRates = rates.filter(r => {
+      if (r.dateFrom && checkDate < r.dateFrom) return false;
+      if (r.dateTo && (checkOut || checkDate) > r.dateTo) return false;
+      return true;
+    });
+
+    res.json(activeRates.map(r => ({
+      id: r.id,
+      name: r.name,
+      pricePerNight: Number(r.pricePerNight),
+      minNights: r.minNights,
+      dateFrom: r.dateFrom,
+      dateTo: r.dateTo,
+      discountPercent: r.discountPercent ? Number(r.discountPercent) : null,
+      unitPrices: r.unitPrices || null,
+      // unit-specific price (if unitId provided and unitPrices map has it)
+      unitPrice: unitId && r.unitPrices && (r.unitPrices as any)[String(unitId)]
+        ? Number((r.unitPrices as any)[String(unitId)])
+        : Number(r.pricePerNight),
+    })));
+  } catch (e: any) { console.error("GET PUBLIC RATES ERROR:", e.message); res.status(500).json({ error: e.message }); }
 });
 
 export default router;
