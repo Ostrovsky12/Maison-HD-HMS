@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp, date, numeric, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, date, numeric, boolean, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { propertiesTable } from "./properties";
@@ -15,6 +15,7 @@ export const ratesTable = pgTable("rates", {
   isStopSale: boolean("is_stop_sale").notNull().default(false),
   promoCode: text("promo_code"),
   discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }),
+  unitPrices: jsonb("unit_prices").$type<Record<string, number>>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
