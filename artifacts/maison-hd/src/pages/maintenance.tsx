@@ -256,66 +256,6 @@ export default function MaintenancePage() {
         {/* ─── REQUESTS TAB ─────────────────────────────────────────────────── */}
         {tab === "requests" && (
           <div className="space-y-4">
-            {/* New Request Modal */}
-            {showNewRequest && (
-              <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <div className="p-6">
-                    <h2 className="text-lg font-bold mb-4">Нова заявка на ТО</h2>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="col-span-2">
-                        <label className="text-xs text-gray-500 mb-1 block">Назва заявки *</label>
-                        <Input value={newReq.title} onChange={e => setNewReq(f => ({ ...f, title: e.target.value }))} placeholder="Коротко опишіть проблему" />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-xs text-gray-500 mb-1 block">Опис</label>
-                        <Textarea value={newReq.description} onChange={e => setNewReq(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="Детальний опис проблеми" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Категорія</label>
-                        <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newReq.category} onChange={e => setNewReq(f => ({ ...f, category: e.target.value }))}>
-                          {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Пріоритет</label>
-                        <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newReq.priority} onChange={e => setNewReq(f => ({ ...f, priority: e.target.value }))}>
-                          {Object.entries(PRIORITY_CONFIG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Очікуваний час (хв)</label>
-                        <Input type="number" value={newReq.estimatedDurationMin} onChange={e => setNewReq(f => ({ ...f, estimatedDurationMin: e.target.value }))} placeholder="60" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Орієнтовна вартість ₴</label>
-                        <Input type="number" value={newReq.estimatedCost} onChange={e => setNewReq(f => ({ ...f, estimatedCost: e.target.value }))} placeholder="1500" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Підрядник / майстер</label>
-                        <Input value={newReq.vendorName} onChange={e => setNewReq(f => ({ ...f, vendorName: e.target.value }))} placeholder="ТОВ Ремонтник" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Дедлайн</label>
-                        <Input type="datetime-local" value={newReq.dueDate} onChange={e => setNewReq(f => ({ ...f, dueDate: e.target.value }))} />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-xs text-gray-500 mb-1 block">Нотатки</label>
-                        <Textarea value={newReq.notes} onChange={e => setNewReq(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Додаткова інформація..." />
-                      </div>
-                    </div>
-                    <div className="flex gap-2 mt-4">
-                      <Button className="flex-1" onClick={() => createReqM.mutate({
-                        ...newReq,
-                        estimatedDurationMin: newReq.estimatedDurationMin ? parseInt(newReq.estimatedDurationMin) : undefined,
-                        estimatedCost: newReq.estimatedCost ? parseFloat(newReq.estimatedCost) : undefined,
-                      })} disabled={!newReq.title}>Створити заявку</Button>
-                      <Button variant="outline" onClick={() => setShowNewRequest(false)}>Скасувати</Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Filters */}
             <div className="flex flex-wrap gap-2 items-center">
@@ -391,68 +331,6 @@ export default function MaintenancePage() {
               <h2 className="font-semibold text-gray-700">Профілактичне технічне обслуговування</h2>
               <Button size="sm" onClick={() => setShowNewSchedule(true)}><Plus className="w-4 h-4 mr-1" /> Новий розклад</Button>
             </div>
-
-            {/* New Schedule Modal */}
-            {showNewSchedule && (
-              <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <div className="p-6">
-                    <h2 className="text-lg font-bold mb-4">Новий розклад ТО</h2>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="col-span-2">
-                        <label className="text-xs text-gray-500 mb-1 block">Назва *</label>
-                        <Input value={newSched.title} onChange={e => setNewSched(f => ({ ...f, title: e.target.value }))} placeholder="ТО кондиціонерів 2-го поверху" />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-xs text-gray-500 mb-1 block">Опис</label>
-                        <Textarea value={newSched.description} onChange={e => setNewSched(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="Що включає це ТО?" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Категорія</label>
-                        <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newSched.category} onChange={e => setNewSched(f => ({ ...f, category: e.target.value }))}>
-                          {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Частота</label>
-                        <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newSched.frequency} onChange={e => setNewSched(f => ({ ...f, frequency: e.target.value }))}>
-                          {Object.entries(FREQ_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Час виконання (хв)</label>
-                        <Input type="number" value={newSched.estimatedDurationMin} onChange={e => setNewSched(f => ({ ...f, estimatedDurationMin: e.target.value }))} placeholder="120" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Орієнтовна вартість ₴</label>
-                        <Input type="number" value={newSched.estimatedCost} onChange={e => setNewSched(f => ({ ...f, estimatedCost: e.target.value }))} placeholder="2000" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Підрядник</label>
-                        <Input value={newSched.vendorName} onChange={e => setNewSched(f => ({ ...f, vendorName: e.target.value }))} placeholder="ТОВ Сервіс" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Перша дата ТО</label>
-                        <Input type="datetime-local" value={newSched.nextDueAt} onChange={e => setNewSched(f => ({ ...f, nextDueAt: e.target.value }))} />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Нагадування (днів до)</label>
-                        <Input type="number" value={newSched.advanceNoticeDays} onChange={e => setNewSched(f => ({ ...f, advanceNoticeDays: e.target.value }))} min={0} max={30} />
-                      </div>
-                    </div>
-                    <div className="flex gap-2 mt-4">
-                      <Button className="flex-1" onClick={() => createSchedM.mutate({
-                        ...newSched,
-                        estimatedDurationMin: newSched.estimatedDurationMin ? parseInt(newSched.estimatedDurationMin) : undefined,
-                        estimatedCost: newSched.estimatedCost ? parseFloat(newSched.estimatedCost) : undefined,
-                        advanceNoticeDays: parseInt(newSched.advanceNoticeDays),
-                      })} disabled={!newSched.title}>Створити розклад</Button>
-                      <Button variant="outline" onClick={() => setShowNewSchedule(false)}>Скасувати</Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             <div className="grid md:grid-cols-2 gap-3">
               {schedules.map((s: any) => (
@@ -711,6 +589,136 @@ export default function MaintenancePage() {
         )}
 
       </div>
+
+      {/* ─── NEW REQUEST MODAL (global — works from any tab) ────────────────── */}
+      {showNewRequest && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-lg font-bold mb-4">Нова заявка на ТО</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 mb-1 block">Назва заявки *</label>
+                  <Input value={newReq.title} onChange={e => setNewReq(f => ({ ...f, title: e.target.value }))} placeholder="Коротко опишіть проблему" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 mb-1 block">Опис</label>
+                  <Textarea value={newReq.description} onChange={e => setNewReq(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="Детальний опис проблеми" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Категорія</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newReq.category} onChange={e => setNewReq(f => ({ ...f, category: e.target.value }))}>
+                    {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Пріоритет</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newReq.priority} onChange={e => setNewReq(f => ({ ...f, priority: e.target.value }))}>
+                    {Object.entries(PRIORITY_CONFIG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Очікуваний час (хв)</label>
+                  <Input type="number" value={newReq.estimatedDurationMin} onChange={e => setNewReq(f => ({ ...f, estimatedDurationMin: e.target.value }))} placeholder="60" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Орієнтовна вартість ₴</label>
+                  <Input type="number" value={newReq.estimatedCost} onChange={e => setNewReq(f => ({ ...f, estimatedCost: e.target.value }))} placeholder="1500" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Підрядник / майстер</label>
+                  <Input value={newReq.vendorName} onChange={e => setNewReq(f => ({ ...f, vendorName: e.target.value }))} placeholder="ТОВ Ремонтник" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Дедлайн</label>
+                  <Input type="datetime-local" value={newReq.dueDate} onChange={e => setNewReq(f => ({ ...f, dueDate: e.target.value }))} />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 mb-1 block">Нотатки</label>
+                  <Textarea value={newReq.notes} onChange={e => setNewReq(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Додаткова інформація..." />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <Button className="flex-1" onClick={() => createReqM.mutate({
+                  ...newReq,
+                  estimatedDurationMin: newReq.estimatedDurationMin ? parseInt(newReq.estimatedDurationMin) : undefined,
+                  estimatedCost: newReq.estimatedCost ? parseFloat(newReq.estimatedCost) : undefined,
+                })} disabled={!newReq.title || createReqM.isPending}>
+                  {createReqM.isPending && <span className="mr-1 inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  Створити заявку
+                </Button>
+                <Button variant="outline" onClick={() => setShowNewRequest(false)}>Скасувати</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── NEW SCHEDULE MODAL (global — works from any tab) ───────────────── */}
+      {showNewSchedule && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-lg font-bold mb-4">Новий розклад ТО</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 mb-1 block">Назва *</label>
+                  <Input value={newSched.title} onChange={e => setNewSched(f => ({ ...f, title: e.target.value }))} placeholder="ТО кондиціонерів 2-го поверху" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 mb-1 block">Опис</label>
+                  <Textarea value={newSched.description} onChange={e => setNewSched(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="Що включає це ТО?" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Категорія</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newSched.category} onChange={e => setNewSched(f => ({ ...f, category: e.target.value }))}>
+                    {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Частота</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={newSched.frequency} onChange={e => setNewSched(f => ({ ...f, frequency: e.target.value }))}>
+                    {Object.entries(FREQ_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Час виконання (хв)</label>
+                  <Input type="number" value={newSched.estimatedDurationMin} onChange={e => setNewSched(f => ({ ...f, estimatedDurationMin: e.target.value }))} placeholder="120" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Орієнтовна вартість ₴</label>
+                  <Input type="number" value={newSched.estimatedCost} onChange={e => setNewSched(f => ({ ...f, estimatedCost: e.target.value }))} placeholder="2000" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Підрядник</label>
+                  <Input value={newSched.vendorName} onChange={e => setNewSched(f => ({ ...f, vendorName: e.target.value }))} placeholder="ТОВ Сервіс" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Перша дата ТО</label>
+                  <Input type="datetime-local" value={newSched.nextDueAt} onChange={e => setNewSched(f => ({ ...f, nextDueAt: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Нагадування (днів до)</label>
+                  <Input type="number" value={newSched.advanceNoticeDays} onChange={e => setNewSched(f => ({ ...f, advanceNoticeDays: e.target.value }))} min={0} max={30} />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <Button className="flex-1" onClick={() => createSchedM.mutate({
+                  ...newSched,
+                  estimatedDurationMin: newSched.estimatedDurationMin ? parseInt(newSched.estimatedDurationMin) : undefined,
+                  estimatedCost: newSched.estimatedCost ? parseFloat(newSched.estimatedCost) : undefined,
+                  advanceNoticeDays: parseInt(newSched.advanceNoticeDays),
+                })} disabled={!newSched.title || createSchedM.isPending}>
+                  {createSchedM.isPending && <span className="mr-1 inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  Створити розклад
+                </Button>
+                <Button variant="outline" onClick={() => setShowNewSchedule(false)}>Скасувати</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </AppLayout>
   );
 }
