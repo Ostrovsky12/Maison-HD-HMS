@@ -232,6 +232,116 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/bookings/group — create multiple units as one group booking
+router.post("/group", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const {
+    units, // array of { unitId, adults, childrenUnder6, childrenOver6, extraBeds }
+    checkIn, checkOut, checkinTime, checkoutTime,
+    status, source, rateId, rateName,
+    firstName, lastName, middleName, phone,
+    discountId, discountValue, discountType,
+    selectedAddons, legalEntityId, notes,
+    payOnArrival, partialAmount,
+  } = req.body;
+
+  if (!Array.isArray(units) || units.length === 0) {
+    res.status(400).json({ error: "units array required" });
+    return;
+  }
+
+  let { guestId } = req.body;
+
+  // Auto-find or create guest
+  if (!guestId && (phone || firstName)) {
+    if (phone) {
+      const existing = await db.select().from(guestsTable)
+        .where(and(eq(guestsTable.phone, phone), eq(guestsTable.organizationId, user.organizationId || 0)))
+        .limit(1);
+      if (existing.length > 0) guestId = existing[0].id;
+    }
+    if (!guestId && firstName) {
+      const [newGuest] = await db.insert(guestsTable).values({
+        organizationId: user.organizationId || 0,
+        firstName: firstName || "Гість",
+        lastName: lastName || "",
+        middleName: middleName || null,
+        phone: phone || null,
+      }).returning();
+      guestId = newGuest.id;
+    }
+  }
+
+  const groupBookingId = crypto.randomUUID();
+  const isDraft = status === "draft";
+  const draftExpiresAt = isDraft ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null;
+  const bookingStatus = status || "confirmed";
+  const isPayOnArrival = Boolean(payOnArrival);
+  const partial = partialAmount ? Number(partialAmount) : null;
+  const totalAllUnits = units.reduce((s: number, u: any) => s + Number(u.totalAmount || 0), 0);
+
+  let initialPaid = "0";
+  let initialPaymentStatus = "unpaid";
+  if (partial !== null && partial > 0 && partial < totalAllUnits) {
+    initialPaid = String(partial);
+    initialPaymentStatus = "partial";
+  }
+
+  const created: any[] = [];
+  for (const unit of units) {
+    const guestsCount = (unit.adults || 1) + (unit.childrenUnder6 || 0) + (unit.childrenOver6 || 0);
+    const unitTotal = Number(unit.totalAmount || 0);
+    const [booking] = await db.insert(bookingsTable).values({
+      unitId: unit.unitId,
+      guestId: guestId || null,
+      organizationId: user.organizationId || null,
+      checkIn,
+      checkOut,
+      checkinTime: checkinTime || "14:00",
+      checkoutTime: checkoutTime || "12:00",
+      status: bookingStatus as any,
+      source: (source || "direct") as any,
+      rateId: rateId || null,
+      rateName: rateName || null,
+      adults: unit.adults || 1,
+      childrenUnder6: unit.childrenUnder6 || 0,
+      childrenOver6: unit.childrenOver6 || 0,
+      extraBeds: unit.extraBeds || 0,
+      guestsCount,
+      firstName: firstName || null,
+      lastName: lastName || null,
+      middleName: middleName || null,
+      phone: phone || null,
+      totalAmount: String(unitTotal),
+      paidAmount: initialPaid,
+      paymentStatus: initialPaymentStatus as any,
+      payOnArrival: isPayOnArrival,
+      discountId: discountId || null,
+      discountValue: discountValue ? String(discountValue) : null,
+      discountType: discountType || null,
+      selectedAddons: selectedAddons || {},
+      legalEntityId: legalEntityId || null,
+      notes,
+      internalNotes: isPayOnArrival ? "Оплата при заїзді" : null,
+      groupBookingId,
+      draftExpiresAt,
+    } as any).returning();
+    const [u] = await db.select().from(unitsTable).where(eq(unitsTable.id, unit.unitId)).limit(1);
+    created.push({ ...booking, totalAmount: Number(booking.totalAmount), unitName: u?.name || null });
+  }
+
+  // Update guest stats
+  if (guestId && !isDraft) {
+    await db.update(guestsTable).set({
+      bookingCount: sql`${guestsTable.bookingCount} + ${units.length}`,
+      ltv: sql`${guestsTable.ltv} + ${String(totalAllUnits)}`,
+      updatedAt: new Date(),
+    }).where(eq(guestsTable.id, guestId));
+  }
+
+  res.status(201).json({ groupBookingId, bookings: created, totalAmount: totalAllUnits });
+});
+
 // GET /api/bookings/calendar?startDate=&days=&propertyId= — chessboard data
 router.get("/calendar", requireAuth, async (req, res) => {
   const user = (req as any).user;

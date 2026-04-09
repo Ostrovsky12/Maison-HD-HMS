@@ -6,7 +6,7 @@ import { toast } from "@/hooks/use-toast";
 import {
   X, ChevronRight, ChevronLeft, BedDouble, Calendar, User, Star,
   Minus, Plus, Tag, Check, AlertTriangle, Loader2,
-  FileText, Link2, CreditCard, Banknote, Copy, Send, ChevronDown,
+  FileText, Link2, CreditCard, Banknote, Copy, Send, ChevronDown, Trash2, PlusCircle, Home,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -32,6 +32,14 @@ export interface BookingDialogProps {
   onSuccess?: (booking: any) => void;
 }
 
+interface ExtraUnit {
+  _key: string;
+  unitId: number | "";
+  adults: number;
+  childrenUnder6: number;
+  childrenOver6: number;
+}
+
 interface BookingForm {
   unitId: number | "";
   checkIn: string;
@@ -54,6 +62,7 @@ interface BookingForm {
   discountType: string;
   totalAmount: number;
   source: string;
+  extraUnits: ExtraUnit[];
 }
 
 const STANDARD_ADDONS = [
@@ -107,6 +116,7 @@ const emptyForm = (unitId?: number, checkIn?: string, checkOut?: string): Bookin
   discountType: "percent",
   totalAmount: 0,
   source: "phone",
+  extraUnits: [],
 });
 
 // ── Step config ────────────────────────────────────────────────────────────
@@ -188,11 +198,98 @@ function Stepper({ value, onChange, min = 0, max = 20, label, sub }: {
   );
 }
 
+// ── Extra Unit Card ─────────────────────────────────────────────────────────
+function ExtraUnitCard({ unit, idx, unitsData, nights, pricePerNight, onUpdate, onRemove }: {
+  unit: ExtraUnit;
+  idx: number;
+  unitsData: any[];
+  nights: number;
+  pricePerNight: number;
+  onUpdate: (key: string, field: keyof ExtraUnit, val: any) => void;
+  onRemove: (key: string) => void;
+}) {
+  const unitTotal = pricePerNight > 0 ? pricePerNight * nights : 0;
+  return (
+    <div className="border border-indigo-100 bg-indigo-50/40 rounded-2xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Home className="w-4 h-4 text-indigo-500" />
+          <span className="text-sm font-semibold text-indigo-700">Юніт {idx + 2}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onRemove(unit._key)}
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <select
+        value={unit.unitId ? String(unit.unitId) : ""}
+        onChange={e => onUpdate(unit._key, "unitId", parseInt(e.target.value) || "")}
+        className="w-full h-10 px-3 bg-white border border-indigo-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 appearance-none"
+      >
+        <option value="">Виберіть юніт...</option>
+        {unitsData?.map((u: any) => (
+          <option key={u.id} value={String(u.id)}>
+            {u.name}{u.category ? ` — ${u.category}` : ""}
+          </option>
+        ))}
+      </select>
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { field: "adults" as const, label: "Дорослих", min: 1 },
+          { field: "childrenUnder6" as const, label: "Діти до 6", min: 0 },
+          { field: "childrenOver6" as const, label: "Діти 6+", min: 0 },
+        ].map(({ field, label, min }) => (
+          <div key={field} className="text-center">
+            <div className="text-[10px] text-gray-400 font-medium mb-1 uppercase tracking-wide">{label}</div>
+            <div className="flex items-center justify-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onUpdate(unit._key, field, Math.max(min, (unit[field] as number) - 1))}
+                disabled={(unit[field] as number) <= min}
+                className="w-6 h-6 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-500 hover:bg-gray-100 disabled:opacity-30 transition-colors"
+              >
+                <Minus className="w-2.5 h-2.5" />
+              </button>
+              <span className="w-4 text-center text-sm font-bold text-gray-900">{unit[field] as number}</span>
+              <button
+                type="button"
+                onClick={() => onUpdate(unit._key, field, (unit[field] as number) + 1)}
+                className="w-6 h-6 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors"
+              >
+                <Plus className="w-2.5 h-2.5" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {unitTotal > 0 && nights > 0 && (
+        <div className="text-right text-xs text-indigo-500 font-medium">
+          {fmt(pricePerNight)}/ніч × {nights} = <span className="font-black text-indigo-700">{fmt(unitTotal)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Step 1: Room + Dates ───────────────────────────────────────────────────
 function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict, setDraftConflict, qc }: any) {
   const nights = form.checkIn && form.checkOut
     ? Math.max(0, differenceInCalendarDays(new Date(form.checkOut), new Date(form.checkIn)))
     : 0;
+
+  const addExtraUnit = () => {
+    const newUnit: ExtraUnit = { _key: crypto.randomUUID(), unitId: "", adults: 1, childrenUnder6: 0, childrenOver6: 0 };
+    f("extraUnits", [...(form.extraUnits || []), newUnit]);
+  };
+  const updateExtraUnit = (key: string, field: keyof ExtraUnit, val: any) => {
+    f("extraUnits", (form.extraUnits || []).map((u: ExtraUnit) => u._key === key ? { ...u, [field]: val } : u));
+  };
+  const removeExtraUnit = (key: string) => {
+    f("extraUnits", (form.extraUnits || []).filter((u: ExtraUnit) => u._key !== key));
+  };
 
   return (
     <div className="space-y-6">
@@ -238,12 +335,21 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
           <div className="flex-1">
             <span className="font-bold text-indigo-700 text-xl">{nights}</span>
             <span className="text-indigo-500 ml-1 text-sm">{nightsLabel(nights)}</span>
+            {(form.extraUnits?.length > 0) && (
+              <span className="ml-2 text-xs bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full font-medium">
+                {1 + (form.extraUnits?.length || 0)} юніти
+              </span>
+            )}
           </div>
           {(() => {
             const selRate = form.rateId ? ratesData?.find((r: any) => r.id === form.rateId) : null;
-            const rateTotal = selRate ? Number(selRate.pricePerNight) * nights : 0;
-            const displayTotal = rateTotal > 0 ? rateTotal : (pricingPreview?.totalAmount || 0);
-            const displayPerNight = nights > 0 ? Math.round(displayTotal / nights) : 0;
+            const pricePerNight = selRate ? Number(selRate.pricePerNight) : (pricingPreview?.totalAmount > 0 && nights > 0 ? Math.round(pricingPreview.totalAmount / nights) : 0);
+            const mainTotal = selRate ? Number(selRate.pricePerNight) * nights : (pricingPreview?.totalAmount || 0);
+            const extraTotal = (form.extraUnits || []).filter((u: ExtraUnit) => u.unitId).length * pricePerNight * nights;
+            const displayTotal = mainTotal + extraTotal;
+            const displayPerNight = nights > 0 && (1 + (form.extraUnits || []).filter((u: ExtraUnit) => u.unitId).length) > 0
+              ? Math.round(displayTotal / nights)
+              : 0;
             return displayTotal > 0 ? (
               <div className="text-right">
                 <div className="font-black text-indigo-700 text-xl">{fmt(displayTotal)}</div>
@@ -312,6 +418,40 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
             </div>
           </div>
         </div>
+      )}
+
+      {/* Extra units (group booking) */}
+      {!!(form.extraUnits?.length) && (
+        <div className="space-y-3">
+          {(form.extraUnits as ExtraUnit[]).map((unit, idx) => {
+            const selRate = form.rateId ? ratesData?.find((r: any) => r.id === form.rateId) : null;
+            const pricePerNight = selRate ? Number(selRate.pricePerNight) : (pricingPreview?.totalAmount > 0 && nights > 0 ? Math.round(pricingPreview.totalAmount / nights) : 0);
+            return (
+              <ExtraUnitCard
+                key={unit._key}
+                unit={unit}
+                idx={idx}
+                unitsData={unitsData || []}
+                nights={nights}
+                pricePerNight={pricePerNight}
+                onUpdate={updateExtraUnit}
+                onRemove={removeExtraUnit}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add another unit button */}
+      {nights > 0 && form.unitId && (
+        <button
+          type="button"
+          onClick={addExtraUnit}
+          className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-indigo-200 rounded-2xl text-indigo-500 text-sm font-semibold hover:border-indigo-400 hover:bg-indigo-50 transition-all"
+        >
+          <PlusCircle className="w-4 h-4" />
+          Додати ще юніт (групове бронювання)
+        </button>
       )}
     </div>
   );
@@ -852,6 +992,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         discountType: booking.discountType || "percent",
         totalAmount: Number(booking.totalAmount || 0),
         source: booking.source || "direct",
+        extraUnits: [],
       };
     }
     return emptyForm(unitId, initCheckIn, initCheckOut);
@@ -958,14 +1099,19 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const previewTotal = pricingPreview?.totalAmount || 0;
   // If a specific rate is selected, its price takes priority over the preview total
   const rateBase = selectedRate ? Number(selectedRate.pricePerNight) * nights : 0;
+  const unitPricePerNight = selectedRate ? Number(selectedRate.pricePerNight) : (nights > 0 ? previewTotal / nights : 0);
   const base = rateBase > 0 ? rateBase : previewTotal;
+  // Extra units: each unit with a selected unitId gets same rate price × nights
+  const extraUnitsTotal = (form.extraUnits || [])
+    .filter((u: ExtraUnit) => !!u.unitId)
+    .reduce((_s: number, _u: ExtraUnit) => _s + (unitPricePerNight * nights), 0);
   const addonCost = STANDARD_ADDONS.reduce((s, { key }) => {
     return form.selectedAddons[key] ? s + (addonPriceMap[key] || 0) * nights : s;
   }, 0);
   const discount = form.discountValue > 0
-    ? form.discountType === "percent" ? (base + addonCost) * form.discountValue / 100 : form.discountValue
+    ? form.discountType === "percent" ? (base + extraUnitsTotal + addonCost) * form.discountValue / 100 : form.discountValue
     : 0;
-  const totalAmount = Math.max(0, Math.round((base + addonCost - discount + touristTax) * 100) / 100);
+  const totalAmount = Math.max(0, Math.round((base + extraUnitsTotal + addonCost - discount + touristTax) * 100) / 100);
 
   // Sync totalAmount into form for save
   useEffect(() => {
@@ -982,10 +1128,13 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const handleSave = async (status: "confirmed" | "pending", paymentMethod?: string, extra?: { payOnArrival?: boolean; partialAmount?: number }): Promise<any> => {
     if (!form.unitId) { toast({ title: "Виберіть номер", variant: "destructive" }); return null; }
     if (!form.checkIn || !form.checkOut || nights < 1) { toast({ title: "Вкажіть коректні дати", variant: "destructive" }); return null; }
+
+    const activeExtraUnits = (form.extraUnits || []).filter((u: ExtraUnit) => !!u.unitId);
+    const isGroupBooking = !isEdit && activeExtraUnits.length > 0;
+
     setSaving(true);
     try {
-      const body = {
-        unitId: form.unitId,
+      const commonFields = {
         checkIn: form.checkIn,
         checkOut: form.checkOut,
         checkinTime: form.checkinTime,
@@ -994,28 +1143,62 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         source: form.source,
         rateId: form.rateId || undefined,
         rateName: form.rateName || undefined,
-        adults: form.adults,
-        childrenUnder6: form.childrenUnder6,
-        childrenOver6: form.childrenOver6,
-        extraBeds: form.extraBeds,
         firstName: form.firstName || undefined,
         lastName: form.lastName || undefined,
         middleName: form.middleName || undefined,
         phone: form.phone || undefined,
-        totalAmount: form.totalAmount,
         discountValue: form.discountValue || undefined,
         discountType: form.discountType || undefined,
         selectedAddons: form.selectedAddons,
         notes: form.notes || undefined,
-        ...(paymentMethod && paymentMethod !== "arrival" && paymentMethod !== "link" && paymentMethod !== "invoice" && { paymentMethod }),
         ...(extra?.payOnArrival && { payOnArrival: true }),
         ...(extra?.partialAmount && extra.partialAmount < form.totalAmount && { partialAmount: extra.partialAmount }),
+      };
+
+      let saved: any;
+      if (isGroupBooking) {
+        // Group booking: send all units to the group endpoint
+        const mainUnitTotal = rateBase > 0 ? rateBase : previewTotal;
+        const units = [
+          { unitId: form.unitId, adults: form.adults, childrenUnder6: form.childrenUnder6, childrenOver6: form.childrenOver6, extraBeds: form.extraBeds, totalAmount: mainUnitTotal },
+          ...activeExtraUnits.map((u: ExtraUnit) => ({
+            unitId: u.unitId,
+            adults: u.adults,
+            childrenUnder6: u.childrenUnder6,
+            childrenOver6: u.childrenOver6,
+            extraBeds: 0,
+            totalAmount: unitPricePerNight * nights,
+          })),
+        ];
+        const r = await authFetch(`${API}/bookings/group`, { method: "POST", body: JSON.stringify({ ...commonFields, units }) });
+        if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Помилка"); }
+        const groupResult = await r.json();
+        saved = groupResult.bookings?.[0] || groupResult;
+        const unitCount = groupResult.bookings?.length || 1;
+        toast({ title: `Групове бронювання створено — ${unitCount} ${unitCount === 1 ? "юніт" : unitCount < 5 ? "юніти" : "юнітів"}, ${fmt(groupResult.totalAmount)} загалом` });
+        qc.invalidateQueries({ queryKey: ["bookings"] });
+        qc.invalidateQueries({ queryKey: ["calendar"] });
+        onSuccess?.(saved);
+        onClose();
+        return saved;
+      }
+
+      // Single booking (regular)
+      const body = {
+        unitId: form.unitId,
+        ...commonFields,
+        adults: form.adults,
+        childrenUnder6: form.childrenUnder6,
+        childrenOver6: form.childrenOver6,
+        extraBeds: form.extraBeds,
+        totalAmount: form.totalAmount,
+        ...(paymentMethod && paymentMethod !== "arrival" && paymentMethod !== "link" && paymentMethod !== "invoice" && { paymentMethod }),
       };
       const url    = isEdit ? `${API}/bookings/${booking.id}` : `${API}/bookings`;
       const method = isEdit ? "PUT" : "POST";
       const r      = await authFetch(url, { method, body: JSON.stringify(body) });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Помилка"); }
-      const saved = await r.json();
+      saved = await r.json();
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["calendar"] });
       const payLabels: Record<string, string> = {
@@ -1025,7 +1208,6 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         cash:    "Оплачено готівкою",
         arrival: "Збережено — оплата при заїзді",
       };
-      // Don't show "saved" toast for link — it will show after link generation
       if (paymentMethod !== "link") {
         toast({ title: payLabels[paymentMethod || ""] || (isEdit ? "Бронювання оновлено" : "Бронювання створено") });
       }

@@ -95,6 +95,9 @@ export const bookingsTable = pgTable("bookings", {
   internalNotes: text("internal_notes"),
   tags: jsonb("tags").$type<string[]>().default([]),
 
+  // Group booking (multiple units in one reservation)
+  groupBookingId: varchar("group_booking_id", { length: 36 }),
+
   // Draft
   draftExpiresAt: timestamp("draft_expires_at"),
 
