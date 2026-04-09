@@ -112,7 +112,7 @@ function CreateTaskDialog({
       {
         data: {
           unitId: parseInt(unitId),
-          assignedToId: assignedToId ? parseInt(assignedToId) : undefined,
+          assignedToId: (assignedToId && assignedToId !== "none") ? parseInt(assignedToId) : undefined,
           title,
           description: description || undefined,
           taskType: taskType as CreateHousekeepingTaskRequestTaskType,
@@ -203,7 +203,7 @@ function CreateTaskDialog({
                   <SelectValue placeholder="Не призначено" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Не призначено</SelectItem>
+                  <SelectItem value="none">Не призначено</SelectItem>
                   {housekeepingStaff.map((u) => (
                     <SelectItem key={u.id} value={String(u.id)}>
                       {u.name}
