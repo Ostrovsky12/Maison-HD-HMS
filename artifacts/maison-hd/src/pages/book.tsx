@@ -55,13 +55,6 @@ const PROMO_CODES: Record<string, { type: "percent" | "fixed"; value: number; la
   "SUMMER500": { type: "fixed",   value: 500, label: "Знижка 500 ₴ — літній промо" },
 };
 
-// ─── Rate plans ───────────────────────────────────────────────────────────────
-const RATE_PLANS = [
-  { id: "flexible",  label: "Гнучкий",         desc: "Безкоштовне скасування за 48 год", modifier: 1.15, tag: "Рекомендований", cancelPolicy: "Безкоштовне скасування за 48 годин до заїзду" },
-  { id: "standard",  label: "Стандарт",         desc: "Скасування за 7 днів без штрафу", modifier: 1.0,  tag: "",              cancelPolicy: "Безкоштовне скасування за 7 днів. Пізніше — штраф 1 ніч." },
-  { id: "nonrefund", label: "Без повернення",   desc: "Найнижча ціна. Без повернення.",  modifier: 0.85, tag: "Найдешевше",   cancelPolicy: "Без повернення коштів при скасуванні." },
-];
-
 type Step = "search" | "unit" | "extras" | "form" | "payment" | "confirm";
 
 export default function BookPage() {
@@ -73,9 +66,7 @@ export default function BookPage() {
   const [search, setSearch] = useState({ propertyId: "", checkIn: todayStr(), checkOut: tomorrowStr(), adults: 2, children: 0, childAge1: 0, childAge2: 0 });
   const [results, setResults] = useState<any[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<any>(null);
-  const [selectedRate, setSelectedRate] = useState<string | number>("standard");
-  const [dbRates, setDbRates] = useState<any[]>([]);
-  const [ratesLoading, setRatesLoading] = useState(false);
+  const [channelRate, setChannelRate] = useState<any>(null);
   const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [promoCode, setPromoCode] = useState("");
@@ -98,43 +89,29 @@ export default function BookPage() {
       .catch(() => {});
   }, [slug]);
 
-  // Load real rates from DB when unit is selected
+  // Load configured channel rate when a unit is selected (channel = 'online')
   useEffect(() => {
-    if (!selectedUnit) return;
+    if (!selectedUnit) { setChannelRate(null); return; }
     const propertyId = selectedUnit.propertyId || selectedUnit.property_id;
     if (!propertyId) return;
-    setRatesLoading(true);
-    apiFetch(`/rates?propertyId=${propertyId}&unitId=${selectedUnit.id}&checkIn=${search.checkIn}&checkOut=${search.checkOut}`)
+    apiFetch(`/rates?propertyId=${propertyId}&unitId=${selectedUnit.id}&checkIn=${search.checkIn}&checkOut=${search.checkOut}&channel=online`)
       .then(r => r.json())
-      .then((data: any[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setDbRates(data);
-          setSelectedRate(data[0].id); // auto-select first rate
-        } else {
-          setDbRates([]);
-          setSelectedRate("standard");
-        }
-      })
-      .catch(() => { setDbRates([]); setSelectedRate("standard"); })
-      .finally(() => setRatesLoading(false));
+      .then((data: any) => setChannelRate(data || null))
+      .catch(() => setChannelRate(null));
   }, [selectedUnit]);
 
   const nightsCount = calcNights(search.checkIn, search.checkOut);
-
-  // Active rate: prefer DB rate, fallback to hardcoded RATE_PLANS
-  const activeDbRate = dbRates.find(r => r.id === selectedRate) || dbRates[0] || null;
-  const activeFallbackRate = RATE_PLANS.find(r => r.id === selectedRate) || RATE_PLANS[1];
   const pkg = PACKAGES.find(p => p.id === selectedPackage);
 
   const basePrice = useMemo(() => {
     if (!selectedUnit) return 0;
-    if (activeDbRate) {
-      // Use unit-specific price from DB rate, or rate's pricePerNight
-      return Number(activeDbRate.unitPrice || activeDbRate.pricePerNight || 0) * nightsCount;
+    if (channelRate) {
+      // Use channel rate's unit-specific price (or pricePerNight fallback)
+      return Number(channelRate.unitPrice || channelRate.pricePerNight || 0) * nightsCount;
     }
-    // Fallback: unit base price * modifier
-    return parseFloat(selectedUnit.basePrice || selectedUnit.base_price || "0") * nightsCount * activeFallbackRate.modifier;
-  }, [selectedUnit, nightsCount, activeDbRate, activeFallbackRate]);
+    // Fallback: unit's own base price
+    return parseFloat(selectedUnit.basePrice || selectedUnit.base_price || "0") * nightsCount;
+  }, [selectedUnit, nightsCount, channelRate]);
 
   const addonsTotal = useMemo(() => {
     let total = 0;
@@ -417,47 +394,15 @@ export default function BookPage() {
         {step === "extras" && selectedUnit && (
           <div className="grid md:grid-cols-3 gap-6">
             <div className="md:col-span-2 space-y-5">
-              {/* Rate plans */}
-              <SCard title="Тариф" emoji="🏷️">
-                <div className="space-y-2">
-                  {ratesLoading && <p className="text-sm text-gray-400 py-2 text-center">Завантаження тарифів…</p>}
-                  {!ratesLoading && dbRates.length > 0 && dbRates.map(r => {
-                    const unitBase = parseFloat(selectedUnit.basePrice || selectedUnit.base_price || "0");
-                    const ratePrice = Number(r.unitPrice || r.pricePerNight || unitBase) * nightsCount;
-                    const isSelected = selectedRate === r.id;
-                    return (
-                      <label key={r.id} className={`flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${isSelected?"border-blue-500 bg-blue-50":"border-gray-200 hover:border-gray-300"}`}>
-                        <input type="radio" name="rate" value={r.id} checked={isSelected} onChange={()=>setSelectedRate(r.id)} className="accent-blue-600" />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm">{r.name}</span>
-                            {r.minNights > 1 && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">мін. {r.minNights} ночі</span>}
-                            {r.discountPercent && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">-{r.discountPercent}%</span>}
-                          </div>
-                          {r.dateFrom && r.dateTo && <p className="text-xs text-gray-400 mt-0.5">{r.dateFrom} – {r.dateTo}</p>}
-                        </div>
-                        <span className="font-bold text-sm">{fmtMoney(ratePrice)} ₴</span>
-                      </label>
-                    );
-                  })}
-                  {!ratesLoading && dbRates.length === 0 && RATE_PLANS.map(r => {
-                    const p = parseFloat(selectedUnit.basePrice || selectedUnit.base_price || "0") * nightsCount * r.modifier;
-                    return (
-                      <label key={r.id} className={`flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${selectedRate===r.id?"border-blue-500 bg-blue-50":"border-gray-200 hover:border-gray-300"}`}>
-                        <input type="radio" name="rate" value={r.id} checked={selectedRate===r.id} onChange={()=>setSelectedRate(r.id as string)} className="accent-blue-600" />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm">{r.label}</span>
-                            {r.tag && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">{r.tag}</span>}
-                          </div>
-                          <p className="text-xs text-gray-400 mt-0.5">{r.desc}</p>
-                        </div>
-                        <span className="font-bold text-sm">{fmtMoney(p)} ₴</span>
-                      </label>
-                    );
-                  })}
+              {/* Channel rate info (shown when rate is configured for online bookings) */}
+              {channelRate && (
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+                  <Tag className="h-4 w-4 flex-shrink-0" />
+                  <span>Тариф: <strong>{channelRate.name}</strong></span>
+                  {channelRate.minNights > 1 && <span className="text-xs text-blue-500 ml-1">· мін. {channelRate.minNights} ночі</span>}
+                  {channelRate.discountPercent && <span className="text-xs text-emerald-600 ml-1">· -{channelRate.discountPercent}%</span>}
                 </div>
-              </SCard>
+              )}
 
               {/* Packages */}
               <SCard title="Пакети" emoji="📦">
@@ -611,11 +556,7 @@ export default function BookPage() {
               </SCard>
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
                 <p className="text-sm font-semibold text-amber-800 mb-1">📋 Умови скасування</p>
-                <p className="text-sm text-amber-700">
-                  {activeDbRate
-                    ? (activeDbRate.cancellationPolicy || "Умови скасування уточнюйте у закладі.")
-                    : activeFallbackRate.cancelPolicy}
-                </p>
+                <p className="text-sm text-amber-700">Умови скасування уточнюйте у закладі розміщення.</p>
               </div>
             </div>
             <div className="md:col-span-1">

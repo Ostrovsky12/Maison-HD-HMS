@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Trash2, Tag, Loader2, AlertCircle, StopCircle, Gift, CalendarRange, Home, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Pencil, Trash2, Tag, Loader2, AlertCircle, StopCircle, Gift, CalendarRange, Home, ChevronDown, ChevronUp, Globe, ToggleLeft, ToggleRight } from "lucide-react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
 
@@ -19,6 +19,15 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
 
 const fmtMoney = (n: number) => Math.round(n).toLocaleString("uk-UA") + " ₴";
 const fmtDate  = (s?: string | null) => s ? format(new Date(s + "T00:00"), "dd MMM yyyy", { locale: uk }) : null;
+
+const CHANNELS = [
+  { id: "online",     label: "Онлайн-бронювання", desc: "Пряме бронювання через сайт", icon: "🌐" },
+  { id: "booking_com",label: "Booking.com",        desc: "Канал Booking.com",            icon: "🔵" },
+  { id: "airbnb",     label: "Airbnb",             desc: "Канал Airbnb",                 icon: "🔴" },
+  { id: "expedia",    label: "Expedia",            desc: "Канал Expedia",                icon: "🟡" },
+  { id: "hotelscom",  label: "Hotels.com",         desc: "Канал Hotels.com",             icon: "🟠" },
+  { id: "agoda",      label: "Agoda",              desc: "Канал Agoda",                  icon: "🟣" },
+];
 
 interface Unit {
   id: number;
@@ -72,6 +81,10 @@ export default function RatesPage() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [expandedRate, setExpandedRate] = useState<number | null>(null);
+  // Channel settings: propertyId → { channel → { rateId, isActive } }
+  const [channelSettings, setChannelSettings] = useState<Record<number, Record<string, { rateId: number | null; isActive: boolean }>>>({});
+  const [savingChannel, setSavingChannel] = useState<string | null>(null); // "propId:channel"
+  const [channelProp, setChannelProp] = useState<number | null>(null); // which property to show channels for
 
   const load = async () => {
     setLoading(true);
@@ -79,8 +92,13 @@ export default function RatesPage() {
       apiFetch("/rates").then(r => r.ok ? r.json() : []),
       apiFetch("/properties").then(r => r.ok ? r.json() : []),
     ]);
+    const props: Property[] = Array.isArray(pr) ? pr : [];
     setRates(Array.isArray(rr) ? rr : []);
-    setProperties(Array.isArray(pr) ? pr : []);
+    setProperties(props);
+    if (props.length > 0) {
+      const firstId = props[0].id;
+      setChannelProp(firstId);
+    }
     setLoading(false);
   };
 
@@ -96,6 +114,40 @@ export default function RatesPage() {
     }
     setLoadingUnits(false);
   }, []);
+
+  const loadChannelSettings = useCallback(async (propertyId: number) => {
+    if (!propertyId) return;
+    const r = await apiFetch(`/rates/channel-settings?propertyId=${propertyId}`);
+    if (!r.ok) return;
+    const data: any[] = await r.json();
+    const map: Record<string, { rateId: number | null; isActive: boolean }> = {};
+    data.forEach(s => { map[s.channel] = { rateId: s.rateId, isActive: s.isActive }; });
+    setChannelSettings(prev => ({ ...prev, [propertyId]: map }));
+  }, []);
+
+  // Load channel settings when channelProp changes (defined after loadChannelSettings to avoid TDZ)
+  useEffect(() => { if (channelProp) loadChannelSettings(channelProp); }, [channelProp, loadChannelSettings]);
+
+  const saveChannelSetting = async (propertyId: number, channel: string, rateId: number | null, isActive: boolean) => {
+    const key = `${propertyId}:${channel}`;
+    setSavingChannel(key);
+    try {
+      const r = await apiFetch("/rates/channel-settings", {
+        method: "PUT",
+        body: JSON.stringify({ propertyId, channel, rateId, isActive }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      setChannelSettings(prev => ({
+        ...prev,
+        [propertyId]: { ...(prev[propertyId] || {}), [channel]: { rateId, isActive } },
+      }));
+      toast({ title: "Налаштування каналу збережено ✓" });
+    } catch (e: any) {
+      toast({ title: "Помилка", description: e.message, variant: "destructive" });
+    } finally {
+      setSavingChannel(null);
+    }
+  };
 
   const openCreate = (propertyId?: number) => {
     const pid = propertyId || properties[0]?.id || 0;
@@ -391,6 +443,95 @@ export default function RatesPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ─── Channel Settings Section ───────────────────────────────── */}
+        {!loading && properties.length > 0 && (
+          <div className="mt-8 border rounded-2xl bg-white overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b bg-gray-50">
+              <div className="flex items-center gap-2">
+                <Globe className="w-5 h-5 text-emerald-600" />
+                <div>
+                  <h2 className="text-sm font-bold text-gray-900">Канали бронювання</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Оберіть тариф для кожного каналу</p>
+                </div>
+              </div>
+              {properties.length > 1 && (
+                <Select
+                  value={String(channelProp || "")}
+                  onValueChange={v => setChannelProp(Number(v))}
+                >
+                  <SelectTrigger className="w-52 h-8 text-xs">
+                    <SelectValue placeholder="Оберіть об'єкт" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {properties.map(p => (
+                      <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {channelProp && (
+              <div className="divide-y">
+                {CHANNELS.map(ch => {
+                  const setting = channelSettings[channelProp]?.[ch.id];
+                  const currentRateId = setting?.rateId ?? null;
+                  const isActive = setting?.isActive ?? false;
+                  const isSaving = savingChannel === `${channelProp}:${ch.id}`;
+                  const propRates = rates.filter(r => r.propertyId === channelProp && !r.isStopSale);
+
+                  return (
+                    <div key={ch.id} className="flex items-center gap-4 px-5 py-4">
+                      <div className="text-2xl w-8 text-center flex-shrink-0">{ch.icon}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900">{ch.label}</div>
+                        <div className="text-xs text-gray-500">{ch.desc}</div>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <Select
+                          value={String(currentRateId ?? "none")}
+                          onValueChange={v => saveChannelSetting(channelProp, ch.id, v === "none" ? null : Number(v), isActive)}
+                        >
+                          <SelectTrigger className="w-48 h-8 text-xs">
+                            <SelectValue placeholder="Тариф не обрано" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none"><span className="text-gray-400">— Не налаштовано —</span></SelectItem>
+                            {propRates.map(r => (
+                              <SelectItem key={r.id} value={String(r.id)}>
+                                {r.name} · {fmtMoney(r.pricePerNight)}/ніч
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        <button
+                          onClick={() => currentRateId && saveChannelSetting(channelProp, ch.id, currentRateId, !isActive)}
+                          disabled={!currentRateId || isSaving}
+                          title={isActive ? "Активний" : "Вимкнений"}
+                          className={`flex items-center gap-1 text-xs font-medium rounded-lg px-2.5 py-1.5 transition-colors disabled:opacity-40 ${
+                            isActive && currentRateId
+                              ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                              : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                          }`}
+                        >
+                          {isSaving ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : isActive && currentRateId ? (
+                            <><ToggleRight className="w-3.5 h-3.5" /> Активний</>
+                          ) : (
+                            <><ToggleLeft className="w-3.5 h-3.5" /> Вимкнений</>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

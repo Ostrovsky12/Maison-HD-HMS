@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ratesTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { ratesTable, channelRateSettingsTable } from "@workspace/db/schema";
+import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { sql } from "drizzle-orm";
 
@@ -13,6 +13,46 @@ const formatRate = (r: any) => ({
   discountPercent: r.discountPercent ? Number(r.discountPercent) : null,
   unitPrices: r.unitPrices || null,
 });
+
+// ─── Channel Rate Settings (MUST come before /:rateId to avoid route conflict) ─
+
+// GET /rates/channel-settings?propertyId=X
+router.get("/channel-settings", requireAuth, async (req, res) => {
+  try {
+    const { propertyId } = req.query;
+    if (!propertyId) return res.status(400).json({ error: "propertyId required" });
+
+    const settings = await db.select().from(channelRateSettingsTable)
+      .where(eq(channelRateSettingsTable.propertyId, parseInt(propertyId as string)));
+
+    res.json(settings);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /rates/channel-settings — upsert channel rate assignment
+router.put("/channel-settings", requireAuth, async (req, res) => {
+  try {
+    const { propertyId, channel, rateId, isActive } = req.body;
+    if (!propertyId || !channel) return res.status(400).json({ error: "propertyId and channel required" });
+
+    await db.execute(sql`
+      INSERT INTO channel_rate_settings (property_id, channel, rate_id, is_active, updated_at)
+      VALUES (${propertyId}, ${channel}, ${rateId ?? null}, ${isActive ?? true}, NOW())
+      ON CONFLICT (property_id, channel)
+      DO UPDATE SET rate_id = ${rateId ?? null}, is_active = ${isActive ?? true}, updated_at = NOW()
+    `);
+
+    const [setting] = await db.select().from(channelRateSettingsTable)
+      .where(and(
+        eq(channelRateSettingsTable.propertyId, propertyId),
+        eq(channelRateSettingsTable.channel, channel)
+      ));
+
+    res.json(setting);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Rates CRUD ────────────────────────────────────────────────────────────────
 
 router.get("/", requireAuth, async (req, res) => {
   const { propertyId } = req.query;

@@ -4,7 +4,7 @@ import { db } from "@workspace/db";
 import {
   propertiesTable, unitsTable, bookingsTable, organizationsTable,
   fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable,
-  ratesTable,
+  ratesTable, channelRateSettingsTable,
 } from "@workspace/db";
 import { eq, and, or, gte, lte, ne, inArray, notInArray, sql, asc } from "drizzle-orm";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
@@ -459,45 +459,58 @@ router.get("/bookings/:ref", async (req, res) => {
   } catch (e: any) { console.error("GET BOOKING ERROR:", e.message); res.status(500).json({ error: e.message }); }
 });
 
-// ─── GET /rates — active rates for a property (public, no auth) ───────────────
+// ─── GET /rates — active rate for a property & channel (public, no auth) ──────
+// Returns the rate configured for a specific channel (default: 'online').
+// If no channel config, returns null. The booking form applies price from this rate.
 router.get("/rates", async (req, res) => {
   try {
-    const { propertyId, unitId, checkIn, checkOut } = req.query as any;
+    const { propertyId, unitId, checkIn, checkOut, channel = "online" } = req.query as any;
     if (!propertyId) return res.status(400).json({ error: "propertyId required" });
 
+    // Look up channel rate setting for this property & channel
+    const [setting] = await db.select().from(channelRateSettingsTable)
+      .where(and(
+        eq(channelRateSettingsTable.propertyId, parseInt(propertyId)),
+        eq(channelRateSettingsTable.channel, channel),
+        eq(channelRateSettingsTable.isActive, true),
+      ));
+
+    // No active channel setting or no rate assigned → no rate
+    if (!setting || !setting.rateId) {
+      return res.json(null);
+    }
+
+    // Fetch the configured rate
+    const [rate] = await db.select().from(ratesTable)
+      .where(and(
+        eq(ratesTable.id, setting.rateId),
+        eq(ratesTable.isStopSale, false),
+      ));
+
+    if (!rate) return res.json(null);
+
+    // Check date validity
     const today = new Date().toISOString().slice(0, 10);
     const checkDate = checkIn || today;
+    if (rate.dateFrom && checkDate < rate.dateFrom) return res.json(null);
+    if (rate.dateTo && (checkOut || checkDate) > rate.dateTo) return res.json(null);
 
-    const rates = await db.select().from(ratesTable)
-      .where(
-        and(
-          eq(ratesTable.propertyId, parseInt(propertyId)),
-          eq(ratesTable.isStopSale, false),
-        )
-      )
-      .orderBy(ratesTable.id);
+    // Unit-specific price
+    const unitPrice = unitId && rate.unitPrices && (rate.unitPrices as any)[String(unitId)]
+      ? Number((rate.unitPrices as any)[String(unitId)])
+      : Number(rate.pricePerNight);
 
-    // Filter by date range if rates have date constraints
-    const activeRates = rates.filter(r => {
-      if (r.dateFrom && checkDate < r.dateFrom) return false;
-      if (r.dateTo && (checkOut || checkDate) > r.dateTo) return false;
-      return true;
+    res.json({
+      id: rate.id,
+      name: rate.name,
+      pricePerNight: Number(rate.pricePerNight),
+      minNights: rate.minNights,
+      dateFrom: rate.dateFrom,
+      dateTo: rate.dateTo,
+      discountPercent: rate.discountPercent ? Number(rate.discountPercent) : null,
+      unitPrices: rate.unitPrices || null,
+      unitPrice,
     });
-
-    res.json(activeRates.map(r => ({
-      id: r.id,
-      name: r.name,
-      pricePerNight: Number(r.pricePerNight),
-      minNights: r.minNights,
-      dateFrom: r.dateFrom,
-      dateTo: r.dateTo,
-      discountPercent: r.discountPercent ? Number(r.discountPercent) : null,
-      unitPrices: r.unitPrices || null,
-      // unit-specific price (if unitId provided and unitPrices map has it)
-      unitPrice: unitId && r.unitPrices && (r.unitPrices as any)[String(unitId)]
-        ? Number((r.unitPrices as any)[String(unitId)])
-        : Number(r.pricePerNight),
-    })));
   } catch (e: any) { console.error("GET PUBLIC RATES ERROR:", e.message); res.status(500).json({ error: e.message }); }
 });
 
