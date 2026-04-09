@@ -60,6 +60,7 @@ import digitalKeysRouter from "./digital-keys.js";
 import sustainabilityRouter from "./sustainability.js";
 import telephonyRouter from "./telephony.js";
 import unitGroupsRouter from "./unit-groups.js";
+import { router as pushRouter } from "./push.js";
 
 const router: IRouter = Router();
 
@@ -124,5 +125,6 @@ router.use("/rate-intel", rateIntelRouter);
 router.use("/digital-keys", digitalKeysRouter);
 router.use("/sustainability", sustainabilityRouter);
 router.use("/telephony", telephonyRouter);
+router.use("/push", pushRouter);
 
 export default router;

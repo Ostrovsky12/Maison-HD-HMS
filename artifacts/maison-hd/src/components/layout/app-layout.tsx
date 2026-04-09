@@ -8,7 +8,7 @@ import {
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
   ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package, QrCode, Coins,
-  Smartphone, Leaf, Phone,
+  Smartphone, Leaf, Phone, Hammer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +52,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Прибирання",     path: "/housekeeping", icon: Sparkles, roles: null },
       { name: "Тех. служба",    path: "/maintenance",  icon: Wrench,   roles: null },
+      { name: "Вигляд техніка", path: "/tech",         icon: Hammer,   roles: null },
       { name: "Активності",     path: "/activities",   icon: Bike,     roles: null },
       { name: "Проживання",     path: "/accommodation",icon: BedDouble,roles: null },
       { name: "Внутрішні операції", path: "/operations",   icon: Layers,       roles: null },

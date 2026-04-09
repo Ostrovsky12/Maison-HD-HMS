@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { sendPushToOrg, sendPushToUsers } from "./push.js";
 
 const router = Router();
 
@@ -63,7 +64,7 @@ router.get("/stats", requireAuth, async (req: any, res) => {
 router.get("/", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const { status, priority, category, propertyId, search, page, limit: lim } = req.query as any;
+    const { status, priority, category, propertyId, search, page, limit: lim, assignedToMe } = req.query as any;
     const offset = ((parseInt(page) || 1) - 1) * (parseInt(lim) || 50);
     const limitN = parseInt(lim) || 50;
     const statusVal = (status && status !== "all") ? status : null;
@@ -71,6 +72,7 @@ router.get("/", requireAuth, async (req: any, res) => {
     const categoryVal = category || null;
     const propVal = propertyId ? parseInt(propertyId) : null;
     const searchVal = search ? "%" + search + "%" : null;
+    const userId2 = assignedToMe === "true" ? getUserId(req) : null;
 
     const rows = await db.execute(sql`
       SELECT mr.*,
@@ -89,6 +91,7 @@ router.get("/", requireAuth, async (req: any, res) => {
         AND (${categoryVal}::text IS NULL OR mr.category::text = ${categoryVal})
         AND (${propVal}::int IS NULL OR mr.property_id = ${propVal})
         AND (${searchVal}::text IS NULL OR mr.title ILIKE ${searchVal} OR mr.description ILIKE ${searchVal})
+        AND (${userId2}::int IS NULL OR mr.assigned_to_user_id = ${userId2})
       ORDER BY
         CASE mr.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
         mr.created_at DESC
@@ -103,6 +106,7 @@ router.get("/", requireAuth, async (req: any, res) => {
         AND (${categoryVal}::text IS NULL OR mr.category::text = ${categoryVal})
         AND (${propVal}::int IS NULL OR mr.property_id = ${propVal})
         AND (${searchVal}::text IS NULL OR mr.title ILIKE ${searchVal} OR mr.description ILIKE ${searchVal})
+        AND (${userId2}::int IS NULL OR mr.assigned_to_user_id = ${userId2})
     `);
 
     res.json({ requests: rows.rows, total: total.rows[0]?.count ?? 0 });
@@ -188,6 +192,21 @@ router.post("/", requireAuth, async (req: any, res) => {
       INSERT INTO maintenance_logs (request_id, user_id, action, new_status, note)
       VALUES (${newReq.id}, ${userId}, 'created', 'open'::maintenance_status, 'Заявку створено')
     `);
+
+    const priorityEmoji: Record<string, string> = { critical: "🔴", high: "🟠", medium: "🟡", low: "🟢" };
+    const pushPayload = {
+      title: `${priorityEmoji[newReq.priority] ?? "🔧"} Нова заявка ТО`,
+      body: `${newReq.title}`,
+      icon: "/favicon.svg",
+      badge: "/favicon.svg",
+      tag: `maintenance-${newReq.id}`,
+      data: { url: "/maintenance" }
+    };
+    if (newReq.assigned_to_user_id) {
+      sendPushToUsers([newReq.assigned_to_user_id], pushPayload).catch(() => {});
+    } else {
+      sendPushToOrg(orgId, pushPayload, userId ?? undefined).catch(() => {});
+    }
 
     res.status(201).json({ request: newReq });
   } catch (e: any) {

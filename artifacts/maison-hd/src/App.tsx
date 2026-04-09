@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useGetMe } from "@workspace/api-client-react";
 import { Loader2 } from "lucide-react";
+import { usePushNotifications } from "@/hooks/use-push-notifications";
 
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
@@ -66,6 +67,7 @@ import DigitalKeysPage from "@/pages/digital-keys";
 import SustainabilityPage from "@/pages/sustainability";
 import TelephonyPage from "@/pages/telephony";
 import RatesPage from "@/pages/rates";
+import TechPage from "@/pages/tech";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -186,6 +188,7 @@ function Router() {
       <Route path="/telephony"><ProtectedRoute component={TelephonyPage} /></Route>
       <Route path="/qr-menu/:orgSlug/:tableId" component={QrMenuPage} />
       <Route path="/qr-menu/:orgSlug" component={QrMenuPage} />
+      <Route path="/tech"><ProtectedRoute component={TechPage} /></Route>
 
       <Route path="/" component={HomeRoute} />
 
@@ -194,11 +197,18 @@ function Router() {
   );
 }
 
+function PushSubscriber() {
+  const { data: user } = useGetMe();
+  usePushNotifications(!!user);
+  return null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <PushSubscriber />
           <Router />
         </WouterRouter>
         <Toaster />
