@@ -2,6 +2,7 @@ import { pgTable, serial, text, integer, boolean, timestamp, numeric, pgEnum } f
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { propertiesTable } from "./properties";
+import { unitGroupsTable } from "./unit-groups";
 
 export const unitStatusEnum = pgEnum("unit_status", ["active", "inactive", "maintenance"]);
 export const housekeepingStatusEnum = pgEnum("housekeeping_status", ["clean", "dirty", "in_progress"]);
@@ -23,6 +24,7 @@ export const unitsTable = pgTable("units", {
   hasView: text("has_view"),
   hasBalcony: boolean("has_balcony").default(false),
   squareMeters: numeric("square_meters", { precision: 6, scale: 1 }),
+  unitGroupId: integer("unit_group_id").references(() => unitGroupsTable.id, { onDelete: "set null" }),
   isHidden: boolean("is_hidden").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

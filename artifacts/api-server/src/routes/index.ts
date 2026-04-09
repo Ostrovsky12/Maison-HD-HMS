@@ -59,6 +59,7 @@ import rateIntelRouter from "./rate-intelligence.js";
 import digitalKeysRouter from "./digital-keys.js";
 import sustainabilityRouter from "./sustainability.js";
 import telephonyRouter from "./telephony.js";
+import unitGroupsRouter from "./unit-groups.js";
 
 const router: IRouter = Router();
 
@@ -66,6 +67,7 @@ router.use(healthRouter);
 router.use("/auth", authRouter);
 router.use("/organizations", organizationsRouter);
 router.use("/properties", propertiesRouter);
+router.use("/unit-groups", unitGroupsRouter);
 router.use("/units", unitsRouter);
 router.use("/guests", guestsRouter);
 router.use("/bookings", bookingsRouter);

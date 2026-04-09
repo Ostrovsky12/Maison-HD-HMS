@@ -1,6 +1,7 @@
 export * from "./organizations";
 export * from "./users";
 export * from "./properties";
+export * from "./unit-groups";
 export * from "./units";
 export * from "./guests";
 export * from "./bookings";

@@ -160,7 +160,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 router.post("/", requireAuth, async (req, res) => {
-  const { propertyId, name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, floor, description, basePrice, hasView, hasBalcony, squareMeters } = req.body;
+  const { propertyId, name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, floor, description, basePrice, hasView, hasBalcony, squareMeters, unitGroupId } = req.body;
   const [unit] = await db.insert(unitsTable).values({
     propertyId,
     name,
@@ -175,6 +175,7 @@ router.post("/", requireAuth, async (req, res) => {
     hasView: hasView || null,
     hasBalcony: hasBalcony ?? false,
     squareMeters: squareMeters ? String(squareMeters) : null,
+    unitGroupId: unitGroupId ? parseInt(unitGroupId) : null,
   }).returning();
   res.status(201).json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, extraGuestPrice: Number(unit.extraGuestPrice || 0), squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
@@ -191,7 +192,7 @@ router.get("/:unitId", requireAuth, async (req, res) => {
 
 router.put("/:unitId", requireAuth, async (req, res) => {
   const unitId = parseInt(req.params.unitId);
-  const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters, propertyId, sortOrder, isHidden } = req.body;
+  const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters, propertyId, sortOrder, isHidden, unitGroupId } = req.body;
   const [unit] = await db.update(unitsTable).set({
     ...(name !== undefined && { name }),
     ...(category !== undefined && { category }),
@@ -208,6 +209,7 @@ router.put("/:unitId", requireAuth, async (req, res) => {
     ...(squareMeters !== undefined && { squareMeters: squareMeters ? String(squareMeters) : null }),
     ...(propertyId !== undefined && { propertyId: Number(propertyId) }),
     ...(isHidden !== undefined && { isHidden: Boolean(isHidden) }),
+    ...(unitGroupId !== undefined && { unitGroupId: unitGroupId ? parseInt(unitGroupId) : null }),
     updatedAt: new Date(),
   }).where(eq(unitsTable.id, unitId)).returning();
   if (!unit) {
