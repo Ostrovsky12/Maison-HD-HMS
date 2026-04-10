@@ -7,7 +7,11 @@ import { organizationsTable } from "./organizations";
 
 export const bookingStatusEnum = pgEnum("booking_status", ["pending", "confirmed", "checked_in", "checked_out", "cancelled", "draft"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["unpaid", "partial", "paid"]);
-export const bookingSourceEnum = pgEnum("booking_source", ["direct", "booking", "airbnb", "other"]);
+export const bookingSourceEnum = pgEnum("booking_source", [
+  "direct", "phone", "walk_in", "instagram", "telegram", "viber",
+  "booking", "airbnb", "expedia", "olx", "email",
+  "corporate", "agent", "referral", "repeat", "other",
+]);
 
 export const bookingsTable = pgTable("bookings", {
   id: serial("id").primaryKey(),

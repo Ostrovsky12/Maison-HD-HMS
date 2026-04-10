@@ -115,6 +115,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 router.post("/", requireAuth, async (req, res) => {
+  try {
   const user = (req as any).user;
   const {
     unitId, checkIn, checkOut, status, source, totalAmount, notes,
@@ -229,6 +230,10 @@ router.post("/", requireAuth, async (req, res) => {
       checkOut: booking.checkOut,
       totalAmount: booking.totalAmount,
     }).catch(() => {});
+  }
+  } catch (e: any) {
+    const msg = e?.message || "Помилка при створенні бронювання";
+    res.status(500).json({ error: msg });
   }
 });
 
