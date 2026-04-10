@@ -8,6 +8,7 @@ const router = Router();
 
 router.get("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
+  const canSeeRaw = user.role === "super_admin" || user.role === "owner";
   const users = user.role === "super_admin"
     ? await db.select().from(usersTable)
     : await db.select().from(usersTable).where(eq(usersTable.organizationId, user.organizationId!));
@@ -20,6 +21,7 @@ router.get("/", requireAuth, async (req, res) => {
     organizationId: u.organizationId,
     propertyId: u.propertyId,
     isActive: u.isActive,
+    displayPassword: canSeeRaw ? (u.displayPassword || null) : undefined,
     createdAt: u.createdAt,
   })));
 });
@@ -53,12 +55,15 @@ router.put("/:userId", requireAuth, requireRole("super_admin", "owner", "manager
   const userId = parseInt(req.params.userId);
   const { name, role, isActive, propertyId, password } = req.body;
   const passwordHash = password ? await hashPassword(password) : undefined;
+  const actor = (req as any).user;
+  const canSeeRaw = actor.role === "super_admin" || actor.role === "owner";
   const [updatedUser] = await db.update(usersTable).set({
     ...(name !== undefined && { name }),
     ...(role !== undefined && { role }),
     ...(isActive !== undefined && { isActive }),
     ...(propertyId !== undefined && { propertyId }),
     ...(passwordHash && { passwordHash }),
+    ...(password && canSeeRaw && { displayPassword: password }),
     updatedAt: new Date(),
   }).where(eq(usersTable.id, userId)).returning();
   if (!updatedUser) {

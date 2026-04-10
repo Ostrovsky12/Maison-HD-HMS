@@ -27,10 +27,12 @@ export async function autoSeedIfEmpty() {
     logger.info("Empty database detected — running initial seed...");
 
     // ─── Super Admin (no org) ─────────────────────────────────────────────────
+    const saEmail = process.env.SUPER_ADMIN_EMAIL || "owner@maisonhd.com";
+    const saPassword = process.env.SUPER_ADMIN_PASSWORD || "Maison2026!";
     await db.insert(usersTable).values({
-      email: "admin@hms.app",
+      email: saEmail,
       name: "Super Admin",
-      passwordHash: await hp("admin123"),
+      passwordHash: await hp(saPassword),
       role: "super_admin",
       organizationId: null,
     });
@@ -230,7 +232,7 @@ export async function autoSeedIfEmpty() {
 
     logger.info(
       "Auto-seed complete.\n" +
-      "  SuperAdmin: admin@hms.app / admin123\n" +
+      `  SuperAdmin: ${process.env.SUPER_ADMIN_EMAIL || "owner@maisonhd.com"} / [SUPER_ADMIN_PASSWORD env]\n` +
       "  ДОГОДА owner: admin@dogoda.com.ua / Dogoda2026!\n" +
       "  ДОГОДА reception: reception@dogoda.com.ua / reception123\n" +
       "  Maison HD owner: owner@maisonhd.com / Owner2026!"

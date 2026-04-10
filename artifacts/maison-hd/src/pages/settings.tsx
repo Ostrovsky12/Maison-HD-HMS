@@ -1720,6 +1720,340 @@ function OwnersTab() {
   );
 }
 
+// ── Users / Team Management Tab ───────────────────────────────────
+const ROLE_LABELS: Record<string, { label: string; color: string }> = {
+  super_admin:  { label: "Супер-адмін", color: "bg-purple-50 text-purple-700 border-purple-200" },
+  owner:        { label: "Власник",     color: "bg-amber-50 text-amber-700 border-amber-200" },
+  manager:      { label: "Менеджер",    color: "bg-blue-50 text-blue-700 border-blue-200" },
+  reception:    { label: "Рецепція",    color: "bg-sky-50 text-sky-700 border-sky-200" },
+  housekeeping: { label: "Прибирання", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+};
+
+function UserPasswordCell({ user, onSaved }: { user: any; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [pw, setPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [showDisplay, setShowDisplay] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const genPw = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
+    let p = "";
+    for (let i = 0; i < 12; i++) p += chars[Math.floor(Math.random() * chars.length)];
+    setPw(p);
+    setShowPw(true);
+  };
+
+  const save = async () => {
+    if (!pw || pw.length < 4) { toast({ title: "Пароль занадто короткий", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const r = await authFetch(`${API}/users/${user.id}`, { method: "PUT", body: JSON.stringify({ password: pw }) });
+      if (!r.ok) throw new Error("failed");
+      toast({ title: "Пароль змінено" });
+      setEditing(false);
+      setPw("");
+      onSaved();
+    } catch {
+      toast({ title: "Помилка збереження", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2">
+        {user.displayPassword ? (
+          <div className="flex items-center gap-1.5">
+            <code className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
+              {showDisplay ? user.displayPassword : "••••••••"}
+            </code>
+            <button onClick={() => setShowDisplay(v => !v)} className="text-muted-foreground hover:text-foreground">
+              {showDisplay ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+            <button onClick={() => { navigator.clipboard.writeText(user.displayPassword); toast({ title: "Скопійовано" }); }}
+              className="text-muted-foreground hover:text-foreground">
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground italic">не встановлено</span>
+        )}
+        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => { setEditing(true); setPw(""); }}>
+          <KeyRound className="w-3 h-3" /> Змінити
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="relative">
+        <Input
+          type={showPw ? "text" : "password"}
+          value={pw}
+          onChange={e => setPw(e.target.value)}
+          placeholder="Новий пароль"
+          className="h-7 text-xs w-40 pr-7"
+        />
+        <button onClick={() => setShowPw(v => !v)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+          {showPw ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+        </button>
+      </div>
+      <Button size="icon" variant="outline" className="h-7 w-7" title="Згенерувати" onClick={genPw}>
+        <RefreshCw className="w-3 h-3" />
+      </Button>
+      <Button size="sm" className="h-7 px-2 text-xs" onClick={save} disabled={saving}>
+        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+      </Button>
+      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditing(false); setPw(""); }}>
+        <X className="w-3 h-3" />
+      </Button>
+    </div>
+  );
+}
+
+function UsersManagementTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [orgFilter, setOrgFilter] = useState("all");
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newForm, setNewForm] = useState({ name: "", email: "", password: "", role: "reception", organizationId: "", propertyId: "" });
+  const [showNewPw, setShowNewPw] = useState(false);
+
+  const { data: users = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["all-users-mgmt"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/users`);
+      if (!r.ok) return [];
+      return r.json();
+    },
+  });
+
+  const { data: orgs = [] } = useQuery<any[]>({
+    queryKey: ["all-orgs-mgmt"],
+    queryFn: async () => {
+      if (!isSuperAdmin) return [];
+      const r = await authFetch(`${API}/organizations`);
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: isSuperAdmin,
+  });
+
+  const genNewPw = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
+    let p = "";
+    for (let i = 0; i < 12; i++) p += chars[Math.floor(Math.random() * chars.length)];
+    setNewForm(v => ({ ...v, password: p }));
+    setShowNewPw(true);
+  };
+
+  const handleCreate = async () => {
+    if (!newForm.name || !newForm.email || !newForm.password) {
+      toast({ title: "Заповніть усі поля", variant: "destructive" }); return;
+    }
+    setCreating(true);
+    try {
+      const r = await authFetch(`${API}/users`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: newForm.name,
+          email: newForm.email,
+          password: newForm.password,
+          role: newForm.role,
+          organizationId: newForm.organizationId ? parseInt(newForm.organizationId) : undefined,
+          propertyId: newForm.propertyId ? parseInt(newForm.propertyId) : undefined,
+        }),
+      });
+      if (!r.ok) {
+        const e = await r.json();
+        toast({ title: "Помилка", description: e.message || e.error, variant: "destructive" }); return;
+      }
+      toast({ title: "Користувача створено" });
+      setShowCreate(false);
+      setNewForm({ name: "", email: "", password: "", role: "reception", organizationId: "", propertyId: "" });
+      qc.invalidateQueries({ queryKey: ["all-users-mgmt"] });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const toggleActive = async (u: any) => {
+    await authFetch(`${API}/users/${u.id}`, { method: "PUT", body: JSON.stringify({ isActive: !u.isActive }) });
+    qc.invalidateQueries({ queryKey: ["all-users-mgmt"] });
+    toast({ title: u.isActive ? "Деактивовано" : "Активовано" });
+  };
+
+  const filtered = users.filter(u => {
+    const matchSearch = !search || u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase());
+    const matchOrg = orgFilter === "all" || String(u.organizationId) === orgFilter;
+    return matchSearch && matchOrg;
+  });
+
+  const orgName = (id: number | null) => {
+    if (!id) return "Система";
+    const o = orgs.find((o: any) => o.id === id);
+    return o ? o.name : `Org #${id}`;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 justify-between">
+        <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+          <Input
+            placeholder="Пошук по імені або email..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="h-8 text-sm w-52"
+          />
+          {isSuperAdmin && (
+            <Select value={orgFilter} onValueChange={setOrgFilter}>
+              <SelectTrigger className="h-8 text-sm w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Всі організації</SelectItem>
+                <SelectItem value="null">Система</SelectItem>
+                {orgs.map((o: any) => (
+                  <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" onClick={() => refetch()} className="gap-1.5 h-8">
+            <RefreshCw className="w-3.5 h-3.5" />
+          </Button>
+          <Button size="sm" className="gap-1.5 h-8" onClick={() => setShowCreate(v => !v)}>
+            <Plus className="w-3.5 h-3.5" /> Новий користувач
+          </Button>
+        </div>
+      </div>
+
+      {showCreate && (
+        <div className="border rounded-xl p-4 bg-muted/20 space-y-3">
+          <h4 className="font-semibold text-sm flex items-center gap-2"><Users2 className="w-4 h-4" /> Новий користувач</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Ім'я *</Label>
+              <Input className="mt-1 h-8 text-sm" placeholder="Ім'я Прізвище" value={newForm.name} onChange={e => setNewForm(v => ({ ...v, name: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs">Email *</Label>
+              <Input className="mt-1 h-8 text-sm" type="email" placeholder="user@hotel.ua" value={newForm.email} onChange={e => setNewForm(v => ({ ...v, email: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs">Пароль *</Label>
+              <div className="flex gap-1.5 mt-1">
+                <div className="relative flex-1">
+                  <Input className="h-8 text-sm pr-7" type={showNewPw ? "text" : "password"} placeholder="Мін. 4 символи" value={newForm.password} onChange={e => setNewForm(v => ({ ...v, password: e.target.value }))} />
+                  <button onClick={() => setShowNewPw(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {showNewPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <Button type="button" size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={genNewPw}><RefreshCw className="w-3.5 h-3.5" /></Button>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Роль</Label>
+              <Select value={newForm.role} onValueChange={v => setNewForm(p => ({ ...p, role: v }))}>
+                <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="owner">Власник</SelectItem>
+                  <SelectItem value="manager">Менеджер</SelectItem>
+                  <SelectItem value="reception">Рецепція</SelectItem>
+                  <SelectItem value="housekeeping">Прибирання</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {isSuperAdmin && (
+              <div className="col-span-2">
+                <Label className="text-xs">Організація</Label>
+                <Select value={newForm.organizationId || "none"} onValueChange={v => setNewForm(p => ({ ...p, organizationId: v === "none" ? "" : v }))}>
+                  <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue placeholder="Оберіть організацію" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Без організації —</SelectItem>
+                    {orgs.map((o: any) => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="ghost" onClick={() => setShowCreate(false)}><X className="w-3.5 h-3.5 mr-1" /> Скасувати</Button>
+            <Button size="sm" onClick={handleCreate} disabled={creating}>
+              {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Check className="w-3.5 h-3.5 mr-1" />}
+              Створити
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="py-12 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed p-10 text-center text-muted-foreground">
+          <Users2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          <p className="text-sm">Користувачів не знайдено</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-xs text-muted-foreground uppercase tracking-wide">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-medium">Користувач</th>
+                {isSuperAdmin && <th className="px-4 py-2.5 text-left font-medium">Організація</th>}
+                <th className="px-4 py-2.5 text-left font-medium">Роль</th>
+                <th className="px-4 py-2.5 text-left font-medium">Пароль</th>
+                <th className="px-4 py-2.5 text-left font-medium">Статус</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {filtered.map((u: any) => {
+                const rl = ROLE_LABELS[u.role] || ROLE_LABELS.reception;
+                return (
+                  <tr key={u.id} className={`hover:bg-muted/10 transition-colors ${!u.isActive ? "opacity-50" : ""}`}>
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{u.name}</div>
+                      <div className="text-xs text-muted-foreground">{u.email}</div>
+                    </td>
+                    {isSuperAdmin && (
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{orgName(u.organizationId)}</td>
+                    )}
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-lg border ${rl.color}`}>{rl.label}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <UserPasswordCell user={u} onSaved={() => qc.invalidateQueries({ queryKey: ["all-users-mgmt"] })} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => toggleActive(u)}
+                        className={`text-xs font-medium px-2 py-0.5 rounded-lg border cursor-pointer transition-colors ${
+                          u.isActive
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
+                            : "bg-red-50 text-red-700 border-red-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                        }`}
+                        title={u.isActive ? "Клікніть щоб деактивувати" : "Клікніть щоб активувати"}
+                      >
+                        {u.isActive ? "✓ Активний" : "✗ Неактивний"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">Усього: {filtered.length} з {users.length} користувачів</p>
+    </div>
+  );
+}
+
 // ── Addons / Services Tab ─────────────────────────────────────────
 const CATEGORIES = [
   { value: "service",  label: "Сервіс",     icon: "🔧" },
@@ -2102,12 +2436,22 @@ export default function SettingsPage() {
         </div>
 
         {isSA ? (
-          <Tabs defaultValue="profile" className="w-full">
+          <Tabs defaultValue="users" className="w-full">
             <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
-              <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
-              <TabsTrigger value="subscribers" className="gap-1.5"><Clock className="w-3.5 h-3.5" /> Підписники</TabsTrigger>
+              <TabsTrigger value="users" className="gap-1.5"><Users2 className="w-3.5 h-3.5" /> Команда</TabsTrigger>
               <TabsTrigger value="owners" className="gap-1.5"><Crown className="w-3.5 h-3.5" /> Власники</TabsTrigger>
+              <TabsTrigger value="subscribers" className="gap-1.5"><Clock className="w-3.5 h-3.5" /> Підписники</TabsTrigger>
+              <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
             </TabsList>
+            <TabsContent value="users">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Users2 className="w-4 h-4" /> Всі користувачі системи</CardTitle>
+                  <CardDescription>Перегляд, управління паролями та статусом всіх акаунтів платформи.</CardDescription>
+                </CardHeader>
+                <CardContent><UsersManagementTab isSuperAdmin={true} /></CardContent>
+              </Card>
+            </TabsContent>
             <TabsContent value="profile"><ProfileTab /></TabsContent>
             <TabsContent value="subscribers">
               <Card>
@@ -2133,6 +2477,9 @@ export default function SettingsPage() {
             <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
               <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
               <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
+              {(user.role === "owner" || user.role === "manager") && (
+                <TabsTrigger value="team" className="gap-1.5"><Users2 className="w-3.5 h-3.5" /> Команда</TabsTrigger>
+              )}
               {mod("legal_entities") && <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>}
               {mod("discounts") && <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>}
               {(mod("telegram") || mod("liqpay") || mod("binotel")) && <TabsTrigger value="notifications" className="gap-1.5"><Bell className="w-3.5 h-3.5" /> Сповіщення & Інтеграції</TabsTrigger>}
@@ -2141,6 +2488,17 @@ export default function SettingsPage() {
               <TabsTrigger value="billing" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Підписка</TabsTrigger>
             </TabsList>
             <TabsContent value="profile"><ProfileTab /></TabsContent>
+            {(user.role === "owner" || user.role === "manager") && (
+              <TabsContent value="team">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Users2 className="w-4 h-4" /> Команда</CardTitle>
+                    <CardDescription>Управління обліковими записами та паролями персоналу вашого об'єкту.</CardDescription>
+                  </CardHeader>
+                  <CardContent><UsersManagementTab isSuperAdmin={false} /></CardContent>
+                </Card>
+              </TabsContent>
+            )}
             <TabsContent value="hotel">
               <div className="space-y-6">
                 <Card>
