@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -110,7 +111,7 @@ const INTEGRATION_INFO: Record<string, { label: string; desc: string; color: str
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrations"
-         | "tax-invoices" | "bas" | "signing" | "archive";
+         | "tax-invoices" | "bas" | "signing" | "archive" | "invoices";
 
 export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -135,15 +136,16 @@ export default function AccountingPage() {
         {/* Tabs */}
         <div className="flex gap-0.5 border-b border-gray-200 overflow-x-auto pb-px">
           {([
-            { id: "overview",      label: "Огляд",          icon: BarChart3 },
-            { id: "documents",     label: "Документи",      icon: FileText },
-            { id: "tax-invoices",  label: "Подат. накладні",icon: Landmark },
-            { id: "bas",           label: "BAS / 1C",       icon: Cpu },
-            { id: "signing",       label: "Підписання",     icon: PenSquare },
-            { id: "archive",       label: "Архів",          icon: Archive },
-            { id: "counterparties",label: "Контрагенти",    icon: Users },
-            { id: "entities",      label: "Юр. особи",      icon: Building2 },
-            { id: "integrations",  label: "Інтеграції",     icon: Settings },
+            { id: "overview",      label: "Огляд",               icon: BarChart3 },
+            { id: "invoices",      label: "Сформовані рахунки",  icon: Receipt },
+            { id: "documents",     label: "Документи",           icon: FileText },
+            { id: "tax-invoices",  label: "Подат. накладні",     icon: Landmark },
+            { id: "bas",           label: "BAS / 1C",            icon: Cpu },
+            { id: "signing",       label: "Підписання",          icon: PenSquare },
+            { id: "archive",       label: "Архів",               icon: Archive },
+            { id: "counterparties",label: "Контрагенти",         icon: Users },
+            { id: "entities",      label: "Юр. особи",           icon: Building2 },
+            { id: "integrations",  label: "Інтеграції",          icon: Settings },
           ] as { id: Tab; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
@@ -158,6 +160,7 @@ export default function AccountingPage() {
 
         {/* Tab content */}
         {tab === "overview"       && <OverviewTab />}
+        {tab === "invoices"       && <BookingInvoicesTab />}
         {tab === "documents"      && <DocumentsTab filter={docFilter} setFilter={setDocFilter} />}
         {tab === "tax-invoices"   && <TaxInvoicesTab />}
         {tab === "bas"            && <BasExportTab />}
@@ -170,6 +173,228 @@ export default function AccountingPage() {
     </AppLayout>
   );
 }
+
+// ─── BOOKING INVOICES TAB ─────────────────────────────────────────────────────
+function BookingInvoicesTab() {
+  const tok = () => localStorage.getItem("hms_token") || "";
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [legalEntityId, setLegalEntityId] = useState("all");
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: entities } = useQuery({
+    queryKey: ["legal-entities"],
+    queryFn: async () => {
+      const r = await fetch(`${API_BASE}/api/organizations/me`, { headers: { Authorization: `Bearer ${tok()}` } });
+      const org = await r.json();
+      return (org.legalEntities || []) as { id: number; name: string }[];
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: invoices, isLoading, refetch } = useQuery({
+    queryKey: ["booking-invoices", dateFrom, dateTo, legalEntityId],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      if (legalEntityId !== "all") params.set("legalEntityId", legalEntityId);
+      const r = await fetch(`${API_BASE}/api/invoices?${params}`, { headers: { Authorization: `Bearer ${tok()}` } });
+      return r.json() as Promise<any[]>;
+    },
+    staleTime: 30_000,
+  });
+
+  const handleDelete = async (id: number) => {
+    setDeleting(true);
+    try {
+      await fetch(`${API_BASE}/api/invoices/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${tok()}` },
+      });
+      toast({ title: "Рахунок видалено" });
+      setDeleteId(null);
+      refetch();
+    } catch {
+      toast({ title: "Помилка видалення", variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handlePrint = (inv: any) => {
+    if (!inv.invoiceItems || !inv.sellerSnapshot) {
+      toast({ title: "Немає даних для друку", description: "Рахунок не містить позицій або реквізитів", variant: "destructive" });
+      return;
+    }
+    import("@/components/booking/invoice-modal").then(({ buildPrintHtml }) => {
+      const data = {
+        invoiceNumber: inv.invoiceNumber,
+        date: inv.createdAt,
+        dueDate: inv.dueDate,
+        seller: inv.sellerSnapshot,
+        buyer: { name: inv.counterpartyName || "", taxCode: inv.counterpartyEdrpou || "", vatNumber: inv.buyerVatNumber || "", address: inv.buyerAddress || "" },
+        items: inv.invoiceItems || [],
+        booking: { guestName: inv.counterpartyName || "", checkIn: "", checkOut: "", paidAmount: 0 },
+        legalEntities: [],
+        legalEntityId: inv.legalEntityId,
+      };
+      const buyer = data.buyer;
+      const html = buildPrintHtml(data as any, buyer, data.items);
+      const w = window.open("", "_blank", "width=900,height=700");
+      if (!w) { toast({ title: "Дозвольте спливаючі вікна для друку", variant: "destructive" }); return; }
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 400);
+    });
+  };
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, { label: string; cls: string }> = {
+      pending: { label: "Очікує", cls: "bg-amber-100 text-amber-800" },
+      paid:    { label: "Оплачено", cls: "bg-emerald-100 text-emerald-800" },
+      draft:   { label: "Чернетка", cls: "bg-gray-100 text-gray-600" },
+      cancelled: { label: "Скасовано", cls: "bg-red-100 text-red-700" },
+      overdue: { label: "Прострочено", cls: "bg-red-100 text-red-800" },
+    };
+    const s = map[status] || { label: status, cls: "bg-gray-100 text-gray-500" };
+    return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${s.cls}`}>{s.label}</span>;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Від</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            className="h-9 px-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">До</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            className="h-9 px-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        {entities && entities.length > 1 && (
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Юр. особа</label>
+            <select
+              value={legalEntityId}
+              onChange={e => setLegalEntityId(e.target.value)}
+              className="h-9 px-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+            >
+              <option value="all">Усі</option>
+              {entities.map(e => <option key={e.id} value={String(e.id)}>{e.name}</option>)}
+            </select>
+          </div>
+        )}
+        <button
+          onClick={() => refetch()}
+          className="h-9 px-3 flex items-center gap-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5" /> Оновити
+        </button>
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-indigo-600" /></div>
+      ) : !invoices || invoices.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 py-20 text-gray-400">
+          <Receipt className="w-12 h-12 opacity-30" />
+          <div className="font-semibold">Рахунків ще немає</div>
+          <div className="text-sm">Рахунки формуються при відкритті бронювання</div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gray-50/50">
+                <TableHead className="text-xs font-semibold text-gray-500 pl-5">№ Рахунку</TableHead>
+                <TableHead className="text-xs font-semibold text-gray-500">Контрагент</TableHead>
+                <TableHead className="text-xs font-semibold text-gray-500">Дата</TableHead>
+                <TableHead className="text-xs font-semibold text-gray-500">Сума</TableHead>
+                <TableHead className="text-xs font-semibold text-gray-500">Статус</TableHead>
+                <TableHead className="text-xs font-semibold text-gray-500 pr-5 text-right">Дії</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(invoices || []).map((inv: any) => (
+                <TableRow key={inv.id} className="hover:bg-gray-50/50">
+                  <TableCell className="pl-5 font-mono text-sm font-semibold text-indigo-700">{inv.invoiceNumber}</TableCell>
+                  <TableCell className="text-sm text-gray-700 max-w-[200px] truncate">
+                    {inv.counterpartyName || inv.guestName || "—"}
+                    {inv.counterpartyEdrpou && <span className="text-gray-400 text-xs ml-1">({inv.counterpartyEdrpou})</span>}
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-500">{fmtDate(inv.createdAt)}</TableCell>
+                  <TableCell className="text-sm font-semibold text-gray-900">
+                    {fmtNum(inv.amount)} ₴
+                  </TableCell>
+                  <TableCell>{statusBadge(inv.status)}</TableCell>
+                  <TableCell className="pr-5">
+                    <div className="flex items-center gap-1 justify-end">
+                      <button
+                        onClick={() => handlePrint(inv)}
+                        title="Друкувати"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                      >
+                        <span className="sr-only">Друк</span>
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                          <rect x="6" y="14" width="12" height="8"/>
+                        </svg>
+                      </button>
+                      {deleteId === inv.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDelete(inv.id)}
+                            disabled={deleting}
+                            className="h-7 px-2 text-xs text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+                          >
+                            {deleting ? "..." : "Так"}
+                          </button>
+                          <button
+                            onClick={() => setDeleteId(null)}
+                            className="h-7 px-2 text-xs text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            Ні
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setDeleteId(inv.id)}
+                          title="Видалити"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ─── OVERVIEW TAB ─────────────────────────────────────────────────────────────
 function OverviewTab() {

@@ -8,6 +8,7 @@ Key capabilities include:
 - Multi-tenant architecture with robust authentication and role-based access control.
 - Management of properties, units, and reservations through an intuitive chessboard interface.
 - Financial operations such as quote/invoice generation and integration with payment layers like LiqPay.
+- **Booking Invoice (Рахунок-фактура)** — full invoice lifecycle from booking: generate invoice with buyer details (ЄДРПОУ, ПДВ номер, адреса), line items, seller snapshot from legal entity; save to DB via `POST /api/bookings/:id/invoice`; "Надіслати" modal for channel selection (Telegram/SMS/link); accounting "Сформовані рахунки" tab with date/entity filters, print (opens print window), and delete actions. `buildPrintHtml` exported for re-use. Endpoints: `POST /api/bookings/:id/invoice` (upsert), `GET/PUT/DELETE /api/invoices/:id`, `POST /api/invoices/:id/send`.
 - Dedicated dashboards for owners, unified inbox for communications, and guest portals.
 - Extensive integration and accounting export capabilities.
 - Advanced modules for revenue management, OTA channel management, online booking, AI automation, guest experience management, maintenance, F&B/Restaurant operations (unified with Kitchen Display), events, SPA & wellness, and rentals & activities.

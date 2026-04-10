@@ -1143,6 +1143,58 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/bookings/:bookingId/invoice — save invoice to DB
+router.post("/:bookingId/invoice", requireAuth, async (req, res) => {
+  try {
+    const bookingId = parseInt(req.params.bookingId);
+    const user = (req as any).user;
+    const { invoicesTable, legalEntitiesTable } = await import("@workspace/db/schema");
+    const {
+      invoiceNumber, date, dueDate, legalEntityId,
+      buyer, items, seller, bookingData,
+    } = req.body;
+
+    const total = (items || []).reduce((s: number, it: any) => s + Number(it.amount), 0);
+
+    // Check if invoice already exists for this booking
+    const existing = await db.select({ id: invoicesTable.id })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.bookingId, bookingId))
+      .limit(1);
+
+    const payload: any = {
+      invoiceNumber,
+      bookingId,
+      legalEntityId: legalEntityId || null,
+      counterpartyName: buyer?.name || null,
+      counterpartyEdrpou: buyer?.taxCode || null,
+      buyerAddress: buyer?.address || null,
+      buyerVatNumber: buyer?.vatNumber || null,
+      invoiceItems: items || [],
+      sellerSnapshot: seller || null,
+      amount: total.toFixed(2),
+      status: "pending",
+      dueDate: dueDate ? new Date(dueDate) : null,
+      createdById: user.id,
+      updatedAt: new Date(),
+    };
+
+    let saved;
+    if (existing.length > 0) {
+      const [upd] = await db.update(invoicesTable).set(payload)
+        .where(eq(invoicesTable.id, existing[0].id)).returning();
+      saved = upd;
+    } else {
+      const [ins] = await db.insert(invoicesTable).values(payload).returning();
+      saved = ins;
+    }
+
+    res.json({ id: saved.id, invoiceNumber: saved.invoiceNumber, status: saved.status });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/bookings/:bookingId/invoice
 router.get("/:bookingId/invoice", requireAuth, async (req, res) => {
   try {

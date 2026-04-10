@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import { uk } from "date-fns/locale";
 import {
   X, Printer, Edit3, Save, Plus, Trash2, ChevronDown, Building2,
-  FileText, Check,
+  FileText, Check, Send, MessageCircle, Phone, Link2, CheckCircle2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -64,6 +64,7 @@ export interface InvoiceData {
   buyer: InvoiceBuyer | null;
   items: InvoiceItem[];
   legalEntities?: { id: number; name: string; isDefault: boolean }[];
+  legalEntityId?: number | null;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -120,7 +121,7 @@ function EditableField({
 
 // ─── Print helper ───────────────────────────────────────────────────────────
 
-function buildPrintHtml(inv: InvoiceData, buyer: InvoiceBuyer, items: InvoiceItem[]): string {
+export function buildPrintHtml(inv: InvoiceData, buyer: InvoiceBuyer, items: InvoiceItem[]): string {
   const total = items.reduce((s, it) => s + it.amount, 0);
   const sellerBlock = inv.seller ? `
     <div class="party">
@@ -225,6 +226,8 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   const [items, setItems] = useState<InvoiceItem[]>(data.items);
   const [entityMenuOpen, setEntityMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(null);
+  const [showSendModal, setShowSendModal] = useState(false);
 
   const total = items.reduce((s, it) => s + it.amount, 0);
   const due = total - (data.booking.paidAmount || 0);
@@ -260,10 +263,27 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   const handleSave = async () => {
     setSaving(true);
     try {
-      toast({ title: "Збережено", description: "Реквізити покупця оновлено" });
+      const payload = {
+        invoiceNumber: data.invoiceNumber,
+        date: data.date,
+        dueDate: data.dueDate,
+        legalEntityId: data.legalEntityId,
+        buyer,
+        items,
+        seller: data.seller,
+      };
+      const resp = await fetch(`${API}/bookings/${bookingId}/invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok()}` },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error((await resp.json()).error || "save failed");
+      const saved = await resp.json();
+      setSavedInvoiceId(saved.id);
+      toast({ title: "Рахунок збережено", description: `№ ${data.invoiceNumber}` });
       setEditing(false);
-    } catch {
-      toast({ title: "Помилка збереження", variant: "destructive" });
+    } catch (e: any) {
+      toast({ title: "Помилка збереження", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -335,6 +355,14 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
                 className="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
               >
                 <Edit3 className="w-3.5 h-3.5" /> Редагувати
+              </button>
+            )}
+            {savedInvoiceId && (
+              <button
+                onClick={() => setShowSendModal(true)}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors"
+              >
+                <Send className="w-3.5 h-3.5" /> Надіслати
               </button>
             )}
             <button
@@ -597,6 +625,155 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
             </div>
           </div>
 
+        </div>
+      </div>
+
+      {/* ── Send Invoice Modal ─────────────────────────────────── */}
+      {showSendModal && savedInvoiceId && (
+        <SendInvoiceModal
+          invoiceId={savedInvoiceId}
+          invoiceNumber={data.invoiceNumber}
+          total={total}
+          guestName={buyer.name || data.booking.guestName || ""}
+          onClose={() => setShowSendModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Send Invoice Modal ──────────────────────────────────────────────────────
+
+interface SendInvoiceModalProps {
+  invoiceId: number;
+  invoiceNumber: string;
+  total: number;
+  guestName: string;
+  onClose: () => void;
+}
+
+function SendInvoiceModal({ invoiceId, invoiceNumber, total, guestName, onClose }: SendInvoiceModalProps) {
+  const { toast } = useToast();
+  const [channel, setChannel] = useState<"telegram" | "sms" | "link">("telegram");
+  const [recipient, setRecipient] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const uah = (n: number) => new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", minimumFractionDigits: 2 }).format(n);
+  const defaultMessage = `Рахунок № ${invoiceNumber} на суму ${uah(total)}.\nОтримувач: ${guestName}`;
+
+  const handleSend = async () => {
+    if (!recipient.trim()) {
+      toast({ title: "Вкажіть отримувача", variant: "destructive" });
+      return;
+    }
+    setSending(true);
+    try {
+      const resp = await fetch(`${API}/invoices/${invoiceId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok()}` },
+        body: JSON.stringify({ channel, recipient: recipient.trim(), message: defaultMessage }),
+      });
+      if (!resp.ok) throw new Error((await resp.json()).error || "send failed");
+      setSent(true);
+      toast({ title: "Надіслано!", description: `Рахунок відправлено через ${channel === "telegram" ? "Telegram" : channel === "sms" ? "SMS" : "посилання"}` });
+      setTimeout(onClose, 1500);
+    } catch (e: any) {
+      toast({ title: "Помилка надсилання", description: e.message, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const channels = [
+    { id: "telegram" as const, label: "Telegram", icon: MessageCircle, hint: "Username або @ім'я" },
+    { id: "sms" as const, label: "SMS", icon: Phone, hint: "+380XXXXXXXXX" },
+    { id: "link" as const, label: "Посилання", icon: Link2, hint: "Email отримувача" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center">
+              <Send className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <div className="font-bold text-gray-900 text-sm">Надіслати рахунок</div>
+              <div className="text-xs text-gray-400">№ {invoiceNumber} · {uah(total)}</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400 hover:bg-gray-50">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {sent ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <CheckCircle2 className="w-14 h-14 text-emerald-500" />
+              <div className="text-lg font-bold text-gray-900">Надіслано!</div>
+              <div className="text-sm text-gray-500">Рахунок відправлено отримувачу</div>
+            </div>
+          ) : (
+            <>
+              {/* Channel selection */}
+              <div className="grid grid-cols-3 gap-2">
+                {channels.map(ch => (
+                  <button
+                    key={ch.id}
+                    onClick={() => setChannel(ch.id)}
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 text-xs font-semibold transition-all ${
+                      channel === ch.id
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                        : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}
+                  >
+                    <ch.icon className="w-5 h-5" />
+                    {ch.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Recipient */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  {channels.find(c => c.id === channel)?.hint || "Отримувач"}
+                </label>
+                <input
+                  type="text"
+                  value={recipient}
+                  onChange={e => setRecipient(e.target.value)}
+                  placeholder={channels.find(c => c.id === channel)?.hint}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Message preview */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Повідомлення</label>
+                <div className="bg-gray-50 rounded-xl px-4 py-3 text-xs text-gray-600 whitespace-pre-wrap">{defaultMessage}</div>
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={handleSend}
+                  disabled={sending}
+                  className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+                >
+                  <Send className="w-4 h-4" />
+                  {sending ? "Надсилання..." : "Надіслати"}
+                </button>
+                <button
+                  onClick={onClose}
+                  className="flex items-center justify-center gap-2 h-10 px-4 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  Скасувати
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
