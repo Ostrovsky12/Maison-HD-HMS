@@ -51,12 +51,14 @@ router.post("/", requireAuth, requireRole("super_admin", "owner", "manager"), as
 
 router.put("/:userId", requireAuth, requireRole("super_admin", "owner", "manager"), async (req, res) => {
   const userId = parseInt(req.params.userId);
-  const { name, role, isActive, propertyId } = req.body;
+  const { name, role, isActive, propertyId, password } = req.body;
+  const passwordHash = password ? await hashPassword(password) : undefined;
   const [updatedUser] = await db.update(usersTable).set({
     ...(name !== undefined && { name }),
     ...(role !== undefined && { role }),
     ...(isActive !== undefined && { isActive }),
     ...(propertyId !== undefined && { propertyId }),
+    ...(passwordHash && { passwordHash }),
     updatedAt: new Date(),
   }).where(eq(usersTable.id, userId)).returning();
   if (!updatedUser) {
