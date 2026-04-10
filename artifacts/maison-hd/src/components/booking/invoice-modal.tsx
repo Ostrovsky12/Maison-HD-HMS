@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
 import {
@@ -291,7 +292,7 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
 
   const hasEntities = data.legalEntities && data.legalEntities.length > 1;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm overflow-y-auto py-6 px-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
 
@@ -638,7 +639,8 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
           onClose={() => setShowSendModal(false)}
         />
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
 
