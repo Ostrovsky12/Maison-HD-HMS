@@ -16,6 +16,8 @@ interface InvoiceItem {
   qty: number;
   unit: string;
   price: number;
+  discount?: number;
+  vatRate?: number;
   amount: number;
 }
 
@@ -46,6 +48,7 @@ export interface InvoiceData {
   invoiceNumber: string;
   date: string;
   dueDate?: string;
+  note?: string;
   booking: {
     id: number;
     checkIn: string;
@@ -124,88 +127,220 @@ function EditableField({
 
 export function buildPrintHtml(inv: InvoiceData, buyer: InvoiceBuyer, items: InvoiceItem[]): string {
   const total = items.reduce((s, it) => s + it.amount, 0);
+  const paid  = inv.booking.paidAmount || 0;
+  const due   = total - paid;
+
+  // ── VAT calculation ───────────────────────────────────────────────────────
+  const hasVat = items.some(it => (it.vatRate || 0) > 0);
+  const vatGroups: Record<number, number> = {};
+  items.forEach(it => {
+    const rate = it.vatRate || 0;
+    const net  = it.amount / (1 + rate / 100);
+    const vat  = it.amount - net;
+    vatGroups[rate] = (vatGroups[rate] || 0) + vat;
+  });
+
+  const vatRows = Object.entries(vatGroups).map(([rate, vatAmt]) => {
+    const r = Number(rate);
+    const base = items.filter(i => (i.vatRate || 0) === r).reduce((s, i) => s + i.amount / (1 + r / 100), 0);
+    return r === 0
+      ? `<div class="vat-row"><span>Без ПДВ:</span><span>${fmtMoney(base)} грн</span></div>`
+      : `<div class="vat-row"><span>ПДВ ${r}%:</span><span>${fmtMoney(vatAmt)} грн</span></div>`;
+  }).join("");
+
+  // ── Logo ──────────────────────────────────────────────────────────────────
+  const logoHtml = inv.seller?.logoUrl
+    ? `<img src="${inv.seller.logoUrl}" alt="logo" class="logo" />`
+    : "";
+
+  // ── Seller block ──────────────────────────────────────────────────────────
   const sellerBlock = inv.seller ? `
     <div class="party">
       <div class="party-label">Продавець</div>
       <div class="party-name">${inv.seller.name}</div>
-      ${inv.seller.type === "fop" ? "<div>ФОП</div>" : ""}
-      ${inv.seller.taxCode ? `<div>${inv.seller.type === "fop" ? "ІПН" : "ЄДРПОУ"}: <strong>${inv.seller.taxCode}</strong></div>` : ""}
-      ${inv.seller.vatNumber ? `<div>ПДВ: ${inv.seller.vatNumber}</div>` : ""}
-      ${inv.seller.address ? `<div>${inv.seller.address}</div>` : ""}
-      ${inv.seller.iban ? `<div>IBAN: <strong>${inv.seller.iban}</strong></div>` : ""}
-      ${inv.seller.bankName ? `<div>Банк: ${inv.seller.bankName}${inv.seller.mfo ? `, МФО ${inv.seller.mfo}` : ""}</div>` : ""}
-    </div>` : "";
+      ${inv.seller.type === "fop" ? `<div class="party-row">ФОП</div>` : ""}
+      ${inv.seller.taxCode ? `<div class="party-row">${inv.seller.type === "fop" ? "ІПН" : "ЄДРПОУ"}: <strong>${inv.seller.taxCode}</strong></div>` : ""}
+      ${inv.seller.vatNumber ? `<div class="party-row">Свідоцтво ПДВ: ${inv.seller.vatNumber}</div>` : ""}
+      ${inv.seller.address ? `<div class="party-row">${inv.seller.address}</div>` : ""}
+      ${inv.seller.iban ? `<div class="party-row">IBAN: <strong>${inv.seller.iban}</strong></div>` : ""}
+      ${inv.seller.bankName ? `<div class="party-row">Банк: ${inv.seller.bankName}${inv.seller.mfo ? ` · МФО ${inv.seller.mfo}` : ""}</div>` : ""}
+    </div>` : `<div class="party"></div>`;
+
+  // ── Buyer block ──────────────────────────────────────────────────────────
   const buyerBlock = `
     <div class="party">
       <div class="party-label">Покупець</div>
       <div class="party-name">${buyer.name || "—"}</div>
-      ${buyer.taxCode ? `<div>${buyer.taxCode.length <= 10 ? "ІПН/ЄДРПОУ" : "Код"}: <strong>${buyer.taxCode}</strong></div>` : ""}
-      ${buyer.vatNumber ? `<div>ПДВ: ${buyer.vatNumber}</div>` : ""}
-      ${buyer.address ? `<div>${buyer.address}</div>` : ""}
+      ${buyer.taxCode ? `<div class="party-row">${buyer.taxCode.length <= 10 ? "ІПН/ЄДРПОУ" : "Код"}: <strong>${buyer.taxCode}</strong></div>` : ""}
+      ${buyer.vatNumber ? `<div class="party-row">Свідоцтво ПДВ: ${buyer.vatNumber}</div>` : ""}
+      ${buyer.address ? `<div class="party-row">${buyer.address}</div>` : ""}
     </div>`;
-  const itemRows = items.map((it, i) => `
+
+  // ── Items rows ────────────────────────────────────────────────────────────
+  const itemRows = items.map((it, i) => {
+    const disc    = it.discount || 0;
+    const vatRate = it.vatRate  || 0;
+    const netAmt  = vatRate > 0 ? it.amount / (1 + vatRate / 100) : it.amount;
+    const vatAmt  = it.amount - netAmt;
+    return `
     <tr>
       <td class="center">${i + 1}</td>
       <td>
         <div>${it.description}</div>
         ${it.detail ? `<div class="detail">${it.detail}</div>` : ""}
       </td>
-      <td class="center">${it.qty}</td>
-      <td class="center">${it.unit}</td>
+      <td class="center">${it.qty}&nbsp;${it.unit}</td>
       <td class="right">${fmtMoney(it.price)}</td>
+      <td class="right">${disc > 0 ? fmtMoney(disc) : "—"}</td>
+      <td class="right">${fmtMoney(netAmt)}</td>
+      <td class="center">${vatRate > 0 ? vatRate + "%" : "Без ПДВ"}</td>
       <td class="right"><strong>${fmtMoney(it.amount)}</strong></td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
+
+  // ── Bank details ──────────────────────────────────────────────────────────
+  const bankHtml = inv.seller?.iban ? `
+    <div class="bank-block">
+      <div class="bank-label">Банківські реквізити</div>
+      <div><strong>IBAN:</strong> ${inv.seller.iban}</div>
+      ${inv.seller.bankName ? `<div><strong>Банк:</strong> ${inv.seller.bankName}${inv.seller.mfo ? ` · МФО ${inv.seller.mfo}` : ""}</div>` : ""}
+    </div>` : "";
+
+  // ── Note ─────────────────────────────────────────────────────────────────
+  const noteHtml = inv.note ? `
+    <div class="note-block">
+      <span class="note-label">Примітка:</span> ${inv.note}
+    </div>` : "";
+
+  // ── Signatures ────────────────────────────────────────────────────────────
+  const directorName  = inv.seller?.directorName  || "________________";
+  const accountantName = inv.seller?.accountantName || "________________";
 
   return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
 <title>Рахунок ${inv.invoiceNumber}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; background: #fff; padding: 24px 32px; }
-  h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-  .sub { color: #555; font-size: 11px; margin-bottom: 24px; }
-  .meta { display: flex; gap: 40px; margin-bottom: 24px; }
-  .meta-item { }
-  .meta-label { font-size: 10px; text-transform: uppercase; color: #888; }
-  .meta-val { font-weight: 600; font-size: 13px; }
-  .parties { display: flex; gap: 32px; margin-bottom: 24px; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 16px 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; background: #fff; padding: 24px 32px; max-width: 900px; margin: 0 auto; }
+  .header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 24px; }
+  .logo { max-height: 60px; max-width: 160px; object-fit: contain; }
+  .title-block h1 { font-size: 22px; font-weight: 800; color: #1e3a5f; }
+  .title-block .inv-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .meta-boxes { display: flex; gap: 12px; margin-bottom: 20px; }
+  .meta-box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; min-width: 110px; }
+  .meta-box.highlight { background: #1e3a5f; color: #fff; border-color: #1e3a5f; }
+  .meta-box .ml { font-size: 10px; text-transform: uppercase; color: #9ca3af; margin-bottom: 2px; }
+  .meta-box.highlight .ml { color: #93c5fd; }
+  .meta-box .mv { font-size: 14px; font-weight: 700; }
+  .bank-block { background: #f0f4ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-size: 11px; line-height: 1.6; }
+  .bank-label { font-size: 10px; text-transform: uppercase; color: #4f46e5; font-weight: 700; margin-bottom: 4px; }
+  .parties { display: flex; gap: 24px; margin-bottom: 20px; border-top: 2px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 14px 0; }
   .party { flex: 1; }
-  .party-label { font-size: 10px; text-transform: uppercase; color: #6b7280; margin-bottom: 4px; }
-  .party-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-  .party div { margin-bottom: 2px; color: #374151; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  thead tr { background: #f3f4f6; }
-  th { padding: 8px; font-size: 10px; text-transform: uppercase; color: #6b7280; font-weight: 600; border-bottom: 1px solid #e5e7eb; }
-  td { padding: 8px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  .party-label { font-size: 10px; text-transform: uppercase; color: #6b7280; font-weight: 700; margin-bottom: 6px; letter-spacing: .5px; }
+  .party-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; color: #111827; }
+  .party-row { margin-bottom: 2px; color: #374151; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }
+  thead tr { background: #1e3a5f; color: #fff; }
+  th { padding: 7px 8px; font-size: 10px; text-transform: uppercase; font-weight: 600; letter-spacing: .3px; }
+  td { padding: 7px 8px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f9fafb; }
   .center { text-align: center; }
   .right { text-align: right; }
-  .detail { font-size: 10px; color: #888; margin-top: 2px; }
-  .totals { display: flex; justify-content: flex-end; margin-bottom: 24px; }
-  .totals-box { min-width: 220px; }
-  .totals-row { display: flex; justify-content: space-between; padding: 4px 0; }
-  .totals-row.big { border-top: 2px solid #111; padding-top: 8px; font-weight: 700; font-size: 14px; }
-  .footer { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; }
-  .sig-line { border-top: 1px solid #999; min-width: 160px; margin-top: 32px; padding-top: 4px; font-size: 10px; color: #888; }
+  .detail { font-size: 10px; color: #9ca3af; margin-top: 2px; }
+  .vat-section { margin-bottom: 16px; }
+  .vat-section-label { font-size: 10px; text-transform: uppercase; color: #6b7280; font-weight: 700; margin-bottom: 6px; }
+  .vat-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; color: #374151; }
+  .totals { display: flex; justify-content: flex-end; margin-bottom: 20px; }
+  .totals-box { min-width: 240px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  .totals-row { display: flex; justify-content: space-between; padding: 6px 12px; font-size: 12px; border-bottom: 1px solid #f3f4f6; }
+  .totals-row:last-child { border-bottom: none; }
+  .totals-row.big { background: #1e3a5f; color: #fff; font-weight: 700; font-size: 14px; padding: 8px 12px; }
+  .note-block { font-size: 11px; color: #6b7280; margin-bottom: 20px; padding: 8px 12px; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 4px; }
+  .note-label { font-weight: 700; color: #92400e; }
+  .footer { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; gap: 16px; }
+  .sig-block { flex: 1; }
+  .sig-role { font-size: 10px; text-transform: uppercase; color: #6b7280; margin-bottom: 32px; }
+  .sig-line { border-top: 1px solid #374151; padding-top: 4px; font-size: 11px; color: #374151; font-weight: 600; }
   @media print { body { padding: 0; } }
 </style></head><body>
-  <h1>Рахунок-фактура № ${inv.invoiceNumber}</h1>
-  <div class="sub">Дата: ${fmtDate(inv.date)}${inv.dueDate ? ` · Дата оплати: ${fmtDate(inv.dueDate)}` : ""}</div>
+
+  <div class="header">
+    <div class="title-block">
+      ${logoHtml}
+      <h1>Рахунок-фактура</h1>
+      <div class="inv-sub">№ ${inv.invoiceNumber}</div>
+    </div>
+    ${inv.seller ? `<div style="text-align:right;font-size:11px;color:#6b7280;line-height:1.6">
+      <div style="font-weight:700;color:#111;font-size:13px">${inv.seller.name}</div>
+      ${inv.seller.taxCode ? `<div>${inv.seller.type === "fop" ? "ІПН" : "ЄДРПОУ"}: ${inv.seller.taxCode}</div>` : ""}
+      ${inv.seller.vatNumber ? `<div>ПДВ: ${inv.seller.vatNumber}</div>` : ""}
+    </div>` : ""}
+  </div>
+
+  <div class="meta-boxes">
+    <div class="meta-box">
+      <div class="ml">Дата</div>
+      <div class="mv">${fmtDate(inv.date)}</div>
+    </div>
+    <div class="meta-box">
+      <div class="ml">Номер</div>
+      <div class="mv">${inv.invoiceNumber}</div>
+    </div>
+    ${inv.dueDate ? `<div class="meta-box">
+      <div class="ml">Дата оплати</div>
+      <div class="mv">${fmtDate(inv.dueDate)}</div>
+    </div>` : ""}
+    <div class="meta-box highlight">
+      <div class="ml">До сплати</div>
+      <div class="mv">${fmtMoney(due)} грн</div>
+    </div>
+  </div>
+
+  ${bankHtml}
+
   <div class="parties">${sellerBlock}${buyerBlock}</div>
+
   <table>
     <thead><tr>
-      <th>#</th><th style="text-align:left">Послуга</th>
-      <th>К-сть</th><th>Од.</th><th class="right">Ціна</th><th class="right">Сума</th>
+      <th class="center">#</th>
+      <th>Послуга / Товар</th>
+      <th class="center">К-сть / Од.</th>
+      <th class="right">Ціна, грн</th>
+      <th class="right">Знижка, грн</th>
+      <th class="right">Сума без ПДВ</th>
+      <th class="center">Ставка ПДВ</th>
+      <th class="right">Сума, грн</th>
     </tr></thead>
     <tbody>${itemRows}</tbody>
   </table>
+
+  ${hasVat ? `<div class="vat-section">
+    <div class="vat-section-label">Розшифровка ПДВ</div>
+    ${vatRows}
+  </div>` : ""}
+
   <div class="totals"><div class="totals-box">
-    ${inv.booking.paidAmount > 0 ? `<div class="totals-row"><span>Оплачено:</span><span>${uah(inv.booking.paidAmount)}</span></div>` : ""}
-    <div class="totals-row big"><span>До сплати:</span><span>${uah(total - inv.booking.paidAmount)}</span></div>
+    ${paid > 0 ? `<div class="totals-row"><span>Оплачено раніше:</span><span>${fmtMoney(paid)} грн</span></div>` : ""}
+    <div class="totals-row"><span>Разом:</span><span>${fmtMoney(total)} грн</span></div>
+    <div class="totals-row big"><span>До сплати:</span><span>${fmtMoney(due)} грн</span></div>
   </div></div>
-  ${inv.seller?.iban ? `<div style="font-size:11px;color:#555;margin-bottom:24px">Реквізити для оплати: IBAN <strong>${inv.seller.iban}</strong>${inv.seller.bankName ? ` · ${inv.seller.bankName}` : ""}${inv.seller.mfo ? ` · МФО ${inv.seller.mfo}` : ""}</div>` : ""}
+
+  ${noteHtml}
+
   <div class="footer">
-    <div><div class="sig-line">Продавець / ${inv.seller?.directorName || "________________"}</div></div>
-    <div><div class="sig-line">Покупець / ________________</div></div>
+    <div class="sig-block">
+      <div class="sig-role">Керівник / Директор</div>
+      <div class="sig-line">${inv.seller?.directorName || "________________"}</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-role">Головний бухгалтер</div>
+      <div class="sig-line">${accountantName}</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-role">Покупець</div>
+      <div class="sig-line">________________</div>
+    </div>
   </div>
+
 </body></html>`;
 }
 
@@ -225,6 +360,7 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
     data.buyer || { name: data.booking.guestName || "", taxCode: "", vatNumber: "", address: "" }
   );
   const [items, setItems] = useState<InvoiceItem[]>(data.items);
+  const [note, setNote] = useState<string>(data.note || "");
   const [entityMenuOpen, setEntityMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(null);
@@ -234,7 +370,7 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   const due = total - (data.booking.paidAmount || 0);
 
   const handlePrint = () => {
-    const html = buildPrintHtml({ ...data, buyer }, buyer, items);
+    const html = buildPrintHtml({ ...data, buyer, note }, buyer, items);
     const w = window.open("", "_blank", "width=900,height=700");
     if (!w) { toast({ title: "Дозвольте спливаючі вікна для друку", variant: "destructive" }); return; }
     w.document.write(html);
@@ -246,15 +382,19 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   const updateItem = (i: number, field: keyof InvoiceItem, val: any) => {
     setItems(prev => {
       const next = [...prev];
-      const it = { ...next[i], [field]: field === "qty" || field === "price" ? Number(val) : val };
-      it.amount = Math.round(it.qty * it.price * 100) / 100;
+      const numFields = ["qty", "price", "discount", "vatRate"];
+      const it = { ...next[i], [field]: numFields.includes(field) ? Number(val) : val };
+      const base = Math.round(it.qty * it.price * 100) / 100;
+      const disc = it.discount || 0;
+      it.amount = Math.max(0, Math.round((base - disc) * 100) / 100);
       next[i] = it;
       return next;
     });
   };
 
   const addItem = () => {
-    setItems(prev => [...prev, { description: "Додаткова послуга", detail: "", qty: 1, unit: "шт", price: 0, amount: 0 }]);
+    const defaultVat = items[0]?.vatRate ?? 0;
+    setItems(prev => [...prev, { description: "Додаткова послуга", detail: "", qty: 1, unit: "шт", price: 0, discount: 0, vatRate: defaultVat, amount: 0 }]);
   };
 
   const removeItem = (i: number) => {
@@ -269,6 +409,7 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
         date: data.date,
         dueDate: data.dueDate,
         legalEntityId: data.legalEntityId,
+        note,
         buyer,
         items,
         seller: data.seller,
@@ -492,10 +633,12 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
                 <tr className="border-b-2 border-gray-200">
                   <th className="text-left text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 pr-3 w-6">#</th>
                   <th className="text-left text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2">Послуга</th>
-                  <th className="text-center text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-16">К-сть</th>
-                  <th className="text-center text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-12">Од.</th>
-                  <th className="text-right text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-28">Ціна</th>
-                  <th className="text-right text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-28">Сума</th>
+                  <th className="text-center text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-14">К-сть</th>
+                  <th className="text-center text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-10">Од.</th>
+                  <th className="text-right text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-24">Ціна</th>
+                  <th className="text-right text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-20">Знижка</th>
+                  <th className="text-center text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-20">ПДВ %</th>
+                  <th className="text-right text-[10px] uppercase tracking-wider text-gray-400 font-semibold pb-2 w-24">Сума</th>
                   {editing && <th className="w-8" />}
                 </tr>
               </thead>
@@ -545,12 +688,41 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
                           type="number"
                           value={it.price}
                           onChange={e => updateItem(i, "price", e.target.value)}
-                          className="w-24 text-right border-b border-dashed border-indigo-300 bg-indigo-50/40 focus:outline-none"
+                          className="w-20 text-right border-b border-dashed border-indigo-300 bg-indigo-50/40 focus:outline-none"
                           min={0}
                           step={0.01}
                         />
                       ) : (
                         <span className="text-gray-700">{fmtMoney(it.price)}</span>
+                      )}
+                    </td>
+                    <td className="py-3 text-right">
+                      {editing ? (
+                        <input
+                          type="number"
+                          value={it.discount || 0}
+                          onChange={e => updateItem(i, "discount", e.target.value)}
+                          className="w-16 text-right border-b border-dashed border-indigo-300 bg-indigo-50/40 focus:outline-none"
+                          min={0}
+                          step={0.01}
+                        />
+                      ) : (
+                        <span className="text-gray-500">{(it.discount || 0) > 0 ? fmtMoney(it.discount!) : "—"}</span>
+                      )}
+                    </td>
+                    <td className="py-3 text-center">
+                      {editing ? (
+                        <select
+                          value={it.vatRate ?? 0}
+                          onChange={e => updateItem(i, "vatRate", e.target.value)}
+                          className="w-16 text-center border-b border-dashed border-indigo-300 bg-indigo-50/40 focus:outline-none text-xs"
+                        >
+                          <option value={0}>Без ПДВ</option>
+                          <option value={7}>7%</option>
+                          <option value={20}>20%</option>
+                        </select>
+                      ) : (
+                        <span className="text-gray-500 text-xs">{(it.vatRate || 0) > 0 ? `${it.vatRate}%` : "Без ПДВ"}</span>
                       )}
                     </td>
                     <td className="py-3 text-right font-semibold text-gray-900">{fmtMoney(it.amount)}</td>
@@ -610,18 +782,46 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
             </div>
           )}
 
+          {/* Note */}
+          {(editing || !!note) && (
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
+                Примітка {editing && <span className="text-indigo-400 normal-case font-normal">(необов'язково)</span>}
+              </div>
+              {editing ? (
+                <textarea
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  placeholder="Наприклад: Без ПДВ / ФОП на спрощеній системі / умови оплати..."
+                  rows={2}
+                  className="w-full border border-dashed border-indigo-300 bg-indigo-50/40 rounded-lg px-3 py-2 text-xs text-gray-700 focus:outline-none focus:border-indigo-500 resize-none"
+                />
+              ) : (
+                <div className="text-xs text-gray-500 bg-amber-50 border-l-2 border-amber-300 px-3 py-2 rounded">{note}</div>
+              )}
+            </div>
+          )}
+
           {/* Signature area */}
-          <div className="flex justify-between pt-4 border-t border-gray-100">
-            <div className="space-y-8">
-              <div className="text-xs text-gray-500">Від постачальника:</div>
-              <div className="border-t border-gray-300 pt-1 text-[10px] text-gray-400 min-w-[180px]">
-                {data.seller?.directorName ? `${data.seller.directorName} / підпис` : "ПІБ / підпис"}
+          <div className="flex justify-between gap-4 pt-4 border-t border-gray-100">
+            <div className="flex-1 space-y-6">
+              <div className="text-[10px] uppercase text-gray-400 font-bold tracking-wider">Керівник / Директор</div>
+              <div className="border-t border-gray-300 pt-1 text-[10px] text-gray-500 font-medium">
+                {data.seller?.directorName || "________________"}
               </div>
             </div>
-            <div className="space-y-8 text-right">
-              <div className="text-xs text-gray-500">Від покупця:</div>
-              <div className="border-t border-gray-300 pt-1 text-[10px] text-gray-400 min-w-[180px] text-left">
-                ПІБ / підпис
+            {data.seller?.accountantName && (
+              <div className="flex-1 space-y-6">
+                <div className="text-[10px] uppercase text-gray-400 font-bold tracking-wider">Гол. бухгалтер</div>
+                <div className="border-t border-gray-300 pt-1 text-[10px] text-gray-500 font-medium">
+                  {data.seller.accountantName}
+                </div>
+              </div>
+            )}
+            <div className="flex-1 space-y-6">
+              <div className="text-[10px] uppercase text-gray-400 font-bold tracking-wider">Покупець</div>
+              <div className="border-t border-gray-300 pt-1 text-[10px] text-gray-400">
+                ________________
               </div>
             </div>
           </div>
