@@ -8,7 +8,7 @@ import {
   bookingsTable,
   addonsTable,
 } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { logger } from "./logger.js";
 
@@ -239,5 +239,57 @@ export async function autoSeedIfEmpty() {
     );
   } catch (err) {
     logger.error({ err }, "Auto-seed failed");
+  }
+}
+
+// Runs on EVERY startup — ensures super_admin credentials match env vars
+export async function syncSuperAdmin() {
+  try {
+    const saEmail = process.env.SUPER_ADMIN_EMAIL || "owner@maisonhd.com";
+    const saPassword = process.env.SUPER_ADMIN_PASSWORD;
+
+    // Ensure display_password column exists (safe migration for older prod DBs)
+    await db.execute(sql`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS display_password varchar(255)
+    `);
+
+    const [existing] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.role, "super_admin"))
+      .limit(1);
+
+    if (!existing) {
+      logger.warn("No super_admin found — creating one");
+      await db.insert(usersTable).values({
+        email: saEmail,
+        name: "Super Admin",
+        passwordHash: await hp(saPassword || "Maison2026!"),
+        role: "super_admin",
+        organizationId: null,
+      });
+      return;
+    }
+
+    const updates: Record<string, any> = {};
+
+    if (existing.email !== saEmail) {
+      // Free the target email if taken by another user
+      await db.execute(
+        sql`UPDATE users SET email = 'legacy-' || email WHERE email = ${saEmail} AND id != ${existing.id}`
+      );
+      updates.email = saEmail;
+    }
+
+    if (saPassword) {
+      updates.passwordHash = await hp(saPassword);
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await db.update(usersTable).set(updates).where(eq(usersTable.id, existing.id));
+      logger.info({ email: saEmail }, "Super admin credentials synced from env");
+    }
+  } catch (err) {
+    logger.error({ err }, "syncSuperAdmin failed");
   }
 }

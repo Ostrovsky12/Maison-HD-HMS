@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { autoSeedIfEmpty } from "./lib/auto-seed";
+import { autoSeedIfEmpty, syncSuperAdmin } from "./lib/auto-seed";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
@@ -205,6 +205,7 @@ async function bootstrap() {
     logger.info("Schema ready.");
 
     await autoSeedIfEmpty();
+    await syncSuperAdmin();
   } catch (err) {
     logger.error({ err }, "Bootstrap error");
   }
