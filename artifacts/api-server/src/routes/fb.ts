@@ -577,7 +577,10 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const orderId = parseInt(req.params.id);
-    const { paymentMethod = "cash", paidAmount, discountAmount = 0, notes } = req.body;
+    const {
+      paymentMethod = "cash", paidAmount, discountAmount = 0, notes,
+      tipAmount = 0, tipPct = 0, legalEntityId,
+    } = req.body;
     const db_ = (db as any).$client;
 
     // Get order
@@ -591,7 +594,9 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       res.status(400).json({ error: "Order already closed" }); return;
     }
 
-    const finalAmount = Number(order.total_amount) - Number(discountAmount);
+    const baseAmount  = Number(order.total_amount) - Number(discountAmount);
+    const tip         = Number(tipAmount) || 0;
+    const finalAmount = baseAmount + tip;
 
     // Generate receipt number
     const cnt = await db_.query(
@@ -599,14 +604,17 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     );
     const receiptNum = `R-${orgId}-${String((cnt.rows[0]?.cnt || 0) + 1).padStart(5, "0")}`;
 
-    // Update order
+    // Update order (includes tip + legal entity)
     const r = await db_.query(
       `UPDATE fb_orders SET
          status = 'closed', paid_amount = $1, payment_method = $2,
          discount_amount = $3, receipt_number = $4, closed_at = NOW(),
-         notes = COALESCE($5, notes), updated_at = NOW()
-       WHERE id = $6 AND organization_id = $7 RETURNING *`,
-      [paidAmount ?? finalAmount, paymentMethod, discountAmount, receiptNum, notes || null, orderId, orgId]
+         tip_amount = $5, tip_pct = $6,
+         legal_entity_id = COALESCE($7, legal_entity_id),
+         notes = COALESCE($8, notes), updated_at = NOW()
+       WHERE id = $9 AND organization_id = $10 RETURNING *`,
+      [paidAmount ?? finalAmount, paymentMethod, discountAmount, receiptNum,
+       tip, tipPct || 0, legalEntityId || null, notes || null, orderId, orgId]
     );
 
     // Free the table
@@ -617,23 +625,92 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       );
     }
 
-    // Update cashbox session if cash payment
+    // Update cashbox session if cash payment (include tip in cash flow)
     if (paymentMethod === "cash") {
+      const cashIn = paidAmount ?? finalAmount;
       await db_.query(
         `UPDATE cashbox_sessions SET
            cash_in = cash_in + $1, expected_balance = expected_balance + $1, updated_at = NOW()
          WHERE organization_id = $2 AND status = 'open'`,
-        [paidAmount ?? finalAmount, orgId]
+        [cashIn, orgId]
       );
     }
 
     res.json({
-      order: r.rows[0],
+      order:         r.rows[0],
       receiptNumber: receiptNum,
+      tipAmount:     tip,
       change: paymentMethod === "cash" && paidAmount
         ? Math.max(0, Number(paidAmount) - finalAmount)
         : 0,
     });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POS PRINTERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+router.get("/printers", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `SELECT * FROM pos_printers WHERE organization_id = $1 ORDER BY printer_type, name`, [orgId]
+    );
+    res.json({ printers: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/printers", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { name, printerType = "kitchen_general", ipAddress, port = 9100, usbPath, autoPrint = true, copies = 1, notes } = req.body;
+    if (!name) { res.status(400).json({ error: "name required" }); return; }
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `INSERT INTO pos_printers (organization_id, name, printer_type, ip_address, port, usb_path, auto_print, copies, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [orgId, name, printerType, ipAddress||null, port, usbPath||null, autoPrint, copies, notes||null]
+    );
+    res.status(201).json({ printer: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/printers/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const { name, printerType, ipAddress, port, usbPath, isActive, autoPrint, copies, notes } = req.body;
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `UPDATE pos_printers SET
+         name         = COALESCE($1, name),
+         printer_type = COALESCE($2, printer_type),
+         ip_address   = COALESCE($3, ip_address),
+         port         = COALESCE($4, port),
+         usb_path     = COALESCE($5, usb_path),
+         is_active    = COALESCE($6, is_active),
+         auto_print   = COALESCE($7, auto_print),
+         copies       = COALESCE($8, copies),
+         notes        = COALESCE($9, notes),
+         updated_at   = NOW()
+       WHERE id = $10 AND organization_id = $11 RETURNING *`,
+      [name||null, printerType||null, ipAddress||null, port??null, usbPath||null,
+       isActive??null, autoPrint??null, copies??null, notes||null, id, orgId]
+    );
+    if (!r.rows.length) { res.status(404).json({ error: "Not found" }); return; }
+    res.json({ printer: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/printers/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const db_ = (db as any).$client;
+    await db_.query(`UPDATE pos_printers SET is_active = false WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

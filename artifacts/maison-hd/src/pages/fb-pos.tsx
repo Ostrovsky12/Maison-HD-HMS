@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +14,7 @@ import {
   ShoppingCart, CreditCard, Banknote, Smartphone, X, Plus, Minus,
   Clock, Users, CheckCircle2, LogIn, LogOut, Loader2, RefreshCw,
   Receipt, TrendingUp, Table2, UtensilsCrossed, Percent, Hash,
-  ChevronRight, AlertCircle,
+  ChevronRight, AlertCircle, Heart, Building2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -34,6 +35,15 @@ type Category = { id: number; name: string; icon?: string; sort_order: number };
 type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string };
 type OrderItem = { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string };
 type Order = { id: number; table_id?: number; order_type: string; guest_name?: string; status: string; total_amount: number; items?: OrderItem[] };
+type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean };
+
+const TIP_OPTIONS = [
+  { label: "Без чайових", pct: 0 },
+  { label: "5%",  pct: 5  },
+  { label: "7%",  pct: 7  },
+  { label: "10%", pct: 10 },
+  { label: "15%", pct: 15 },
+];
 
 const PAYMENT_METHODS = [
   { key: "cash",      label: "Готівка",      icon: Banknote,   color: "text-emerald-600" },
