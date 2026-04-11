@@ -923,6 +923,156 @@ router.post("/:code/review", async (req, res) => {
   }
 });
 
+// GET /api/guest/:code/documents/:type/download — generate printable HTML document
+router.get("/:code/documents/:type/download", async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase();
+    const type = req.params.type;
+
+    const [booking] = await db.select({
+      id: bookingsTable.id, bookingRef: bookingsTable.bookingRef,
+      firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
+      checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
+      totalAmount: bookingsTable.totalAmount, paidAmount: bookingsTable.paidAmount,
+      paymentStatus: bookingsTable.paymentStatus, checkinFormSubmitted: bookingsTable.checkinFormSubmitted,
+      checkinFormData: bookingsTable.checkinFormData, unitId: bookingsTable.unitId,
+      adults: bookingsTable.adults, phone: bookingsTable.phone, email: bookingsTable.email,
+    }).from(bookingsTable).where(eq(bookingsTable.guestAccessCode, code));
+    if (!booking) return res.status(404).send("<h1>Не знайдено</h1>");
+
+    const [unit] = await db.select({ name: unitsTable.name, propertyId: unitsTable.propertyId })
+      .from(unitsTable).where(eq(unitsTable.id, booking.unitId!));
+    const [property] = unit ? await db.select({ name: propertiesTable.name, address: propertiesTable.address, organizationId: propertiesTable.organizationId })
+      .from(propertiesTable).where(eq(propertiesTable.id, unit.propertyId)) : [null];
+    const [org] = property ? await db.select({ name: organizationsTable.name })
+      .from(organizationsTable).where(eq(organizationsTable.id, property.organizationId)) : [null];
+
+    const guestName = `${booking.firstName || ""} ${booking.lastName || ""}`.trim() || "Гість";
+    const ref = booking.bookingRef || `#${booking.id}`;
+    const propName = property?.name || "";
+    const orgName = org?.name || "";
+    const total = parseFloat(booking.totalAmount || "0");
+    const paid = parseFloat(booking.paidAmount || "0");
+    const balance = Math.max(0, total - paid);
+    const fd = (booking.checkinFormData as Record<string, string>) || {};
+    const checkIn = booking.checkIn ? new Date(booking.checkIn).toLocaleDateString("uk-UA", { day: "2-digit", month: "long", year: "numeric" }) : "—";
+    const checkOut = booking.checkOut ? new Date(booking.checkOut).toLocaleDateString("uk-UA", { day: "2-digit", month: "long", year: "numeric" }) : "—";
+    const today = new Date().toLocaleDateString("uk-UA", { day: "2-digit", month: "long", year: "numeric" });
+
+    const css = `
+      body{font-family:'Helvetica Neue',Arial,sans-serif;margin:0;padding:32px;color:#1a1a1a;font-size:14px}
+      .logo{font-size:22px;font-weight:800;letter-spacing:-0.5px;color:#4f46e5}
+      .subtitle{color:#6b7280;font-size:12px;margin-top:2px}
+      h1{font-size:20px;font-weight:700;margin:24px 0 4px}
+      .doc-type{display:inline-block;background:#f0f0ff;color:#4f46e5;font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;margin-bottom:20px}
+      table{width:100%;border-collapse:collapse;margin:12px 0}
+      td{padding:8px 10px;border-bottom:1px solid #f0f0f0;font-size:13px}
+      td:first-child{color:#6b7280;width:45%}
+      td:last-child{font-weight:600;text-align:right}
+      .total{background:#f8f8ff;border-radius:10px;padding:14px 16px;margin:16px 0}
+      .total-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px}
+      .total-row.debt{color:#dc2626;font-weight:700;font-size:15px;border-top:1px solid #e5e7eb;margin-top:8px;padding-top:8px}
+      .footer{margin-top:40px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
+      .stamp{display:inline-block;border:2px solid #16a34a;color:#16a34a;padding:6px 18px;border-radius:6px;font-weight:700;font-size:13px;transform:rotate(-3deg);margin-top:8px}
+      @media print{.no-print{display:none}body{padding:16px}}
+    `;
+    const printBtn = `<div class="no-print" style="margin-bottom:24px"><button onclick="window.print()" style="background:#4f46e5;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">🖨️ Друкувати / Зберегти PDF</button></div>`;
+    const header = `<div class="logo">${orgName || "Maison HD"}</div><div class="subtitle">${propName}</div>`;
+    const footerHtml = `<div class="footer">${orgName} · ${propName} · ${property?.address || ""}<br>Дата формування: ${today}</div>`;
+    const autoprint = `<script>window.onload=function(){if(document.referrer){}}</script>`;
+
+    let body = "";
+
+    if (type === "confirmation") {
+      body = `
+        <h1>Підтвердження бронювання</h1>
+        <span class="doc-type">📄 Підтвердження</span>
+        <table>
+          <tr><td>Номер бронювання</td><td>${ref}</td></tr>
+          <tr><td>Гість</td><td>${guestName}</td></tr>
+          <tr><td>Телефон</td><td>${booking.phone || "—"}</td></tr>
+          <tr><td>Email</td><td>${booking.email || "—"}</td></tr>
+          <tr><td>Номер</td><td>${unit?.name || "—"}</td></tr>
+          <tr><td>Заїзд</td><td>${checkIn}</td></tr>
+          <tr><td>Виїзд</td><td>${checkOut}</td></tr>
+          <tr><td>Кількість гостей</td><td>${booking.adults || 1}</td></tr>
+        </table>
+        <div class="stamp">✓ ПІДТВЕРДЖЕНО</div>
+      `;
+    } else if (type === "invoice") {
+      body = `
+        <h1>Рахунок-фактура</h1>
+        <span class="doc-type">🧾 Рахунок</span>
+        <table>
+          <tr><td>Номер рахунку</td><td>INV-${ref}</td></tr>
+          <tr><td>Гість</td><td>${guestName}</td></tr>
+          <tr><td>Бронювання</td><td>${ref}</td></tr>
+          <tr><td>Номер</td><td>${unit?.name || "—"}</td></tr>
+          <tr><td>Заїзд</td><td>${checkIn}</td></tr>
+          <tr><td>Виїзд</td><td>${checkOut}</td></tr>
+          <tr><td>Дата рахунку</td><td>${today}</td></tr>
+        </table>
+        <div class="total">
+          <div class="total-row"><span>Сума за проживання</span><span>${total.toLocaleString("uk-UA")} ₴</span></div>
+          <div class="total-row"><span>Оплачено</span><span>${paid.toLocaleString("uk-UA")} ₴</span></div>
+          ${balance > 0 ? `<div class="total-row debt"><span>До сплати</span><span>${balance.toLocaleString("uk-UA")} ₴</span></div>` : '<div class="total-row" style="color:#16a34a;font-weight:700"><span>ОПЛАЧЕНО</span><span>✓</span></div>'}
+        </div>
+      `;
+    } else if (type === "registration") {
+      const fields = [
+        ["Ім'я", fd.firstName || booking.firstName],
+        ["Прізвище", fd.lastName || booking.lastName],
+        ["По-батькові", fd.middleName],
+        ["Телефон", fd.phone || booking.phone],
+        ["Email", fd.email || booking.email],
+        ["Дата народження", fd.birthDate],
+        ["Тип документа", fd.passportType],
+        ["Номер документа", fd.passportNumber],
+        ["Час заїзду", fd.arrivalTime],
+        ["Номер авто", fd.carNumber],
+        ["Особливі побажання", fd.specialRequests],
+      ].filter(([, v]) => v);
+      body = `
+        <h1>Реєстраційна картка гостя</h1>
+        <span class="doc-type">📋 Чекін</span>
+        <table>
+          ${fields.map(([l, v]) => `<tr><td>${l}</td><td>${v}</td></tr>`).join("")}
+          <tr><td>Бронювання</td><td>${ref}</td></tr>
+          <tr><td>Заїзд</td><td>${checkIn}</td></tr>
+          <tr><td>Виїзд</td><td>${checkOut}</td></tr>
+        </table>
+        <div class="stamp">✓ ЗАРЕЄСТРОВАНО</div>
+      `;
+    } else if (type === "receipt") {
+      body = `
+        <h1>Квитанція про оплату</h1>
+        <span class="doc-type">💳 Квитанція</span>
+        <table>
+          <tr><td>Квитанція №</td><td>RCP-${ref}</td></tr>
+          <tr><td>Гість</td><td>${guestName}</td></tr>
+          <tr><td>Бронювання</td><td>${ref}</td></tr>
+          <tr><td>Номер</td><td>${unit?.name || "—"}</td></tr>
+          <tr><td>Дата</td><td>${today}</td></tr>
+        </table>
+        <div class="total">
+          <div class="total-row"><span>Загальна сума</span><span>${total.toLocaleString("uk-UA")} ₴</span></div>
+          <div class="total-row" style="color:#16a34a;font-weight:700"><span>Оплачено</span><span>${paid.toLocaleString("uk-UA")} ₴</span></div>
+        </div>
+        <div class="stamp">✓ ОПЛАЧЕНО</div>
+      `;
+    } else {
+      return res.status(404).send("<h1>Документ не знайдено</h1>");
+    }
+
+    const html = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8"><title>${orgName}</title><style>${css}</style></head><body>${printBtn}${header}${body}${footerHtml}${autoprint}</body></html>`;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("<h1>Помилка сервера</h1>");
+  }
+});
+
 // GET /api/guest/:code/documents — digital documents
 router.get("/:code/documents", async (req, res) => {
   try {

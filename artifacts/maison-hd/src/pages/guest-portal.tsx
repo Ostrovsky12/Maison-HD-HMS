@@ -1207,9 +1207,15 @@ export default function GuestPortalPage() {
                         {doc.generatedAt && <p className="text-xs text-gray-400">{new Date(doc.generatedAt).toLocaleDateString("uk")}</p>}
                       </div>
                       {doc.available ? (
-                        <Button size="sm" variant="outline" className="h-8 text-xs shrink-0">
-                          <Download className="h-3.5 w-3.5 mr-1" />Скачати
-                        </Button>
+                        <a
+                          href={`${API}/guest/${code}/documents/${doc.type}/download`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Button size="sm" variant="outline" className="h-8 text-xs shrink-0">
+                            <Download className="h-3.5 w-3.5 mr-1" />Скачати
+                          </Button>
+                        </a>
                       ) : (
                         <Badge className="bg-gray-100 text-gray-400 text-xs shrink-0">Недоступно</Badge>
                       )}
@@ -1232,59 +1238,120 @@ export default function GuestPortalPage() {
         )}
 
         {/* ═══════════════ PAYMENT ═══════════════ */}
-        {activeTab === "payment" && (
-          <div className="space-y-3">
-            <div className="bg-white rounded-2xl shadow-sm p-4">
-              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-green-500" />Оплата
-              </h3>
-              <div className="space-y-2">
-                {[
-                  { label: "Всього за проживання", value: `${parseFloat(booking.totalAmount || "0").toLocaleString("uk")} ₴` },
-                  { label: "Оплачено", value: `${parseFloat(booking.paidAmount || "0").toLocaleString("uk")} ₴` },
-                  { label: "Залишок", value: `${Math.max(0, parseFloat(booking.totalAmount || "0") - parseFloat(booking.paidAmount || "0")).toLocaleString("uk")} ₴` },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex justify-between text-sm border-b border-gray-50 pb-2 last:border-0">
-                    <span className="text-gray-500">{label}</span>
-                    <span className="font-bold text-gray-800">{value}</span>
-                  </div>
-                ))}
-                <div className="pt-1">
-                  <Badge className={paymentStatusMap[booking.paymentStatus]?.color || "bg-gray-100"}>
-                    {paymentStatusMap[booking.paymentStatus]?.label || booking.paymentStatus}
-                  </Badge>
+        {activeTab === "payment" && (() => {
+          const bookingTotal = parseFloat(booking.totalAmount || "0");
+          const bookingPaid = parseFloat(booking.paidAmount || "0");
+          const bookingBalance = Math.max(0, bookingTotal - bookingPaid);
+          const paidOrders = orders.filter(o => o.status === "paid");
+          const unpaidOrders = orders.filter(o => o.status !== "paid" && o.status !== "cancelled" && parseFloat(o.totalPrice || "0") > 0);
+          const servicesDebt = unpaidOrders.reduce((s: number, o: any) => s + parseFloat(o.totalPrice || "0"), 0);
+          const servicesPaid = paidOrders.reduce((s: number, o: any) => s + parseFloat(o.totalPrice || "0"), 0);
+          const totalDebt = bookingBalance + servicesDebt;
+          const hasDebt = totalDebt > 0;
+          return (
+            <div className="space-y-3">
+              {/* Total debt banner */}
+              {hasDebt && (
+                <div className="bg-gradient-to-r from-red-500 to-orange-500 rounded-2xl p-4 text-white">
+                  <p className="text-xs font-semibold opacity-80 uppercase tracking-wide">Загальна заборгованість</p>
+                  <p className="text-3xl font-bold mt-1">{totalDebt.toLocaleString("uk-UA")} ₴</p>
+                  {servicesDebt > 0 && (
+                    <p className="text-xs opacity-75 mt-1">
+                      Проживання: {bookingBalance.toLocaleString("uk-UA")} ₴ · Послуги: {servicesDebt.toLocaleString("uk-UA")} ₴
+                    </p>
+                  )}
+                  {booking.paymentLink && (
+                    <a href={booking.paymentLink} target="_blank" rel="noopener noreferrer" className="block mt-3">
+                      <button className="w-full bg-white text-red-600 font-bold rounded-xl py-2.5 text-sm flex items-center justify-center gap-2 hover:bg-red-50 transition">
+                        <CreditCard className="h-4 w-4" />Сплатити {totalDebt.toLocaleString("uk-UA")} ₴ онлайн
+                      </button>
+                    </a>
+                  )}
                 </div>
-              </div>
-            </div>
+              )}
+              {!hasDebt && (
+                <div className="bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl p-4 text-white text-center">
+                  <p className="text-2xl font-bold">✓ Повністю сплачено</p>
+                  <p className="text-xs opacity-80 mt-1">Дякуємо за своєчасну оплату!</p>
+                </div>
+              )}
 
-            {booking.paymentStatus !== "paid" && booking.paymentLink && (
-              <a href={booking.paymentLink} target="_blank" rel="noopener noreferrer">
-                <Button className="w-full bg-green-600 hover:bg-green-700">
-                  <CreditCard className="h-4 w-4 mr-2" />Сплатити онлайн
-                </Button>
-              </a>
-            )}
-
-            {/* Service orders breakdown */}
-            {orders.filter(o => parseFloat(o.totalPrice || 0) > 0).length > 0 && (
+              {/* Booking breakdown */}
               <div className="bg-white rounded-2xl shadow-sm p-4">
-                <h3 className="font-semibold text-sm mb-3">Додаткові послуги</h3>
-                <div className="space-y-2">
-                  {orders.filter(o => parseFloat(o.totalPrice || 0) > 0).map((order: any) => (
-                    <div key={order.id} className="flex justify-between text-sm border-b border-gray-50 pb-1 last:border-0">
-                      <span className="text-gray-600">{order.serviceName} × {order.quantity}</span>
-                      <span className="font-medium">{parseFloat(order.totalPrice || 0).toLocaleString("uk")} ₴</span>
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <CreditCard className="h-4 w-4 text-blue-500" />Проживання
+                </h3>
+                <div className="space-y-1.5">
+                  {[
+                    { label: "Сума за проживання", value: `${bookingTotal.toLocaleString("uk-UA")} ₴` },
+                    { label: "Оплачено", value: `${bookingPaid.toLocaleString("uk-UA")} ₴`, green: true },
+                    { label: "Залишок", value: `${bookingBalance.toLocaleString("uk-UA")} ₴`, red: bookingBalance > 0 },
+                  ].map(({ label, value, green, red }) => (
+                    <div key={label} className="flex justify-between text-sm border-b border-gray-50 pb-1.5 last:border-0">
+                      <span className="text-gray-500">{label}</span>
+                      <span className={`font-bold ${green ? "text-green-600" : red ? "text-red-600" : "text-gray-800"}`}>{value}</span>
                     </div>
                   ))}
-                  <div className="flex justify-between text-sm font-bold pt-1">
-                    <span>Разом послуги</span>
-                    <span>{orders.filter(o => parseFloat(o.totalPrice || 0) > 0).reduce((s, o) => s + parseFloat(o.totalPrice || 0), 0).toLocaleString("uk")} ₴</span>
+                  <div className="pt-1">
+                    <Badge className={paymentStatusMap[booking.paymentStatus]?.color || "bg-gray-100"}>
+                      {paymentStatusMap[booking.paymentStatus]?.label || booking.paymentStatus}
+                    </Badge>
                   </div>
                 </div>
               </div>
-            )}
-          </div>
-        )}
+
+              {/* Service orders breakdown */}
+              {orders.filter((o: any) => parseFloat(o.totalPrice || "0") > 0).length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm p-4">
+                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                    <ShoppingBag className="h-4 w-4 text-purple-500" />Додаткові послуги
+                  </h3>
+                  <div className="space-y-2">
+                    {orders.filter((o: any) => parseFloat(o.totalPrice || "0") > 0).map((order: any) => (
+                      <div key={order.id} className="flex items-center justify-between text-sm border-b border-gray-50 pb-1.5 last:border-0">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-gray-700 font-medium truncate block">{order.serviceName || order.name}</span>
+                          <span className="text-xs text-gray-400">× {order.quantity || 1}</span>
+                        </div>
+                        <div className="text-right flex-shrink-0 ml-2">
+                          <span className={`font-semibold text-sm ${order.status === "paid" ? "text-green-600" : "text-red-600"}`}>
+                            {parseFloat(order.totalPrice || "0").toLocaleString("uk-UA")} ₴
+                          </span>
+                          <p className="text-[10px] text-gray-400">
+                            {order.status === "paid" ? "✓ Сплачено" : order.status === "cancelled" ? "Скасовано" : "⚠ До сплати"}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {(servicesDebt > 0 || servicesPaid > 0) && (
+                      <div className="pt-1 space-y-1">
+                        {servicesPaid > 0 && (
+                          <div className="flex justify-between text-sm text-green-600 font-semibold">
+                            <span>Сплачено послуг</span><span>{servicesPaid.toLocaleString("uk-UA")} ₴</span>
+                          </div>
+                        )}
+                        {servicesDebt > 0 && (
+                          <div className="flex justify-between text-sm text-red-600 font-bold">
+                            <span>До сплати послуги</span><span>{servicesDebt.toLocaleString("uk-UA")} ₴</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Payment link (redundant but useful when scrolled down) */}
+              {hasDebt && booking.paymentLink && (
+                <a href={booking.paymentLink} target="_blank" rel="noopener noreferrer">
+                  <Button className="w-full bg-green-600 hover:bg-green-700 text-base h-12">
+                    <CreditCard className="h-4 w-4 mr-2" />Сплатити {totalDebt.toLocaleString("uk-UA")} ₴ онлайн
+                  </Button>
+                </a>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Footer */}
         <div className="mt-6 text-center text-xs text-gray-400 pb-4">
