@@ -121,7 +121,6 @@ router.get("/", requireAuth, async (req, res) => {
     guestName: sql<string>`COALESCE(NULLIF(concat(${guestsTable.firstName}, ' ', ${guestsTable.lastName}), ' '), NULLIF(trim(concat(${bookingsTable.lastName}, ' ', ${bookingsTable.firstName})), ''), 'Гість')`,
     guestPhone: sql<string | null>`COALESCE(${guestsTable.phone}, ${bookingsTable.phone})`,
     guestEmail: sql<string | null>`COALESCE(${guestsTable.email}, ${bookingsTable.email})`,
-    loyaltyTier: guestsTable.loyaltyTier,
     unitName: unitsTable.name,
   }).from(bookingsTable)
     .leftJoin(guestsTable, eq(bookingsTable.guestId, guestsTable.id))
