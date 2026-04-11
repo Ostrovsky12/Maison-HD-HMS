@@ -194,22 +194,41 @@ export default function InboxPage() {
   const lastPortalUnreadRef = useRef<number>(0);
   const lastCheckinIdRef = useRef<number>(0);
 
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  function getAudioCtx(): AudioContext | null {
+    try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      return audioCtxRef.current;
+    } catch { return null; }
+  }
+
   function playChime(type: "message" | "checkin" = "message") {
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const notes = type === "checkin" ? [523, 659, 784] : [880, 1047];
-      notes.forEach((freq, i) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.type = "sine";
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.14);
-        gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + i * 0.14 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.14 + 0.28);
-        osc.start(ctx.currentTime + i * 0.14);
-        osc.stop(ctx.currentTime + i * 0.14 + 0.3);
-      });
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      const play = () => {
+        const notes = type === "checkin" ? [523, 659, 784] : [880, 1047];
+        notes.forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = "sine";
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.14);
+          gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + i * 0.14 + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.14 + 0.28);
+          osc.start(ctx.currentTime + i * 0.14);
+          osc.stop(ctx.currentTime + i * 0.14 + 0.3);
+        });
+      };
+      if (ctx.state === "suspended") {
+        ctx.resume().then(play).catch(() => {});
+      } else {
+        play();
+      }
     } catch {}
   }
 

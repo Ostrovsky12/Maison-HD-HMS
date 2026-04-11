@@ -2377,6 +2377,84 @@ function GuestCardRulesSection() {
   );
 }
 
+// ── Payment URL Section ───────────────────────────────────────────
+function PaymentUrlSection() {
+  const qc = useQueryClient();
+  const { data: user } = useGetMe();
+  const [url, setUrl] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  const { data: org } = useQuery<any>({
+    queryKey: ["org-current"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/organizations/me`);
+      if (!r.ok) return null;
+      return r.json();
+    },
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (org && !loaded) {
+      setUrl(org.paymentUrl || "");
+      setLoaded(true);
+    }
+  }, [org]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const orgId = org?.id || user?.organizationId;
+      if (!orgId) throw new Error("Організацію не знайдено");
+      const r = await authFetch(`${API}/organizations/${orgId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ paymentUrl: url.trim() || null }),
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.message || "Помилка"); }
+      return r.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org-current"] });
+      toast({ title: "Збережено", description: "Посилання на оплату оновлено" });
+    },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <CreditCard className="w-4 h-4" />
+          Онлайн-оплата для гостей
+        </CardTitle>
+        <CardDescription>
+          Посилання на LiqPay, Monobank або іншу платіжну сторінку. З'являється у гостьовому кабінеті, якщо є борг.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label className="text-sm">Посилання на оплату (URL)</Label>
+          <Input
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            placeholder="https://send.monobank.ua/jar/... або https://www.liqpay.ua/..."
+            type="url"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Якщо у конкретного бронювання не вказано власне посилання — гостю покажуть це як кнопку «Сплатити онлайн».
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => setUrl(org?.paymentUrl || "")}>Скасувати</Button>
+          <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="gap-1.5">
+            {saveMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Зберегти
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
   const { data: user, isLoading: userLoading } = useGetMe();
@@ -2509,6 +2587,7 @@ export default function SettingsPage() {
                   <CardContent><HotelTab /></CardContent>
                 </Card>
                 <GuestCardRulesSection />
+                <PaymentUrlSection />
               </div>
             </TabsContent>
             {mod("legal_entities") && (

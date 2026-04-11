@@ -556,6 +556,7 @@ router.get("/:code", async (req, res) => {
       unitHasBalcony: unitsTable.hasBalcony, unitHasView: unitsTable.hasView, unitSquareMeters: unitsTable.squareMeters,
       propertyName: propertiesTable.name, propertyAddress: propertiesTable.address,
       orgName: organizationsTable.name, orgId: organizationsTable.id,
+      orgPaymentUrl: organizationsTable.paymentUrl,
     }).from(bookingsTable)
       .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
       .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
@@ -594,18 +595,7 @@ router.get("/:code", async (req, res) => {
         eq(guestSpecialOffersTable.status, "active" as any),
       )).limit(4);
 
-    // Resolve address: prefer legal entity address (same source as invoices), fallback to property address
-    let resolvedAddress = booking.propertyAddress;
-    const legalEntities = await db.select({
-      address: legalEntitiesTable.address,
-      isDefault: legalEntitiesTable.isDefault,
-      isActive: legalEntitiesTable.isActive,
-    }).from(legalEntitiesTable)
-      .where(eq(legalEntitiesTable.organizationId, booking.orgId));
-    const legalEntity = legalEntities.find(e => e.isDefault) || legalEntities.find(e => e.isActive) || legalEntities[0];
-    if (legalEntity?.address) resolvedAddress = legalEntity.address;
-
-    res.json({ booking: { ...booking, propertyAddress: resolvedAddress }, orders, loyalty, messages, review: review || null, offers });
+    res.json({ booking, orders, loyalty, messages, review: review || null, offers });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Помилка сервера" });

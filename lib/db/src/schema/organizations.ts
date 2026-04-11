@@ -31,6 +31,7 @@ export const organizationsTable = pgTable("organizations", {
 
   enabledModules: jsonb("enabled_modules"),
   guestCardRules: text("guest_card_rules"),
+  paymentUrl: text("payment_url"),
 
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),

@@ -42,6 +42,7 @@ interface BookingData {
     email: string | null;
     notes: string | null;
     paymentLink: string | null;
+    orgPaymentUrl: string | null;
     checkinFormSubmitted: boolean;
     checkinFormData: Record<string, string>;
     selectedAddons: Record<string, boolean | string>;
@@ -157,6 +158,40 @@ export default function GuestPortalPage() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastHotelMsgCountRef = useRef<number>(-1);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  function getAudioCtx(): AudioContext | null {
+    try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      return audioCtxRef.current;
+    } catch { return null; }
+  }
+
+  function playGuestChime() {
+    try {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      const notes = [784, 1047];
+      const play = () => {
+        notes.forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = "sine";
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.16);
+          gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + i * 0.16 + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.16 + 0.3);
+          osc.start(ctx.currentTime + i * 0.16);
+          osc.stop(ctx.currentTime + i * 0.16 + 0.35);
+        });
+      };
+      if (ctx.state === "suspended") { ctx.resume().then(play).catch(() => {}); } else { play(); }
+    } catch {}
+  }
 
   // Review
   const [reviewForm, setReviewForm] = useState({
@@ -223,6 +258,32 @@ export default function GuestPortalPage() {
         })
         .catch(() => {});
     }, 15000);
+    return () => clearInterval(poll);
+  }, [code, activeTab]);
+
+  // Background polling: notify guest of new hotel messages every 20s (any tab)
+  useEffect(() => {
+    if (!code) return;
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch(`${API}/guest/${code}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!d.messages) return;
+        const hotelMsgs = (d.messages as any[]).filter((m: any) => m.direction === "hotel_to_guest");
+        const count = hotelMsgs.length;
+        if (lastHotelMsgCountRef.current >= 0 && count > lastHotelMsgCountRef.current) {
+          playGuestChime();
+          toast({
+            title: "💬 Повідомлення від готелю",
+            description: "Готель написав вам нове повідомлення",
+          });
+          if (activeTab !== "messages") setMessages(d.messages);
+        }
+        if (lastHotelMsgCountRef.current === -1) lastHotelMsgCountRef.current = count;
+        else if (count !== lastHotelMsgCountRef.current) lastHotelMsgCountRef.current = count;
+      } catch {}
+    }, 20_000);
     return () => clearInterval(poll);
   }, [code, activeTab]);
 
@@ -1260,8 +1321,8 @@ export default function GuestPortalPage() {
                       Проживання: {bookingBalance.toLocaleString("uk-UA")} ₴ · Послуги: {servicesDebt.toLocaleString("uk-UA")} ₴
                     </p>
                   )}
-                  {booking.paymentLink && (
-                    <a href={booking.paymentLink} target="_blank" rel="noopener noreferrer" className="block mt-3">
+                  {(booking.paymentLink || booking.orgPaymentUrl) && (
+                    <a href={booking.paymentLink || booking.orgPaymentUrl!} target="_blank" rel="noopener noreferrer" className="block mt-3">
                       <button className="w-full bg-white text-red-600 font-bold rounded-xl py-2.5 text-sm flex items-center justify-center gap-2 hover:bg-red-50 transition">
                         <CreditCard className="h-4 w-4" />Сплатити {totalDebt.toLocaleString("uk-UA")} ₴ онлайн
                       </button>
@@ -1342,8 +1403,8 @@ export default function GuestPortalPage() {
               )}
 
               {/* Payment link (redundant but useful when scrolled down) */}
-              {hasDebt && booking.paymentLink && (
-                <a href={booking.paymentLink} target="_blank" rel="noopener noreferrer">
+              {hasDebt && (booking.paymentLink || booking.orgPaymentUrl) && (
+                <a href={booking.paymentLink || booking.orgPaymentUrl!} target="_blank" rel="noopener noreferrer">
                   <Button className="w-full bg-green-600 hover:bg-green-700 text-base h-12">
                     <CreditCard className="h-4 w-4 mr-2" />Сплатити {totalDebt.toLocaleString("uk-UA")} ₴ онлайн
                   </Button>

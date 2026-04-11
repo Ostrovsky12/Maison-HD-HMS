@@ -129,7 +129,7 @@ router.patch("/:orgId", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  const allowed = ["name", "email", "phone", "address", "website", "logo", "primaryColor", "timezone", "currency", "isActive", "plan", "subscriptionStatus", "guestCardRules"];
+  const allowed = ["name", "email", "phone", "address", "website", "logo", "primaryColor", "timezone", "currency", "isActive", "plan", "subscriptionStatus", "guestCardRules", "paymentUrl"];
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];

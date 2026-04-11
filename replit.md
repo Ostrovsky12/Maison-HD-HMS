@@ -41,8 +41,9 @@ Public mobile-first guest-facing portal accessible via booking QR code / link.
 - **Документи** — downloadable HTML→PDF documents (print dialog):
   - `GET /api/guest/:code/documents/:type/download` (type: `confirmation` / `invoice` / `registration` / `receipt`)
   - Button opens in new tab, styled A4 layout with hotel branding, print-to-PDF.
-- **Оплата** — shows total debt = booking balance + unpaid service orders. Red banner with total + itemized breakdown. "Сплатити онлайн" button links to `paymentLink`. Green "✓ Повністю сплачено" when clear.
-- **Адреса** — uses legal entity default/active address (priority: default → active → first) as `propertyAddress`, falls back to property address.
+- **Оплата** — shows total debt = booking balance + unpaid service orders. Red banner with total + itemized breakdown. "Сплатити онлайн" button links to `booking.paymentLink` OR `booking.orgPaymentUrl` (org-level fallback). Green "✓ Повністю сплачено" when clear. **Fixed**: payment button uses org-level `paymentUrl` fallback; configurable in Settings → Hotel.
+- **Адреса** — uses **property physical address** directly (NOT legal entity address). Legal entity address is for B2B invoices only. **Fixed**: removed override that was incorrectly substituting legal entity address for property address.
+- **Сповіщення гостя** — background polling every 20s checks for new hotel messages (`hotel_to_guest`). Plays Web Audio chime + toast on new message regardless of active tab. **NEW**: guest-side AudioContext with `resume()` fix.
 
 ### Unified Inbox (`/inbox`)
 - **Conversations** — Telegram, Instagram, Website chat, Email, Phone, WhatsApp.
@@ -51,7 +52,7 @@ Public mobile-first guest-facing portal accessible via booking QR code / link.
   - `GET /api/guest/portal-threads` — all bookings with messages: guest name, unit, dates, last msg, unread count.
   - `PATCH /api/guest/portal-threads/:bookingId/read-all` — mark all as read.
   - Thread list with unread badge (emerald). Chat view with send reply via `POST /api/guest/message/:bookingId`.
-- **Звукові сповіщення** — Web Audio API chime (no audio files): 2 notes for message, 3 notes for check-in. Bell/BellOff toggle in header, persisted to `localStorage`.
+- **Звукові сповіщення** — Web Audio API chime (no audio files): 2 notes for message, 3 notes for check-in. Bell/BellOff toggle in header, persisted to `localStorage`. **Fixed**: persistent `AudioContext` ref with `ctx.resume()` before playing — resolves browser autoplay policy blocking.
 - **Polling 30s** — auto-checks: inbox unread count, portal unread, new check-in submissions. Fires sound + browser Notification API + toast on new events.
 - **Browser Notifications** — requests `Notification.permission` on mount; shows popup when tab is in background.
 - **Telegram bidirectional** — `POST /api/inbox/webhooks/telegram/:orgId` public webhook. Reply dispatches to Telegram Bot API. Setup: token → `getMe` verify → `setWebhook` auto-register.
