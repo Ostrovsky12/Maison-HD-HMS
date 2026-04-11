@@ -177,6 +177,61 @@ router.patch("/messages/:id/read", requireAuth, async (req: any, res) => {
   }
 });
 
+// ── Staff: Portal threads for Inbox (all bookings with messages) ───────────
+router.get("/portal-threads", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const rows = await db.execute(sql`
+      SELECT
+        b.id                                                        AS booking_id,
+        b.booking_ref,
+        b.guest_access_code,
+        b.check_in,
+        b.check_out,
+        b.status                                                    AS booking_status,
+        COALESCE(b.first_name || ' ' || b.last_name, 'Гість')      AS guest_name,
+        b.phone,
+        u.name                                                      AS unit_name,
+        COUNT(m.id)                                                 AS total_messages,
+        COUNT(CASE WHEN m.direction='guest_to_hotel' AND m.is_read=false THEN 1 END) AS unread_count,
+        MAX(m.created_at)                                           AS last_message_at,
+        (SELECT m2.message FROM guest_portal_messages m2
+          WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
+                                                                    AS last_message,
+        (SELECT m2.direction FROM guest_portal_messages m2
+          WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
+                                                                    AS last_direction
+      FROM bookings b
+      JOIN units u ON u.id = b.unit_id
+      JOIN properties p ON p.id = u.property_id
+      JOIN guest_portal_messages m ON m.booking_id = b.id
+      WHERE p.organization_id = ${orgId}
+      GROUP BY b.id, b.booking_ref, b.guest_access_code, b.check_in, b.check_out,
+               b.status, b.first_name, b.last_name, b.phone, u.name
+      ORDER BY last_message_at DESC
+    `);
+    res.json(rows.rows);
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Staff: Mark all portal messages for a booking as read ──────────────────
+router.patch("/portal-threads/:bookingId/read-all", requireAuth, async (req: any, res) => {
+  try {
+    const bookingId = parseInt(req.params.bookingId);
+    await db.update(guestPortalMessagesTable).set({ isRead: true })
+      .where(and(
+        eq(guestPortalMessagesTable.bookingId, bookingId),
+        eq(guestPortalMessagesTable.direction, "guest_to_hotel" as any),
+      ));
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Staff: Loyalty overview ────────────────────────────────────────────────
 router.get("/loyalty-overview", requireAuth, async (req: any, res) => {
   try {

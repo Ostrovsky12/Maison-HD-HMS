@@ -143,7 +143,7 @@ function Avatar({ name, channel, size = "md" }: { name: string | null; channel?:
 }
 
 export default function InboxPage() {
-  const [view, setView] = useState<"conversations" | "leads">("conversations");
+  const [view, setView] = useState<"conversations" | "leads" | "portal">("conversations");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
@@ -179,6 +179,14 @@ export default function InboxPage() {
   const [showAssign, setShowAssign] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [newLeadForm, setNewLeadForm] = useState({ firstName: "", lastName: "", email: "", phone: "", source: "phone", subject: "", estimatedValue: "" });
+
+  const [portalThreads, setPortalThreads] = useState<any[]>([]);
+  const [selectedPortal, setSelectedPortal] = useState<any | null>(null);
+  const [portalMessages, setPortalMessages] = useState<any[]>([]);
+  const [portalDraft, setPortalDraft] = useState("");
+  const [portalSending, setPortalSending] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const portalBottomRef = useRef<HTMLDivElement>(null);
 
   const [showChannelSettings, setShowChannelSettings] = useState(false);
   const [channels, setChannels] = useState<any[]>([]);
@@ -257,6 +265,48 @@ export default function InboxPage() {
     } finally { setChannelSetupLoading(""); }
   }
 
+  // ── Portal: load threads ──────────────────────────────────────────────────
+  async function loadPortalThreads() {
+    try {
+      const r = await apiFetch(`${API}/guest/portal-threads`);
+      if (r.ok) { const d = await r.json(); if (Array.isArray(d)) setPortalThreads(d); }
+    } catch {}
+  }
+
+  // ── Portal: load messages for selected thread ─────────────────────────────
+  async function loadPortalMessages(bookingId: number) {
+    setPortalLoading(true);
+    try {
+      const r = await apiFetch(`${API}/guest/messages/${bookingId}`);
+      if (r.ok) { const d = await r.json(); if (Array.isArray(d)) setPortalMessages(d); }
+      // Mark all as read
+      await apiFetch(`${API}/guest/portal-threads/${bookingId}/read-all`, { method: "PATCH" });
+      setPortalThreads(prev => prev.map(t => t.booking_id === bookingId ? { ...t, unread_count: "0" } : t));
+    } finally { setPortalLoading(false); }
+  }
+
+  // ── Portal: send reply ────────────────────────────────────────────────────
+  async function sendPortalReply() {
+    if (!selectedPortal || !portalDraft.trim()) return;
+    setPortalSending(true);
+    try {
+      const r = await apiFetch(`${API}/guest/message/${selectedPortal.booking_id}`, {
+        method: "POST", body: JSON.stringify({ message: portalDraft.trim() }),
+      });
+      if (r.ok) {
+        setPortalDraft("");
+        await loadPortalMessages(selectedPortal.booking_id);
+        setPortalThreads(prev => prev.map(t =>
+          t.booking_id === selectedPortal.booking_id
+            ? { ...t, last_message: portalDraft.trim(), last_direction: "hotel_to_guest", last_message_at: new Date().toISOString() }
+            : t
+        ));
+      } else {
+        toast({ title: "Помилка відправки", variant: "destructive" });
+      }
+    } finally { setPortalSending(false); }
+  }
+
   // ── Load ────────────────────────────────────────────────────────────────
   async function loadAll() {
     setLoading(true);
@@ -278,11 +328,15 @@ export default function InboxPage() {
     }
   }
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); loadPortalThreads(); }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    portalBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [portalMessages]);
 
   const filteredConvs = conversations.filter(c => {
     if (statusFilter !== "all" && c.status !== statusFilter) return false;
@@ -532,6 +586,17 @@ export default function InboxPage() {
                 {totalUnread > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-1 rounded-full">{totalUnread}</span>}
               </button>
               <button
+                onClick={() => { setView("portal"); setSelectedPortal(null); setPortalMessages([]); loadPortalThreads(); }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all ${view === "portal" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                <Globe className="w-3 h-3" /> Портал
+                {portalThreads.filter(t => parseInt(t.unread_count) > 0).length > 0 && (
+                  <span className="bg-emerald-500 text-white text-[10px] font-bold px-1 rounded-full">
+                    {portalThreads.filter(t => parseInt(t.unread_count) > 0).length}
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={() => setView("leads")}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all ${view === "leads" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
               >
@@ -544,7 +609,7 @@ export default function InboxPage() {
             <div className="relative mb-2">
               <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-gray-400" />
               <Input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder={view === "conversations" ? "Пошук розмов…" : "Пошук лідів…"}
+                placeholder={view === "conversations" ? "Пошук розмов…" : view === "portal" ? "Пошук гостей…" : "Пошук лідів…"}
                 className="pl-8 h-8 text-sm bg-gray-50 border-gray-100" />
             </div>
 
@@ -552,7 +617,7 @@ export default function InboxPage() {
             {view === "conversations" ? (
               <>
                 <div className="flex gap-0.5 mb-2">
-                  {["all", "open", "pending", "resolved"].map(f => (
+                  {["all", "open", "pending", "resolved"].map((f) => (
                     <button key={f} onClick={() => setStatusFilter(f)}
                       className={`flex-1 py-1 text-[11px] rounded-lg font-medium transition-all ${statusFilter === f ? "bg-gray-900 text-white" : "text-gray-500 hover:bg-gray-100"}`}>
                       {f === "all" ? "Всі" : CONV_STATUS[f]?.label}
@@ -572,7 +637,7 @@ export default function InboxPage() {
                   })}
                 </div>
               </>
-            ) : (
+            ) : view === "leads" ? (
               <div className="flex gap-0.5 flex-wrap pb-2">
                 <button onClick={() => setLeadStageFilter("all")}
                   className={`px-2 py-0.5 text-[11px] rounded-full font-medium transition-all ${leadStageFilter === "all" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-500"}`}>
@@ -585,13 +650,56 @@ export default function InboxPage() {
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* List */}
           <div className="flex-1 overflow-y-auto">
             {loading ? (
               <div className="flex items-center justify-center h-40"><Loader2 className="w-6 h-6 animate-spin text-gray-300" /></div>
+            ) : view === "portal" ? (
+              // Portal threads list
+              portalThreads.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-center p-4">
+                  <Globe className="w-10 h-10 text-gray-200 mb-2" />
+                  <p className="text-sm text-gray-400">Немає повідомлень через портал</p>
+                </div>
+              ) : portalThreads.map(t => {
+                const unread = parseInt(t.unread_count || "0") > 0;
+                const isSelected = selectedPortal?.booking_id === t.booking_id;
+                return (
+                  <button key={t.booking_id}
+                    onClick={() => { setSelectedPortal(t); loadPortalMessages(t.booking_id); }}
+                    className={`w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors ${isSelected ? "bg-emerald-50 border-l-2 border-l-emerald-500" : ""}`}>
+                    <div className="flex items-start gap-2.5">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold ${unread ? "bg-emerald-500 text-white" : "bg-gray-100 text-gray-500"}`}>
+                        {(t.guest_name || "?").slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className={`text-sm truncate ${unread ? "font-semibold text-gray-900" : "font-medium text-gray-700"}`}>
+                            {t.guest_name}
+                          </span>
+                          <span className="text-[10px] text-gray-400 flex-shrink-0">
+                            {t.last_message_at ? formatDistanceToNow(new Date(t.last_message_at), { locale: uk, addSuffix: false }) : ""}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 truncate">{t.unit_name} · #{t.booking_ref}</p>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <p className="text-[11px] text-gray-400 truncate flex-1">
+                            {t.last_direction === "hotel_to_guest" ? "Ви: " : ""}{t.last_message}
+                          </p>
+                          {unread && (
+                            <span className="bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1">
+                              {t.unread_count}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
             ) : view === "conversations" ? (
               filteredConvs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 text-center p-4">
@@ -690,7 +798,88 @@ export default function InboxPage() {
         </div>
 
         {/* ══ MAIN CHAT ═════════════════════════════════════════════════════ */}
-        {!selectedConv && !showMobileDetail ? (
+        {/* ── Portal chat view ── */}
+        {view === "portal" && selectedPortal ? (
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Portal header */}
+            <div className="bg-white border-b border-gray-100 px-4 py-2.5 flex items-center gap-3 flex-shrink-0">
+              <button onClick={() => { setSelectedPortal(null); setPortalMessages([]); }} className="md:hidden text-gray-400">
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-sm">
+                {(selectedPortal.guest_name || "?").slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="font-bold text-gray-900 truncate">{selectedPortal.guest_name}</h2>
+                  {selectedPortal.phone && <span className="text-xs text-gray-400">{selectedPortal.phone}</span>}
+                  <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-100">
+                    🏠 {selectedPortal.unit_name}
+                  </span>
+                  <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full border border-blue-100">
+                    #{selectedPortal.booking_ref}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  {selectedPortal.check_in ? new Date(selectedPortal.check_in).toLocaleDateString("uk-UA") : ""} →{" "}
+                  {selectedPortal.check_out ? new Date(selectedPortal.check_out).toLocaleDateString("uk-UA") : ""}
+                </p>
+              </div>
+              <a href={`/bookings?code=${selectedPortal.guest_access_code}`} target="_blank" rel="noreferrer"
+                className="text-xs text-indigo-600 hover:underline flex-shrink-0">
+                Бронювання →
+              </a>
+            </div>
+
+            {/* Portal messages */}
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-gray-50">
+              {portalLoading ? (
+                <div className="flex justify-center pt-8"><Loader2 className="w-6 h-6 animate-spin text-gray-300" /></div>
+              ) : portalMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 text-center">
+                  <Globe className="w-8 h-8 text-gray-200 mb-2" />
+                  <p className="text-sm text-gray-400">Немає повідомлень</p>
+                </div>
+              ) : portalMessages.map((msg: any) => {
+                const isStaff = msg.direction === "hotel_to_guest";
+                return (
+                  <div key={msg.id} className={`flex ${isStaff ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[70%] rounded-2xl px-3 py-2 ${isStaff
+                      ? "bg-emerald-600 text-white rounded-br-sm"
+                      : "bg-white border border-gray-100 text-gray-800 rounded-bl-sm shadow-sm"}`}>
+                      {!isStaff && (
+                        <p className="text-[10px] font-semibold mb-0.5 text-emerald-600">{msg.sender_name || selectedPortal.guest_name}</p>
+                      )}
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.message}</p>
+                      <p className={`text-[10px] mt-1 ${isStaff ? "text-emerald-200" : "text-gray-400"}`}>
+                        {msg.created_at ? new Date(msg.created_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }) : ""}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={portalBottomRef} />
+            </div>
+
+            {/* Portal reply input */}
+            <div className="bg-white border-t border-gray-100 p-3 flex gap-2 flex-shrink-0">
+              <textarea
+                value={portalDraft}
+                onChange={e => setPortalDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPortalReply(); } }}
+                placeholder="Напишіть відповідь гостю… (Enter — надіслати)"
+                className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 min-h-[64px] max-h-32"
+              />
+              <button
+                onClick={sendPortalReply}
+                disabled={portalSending || !portalDraft.trim()}
+                className="self-end px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5">
+                {portalSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                <span className="hidden sm:inline">Надіслати</span>
+              </button>
+            </div>
+          </div>
+        ) : !selectedConv && !showMobileDetail ? (
           <div className="flex-1 hidden md:flex flex-col items-center justify-center text-center p-8">
             <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-50 to-purple-100 flex items-center justify-center mb-6">
               <Inbox className="w-12 h-12 text-indigo-400" />
