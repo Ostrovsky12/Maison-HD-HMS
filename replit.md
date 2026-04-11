@@ -21,7 +21,7 @@
 - **QR Ordering** (`/qr-ordering` + `/qr-menu/:orgSlug/:tableId`) — QR codes per table, live order tracking. Public API: `GET /api/public/menu/:orgSlug`, `POST /api/public/menu-order`.
 - **Digital Key & Mobile Check-in** (`/digital-keys`) — 4-digit PIN + QR key, revoke, pre-check-in approval with ID doc. DB: `digital_keys`, `mobile_checkins`.
 - **Sustainability & ESG** (`/sustainability`) — KPI cards (energy/water/waste/CO2), goals, initiatives, monthly metrics journal.
-- **Rate Intelligence** (`/rate-intelligence`) — 7-day competitor rate grid, market position, pricing recommendations. **Fixed**: radius param bug corrected.
+- **Rate Intelligence** (`/rate-intelligence`) — 7-day competitor rate grid, market position, pricing recommendations. **Fixed**: AI suggest-competitors endpoint rewrote prompt + robust JSON parser (multi-step extraction), starRating normalization (0→3 default). AI now returns 6 Carpathian-region competitors for ДОГОДА correctly.
 - **Upsell Engine** (`/upsell`) — template-based offers with type/trigger/price, one-click send to guest portal, accept/decline workflow, conversion analytics.
 - **Staff Scheduling** (`/staff-schedule`) — weekly calendar grid, per-staff cards, department filter, shift CRUD.
 - **Loyalty Program** (`/loyalty`) — Bronze/Silver/Gold/Platinum tiers, points earn/redeem, manual adjustment, transaction history.

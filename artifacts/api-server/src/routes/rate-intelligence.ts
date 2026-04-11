@@ -271,65 +271,91 @@ router.post("/suggest-competitors", requireAuth, async (req: any, res) => {
     const existing = await db.select({ name: rateCompetitorsTable.name })
       .from(rateCompetitorsTable)
       .where(eq(rateCompetitorsTable.organizationId, orgId));
-    const existingNames = existing.map(c => c.name).join(", ");
+    const existingNames = existing.map(c => c.name);
 
-    const propertyDesc = [
-      prop?.name || org?.name,
-      prop?.type ? `тип: ${prop.type}` : "",
-      prop?.address || org?.address || "",
-      org?.website ? `сайт: ${org.website}` : "",
-    ].filter(Boolean).join(", ");
+    const propName = prop?.name || org?.name || "готель";
+    const propAddress = prop?.address || org?.address || "";
+    const propType = (prop as any)?.type || "hotel";
 
-    const prompt = `Ти — аналітик готельного ринку. Проаналізуй цей готель:
-${propertyDesc}
+    // Extract region/city from address for better context
+    const regionHint = propAddress
+      ? `Адреса: ${propAddress}.`
+      : "";
 
-${existingNames ? `Вже відстежуються конкуренти: ${existingNames}. Запропонуй ІНШИХ.` : ""}
+    const systemPrompt = `Ти — досвідчений аналітик готельного ринку України. 
+Твоє завдання — запропонувати конкурентів для моніторингу цін.
+ЗАВЖДИ повертай рівно 6 об'єктів у вигляді JSON масиву. 
+Без жодних пояснень, без markdown, тільки чистий JSON масив.`;
 
-Запропонуй 5 конкурентів для моніторингу тарифів.
+    const userPrompt = `Готель для аналізу: "${propName}"
+${regionHint}
+Тип об'єкту: ${propType}
+${existingNames.length > 0 ? `Вже відстежуються (виключи їх): ${existingNames.join(", ")}` : ""}
 
-КРИТИЧНО ВАЖЛИВО щодо географії:
-- Обирай ЛИШЕ готелі/апартаменти в радіусі НЕ БІЛЬШЕ 60 км від цього готелю
-- Надавай перевагу об'єктам у тому самому місті або селищі
-- Якщо готель у сільській місцевості — шукай у межах тієї ж громади або сусідніх громад (не далі 60 км)
-- Якщо готель знаходиться в певній області України — конкуренти мають бути ЛИШЕ в тій самій або суміжній частині цієї ж області
-- ЗАБОРОНЯЄТЬСЯ пропонувати готелі з інших міст, що знаходяться далі ніж 60 км (наприклад, якщо готель у Хмільнику — не пропонуй готелі з Вінниці чи Черкас, якщо вони далі 60 км)
+Запропонуй 6 конкурентів — готелі, котеджні комплекси або бази відпочинку схожого типу та цінової категорії, що знаходяться в тому ж регіоні (Карпати, та ж область або сусідня область в межах 100 км).
 
-Це мають бути реальні або типові готелі/апартаменти з аналогічними послугами та ціновою категорією.
+Якщо це котеджний або заміський комплекс — шукай аналогічні заміські об'єкти.
+Якщо це SPA-готель — шукай SPA та wellness об'єкти.
+Якщо це бюджетний об'єкт — шукай аналоги в тій же ціновій категорії.
 
-Поверни ЛИШЕ JSON масив:
-[
-  {
-    "name": "Назва готелю",
-    "websiteUrl": "https://...",
-    "starRating": 3,
-    "roomType": "Стандарт",
-    "notes": "Чому варто відстежувати (вкажи місто/відстань)",
-    "confidence": "high|medium|low"
-  }
-]`;
+Реальні відомі об'єкти мають перевагу, але якщо не знаєш точних — використай типові назви що відповідають регіону.
+
+Поверни ТІЛЬКИ JSON масив (без \`\`\`json, без пояснень):
+[{"name":"...","websiteUrl":"https://...","starRating":3,"roomType":"Котедж","notes":"...","confidence":"high"}]`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-5.2",
       messages: [
-        { role: "system", content: "Ти — аналітик готельного ринку України. Відповідай лише валідним JSON масивом без пояснень." },
-        { role: "user", content: prompt },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
-      max_completion_tokens: 2000,
+      max_completion_tokens: 3000,
     });
 
+    const raw = (completion.choices[0]?.message?.content || "").trim();
+    console.log("[suggest-competitors] raw AI response:", raw.slice(0, 500));
+
+    // Robust JSON extraction
     let suggestions: any[] = [];
-    try {
-      const raw = completion.choices[0]?.message?.content || "[]";
-      const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || raw.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
-      const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : raw;
-      const parsed = JSON.parse(jsonStr.trim());
-      suggestions = Array.isArray(parsed) ? parsed : (parsed.competitors || parsed.suggestions || Object.values(parsed)[0] || []);
-    } catch {
-      return res.status(422).json({ error: "AI не зміг розпізнати відповідь" });
+    const extractJson = (text: string): any[] => {
+      // Try direct parse first
+      try { const p = JSON.parse(text); return Array.isArray(p) ? p : []; } catch {}
+      // Strip markdown code blocks
+      const stripped = text.replace(/```(?:json)?\s*/gi, "").replace(/```\s*/g, "").trim();
+      try { const p = JSON.parse(stripped); return Array.isArray(p) ? p : []; } catch {}
+      // Extract first [...] block
+      const match = stripped.match(/\[[\s\S]*?\]/);
+      if (match) {
+        try { const p = JSON.parse(match[0]); return Array.isArray(p) ? p : []; } catch {}
+      }
+      // Extract objects line by line
+      const objMatches = [...stripped.matchAll(/\{[^{}]+\}/g)];
+      if (objMatches.length > 0) {
+        try { return objMatches.map(m => JSON.parse(m[0])).filter(Boolean); } catch {}
+      }
+      return [];
+    };
+
+    suggestions = extractJson(raw);
+
+    if (suggestions.length === 0) {
+      console.error("[suggest-competitors] failed to parse:", raw);
+      return res.status(422).json({ error: `AI повернув неочікуваний формат. Спробуйте ще раз.` });
     }
+
+    // Normalize fields
+    suggestions = suggestions.map(s => ({
+      name: s.name || s.title || "Невідомий",
+      websiteUrl: s.websiteUrl || s.website || s.url || "",
+      starRating: (typeof s.starRating === "number" && s.starRating > 0) ? s.starRating : (parseInt(s.stars) || 3),
+      roomType: s.roomType || s.room_type || s.type || "Стандарт",
+      notes: s.notes || s.description || s.reason || "",
+      confidence: s.confidence || "medium",
+    })).filter(s => s.name && s.name !== "Невідомий");
 
     res.json(suggestions);
   } catch (e: any) {
+    console.error("[suggest-competitors] error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
