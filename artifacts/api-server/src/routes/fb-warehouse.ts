@@ -621,6 +621,158 @@ router.get("/stock-levels", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ANALYTICS — F&B Аналітика складу та продажів
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get("/analytics", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const days = Math.min(parseInt(String(req.query.days || "30")), 365);
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().split("T")[0]; // YYYY-MM-DD
+
+    // 1. Food Cost по тех.картах (recipe cards linked to menu items)
+    const foodCostRows = (await db.execute(sql`
+      SELECT
+        rc.id,
+        rc.name,
+        COALESCE(fi.price, 0)::numeric            AS selling_price,
+        COALESCE(rc.cost_per_portion, 0)::numeric AS cost_per_portion,
+        CASE
+          WHEN COALESCE(fi.price, 0) > 0
+          THEN ROUND(COALESCE(rc.cost_per_portion, 0) / fi.price::numeric * 100, 1)
+          ELSE 0
+        END                                        AS food_cost_pct,
+        CASE
+          WHEN COALESCE(fi.price, 0) > 0
+          THEN ROUND(fi.price::numeric - COALESCE(rc.cost_per_portion, 0), 2)
+          ELSE 0
+        END                                        AS margin_uah
+      FROM fb_recipe_cards rc
+      LEFT JOIN fb_items fi ON fi.id = rc.menu_item_id
+      WHERE rc.organization_id = ${orgId} AND rc.is_active = true
+      ORDER BY food_cost_pct DESC NULLS LAST
+      LIMIT 50
+    `)).rows;
+
+    // 2. Рух складу по днях — окремі запити, серія дат будується в JS
+    const recDays = (await db.execute(sql`
+      SELECT receipt_date::date::text AS d, COUNT(*) AS cnt,
+             COALESCE(SUM(total_amount), 0)::numeric AS amt
+      FROM fb_stock_receipts
+      WHERE organization_id = ${orgId} AND status = 'confirmed'
+        AND receipt_date >= ${cutoffStr}::date
+      GROUP BY receipt_date::date
+    `)).rows as any[];
+
+    const wofDays = (await db.execute(sql`
+      SELECT created_at::date::text AS d, COUNT(*) AS cnt,
+             COALESCE(SUM(total_amount), 0)::numeric AS amt
+      FROM fb_stock_writeoffs
+      WHERE organization_id = ${orgId} AND status = 'confirmed'
+        AND created_at >= ${cutoffStr}::date
+      GROUP BY created_at::date
+    `)).rows as any[];
+
+    // Build full date series in JavaScript
+    const recMap = Object.fromEntries(recDays.map((r: any) => [r.d, r]));
+    const wofMap = Object.fromEntries(wofDays.map((w: any) => [w.d, w]));
+    const movementRows: any[] = [];
+    const startDate = new Date(cutoffStr + "T00:00:00Z");
+    const endDate   = new Date();
+    for (const d = new Date(startDate); d <= endDate; d.setUTCDate(d.getUTCDate() + 1)) {
+      const key = d.toISOString().split("T")[0];
+      movementRows.push({
+        date: key,
+        receipts_count:  Number(recMap[key]?.cnt ?? 0),
+        receipts_amount: Number(recMap[key]?.amt ?? 0),
+        writeoffs_count:  Number(wofMap[key]?.cnt ?? 0),
+        writeoffs_amount: Number(wofMap[key]?.amt ?? 0),
+      });
+    }
+
+    // 3. Відходи по причинах
+    const wasteByReason = (await db.execute(sql`
+      SELECT
+        reason,
+        COUNT(*) AS cnt,
+        ROUND(SUM(total_amount)::numeric, 2) AS total_cost
+      FROM fb_stock_writeoffs
+      WHERE organization_id = ${orgId} AND status = 'confirmed'
+        AND created_at >= ${cutoffStr}::date
+      GROUP BY reason
+      ORDER BY total_cost DESC
+    `)).rows;
+
+    // 4. Топ-10 інгредієнтів за вартістю запасу
+    const topStockValue = (await db.execute(sql`
+      SELECT
+        name, unit, category,
+        current_stock::numeric,
+        cost_per_unit::numeric,
+        ROUND(current_stock::numeric * cost_per_unit::numeric, 2) AS stock_value
+      FROM fb_ingredients
+      WHERE organization_id = ${orgId} AND is_active = true AND current_stock > 0
+      ORDER BY stock_value DESC
+      LIMIT 10
+    `)).rows;
+
+    // 5. Топ-10 інгредієнтів за споживанням (з накладних)
+    const topUsage = (await db.execute(sql`
+      SELECT
+        i.name,
+        i.unit,
+        ROUND(SUM(sri.quantity)::numeric, 2) AS total_received,
+        ROUND(SUM(sri.total_price)::numeric, 2) AS total_cost
+      FROM fb_stock_receipt_items sri
+      JOIN fb_stock_receipts sr ON sr.id = sri.receipt_id
+      JOIN fb_ingredients i ON i.id = sri.ingredient_id
+      WHERE sr.organization_id = ${orgId} AND sr.status = 'confirmed'
+        AND sr.receipt_date >= ${cutoffStr}::date
+      GROUP BY i.id, i.name, i.unit
+      ORDER BY total_cost DESC
+      LIMIT 10
+    `)).rows;
+
+    // 6. KPI summary
+    const kpi = (await db.execute(sql`
+      SELECT
+        (SELECT ROUND(SUM(total_amount)::numeric, 2) FROM fb_stock_receipts
+         WHERE organization_id = ${orgId} AND status = 'confirmed'
+           AND receipt_date >= ${cutoffStr}::date
+        ) AS total_purchased,
+        (SELECT ROUND(SUM(total_amount)::numeric, 2) FROM fb_stock_writeoffs
+         WHERE organization_id = ${orgId} AND status = 'confirmed'
+           AND created_at >= ${cutoffStr}::date
+        ) AS total_waste,
+        (SELECT COUNT(*) FROM fb_ingredients
+         WHERE organization_id = ${orgId} AND is_active = true) AS ingredients_total,
+        (SELECT ROUND(SUM(current_stock::numeric * cost_per_unit::numeric), 2)
+         FROM fb_ingredients
+         WHERE organization_id = ${orgId} AND is_active = true) AS stock_total_value,
+        (SELECT ROUND(AVG(food_cost_pct), 1) FROM (
+          SELECT CASE WHEN fi.price::numeric > 0
+                      THEN rc.cost_per_portion::numeric / fi.price::numeric * 100
+                      ELSE 0 END AS food_cost_pct
+          FROM fb_recipe_cards rc
+          LEFT JOIN fb_items fi ON fi.id = rc.menu_item_id
+          WHERE rc.organization_id = ${orgId} AND rc.is_active = true
+            AND fi.price::numeric > 0 AND rc.cost_per_portion IS NOT NULL
+        ) sub) AS avg_food_cost_pct
+    `)).rows[0];
+
+    res.json({
+      kpi,
+      food_cost_by_dish: foodCostRows,
+      stock_movement: movementRows,
+      waste_by_reason: wasteByReason,
+      top_stock_value: topStockValue,
+      top_usage: topUsage,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // AI — Alcohol tax classification helper
 // ═══════════════════════════════════════════════════════════════════════════
 router.post("/ai/classify-alcohol", async (req, res) => {

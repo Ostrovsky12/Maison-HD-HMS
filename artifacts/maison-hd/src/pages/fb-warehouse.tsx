@@ -14,8 +14,14 @@ import {
   AlertTriangle, CheckCircle2, XCircle, Loader2, ChevronRight,
   BarChart3, Sparkles, Upload, Eye, Check, X, ArrowLeft, RefreshCw,
   Building2, Phone, Mail, MapPin, Calculator, Beef, Wine, Info,
-  ShoppingCart, ClipboardList, Warehouse,
+  ShoppingCart, ClipboardList, Warehouse, TrendingUp, TrendingDown,
+  DollarSign, PieChart as PieChartIcon, Activity,
 } from "lucide-react";
+import {
+  ResponsiveContainer, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  PieChart, Pie, Cell,
+} from "recharts";
 import { useLocation } from "wouter";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -50,7 +56,7 @@ const STOCK_STATUS: Record<string, { label: string; color: string; icon: any }> 
   ok: { label: "Норма", color: "bg-green-100 text-green-700 border-green-200", icon: CheckCircle2 },
 };
 
-type Tab = "stock" | "ingredients" | "suppliers" | "receipts" | "recipes" | "writeoffs";
+type Tab = "stock" | "ingredients" | "suppliers" | "receipts" | "recipes" | "writeoffs" | "analytics";
 
 export default function FbWarehousePage() {
   const [tab, setTab] = useState<Tab>("stock");
@@ -81,6 +87,7 @@ export default function FbWarehousePage() {
             { key: "receipts", label: "Накладні", icon: FileText },
             { key: "recipes", label: "Тех. Карти", icon: BookOpen },
             { key: "writeoffs", label: "Списання", icon: Trash2 },
+            { key: "analytics", label: "Аналітика", icon: TrendingUp },
           ] as { key: Tab; label: string; icon: any }[]).map(t => (
             <button
               key={t.key}
@@ -104,6 +111,7 @@ export default function FbWarehousePage() {
           {tab === "receipts" && <ReceiptsTab toast={toast} />}
           {tab === "recipes" && <RecipesTab toast={toast} />}
           {tab === "writeoffs" && <WriteoffsTab toast={toast} />}
+          {tab === "analytics" && <AnalyticsTab toast={toast} />}
         </div>
       </div>
     </AppLayout>
@@ -1625,6 +1633,279 @@ function WriteoffsTab({ toast }: { toast: any }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB: ANALYTICS
+// ═══════════════════════════════════════════════════════════════════
+
+const WASTE_COLORS = ["#f97316", "#ef4444", "#eab308", "#8b5cf6", "#6b7280"];
+const PIE_COLORS   = ["#7c3aed", "#6d28d9", "#5b21b6", "#4c1d95", "#7e22ce",
+                      "#9333ea", "#a855f7", "#c084fc", "#ddd6fe", "#3b0764"];
+
+const fmtUah = (v: number | string | null | undefined) => {
+  const n = Number(v ?? 0);
+  if (!n) return "0 ₴";
+  return n.toLocaleString("uk-UA", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " ₴";
+};
+const fmtPct = (v: number | string | null | undefined) => Number(v ?? 0).toFixed(1) + "%";
+const fcColor = (pct: number) =>
+  pct <= 25 ? "text-green-600" : pct <= 35 ? "text-yellow-600" : pct <= 45 ? "text-orange-600" : "text-red-600";
+const fcBar = (pct: number) =>
+  pct <= 25 ? "bg-green-500" : pct <= 35 ? "bg-yellow-500" : pct <= 45 ? "bg-orange-500" : "bg-red-500";
+
+function AnalyticsTab({ toast }: { toast: any }) {
+  const [data, setData]      = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [period, setPeriod]  = useState("30");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/analytics?days=${period}`);
+      if (!r.ok) throw new Error((await r.json()).error);
+      setData(await r.json());
+    } catch (e: any) {
+      toast({ title: "Помилка аналітики", description: e.message, variant: "destructive" });
+    } finally { setLoading(false); }
+  }, [period]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <Loader2 className="animate-spin h-8 w-8 text-violet-500" />
+    </div>
+  );
+  if (!data) return null;
+
+  const { kpi, food_cost_by_dish, stock_movement, waste_by_reason, top_stock_value, top_usage } = data;
+
+  const movementChart = (() => {
+    const all = (stock_movement || []).map((d: any) => ({
+      date: new Date(d.date).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" }),
+      "Надходження": Number(d.receipts_amount),
+      "Списання": Number(d.writeoffs_amount),
+    }));
+    if (all.length <= 14) return all;
+    const step = Math.ceil(all.length / 14);
+    return all.filter((_: any, i: number) => i % step === 0 || i === all.length - 1);
+  })();
+
+  const wasteChart = (waste_by_reason || []).map((w: any) => ({
+    name: ({ spoilage: "Псування", production: "Виробниче", damage: "Пошкодження", inventory: "Інвентаризація" } as any)[w.reason] || "Інше",
+    value: Number(w.total_cost),
+  }));
+
+  const topStockChart = (top_stock_value || []).map((i: any) => ({
+    name: i.name.length > 14 ? i.name.slice(0, 13) + "…" : i.name,
+    value: Number(i.stock_value),
+  }));
+
+  const hasMovement = movementChart.some((d: any) => d["Надходження"] > 0 || d["Списання"] > 0);
+
+  return (
+    <div className="space-y-5">
+      {/* Header + Period */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+          <Activity size={20} className="text-violet-600" /> F&B Аналітика
+        </h2>
+        <div className="flex gap-1 bg-white border rounded-lg p-1 shadow-sm">
+          {[{ v: "7", l: "7 д" }, { v: "30", l: "30 д" }, { v: "90", l: "3 міс" }, { v: "365", l: "Рік" }].map(p => (
+            <button key={p.v} onClick={() => setPeriod(p.v)}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${period === p.v ? "bg-violet-600 text-white shadow" : "text-gray-500 hover:text-violet-600"}`}
+            >{p.l}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "Закуплено", value: fmtUah(kpi?.total_purchased), sub: `за ${period} днів`, icon: DollarSign, col: "bg-violet-50 text-violet-600" },
+          { label: "Відходи/Списання", value: fmtUah(kpi?.total_waste), sub: `за ${period} днів`, icon: Trash2, col: "bg-red-50 text-red-500" },
+          { label: "Ср. Food Cost", value: kpi?.avg_food_cost_pct ? fmtPct(kpi.avg_food_cost_pct) : "—", sub: "≤25% — відмінно", icon: TrendingDown, col: "bg-amber-50 text-amber-600", vc: fcColor(Number(kpi?.avg_food_cost_pct ?? 0)) },
+          { label: "Вартість залишків", value: fmtUah(kpi?.stock_total_value), sub: `${kpi?.ingredients_total || 0} інгр.`, icon: Package, col: "bg-green-50 text-green-600" },
+        ].map((c, i) => (
+          <Card key={i} className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`p-1.5 rounded-lg ${c.col}`}><c.icon size={15} /></div>
+                <span className="text-xs text-gray-500 font-medium leading-tight">{c.label}</span>
+              </div>
+              <p className={`text-xl font-bold ${(c as any).vc || "text-gray-900"}`}>{c.value}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{c.sub}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Stock Movement */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2 pt-4">
+          <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <Activity size={15} className="text-violet-500" /> Рух складу — надходження та списання
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pb-4">
+          {!hasMovement ? (
+            <div className="h-40 flex items-center justify-center text-gray-400 text-sm bg-gray-50 rounded-lg">
+              Немає підтверджених накладних або списань за цей період
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={movementChart} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9ca3af" }} />
+                <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                <Tooltip formatter={(v: any) => fmtUah(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="Надходження" stroke="#7c3aed" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                <Line type="monotone" dataKey="Списання" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 3" dot={false} activeDot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Food Cost table */}
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Calculator size={15} className="text-violet-500" /> Food Cost по стравах
+              <span className="ml-auto text-xs font-normal text-gray-400">собівартість → ціна</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 pb-2">
+            {food_cost_by_dish.length === 0 ? (
+              <div className="py-10 text-center text-gray-400 text-sm bg-gray-50 m-3 rounded-lg">
+                Немає тех. карт із собівартістю.<br />Введіть ціни у Меню та собівартість у Тех. Картах.
+              </div>
+            ) : (
+              <div className="divide-y max-h-80 overflow-y-auto">
+                {food_cost_by_dish.map((d: any, i: number) => {
+                  const pct = Number(d.food_cost_pct);
+                  return (
+                    <div key={i} className="px-4 py-2.5 hover:bg-gray-50">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-medium text-gray-800 truncate max-w-[50%]">{d.name}</span>
+                        <div className="flex items-center gap-3 shrink-0 ml-2">
+                          <span className="text-xs text-gray-400">{fmtUah(d.cost_per_portion)} → {fmtUah(d.selling_price)}</span>
+                          <span className={`text-xs font-bold tabular-nums ${fcColor(pct)}`}>{fmtPct(pct)}</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${fcBar(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Waste by reason */}
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Trash2 size={15} className="text-red-500" /> Списання по причинах
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {wasteChart.length === 0 ? (
+              <div className="h-40 flex items-center justify-center text-gray-400 text-sm bg-gray-50 rounded-lg">
+                Немає підтверджених списань за цей період
+              </div>
+            ) : (
+              <div className="flex items-center gap-4">
+                <ResponsiveContainer width="45%" height={160}>
+                  <PieChart>
+                    <Pie data={wasteChart} dataKey="value" nameKey="name" innerRadius={38} outerRadius={68} paddingAngle={3}>
+                      {wasteChart.map((_: any, i: number) => <Cell key={i} fill={WASTE_COLORS[i % WASTE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: any) => fmtUah(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex-1 space-y-2 min-w-0">
+                  {wasteChart.map((w: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: WASTE_COLORS[i % WASTE_COLORS.length] }} />
+                        <span className="text-xs text-gray-600 truncate">{w.name}</span>
+                      </div>
+                      <span className="text-xs font-semibold text-gray-800 shrink-0">{fmtUah(w.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Top stock value */}
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <TrendingUp size={15} className="text-green-500" /> Топ-10 залишків за вартістю
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {topStockChart.length === 0 ? (
+              <div className="h-44 flex items-center justify-center text-gray-400 text-sm bg-gray-50 rounded-lg">Немає залишків</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={topStockChart} layout="vertical" margin={{ top: 0, right: 10, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 9, fill: "#9ca3af" }} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: "#6b7280" }} width={88} />
+                  <Tooltip formatter={(v: any) => fmtUah(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                  <Bar dataKey="value" name="Вартість" radius={[0, 4, 4, 0]}>
+                    {topStockChart.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Top purchased */}
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <ShoppingCart size={15} className="text-blue-500" /> Топ-10 закупівель за сумою
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 pb-2">
+            {(top_usage || []).length === 0 ? (
+              <div className="py-10 text-center text-gray-400 text-sm bg-gray-50 m-3 rounded-lg">
+                Немає підтверджених накладних за цей період
+              </div>
+            ) : (
+              <div className="divide-y max-h-[220px] overflow-y-auto">
+                {(top_usage || []).map((u: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xs font-bold text-gray-300 w-4 text-right shrink-0">{i + 1}</span>
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">{u.name}</p>
+                        <p className="text-xs text-gray-400">{Number(u.total_received).toFixed(2)} {u.unit}</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-violet-700 shrink-0">{fmtUah(u.total_cost)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
