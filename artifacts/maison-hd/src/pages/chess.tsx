@@ -638,13 +638,23 @@ export default function ChessPage() {
                         const paid = overlay === "payment";
                         const paymentBg = paid ? (b.paymentStatus === "paid" ? "bg-emerald-500" : b.paymentStatus === "partial" ? "bg-orange-400" : "bg-red-400") : "";
 
+                        // Split-cell positioning: check-in = right 40%, check-out = left 40%
+                        const barLeft = isOverflow
+                          ? startIdx * dayW + 1
+                          : startIdx * dayW + Math.round(dayW * 0.6) + 1;
+                        const barRight = (isUnderflow || endIdx === -1)
+                          ? (startIdx + w) * dayW - 1
+                          : endIdx * dayW + Math.round(dayW * 0.4) - 1;
+                        const barWidth = Math.max(2, barRight - barLeft);
+
                         return (
                           <div key={b.id}
                             className={`absolute top-1 bottom-1 rounded-md border cursor-pointer select-none overflow-hidden flex items-center transition-all hover:brightness-90 hover:shadow-md z-10
                               ${paid ? paymentBg + " text-white border-transparent" : `${def.bg} ${def.text} ${def.border}`}
                               ${b.status === "cancelled" ? "opacity-50" : ""}
                               ${isOverflow ? "rounded-l-none" : ""} ${isUnderflow ? "rounded-r-none" : ""}`}
-                            style={{ left: startIdx * dayW + 2, width: w * dayW - 4 }}
+                            style={{ left: barLeft, width: barWidth }}
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => { e.stopPropagation(); setDetailBk(b); setHoveredBk(null); }}
                             onMouseEnter={(e) => setHoveredBk({ bk: b, x: e.clientX, y: e.clientY })}
                             onMouseMove={(e) => setHoveredBk(h => h ? { ...h, x: e.clientX, y: e.clientY } : null)}
@@ -658,26 +668,26 @@ export default function ChessPage() {
 
                             {/* Today indicator */}
                             {b.checkIn <= today && b.checkOut > today && (
-                              <div className="absolute top-0 bottom-0" style={{ left: (dates.indexOf(today) - startIdx) * dayW, width: 2, background: "rgba(0,0,0,0.3)" }} />
+                              <div className="absolute top-0 bottom-0" style={{ left: dates.indexOf(today) * dayW - barLeft, width: 2, background: "rgba(0,0,0,0.3)" }} />
                             )}
 
                             {/* Content */}
-                            {w * dayW > 30 && (
+                            {barWidth > 30 && (
                               <div className="flex items-center gap-1 px-1.5 min-w-0 w-full">
-                                {w * dayW > 42 && (
+                                {barWidth > 42 && (
                                   <span className="text-[11px] font-semibold truncate leading-tight flex-1">
                                     {b.guestName?.split(" ")[0] || "—"}
-                                    {w * dayW > 80 && b.guestName?.split(" ")[1] ? ` ${b.guestName.split(" ")[1][0]}.` : ""}
+                                    {barWidth > 80 && b.guestName?.split(" ")[1] ? ` ${b.guestName.split(" ")[1][0]}.` : ""}
                                   </span>
                                 )}
-                                {w * dayW > 120 && (
+                                {barWidth > 120 && (
                                   <span className="text-[9px] opacity-60 flex-shrink-0">{b.nights}н</span>
                                 )}
                               </div>
                             )}
 
                             {/* Status dot */}
-                            {w * dayW <= 30 && (
+                            {barWidth <= 30 && (
                               <div className="w-full h-full flex items-center justify-center">
                                 <div className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
                               </div>
@@ -715,18 +725,25 @@ export default function ChessPage() {
                         );
                       })}
 
-                      {/* Drag preview */}
+                      {/* Drag preview — split-cell: start=right 40%, end=left 40% */}
                       {dragVis && dragVis.unitId === u.id && (() => {
                         const a = dragVis.start <= dragVis.end ? dragVis.start : dragVis.end;
                         const b = dragVis.start <= dragVis.end ? dragVis.end : dragVis.start;
                         const si = dates.indexOf(a);
                         const ei = dates.indexOf(b);
                         if (si === -1) return null;
-                        const w = (ei === -1 ? dates.length - 1 : ei) - si + 1;
+                        const nights = (ei === -1 ? dates.length : ei) - si;
+                        const dragLeft = si * dayW + Math.round(dayW * 0.6) + 1;
+                        const dragRight = ei === -1
+                          ? dates.length * dayW - 1
+                          : si === ei
+                            ? si * dayW + dayW - 1
+                            : ei * dayW + Math.round(dayW * 0.4) - 1;
+                        const dragWidth = Math.max(4, dragRight - dragLeft);
                         return (
                           <div className="absolute top-1 bottom-1 rounded-md bg-blue-300 border-2 border-blue-500 border-dashed z-20 pointer-events-none opacity-70 flex items-center justify-center"
-                            style={{ left: si * dayW + 2, width: w * dayW - 4 }}>
-                            <span className="text-[10px] text-blue-800 font-bold">{w}н</span>
+                            style={{ left: dragLeft, width: dragWidth }}>
+                            {dragWidth > 20 && <span className="text-[10px] text-blue-800 font-bold">{Math.max(1, nights)}н</span>}
                           </div>
                         );
                       })()}
