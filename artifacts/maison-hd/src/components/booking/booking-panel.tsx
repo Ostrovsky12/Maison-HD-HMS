@@ -666,31 +666,232 @@ function TabPayments({ b }: { b: any }) {
   );
 }
 
-// ── Tab: Services ──────────────────────────────────────────────────────────
+// ── Add Service Order Dialog + Tab: Services ───────────────────────────────
+function AddServiceDialog({
+  bookingId, type, onClose, onSaved,
+}: { bookingId: number; type: "spa" | "rental" | "service"; onClose: () => void; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    serviceName: "", requestedTime: "", guestNotes: "", price: "", quantity: "1",
+  });
+
+  const PRESETS: Record<string, { name: string; price: string }[]> = {
+    spa: [
+      { name: "SPA — масаж класичний (60 хв)", price: "800" },
+      { name: "SPA — масаж релакс (90 хв)", price: "1200" },
+      { name: "SPA — ароматерапія", price: "700" },
+      { name: "SPA — сауна (1 год)", price: "500" },
+      { name: "SPA — джакузі (30 хв)", price: "400" },
+    ],
+    rental: [
+      { name: "Прокат велосипеда (1 день)", price: "200" },
+      { name: "Прокат самоката (1 день)", price: "150" },
+      { name: "Прокат байдарки (1 год)", price: "300" },
+      { name: "Прокат мангал + вугілля", price: "250" },
+    ],
+    service: [
+      { name: "Барбекю-набір", price: "500" },
+      { name: "Святковий декор кімнати", price: "800" },
+      { name: "Букет квітів", price: "600" },
+      { name: "Пляшка вина", price: "700" },
+      { name: "Торт на замовлення", price: "1200" },
+    ],
+  };
+
+  const title = type === "spa" ? "Записати на SPA" : type === "rental" ? "Додати прокат" : "Додати послугу";
+
+  const save = async () => {
+    if (!form.serviceName) { toast({ title: "Введіть назву послуги", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const r = await apiFetch(`${API}/guest/service-orders`, {
+        method: "POST",
+        body: JSON.stringify({
+          bookingId, serviceName: form.serviceName, serviceType: type,
+          quantity: parseInt(form.quantity) || 1,
+          requestedTime: form.requestedTime || null,
+          guestNotes: form.guestNotes || null,
+          price: form.price ? parseFloat(form.price) : null,
+          totalPrice: form.price ? parseFloat(form.price) * (parseInt(form.quantity) || 1) : null,
+        }),
+      });
+      if (r.ok) {
+        toast({ title: `${title} — збережено ✓` });
+        onSaved();
+        onClose();
+      } else {
+        const d = await r.json();
+        toast({ title: d.error || "Помилка", variant: "destructive" });
+      }
+    } finally { setSaving(false); }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between p-5 pb-3 border-b border-gray-100">
+          <h2 className="font-bold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-100 text-gray-400">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          {/* Presets */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 mb-2">Швидкий вибір</p>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS[type]?.map(p => (
+                <button key={p.name} onClick={() => setForm(f => ({ ...f, serviceName: p.name, price: p.price }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${form.serviceName === p.name ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-700"}`}>
+                  {p.name.split("(")[0].trim()}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 font-semibold">Назва послуги *</label>
+            <input value={form.serviceName} onChange={e => setForm(f => ({ ...f, serviceName: e.target.value }))}
+              placeholder="Введіть назву..."
+              className="w-full mt-1 px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 font-semibold">Час / дата</label>
+              <input value={form.requestedTime} onChange={e => setForm(f => ({ ...f, requestedTime: e.target.value }))}
+                placeholder="Напр. 14:00, 12.05"
+                className="w-full mt-1 px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 font-semibold">Кількість</label>
+              <input type="number" min="1" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}
+                className="w-full mt-1 px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 font-semibold">Ціна (₴)</label>
+            <input type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+              placeholder="0"
+              className="w-full mt-1 px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 font-semibold">Нотатка</label>
+            <textarea value={form.guestNotes} onChange={e => setForm(f => ({ ...f, guestNotes: e.target.value }))}
+              rows={2} placeholder="Додаткова інформація..."
+              className="w-full mt-1 px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-none" />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 font-semibold hover:bg-gray-50 transition-colors">
+              Скасувати
+            </button>
+            <button onClick={save} disabled={saving || !form.serviceName}
+              className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-colors disabled:opacity-60">
+              {saving ? "Збереження…" : "Зберегти"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+const ORDER_STATUS_PANEL: Record<string, { label: string; color: string }> = {
+  pending:   { label: "Нове",         color: "bg-amber-50 text-amber-700 ring-amber-200" },
+  confirmed: { label: "Підтверджено", color: "bg-blue-50 text-blue-700 ring-blue-200" },
+  completed: { label: "Виконано",     color: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  cancelled: { label: "Скасовано",    color: "bg-gray-100 text-gray-500 ring-gray-200" },
+};
+
 function TabServices({ b }: { b: any }) {
+  const { toast } = useToast();
   const addons = b.selectedAddons || {};
   const addonKeys = Object.entries(addons).filter(([, v]) => v).map(([k]) => k);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [addDialog, setAddDialog] = useState<"spa" | "rental" | "service" | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
 
   const ADDON_LABELS: Record<string, { label: string; icon: string }> = {
-    animal_cat:    { label: "З кішкою",              icon: "🐱" },
-    animal_dog:    { label: "З собакою",              icon: "🐶" },
-    baby_cot:      { label: "Дитяче ліжечко",         icon: "🛏" },
-    baby_chair:    { label: "Дитячий стілець",         icon: "🪑" },
-    extra_pillows: { label: "Додаткові подушки",      icon: "🛋" },
-    extra_blanket: { label: "Додаткова ковдра",       icon: "🛌" },
-    double_bed:    { label: "Суцільне ліжко",         icon: "🛏" },
+    animal_cat:    { label: "З кішкою",         icon: "🐱" },
+    animal_dog:    { label: "З собакою",         icon: "🐶" },
+    baby_cot:      { label: "Дитяче ліжечко",    icon: "🛏" },
+    baby_chair:    { label: "Дитячий стілець",    icon: "🪑" },
+    extra_pillows: { label: "Додаткові подушки", icon: "🛋" },
+    extra_blanket: { label: "Додаткова ковдра",  icon: "🛌" },
+    double_bed:    { label: "Суцільне ліжко",    icon: "🛏" },
+  };
+
+  const loadOrders = async () => {
+    setLoadingOrders(true);
+    try {
+      const r = await apiFetch(`${API}/guest/service-orders?status=all&limit=100`);
+      if (r.ok) {
+        const all = await r.json();
+        setOrders(all.filter((o: any) => o.bookingId === b.id));
+      }
+    } finally { setLoadingOrders(false); }
+  };
+
+  useEffect(() => { loadOrders(); }, [b.id]);
+
+  const updateStatus = async (id: number, status: string) => {
+    setUpdatingId(id);
+    const r = await apiFetch(`${API}/guest/service-orders/${id}`, {
+      method: "PATCH", body: JSON.stringify({ status }),
+    });
+    if (r.ok) { toast({ title: "Статус оновлено" }); loadOrders(); }
+    setUpdatingId(null);
+  };
+
+  const spaOrders = orders.filter(o => o.serviceType === "spa");
+  const rentalOrders = orders.filter(o => o.serviceType === "rental");
+  const otherOrders = orders.filter(o => o.serviceType !== "spa" && o.serviceType !== "rental");
+
+  const OrderCard = ({ o }: { o: any }) => {
+    const st = ORDER_STATUS_PANEL[o.status] || ORDER_STATUS_PANEL.pending;
+    return (
+      <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-gray-800">{o.serviceName}</span>
+            <span className={`inline-flex text-[10px] font-bold px-2 py-0.5 rounded-full ring-1 ${st.color}`}>{st.label}</span>
+          </div>
+          {o.requestedTime && <p className="text-xs text-gray-400 mt-0.5">⏰ {o.requestedTime}</p>}
+          {o.guestNotes && <p className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded mt-1 inline-block">💬 {o.guestNotes}</p>}
+          {o.price && <p className="text-xs font-bold text-indigo-700 mt-0.5">{parseFloat(o.price).toLocaleString("uk")} ₴ × {o.quantity || 1}</p>}
+        </div>
+        <div className="flex flex-col gap-1 shrink-0">
+          {o.status === "pending" && (
+            <>
+              <button onClick={() => updateStatus(o.id, "confirmed")} disabled={updatingId === o.id}
+                className="px-2 py-1 bg-blue-600 text-white text-[10px] font-bold rounded-lg hover:bg-blue-700 transition-colors">
+                {updatingId === o.id ? "…" : "Підтвердити"}
+              </button>
+              <button onClick={() => updateStatus(o.id, "cancelled")} disabled={updatingId === o.id}
+                className="px-2 py-1 bg-gray-100 text-gray-600 text-[10px] font-semibold rounded-lg hover:bg-gray-200 transition-colors">
+                Скасувати
+              </button>
+            </>
+          )}
+          {o.status === "confirmed" && (
+            <button onClick={() => updateStatus(o.id, "completed")} disabled={updatingId === o.id}
+              className="px-2 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded-lg hover:bg-emerald-700 transition-colors">
+              ✓ Виконано
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
     <div className="space-y-4">
       {/* Addons */}
-      <div>
-        <SectionLabel>Обрані опції</SectionLabel>
-        {addonKeys.length === 0 ? (
-          <div className="p-5 rounded-2xl border border-dashed border-gray-200 text-center text-sm text-gray-400">
-            Немає обраних опцій
-          </div>
-        ) : (
+      {addonKeys.length > 0 && (
+        <div>
+          <SectionLabel>Обрані опції при бронюванні</SectionLabel>
           <div className="grid grid-cols-2 gap-2">
             {addonKeys.map(k => {
               const cfg = ADDON_LABELS[k] || { label: k, icon: "✓" };
@@ -702,28 +903,65 @@ function TabServices({ b }: { b: any }) {
               );
             })}
           </div>
-        )}
+        </div>
+      )}
+
+      {/* SPA */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <SectionLabel>SPA-записи</SectionLabel>
+          <button onClick={() => setAddDialog("spa")} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800 flex items-center gap-1">
+            <Plus className="w-3 h-3" />Записати
+          </button>
+        </div>
+        {loadingOrders ? <div className="text-center py-3 text-gray-400"><Loader2 className="w-4 h-4 animate-spin mx-auto" /></div>
+          : spaOrders.length === 0 ? (
+            <div className="p-4 rounded-2xl border border-dashed border-gray-200 text-center">
+              <Waves className="w-7 h-7 text-gray-200 mx-auto mb-2" />
+              <p className="text-sm text-gray-400">Немає SPA-записів</p>
+              <button onClick={() => setAddDialog("spa")} className="mt-2 text-xs text-indigo-500 hover:underline font-semibold">+ Записати на SPA</button>
+            </div>
+          ) : (
+            <div className="space-y-2">{spaOrders.map(o => <OrderCard key={o.id} o={o} />)}</div>
+          )}
       </div>
 
-      {/* Spa placeholder */}
+      {/* Rental */}
       <div>
-        <SectionLabel>SPA-записи</SectionLabel>
-        <div className="p-5 rounded-2xl border border-dashed border-gray-200 text-center">
-          <Waves className="w-7 h-7 text-gray-200 mx-auto mb-2" />
-          <p className="text-sm text-gray-400">Немає SPA-записів</p>
-          <button className="mt-2 text-xs text-indigo-500 hover:underline font-semibold">+ Записати на SPA</button>
+        <div className="flex items-center justify-between mb-2">
+          <SectionLabel>Прокат</SectionLabel>
+          <button onClick={() => setAddDialog("rental")} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800 flex items-center gap-1">
+            <Plus className="w-3 h-3" />Додати
+          </button>
         </div>
+        {loadingOrders ? <div className="text-center py-3 text-gray-400"><Loader2 className="w-4 h-4 animate-spin mx-auto" /></div>
+          : rentalOrders.length === 0 ? (
+            <div className="p-4 rounded-2xl border border-dashed border-gray-200 text-center">
+              <Bike className="w-7 h-7 text-gray-200 mx-auto mb-2" />
+              <p className="text-sm text-gray-400">Прокат не замовлений</p>
+              <button onClick={() => setAddDialog("rental")} className="mt-2 text-xs text-indigo-500 hover:underline font-semibold">+ Додати прокат</button>
+            </div>
+          ) : (
+            <div className="space-y-2">{rentalOrders.map(o => <OrderCard key={o.id} o={o} />)}</div>
+          )}
       </div>
 
-      {/* Rental placeholder */}
-      <div>
-        <SectionLabel>Прокат</SectionLabel>
-        <div className="p-5 rounded-2xl border border-dashed border-gray-200 text-center">
-          <Bike className="w-7 h-7 text-gray-200 mx-auto mb-2" />
-          <p className="text-sm text-gray-400">Прокат не замовлений</p>
-          <button className="mt-2 text-xs text-indigo-500 hover:underline font-semibold">+ Додати прокат</button>
+      {/* Other services */}
+      {otherOrders.length > 0 && (
+        <div>
+          <SectionLabel>Інші послуги</SectionLabel>
+          <div className="space-y-2">{otherOrders.map(o => <OrderCard key={o.id} o={o} />)}</div>
         </div>
-      </div>
+      )}
+
+      <button onClick={() => setAddDialog("service")}
+        className="w-full py-2.5 border-2 border-dashed border-indigo-100 hover:border-indigo-300 text-indigo-600 text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5">
+        <Plus className="w-3.5 h-3.5" />Додати послугу
+      </button>
+
+      {addDialog && (
+        <AddServiceDialog bookingId={b.id} type={addDialog} onClose={() => setAddDialog(null)} onSaved={loadOrders} />
+      )}
     </div>
   );
 }

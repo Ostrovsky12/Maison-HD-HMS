@@ -14,6 +14,7 @@ import {
   CheckCircle2, Clock, RefreshCw, Plus, Send, Eye, EyeOff,
   ThumbsUp, Crown, Zap, AlertCircle, ChevronRight, Mail,
   BarChart3, Sparkles, Globe, Calendar, ShoppingBag, Check, X, Package,
+  UserCheck, Phone, BedDouble, ChevronDown,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -202,6 +203,123 @@ function ServiceOrdersTab() {
   );
 }
 
+// ── Online Checkins Tab ────────────────────────────────────────────────────────
+function CheckinsTab() {
+  const [checkins, setCheckins] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await apiFetch("/guest/checkins");
+    if (r.ok) setCheckins(await r.json());
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmtDate = (d: string) => {
+    try { return new Date(d).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "2-digit" }); }
+    catch { return d; }
+  };
+  const fmtDateTime = (d: string) => {
+    try { return new Date(d).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+    catch { return d; }
+  };
+
+  const FIELD_LABELS: Record<string, string> = {
+    firstName: "Ім'я", lastName: "Прізвище", middleName: "По батькові",
+    phone: "Телефон", email: "Email", passportType: "Документ", passportNumber: "Номер документа",
+    nationality: "Громадянство", birthDate: "Дата народження", arrivalTime: "Час прибуття",
+    specialRequests: "Побажання", carNumber: "Номер авто", hasPet: "Тварина", petType: "Вид тварини", petName: "Кличка",
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-700">Онлайн чекін-форми</span>
+          {!loading && <Badge className="bg-emerald-100 text-emerald-700">{checkins.length}</Badge>}
+        </div>
+        <button onClick={load} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-32 text-gray-400">
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" />Завантаження...
+        </div>
+      ) : checkins.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 gap-3 text-gray-400">
+          <UserCheck className="w-10 h-10 text-gray-200" />
+          <div className="text-center">
+            <p className="text-sm font-medium">Жодного онлайн чекіну</p>
+            <p className="text-xs text-gray-300 mt-1">Гості заповнять форму через гостьовий портал</p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {checkins.map(c => (
+            <Card key={c.id} className="border-0 shadow-sm overflow-hidden">
+              <CardContent className="p-0">
+                <div
+                  className="flex items-center gap-3 p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={() => setExpanded(expanded === c.id ? null : c.id)}
+                >
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                    <UserCheck className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-gray-900 text-sm">{c.guestName}</span>
+                      <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">✅ Форма заповнена</Badge>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5 flex flex-wrap gap-x-3">
+                      <span><BedDouble className="w-3 h-3 inline mr-0.5" />{c.unitName}</span>
+                      <span>📅 {fmtDate(c.checkIn)} → {fmtDate(c.checkOut)}</span>
+                      <span>🕐 {fmtDateTime(c.updatedAt)}</span>
+                    </div>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${expanded === c.id ? "rotate-180" : ""}`} />
+                </div>
+
+                {expanded === c.id && c.checkinFormData && Object.keys(c.checkinFormData).length > 0 && (
+                  <div className="px-4 pb-4 border-t border-gray-50">
+                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
+                      {Object.entries(c.checkinFormData)
+                        .filter(([k, v]) => v && k !== "coGuests" && typeof v !== "object")
+                        .map(([k, v]) => (
+                          <div key={k} className="text-xs">
+                            <span className="text-gray-400">{FIELD_LABELS[k] || k}: </span>
+                            <span className="font-medium text-gray-700">{String(v)}</span>
+                          </div>
+                        ))}
+                    </div>
+                    {c.checkinFormData.coGuests && Array.isArray(c.checkinFormData.coGuests) && c.checkinFormData.coGuests.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-400 font-semibold mb-1">Супутники ({c.checkinFormData.coGuests.length}):</p>
+                        {c.checkinFormData.coGuests.map((g: any, i: number) => (
+                          <p key={i} className="text-xs text-gray-700">• {g.firstName} {g.lastName} — {g.passportNumber}</p>
+                        ))}
+                      </div>
+                    )}
+                    {c.checkinFormData.specialRequests && (
+                      <div className="mt-2 bg-amber-50 rounded-lg p-2">
+                        <p className="text-xs text-amber-700">💬 {c.checkinFormData.specialRequests}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function GuestExperiencePage() {
   const [summary, setSummary] = useState<any>(null);
   const [loyalty, setLoyalty] = useState<any[]>([]);
@@ -333,8 +451,13 @@ export default function GuestExperiencePage() {
         </div>
 
         <Tabs defaultValue="orders">
-          <TabsList className="w-full grid grid-cols-5 h-10">
-            <TabsTrigger value="orders" className="text-xs"><ShoppingBag className="h-3.5 w-3.5 mr-1" />Замовлення</TabsTrigger>
+          <TabsList className="w-full grid grid-cols-6 h-10">
+            <TabsTrigger value="orders" className="text-xs relative">
+              <ShoppingBag className="h-3.5 w-3.5 mr-1" />Замовлення
+            </TabsTrigger>
+            <TabsTrigger value="checkins" className="text-xs">
+              <UserCheck className="h-3.5 w-3.5 mr-1" />Чекін
+            </TabsTrigger>
             <TabsTrigger value="loyalty" className="text-xs"><Crown className="h-3.5 w-3.5 mr-1" />Лояльність</TabsTrigger>
             <TabsTrigger value="reviews" className="text-xs"><Star className="h-3.5 w-3.5 mr-1" />Відгуки</TabsTrigger>
             <TabsTrigger value="offers" className="text-xs"><Tag className="h-3.5 w-3.5 mr-1" />Пропозиції</TabsTrigger>
@@ -344,6 +467,11 @@ export default function GuestExperiencePage() {
           {/* ===== SERVICE ORDERS ===== */}
           <TabsContent value="orders" className="mt-4">
             <ServiceOrdersTab />
+          </TabsContent>
+
+          {/* ===== ONLINE CHECKINS ===== */}
+          <TabsContent value="checkins" className="mt-4">
+            <CheckinsTab />
           </TabsContent>
 
           {/* ===== LOYALTY ===== */}

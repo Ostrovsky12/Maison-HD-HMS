@@ -238,6 +238,105 @@ router.get("/summary", requireAuth, async (req: any, res) => {
   }
 });
 
+// ── Admin: List online checkin submissions ────────────────────────────────
+router.get("/checkins", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const propIds = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, orgId));
+    const pIds = propIds.map(p => p.id);
+    if (pIds.length === 0) return res.json([]);
+
+    const unitRows = await db.select({ id: unitsTable.id, name: unitsTable.name })
+      .from(unitsTable).where(inArray(unitsTable.propertyId, pIds));
+    const uIds = unitRows.map(u => u.id);
+    const unitMap = Object.fromEntries(unitRows.map(u => [u.id, u.name]));
+
+    const rows = await db.select({
+      id: bookingsTable.id,
+      checkIn: bookingsTable.checkIn,
+      checkOut: bookingsTable.checkOut,
+      firstName: bookingsTable.firstName,
+      lastName: bookingsTable.lastName,
+      phone: bookingsTable.phone,
+      email: bookingsTable.email,
+      unitId: bookingsTable.unitId,
+      status: bookingsTable.status,
+      checkinFormSubmitted: bookingsTable.checkinFormSubmitted,
+      checkinFormData: bookingsTable.checkinFormData,
+      updatedAt: bookingsTable.updatedAt,
+    }).from(bookingsTable)
+      .where(and(
+        inArray(bookingsTable.unitId, uIds),
+        eq(bookingsTable.checkinFormSubmitted, true)
+      ))
+      .orderBy(desc(bookingsTable.updatedAt))
+      .limit(200);
+
+    res.json(rows.map(r => ({
+      ...r,
+      unitName: unitMap[r.unitId || 0] || "—",
+      guestName: [r.firstName, r.lastName].filter(Boolean).join(" ") || "—",
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Get pending service orders count ───────────────────────────────
+router.get("/service-orders/count", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const propIds = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, orgId));
+    const pIds = propIds.map(p => p.id);
+    if (pIds.length === 0) return res.json({ pending: 0 });
+
+    const unitRows = await db.select({ id: unitsTable.id }).from(unitsTable)
+      .where(inArray(unitsTable.propertyId, pIds));
+    const uIds = unitRows.map(u => u.id);
+    if (uIds.length === 0) return res.json({ pending: 0 });
+
+    const bookingRows = await db.select({ id: bookingsTable.id }).from(bookingsTable)
+      .where(inArray(bookingsTable.unitId, uIds));
+    const bIds = bookingRows.map(b => b.id);
+    if (bIds.length === 0) return res.json({ pending: 0 });
+
+    const [row] = await db.select({ cnt: sql<number>`count(*)::int` })
+      .from(guestServiceOrdersTable)
+      .where(and(
+        inArray(guestServiceOrdersTable.bookingId, bIds),
+        eq(guestServiceOrdersTable.status, "pending")
+      ));
+
+    res.json({ pending: row?.cnt || 0 });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Add service order for a booking (staff-side) ────────────────────
+router.post("/service-orders", requireAuth, async (req: any, res) => {
+  try {
+    const { bookingId, serviceName, serviceType, quantity, requestedTime, guestNotes, price, totalPrice } = req.body;
+    if (!bookingId || !serviceName) return res.status(400).json({ error: "bookingId and serviceName required" });
+    const [order] = await db.insert(guestServiceOrdersTable).values({
+      bookingId: parseInt(bookingId),
+      serviceName,
+      serviceType: serviceType || "service",
+      quantity: quantity || 1,
+      requestedTime: requestedTime || null,
+      guestNotes: guestNotes || null,
+      price: price ? String(price) : null,
+      totalPrice: totalPrice ? String(totalPrice) : (price ? String(price * (quantity || 1)) : null),
+      status: "confirmed",
+    }).returning();
+    res.json(order);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Admin: List service orders for organization ─────────────────────────────
 router.get("/service-orders", requireAuth, async (req: any, res) => {
   try {
