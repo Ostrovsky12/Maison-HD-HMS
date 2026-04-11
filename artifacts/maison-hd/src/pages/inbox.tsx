@@ -180,8 +180,82 @@ export default function InboxPage() {
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [newLeadForm, setNewLeadForm] = useState({ firstName: "", lastName: "", email: "", phone: "", source: "phone", subject: "", estimatedValue: "" });
 
+  const [showChannelSettings, setShowChannelSettings] = useState(false);
+  const [channels, setChannels] = useState<any[]>([]);
+  const [tgToken, setTgToken] = useState("");
+  const [igAccessToken, setIgAccessToken] = useState("");
+  const [igPageId, setIgPageId] = useState("");
+  const [igVerifyToken, setIgVerifyToken] = useState(() => Math.random().toString(36).slice(2, 12));
+  const [channelSetupLoading, setChannelSetupLoading] = useState("");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Load channels config ─────────────────────────────────────────────────
+  async function loadChannels() {
+    const r = await apiFetch(`${API}/inbox/channels`);
+    const data = await r.json();
+    if (Array.isArray(data)) setChannels(data);
+  }
+
+  // ── Connect Telegram bot ─────────────────────────────────────────────────
+  async function setupTelegram() {
+    if (!tgToken.trim()) return;
+    setChannelSetupLoading("telegram");
+    try {
+      const r = await apiFetch(`${API}/inbox/channels/telegram/setup`, {
+        method: "POST", body: JSON.stringify({ botToken: tgToken }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast({ title: `✅ Telegram підключено`, description: `@${d.botUsername}` });
+        setTgToken("");
+        loadChannels();
+      } else {
+        toast({ title: "Помилка", description: d.error, variant: "destructive" });
+      }
+    } finally { setChannelSetupLoading(""); }
+  }
+
+  // ── Disconnect Telegram ──────────────────────────────────────────────────
+  async function disconnectTelegram() {
+    setChannelSetupLoading("telegram-disconnect");
+    try {
+      await apiFetch(`${API}/inbox/channels/telegram/setup`, { method: "DELETE" });
+      toast({ title: "Telegram відключено" });
+      loadChannels();
+    } finally { setChannelSetupLoading(""); }
+  }
+
+  // ── Connect Instagram ────────────────────────────────────────────────────
+  async function setupInstagram() {
+    if (!igAccessToken.trim() || !igPageId.trim()) return;
+    setChannelSetupLoading("instagram");
+    try {
+      const r = await apiFetch(`${API}/inbox/channels/instagram/setup`, {
+        method: "POST", body: JSON.stringify({ accessToken: igAccessToken, pageId: igPageId, verifyToken: igVerifyToken }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast({ title: `✅ Instagram підключено`, description: d.pageName });
+        setIgAccessToken("");
+        setIgPageId("");
+        loadChannels();
+      } else {
+        toast({ title: "Помилка", description: d.error, variant: "destructive" });
+      }
+    } finally { setChannelSetupLoading(""); }
+  }
+
+  // ── Disconnect Instagram ─────────────────────────────────────────────────
+  async function disconnectInstagram() {
+    setChannelSetupLoading("instagram-disconnect");
+    try {
+      await apiFetch(`${API}/inbox/channels/instagram/setup`, { method: "DELETE" });
+      toast({ title: "Instagram відключено" });
+      loadChannels();
+    } finally { setChannelSetupLoading(""); }
+  }
 
   // ── Load ────────────────────────────────────────────────────────────────
   async function loadAll() {
@@ -420,6 +494,10 @@ export default function InboxPage() {
               </div>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={loadAll}><RefreshCw className="w-3.5 h-3.5" /></Button>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Налаштування каналів"
+                  onClick={() => { setShowChannelSettings(true); loadChannels(); }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </Button>
                 <Button size="sm" className="h-7 px-2 gap-1 text-xs bg-indigo-600 hover:bg-indigo-700"
                   onClick={() => { if (view === "leads") setShowLeadForm(true); }}>
                   <Plus className="w-3 h-3" />
@@ -1131,6 +1209,152 @@ export default function InboxPage() {
               <Button className="flex-1 h-9 bg-violet-600 hover:bg-violet-700" onClick={createLead}>
                 <Plus className="w-4 h-4 mr-1" /> Створити лід
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ CHANNEL SETTINGS MODAL ════════════════════════════════════════════ */}
+      {showChannelSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowChannelSettings(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="font-bold text-gray-900 text-base">Підключення каналів</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Telegram та Instagram для Unified Inbox</p>
+              </div>
+              <button onClick={() => setShowChannelSettings(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-6">
+
+              {/* ── TELEGRAM ────────────────────────────────────────────────── */}
+              <div className="rounded-xl border border-gray-100 overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 bg-sky-50">
+                  <div className="w-8 h-8 rounded-lg bg-sky-500 flex items-center justify-center flex-shrink-0">
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.069l-2.055 9.677c-.154.678-.557.843-1.128.524l-3.1-2.285-1.497 1.44c-.165.165-.304.304-.624.304l.223-3.147 5.74-5.185c.25-.222-.054-.345-.386-.123L7.38 14.413l-3.04-.95c-.66-.205-.673-.66.138-.976l11.878-4.578c.549-.199 1.029.133.207.16z"/></svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm text-sky-900">Telegram Bot</p>
+                    <p className="text-[11px] text-sky-600">
+                      {channels.find(c => c.channel === "telegram")?.isEnabled
+                        ? `✓ Підключено — @${channels.find(c => c.channel === "telegram")?.config?.bot_username || "..."}`
+                        : "Не підключено"}
+                    </p>
+                  </div>
+                  {channels.find(c => c.channel === "telegram")?.isEnabled && (
+                    <span className="text-[10px] bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-semibold">ACTIVE</span>
+                  )}
+                </div>
+
+                <div className="px-4 py-4 space-y-3">
+                  {channels.find(c => c.channel === "telegram")?.isEnabled ? (
+                    <div className="space-y-2">
+                      <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-600">
+                        <p className="font-medium mb-0.5">Webhook URL:</p>
+                        <p className="font-mono text-[10px] break-all">{channels.find(c => c.channel === "telegram")?.webhookUrl}</p>
+                      </div>
+                      <Button variant="outline" size="sm" className="w-full h-8 text-red-500 border-red-200 hover:bg-red-50"
+                        onClick={disconnectTelegram} disabled={channelSetupLoading === "telegram-disconnect"}>
+                        {channelSetupLoading === "telegram-disconnect" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Відключити"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <ol className="text-xs text-gray-500 space-y-1 pl-4 list-decimal">
+                        <li>Відкрийте <span className="text-sky-600 font-medium">@BotFather</span> у Telegram</li>
+                        <li>Відправте <code className="bg-gray-100 px-1 rounded">/newbot</code> та дайте ім'я боту</li>
+                        <li>Скопіюйте токен бота та вставте нижче</li>
+                      </ol>
+                      <div className="flex gap-2">
+                        <Input
+                          value={tgToken}
+                          onChange={e => setTgToken(e.target.value)}
+                          placeholder="1234567890:ABCdef..."
+                          className="h-9 text-sm font-mono flex-1"
+                          onKeyDown={e => e.key === "Enter" && setupTelegram()}
+                        />
+                        <Button size="sm" className="h-9 px-3 bg-sky-500 hover:bg-sky-600 whitespace-nowrap"
+                          onClick={setupTelegram} disabled={!tgToken.trim() || channelSetupLoading === "telegram"}>
+                          {channelSetupLoading === "telegram" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Підключити"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── INSTAGRAM ───────────────────────────────────────────────── */}
+              <div className="rounded-xl border border-gray-100 overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 bg-pink-50">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm text-pink-900">Instagram DM</p>
+                    <p className="text-[11px] text-pink-600">
+                      {channels.find(c => c.channel === "instagram")?.isEnabled
+                        ? `✓ Підключено — ${channels.find(c => c.channel === "instagram")?.config?.page_name || "..."}`
+                        : "Не підключено"}
+                    </p>
+                  </div>
+                  {channels.find(c => c.channel === "instagram")?.isEnabled && (
+                    <span className="text-[10px] bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full font-semibold">ACTIVE</span>
+                  )}
+                </div>
+
+                <div className="px-4 py-4 space-y-3">
+                  {channels.find(c => c.channel === "instagram")?.isEnabled ? (
+                    <div className="space-y-2">
+                      <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-600 space-y-1">
+                        <p><span className="font-medium">Webhook URL:</span></p>
+                        <p className="font-mono text-[10px] break-all">{channels.find(c => c.channel === "instagram")?.webhookUrl}</p>
+                        <p className="mt-1"><span className="font-medium">Verify Token:</span> <span className="font-mono">{igVerifyToken}</span></p>
+                      </div>
+                      <Button variant="outline" size="sm" className="w-full h-8 text-red-500 border-red-200 hover:bg-red-50"
+                        onClick={disconnectInstagram} disabled={channelSetupLoading === "instagram-disconnect"}>
+                        {channelSetupLoading === "instagram-disconnect" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Відключити"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-xs text-amber-700">
+                        <p className="font-semibold mb-1">Потрібно:</p>
+                        <ol className="space-y-1 pl-3 list-decimal">
+                          <li>Meta Business App з дозволом <code>instagram_manage_messages</code></li>
+                          <li>Facebook Page з підключеним Instagram Business акаунтом</li>
+                          <li>Page Access Token (не User Token)</li>
+                        </ol>
+                      </div>
+                      <div className="space-y-2">
+                        <Input value={igPageId} onChange={e => setIgPageId(e.target.value)}
+                          placeholder="Facebook Page ID (числовий)" className="h-9 text-sm font-mono" />
+                        <Input value={igAccessToken} onChange={e => setIgAccessToken(e.target.value)}
+                          placeholder="Page Access Token (EAABxxx...)" className="h-9 text-sm font-mono" />
+                        <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
+                          <p className="font-medium text-gray-700 mb-0.5">Verify Token (для Meta Webhook):</p>
+                          <p className="font-mono">{igVerifyToken}</p>
+                          <p className="mt-1">Webhook URL: <span className="font-mono text-[10px] break-all">{`${window.location.origin.replace(/\/maison-hd.*/, "")}/api/inbox/webhooks/instagram`}</span></p>
+                        </div>
+                        <Button size="sm" className="w-full h-9 bg-gradient-to-r from-purple-500 to-pink-500 hover:opacity-90"
+                          onClick={setupInstagram} disabled={!igAccessToken.trim() || !igPageId.trim() || channelSetupLoading === "instagram"}>
+                          {channelSetupLoading === "instagram" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Підключити Instagram"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── INFO ─────────────────────────────────────────────────────── */}
+              <div className="bg-indigo-50 rounded-xl px-4 py-3 text-xs text-indigo-700">
+                <p className="font-semibold mb-1">Як це працює:</p>
+                <p>Гість пише у ваш Telegram-бот або Instagram DM → повідомлення з'являється тут в Inbox → ви відповідаєте з панелі → відповідь іде гостю назад у той самий канал.</p>
+              </div>
+
             </div>
           </div>
         </div>

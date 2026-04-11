@@ -284,8 +284,9 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
     if (!content?.trim()) return res.status(400).json({ error: "Порожнє повідомлення" });
 
     const convR = await (db as any).$client.query(
-      `SELECT id FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+      `SELECT id, channel, external_id FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
     if (!convR.rows[0]) return res.status(404).json({ error: "Not found" });
+    const conv = convR.rows[0];
 
     const msgR = await (db as any).$client.query(`
       INSERT INTO messages (conversation_id, direction, message_type, content, sender_name, is_read, is_ai_generated, created_at)
@@ -297,6 +298,17 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
       UPDATE conversations SET last_message_at = NOW(), last_message_preview = $2, status = 'pending', updated_at = NOW()
       WHERE id = $1
     `, [id, content.trim().slice(0, 100)]);
+
+    // ── Dispatch to actual channel ──────────────────────────────────────────
+    if (conv.channel === "telegram" && conv.external_id) {
+      dispatchTelegram(orgId, conv.external_id, content.trim()).catch(e =>
+        console.error("[reply/telegram] dispatch error:", e)
+      );
+    } else if (conv.channel === "instagram" && conv.external_id) {
+      dispatchInstagram(orgId, conv.external_id, content.trim()).catch(e =>
+        console.error("[reply/instagram] dispatch error:", e)
+      );
+    }
 
     const m = msgR.rows[0];
     res.json({
@@ -312,6 +324,48 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── Channel dispatch helpers ─────────────────────────────────────────────────
+async function dispatchTelegram(orgId: number, chatId: string, text: string) {
+  const [cfg] = await db.select().from(channelConfigsTable)
+    .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
+  const token = cfg?.config?.bot_token;
+  if (!token) throw new Error("No Telegram bot token configured");
+
+  const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+  });
+  if (!r.ok) {
+    const e = await r.json() as any;
+    throw new Error(`Telegram API error: ${e.description || r.status}`);
+  }
+  console.log(`[reply/telegram] sent to chat_id=${chatId}`);
+}
+
+async function dispatchInstagram(orgId: number, recipientId: string, text: string) {
+  const [cfg] = await db.select().from(channelConfigsTable)
+    .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "instagram" as any)));
+  const accessToken = cfg?.config?.access_token;
+  const igUserId = cfg?.config?.ig_user_id;
+  if (!accessToken || !igUserId) throw new Error("Instagram not configured");
+
+  const r = await fetch(`https://graph.facebook.com/v19.0/${igUserId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recipient: { id: recipientId },
+      message: { text },
+      access_token: accessToken,
+    }),
+  });
+  if (!r.ok) {
+    const e = await r.json() as any;
+    throw new Error(`Instagram API error: ${JSON.stringify(e)}`);
+  }
+  console.log(`[reply/instagram] sent to user=${recipientId}`);
+}
 
 // ── Internal note ───────────────────────────────────────────────────────────
 router.post("/conversations/:id/internal-note", async (req: any, res) => {
@@ -717,8 +771,161 @@ router.get("/channels", async (req: any, res) => {
     const channels = ["telegram", "instagram", "website", "email", "phone", "whatsapp", "viber"];
     res.json(channels.map(ch => {
       const config = configs.find(c => c.channel === ch);
-      return { channel: ch, isEnabled: config?.isEnabled || ch === "website", config: config?.config || {} };
+      // Mask sensitive fields in response
+      const safeConfig = { ...(config?.config || {}) };
+      if (safeConfig.bot_token) safeConfig.bot_token = safeConfig.bot_token.slice(0, 10) + "...";
+      if (safeConfig.access_token) safeConfig.access_token = safeConfig.access_token.slice(0, 10) + "...";
+      return {
+        channel: ch,
+        isEnabled: config?.isEnabled || ch === "website",
+        config: safeConfig,
+        webhookUrl: config?.webhookUrl || null,
+      };
     }));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Telegram: setup bot & register webhook ───────────────────────────────────
+router.post("/channels/telegram/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const { botToken } = req.body;
+    if (!botToken?.trim()) return res.status(400).json({ error: "bot_token обов'язковий" });
+
+    // Verify token with Telegram
+    const meR = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+    const me = await meR.json() as any;
+    if (!me.ok) return res.status(400).json({ error: `Telegram: невірний токен — ${me.description}` });
+
+    const botName = me.result.username;
+    const botId = me.result.id;
+
+    // Build webhook URL
+    const baseUrl = process.env.PUBLIC_API_URL
+      || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : null);
+    if (!baseUrl) return res.status(500).json({ error: "PUBLIC_API_URL не налаштований" });
+    const webhookUrl = `${baseUrl}/api/inbox/webhooks/telegram/${orgId}`;
+
+    // Register webhook at Telegram
+    const whR = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: webhookUrl,
+        allowed_updates: ["message", "edited_message"],
+        drop_pending_updates: true,
+      }),
+    });
+    const whData = await whR.json() as any;
+    if (!whData.ok) return res.status(400).json({ error: `Webhook error: ${whData.description}` });
+
+    // Upsert channel config
+    const existing = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
+
+    const configData = { bot_token: botToken, bot_username: botName, bot_id: String(botId) };
+    if (existing.length) {
+      await db.update(channelConfigsTable).set({
+        config: configData, isEnabled: true, webhookUrl, updatedAt: new Date(),
+      }).where(eq(channelConfigsTable.id, existing[0].id));
+    } else {
+      await db.insert(channelConfigsTable).values({
+        organizationId: orgId, channel: "telegram" as any,
+        config: configData, isEnabled: true, webhookUrl,
+      });
+    }
+
+    res.json({ success: true, botUsername: botName, webhookUrl });
+  } catch (err: any) {
+    console.error("[telegram/setup]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Telegram: disconnect ─────────────────────────────────────────────────────
+router.delete("/channels/telegram/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const [cfg] = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
+    if (cfg?.config?.bot_token) {
+      await fetch(`https://api.telegram.org/bot${cfg.config.bot_token}/deleteWebhook`).catch(() => {});
+    }
+    if (cfg) {
+      await db.update(channelConfigsTable).set({ isEnabled: false, config: {}, webhookUrl: null, updatedAt: new Date() })
+        .where(eq(channelConfigsTable.id, cfg.id));
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Instagram: setup via access token ───────────────────────────────────────
+router.post("/channels/instagram/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const { accessToken, pageId, verifyToken } = req.body;
+    if (!accessToken?.trim() || !pageId?.trim() || !verifyToken?.trim()) {
+      return res.status(400).json({ error: "accessToken, pageId та verifyToken обов'язкові" });
+    }
+
+    // Verify access token by fetching page info
+    const pageR = await fetch(`https://graph.facebook.com/v19.0/${pageId}?fields=name,instagram_business_account&access_token=${accessToken}`);
+    const pageData = await pageR.json() as any;
+    if (pageData.error) return res.status(400).json({ error: `Facebook API: ${pageData.error.message}` });
+
+    const igUserId = pageData.instagram_business_account?.id || pageId;
+    const pageName = pageData.name || "Instagram";
+
+    // Build webhook URL
+    const baseUrl = process.env.PUBLIC_API_URL
+      || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : null);
+    if (!baseUrl) return res.status(500).json({ error: "PUBLIC_API_URL не налаштований" });
+    const webhookUrl = `${baseUrl}/api/inbox/webhooks/instagram`;
+
+    // Upsert channel config
+    const existing = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "instagram" as any)));
+
+    const configData = {
+      access_token: accessToken,
+      page_id: pageId,
+      ig_user_id: igUserId,
+      verify_token: verifyToken,
+      page_name: pageName,
+    };
+    if (existing.length) {
+      await db.update(channelConfigsTable).set({
+        config: configData, isEnabled: true, webhookUrl, updatedAt: new Date(),
+      }).where(eq(channelConfigsTable.id, existing[0].id));
+    } else {
+      await db.insert(channelConfigsTable).values({
+        organizationId: orgId, channel: "instagram" as any,
+        config: configData, isEnabled: true, webhookUrl,
+      });
+    }
+
+    res.json({ success: true, pageName, igUserId, webhookUrl });
+  } catch (err: any) {
+    console.error("[instagram/setup]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Instagram: disconnect ────────────────────────────────────────────────────
+router.delete("/channels/instagram/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const [cfg] = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "instagram" as any)));
+    if (cfg) {
+      await db.update(channelConfigsTable).set({ isEnabled: false, config: {}, webhookUrl: null, updatedAt: new Date() })
+        .where(eq(channelConfigsTable.id, cfg.id));
+    }
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
