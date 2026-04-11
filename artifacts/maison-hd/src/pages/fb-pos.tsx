@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -210,14 +209,18 @@ function MenuPanel({ categories, items, onAddItem }: {
 function PaymentDialog({ order, onPaid, onClose }: {
   order: Order; onPaid: (data: any) => void; onClose: () => void;
 }) {
-  const [method, setMethod] = useState("cash");
-  const [given, setGiven]   = useState("");
-  const [discount, setDiscount] = useState("0");
-  const [loading, setLoading]   = useState(false);
+  const [method, setMethod]       = useState("cash");
+  const [given, setGiven]         = useState("");
+  const [discount, setDiscount]   = useState("0");
+  const [tipPct, setTipPct]       = useState(0);
+  const [loading, setLoading]     = useState(false);
+  const [fiscalResult, setFiscalResult] = useState<any>(null);
   const { toast } = useToast();
 
   const discountAmt = Math.min(Number(discount) || 0, order.total_amount);
-  const finalTotal  = order.total_amount - discountAmt;
+  const baseTotal   = order.total_amount - discountAmt;
+  const tipAmt      = tipPct > 0 ? Math.round(baseTotal * tipPct) / 100 : 0;
+  const finalTotal  = baseTotal + tipAmt;
   const change      = method === "cash" && Number(given) > finalTotal ? Number(given) - finalTotal : 0;
   const canPay      = method !== "cash" || !given || Number(given) >= finalTotal;
 
@@ -230,10 +233,13 @@ function PaymentDialog({ order, onPaid, onClose }: {
           paymentMethod: method,
           paidAmount: method === "cash" && given ? Number(given) : finalTotal,
           discountAmount: discountAmt,
+          tipAmount: tipAmt,
+          tipPct,
         }),
       });
       const d = await r.json();
       if (!r.ok) { toast({ title: "Помилка", description: d.error, variant: "destructive" }); return; }
+      if (d.fiscal) setFiscalResult(d.fiscal);
       onPaid(d);
     } finally { setLoading(false); }
   };
@@ -247,7 +253,8 @@ function PaymentDialog({ order, onPaid, onClose }: {
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          {/* Total */}
+
+          {/* ── Totals ──────────────────────────────────────── */}
           <div className="bg-white/5 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm text-white/60">
               <span>Сума замовлення:</span>
@@ -259,13 +266,41 @@ function PaymentDialog({ order, onPaid, onClose }: {
                 <span>-{fmt(discountAmt)}</span>
               </div>
             )}
+            {tipAmt > 0 && (
+              <div className="flex justify-between text-sm text-amber-300">
+                <span>Чайові ({tipPct}%):</span>
+                <span>+{fmt(tipAmt)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-lg font-bold border-t border-white/10 pt-2">
               <span className="text-white/80">До сплати:</span>
               <span className="text-indigo-300">{fmt(finalTotal)}</span>
             </div>
           </div>
 
-          {/* Discount */}
+          {/* ── Tips ────────────────────────────────────────── */}
+          <div>
+            <p className="text-xs text-white/40 mb-2 flex items-center gap-1">
+              <Heart className="w-3 h-3" /> Чайові
+            </p>
+            <div className="flex gap-1.5">
+              {TIP_OPTIONS.map(t => (
+                <button
+                  key={t.pct}
+                  onClick={() => setTipPct(t.pct)}
+                  className={`flex-1 py-2 rounded-lg border text-xs font-medium transition-all ${
+                    tipPct === t.pct
+                      ? "bg-amber-500/25 border-amber-400/50 text-amber-200"
+                      : "bg-white/4 border-white/8 text-white/40 hover:bg-white/8"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Discount ──────────────────────────────────── */}
           <div className="flex items-center gap-2">
             <Percent className="w-4 h-4 text-white/30 shrink-0" />
             <Input
@@ -277,7 +312,7 @@ function PaymentDialog({ order, onPaid, onClose }: {
             />
           </div>
 
-          {/* Payment method */}
+          {/* ── Payment method ──────────────────────────────── */}
           <div className="grid grid-cols-3 gap-2">
             {PAYMENT_METHODS.map(pm => {
               const Icon = pm.icon;
@@ -298,7 +333,7 @@ function PaymentDialog({ order, onPaid, onClose }: {
             })}
           </div>
 
-          {/* Cash change */}
+          {/* ── Cash input ──────────────────────────────────── */}
           {method === "cash" && (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -319,6 +354,21 @@ function PaymentDialog({ order, onPaid, onClose }: {
               )}
             </div>
           )}
+
+          {/* ── Fiscal status ────────────────────────────────── */}
+          {fiscalResult && (
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 space-y-1.5">
+              <p className="text-xs text-blue-300 font-semibold flex items-center gap-1.5">
+                🖨️ Фіскальний чек зареєстровано в Checkbox ПРРО
+              </p>
+              <p className="text-xs text-blue-200/60">Чек №: {fiscalResult.fiscalNumber || fiscalResult.id}</p>
+              {fiscalResult.receiptUrl && (
+                <a href={fiscalResult.receiptUrl} target="_blank" rel="noreferrer"
+                   className="text-xs text-blue-400 underline">Переглянути чек →</a>
+              )}
+            </div>
+          )}
+
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/60">Скасувати</Button>

@@ -39,6 +39,7 @@ export default function QrMenuPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [orderId, setOrderId] = useState<number | null>(null);
+  const [tipPct, setTipPct] = useState(0);
 
   useEffect(() => {
     const load = async () => {
@@ -84,6 +85,8 @@ export default function QrMenuPage() {
   const cartQty = (id: number) => cart.find(c => c.id === id)?.quantity || 0;
   const totalItems = cart.reduce((s, c) => s + c.quantity, 0);
   const totalAmount = cart.reduce((s, c) => s + parseFloat(c.price) * c.quantity, 0);
+  const tipAmount = Math.round(totalAmount * tipPct) / 100;
+  const grandTotal = totalAmount + tipAmount;
 
   const filteredCategories = useMemo(() => {
     if (!menu) return [];
@@ -110,6 +113,8 @@ export default function QrMenuPage() {
           guestName: guestName || "Гість",
           guestCount: 1,
           notes: orderNotes || null,
+          tipPct: tipPct || null,
+          tipAmount: tipAmount > 0 ? tipAmount : null,
           items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity, notes: c.notes })),
         }),
       });
@@ -361,9 +366,30 @@ export default function QrMenuPage() {
             </div>
 
             <div className="px-5 py-4 border-t border-stone-100 bg-white">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-stone-600 text-sm">Разом ({totalItems} поз.)</span>
-                <span className="font-bold text-xl text-stone-900">{fmtMoney(totalAmount)}</span>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-stone-500 text-sm">Сума ({totalItems} поз.)</span>
+                <span className="font-semibold text-stone-800">{fmtMoney(totalAmount)}</span>
+              </div>
+              <div className="mb-3">
+                <p className="text-xs font-medium text-stone-500 mb-1.5">Чайові для персоналу</p>
+                <div className="flex gap-2">
+                  {[0, 5, 7, 10, 15].map(pct => (
+                    <button
+                      key={pct}
+                      onClick={() => setTipPct(pct)}
+                      className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition-all ${tipPct === pct ? "bg-amber-500 text-white border-amber-500" : "bg-white text-stone-600 border-stone-200 hover:border-amber-300"}`}
+                    >
+                      {pct === 0 ? "Без" : `${pct}%`}
+                    </button>
+                  ))}
+                </div>
+                {tipAmount > 0 && (
+                  <p className="text-xs text-stone-400 mt-1">Чайові: {fmtMoney(tipAmount)}</p>
+                )}
+              </div>
+              <div className="flex items-center justify-between mb-4 pt-2 border-t border-stone-100">
+                <span className="font-semibold text-stone-700">До сплати</span>
+                <span className="font-bold text-xl text-stone-900">{fmtMoney(grandTotal)}</span>
               </div>
               <button
                 onClick={placeOrder}

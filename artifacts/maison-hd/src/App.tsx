@@ -34,6 +34,7 @@ import FbPage from "@/pages/fb";
 import FbWarehousePage from "@/pages/fb-warehouse";
 import FbPosPage from "@/pages/fb-pos";
 import FbCostingPage from "@/pages/fb-costing";
+import PosSettingsPage from "@/pages/pos-settings";
 import HqPage from "@/pages/hq";
 import AutomationPage from "@/pages/automation";
 import BookPage from "@/pages/book";
@@ -158,6 +159,7 @@ function Router() {
       <Route path="/fb-warehouse"><ProtectedRoute component={FbWarehousePage} /></Route>
       <Route path="/fb-pos"><ProtectedRoute component={FbPosPage} /></Route>
       <Route path="/fb-costing"><ProtectedRoute component={FbCostingPage} /></Route>
+      <Route path="/pos-settings"><ProtectedRoute component={PosSettingsPage} /></Route>
       <Route path="/hq"><ProtectedRoute component={HqPage} /></Route>
       <Route path="/automation"><ProtectedRoute component={AutomationPage} /></Route>
       <Route path="/minibar" component={() => <ProtectedRoute component={MinibarPage} />} />

@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable } from "@workspace/db";
 import { eq, and, desc, asc, sql, gte, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { createFiscalReceipt, buildCheckboxGoods, toCheckboxPaymentType } from "../services/checkbox.js";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
@@ -200,19 +201,66 @@ router.get("/items", requireAuth, async (req: any, res) => {
 router.post("/items", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const [item] = await db.insert(fbItemsTable).values({ ...req.body, organizationId: orgId }).returning();
-    res.json({ item });
+    const { name, description, price, categoryId, cookMinutes, isAvailable = true, isPopular = false, isVegetarian = false,
+      allergens, tags, sortOrder = 0, imageUrl,
+      vat_rate = 20, is_alcohol = false, alcohol_volume_pct, uktzed_code, excise_code,
+      station = "kitchen_general", legal_entity_id,
+    } = req.body;
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `INSERT INTO fb_items (organization_id, name, description, price, category_id, cook_minutes,
+         is_available, is_popular, is_vegetarian, allergens, tags, sort_order, image_url,
+         vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
+         station, legal_entity_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+      [orgId, name, description||null, price, categoryId||null, cookMinutes||15,
+       isAvailable, isPopular, isVegetarian, allergens||null, tags||null, sortOrder, imageUrl||null,
+       vat_rate||20, is_alcohol||false, alcohol_volume_pct||null, uktzed_code||null, excise_code||null,
+       station||"kitchen_general", legal_entity_id||null]
+    );
+    res.json({ item: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/items/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const [item] = await db.update(fbItemsTable)
-      .set({ ...req.body, updatedAt: new Date() })
-      .where(and(eq(fbItemsTable.id, parseInt(req.params.id)), eq(fbItemsTable.organizationId, orgId)))
-      .returning();
-    res.json({ item });
+    const id = parseInt(req.params.id);
+    const { name, description, price, categoryId, cookMinutes, isAvailable, isPopular, isVegetarian,
+      allergens, tags, sortOrder, imageUrl,
+      vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
+      station, legal_entity_id,
+    } = req.body;
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `UPDATE fb_items SET
+         name               = COALESCE($1, name),
+         description        = COALESCE($2, description),
+         price              = COALESCE($3, price),
+         category_id        = COALESCE($4, category_id),
+         cook_minutes       = COALESCE($5, cook_minutes),
+         is_available       = COALESCE($6, is_available),
+         is_popular         = COALESCE($7, is_popular),
+         is_vegetarian      = COALESCE($8, is_vegetarian),
+         sort_order         = COALESCE($9, sort_order),
+         image_url          = COALESCE($10, image_url),
+         vat_rate           = COALESCE($11, vat_rate),
+         is_alcohol         = COALESCE($12, is_alcohol),
+         alcohol_volume_pct = COALESCE($13, alcohol_volume_pct),
+         uktzed_code        = COALESCE($14, uktzed_code),
+         excise_code        = COALESCE($15, excise_code),
+         station            = COALESCE($16, station),
+         legal_entity_id    = COALESCE($17, legal_entity_id),
+         updated_at         = NOW()
+       WHERE id = $18 AND organization_id = $19 RETURNING *`,
+      [name||null, description||null, price??null, categoryId||null, cookMinutes??null,
+       isAvailable??null, isPopular??null, isVegetarian??null, sortOrder??null, imageUrl||null,
+       vat_rate??null, is_alcohol??null, alcohol_volume_pct??null, uktzed_code||null, excise_code||null,
+       station||null, legal_entity_id||null,
+       id, orgId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Not found" });
+    res.json({ item: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -636,10 +684,63 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       );
     }
 
+    const updatedOrder = r.rows[0];
+
+    // ── Checkbox ПРРО (async, non-blocking) ──────────────────────────────────
+    let fiscalResult: any = null;
+    try {
+      // Determine legal entity
+      const leId = legalEntityId || updatedOrder.legal_entity_id;
+      if (leId) {
+        const leRow = await db_.query(
+          `SELECT * FROM legal_entities WHERE id = $1 AND organization_id = $2 AND prro_enabled = true
+           AND checkbox_login IS NOT NULL AND checkbox_password IS NOT NULL AND checkbox_license_key IS NOT NULL`,
+          [leId, orgId]
+        );
+        const le = leRow.rows[0];
+        if (le) {
+          // Fetch order items with their tax info
+          const itemsRow = await db_.query(
+            `SELECT oi.*, fi.vat_rate, fi.is_alcohol, fi.uktzed_code
+             FROM fb_order_items oi
+             LEFT JOIN fb_items fi ON fi.id = oi.item_id
+             WHERE oi.order_id = $1`, [orderId]
+          );
+          const goods = buildCheckboxGoods(itemsRow.rows);
+          const totalKopecks = Math.round(finalAmount * 100);
+          const payments = [{
+            type: toCheckboxPaymentType(paymentMethod),
+            value: totalKopecks,
+          }];
+          fiscalResult = await createFiscalReceipt(
+            { login: le.checkbox_login, password: le.checkbox_password, licenseKey: le.checkbox_license_key },
+            goods, payments, Math.round(tip * 100)
+          );
+          // Store fiscal data
+          await db_.query(
+            `UPDATE fb_orders SET
+               fiscal_receipt_id = $1, fiscal_receipt_url = $2, fiscal_qr_url = $3,
+               fiscal_status = 'done', fiscal_data = $4, updated_at = NOW()
+             WHERE id = $5`,
+            [fiscalResult.id, fiscalResult.receiptUrl, fiscalResult.qrUrl,
+             JSON.stringify(fiscalResult), orderId]
+          );
+        }
+      }
+    } catch (fiscalErr: any) {
+      // Non-blocking — log but don't fail payment
+      console.error("[CHECKBOX ПРРО] Error:", fiscalErr.message);
+      await db_.query(
+        `UPDATE fb_orders SET fiscal_status = 'error', fiscal_data = $1 WHERE id = $2`,
+        [JSON.stringify({ error: fiscalErr.message }), orderId]
+      );
+    }
+
     res.json({
-      order:         r.rows[0],
+      order:         updatedOrder,
       receiptNumber: receiptNum,
       tipAmount:     tip,
+      fiscal:        fiscalResult,
       change: paymentMethod === "cash" && paidAmount
         ? Math.max(0, Number(paidAmount) - finalAmount)
         : 0,

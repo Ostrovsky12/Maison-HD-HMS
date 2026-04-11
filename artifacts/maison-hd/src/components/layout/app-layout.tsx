@@ -8,7 +8,7 @@ import {
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
   ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package, QrCode, Coins,
-  Smartphone, Leaf, Phone, Hammer, Warehouse,
+  Smartphone, Leaf, Phone, Hammer, Warehouse, Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +89,7 @@ const NAV: NavSection[] = [
       { name: "F&B Костинг",     path: "/fb-costing",    icon: ChefHat,         roles: null,                                       moduleKey: "fb_analytics" },
       { name: "QR-замовлення",   path: "/qr-ordering",   icon: QrCode,          roles: null },
       { name: "Мінібар",         path: "/minibar",       icon: Wine,            roles: null },
+      { name: "POS Налаштування",path: "/pos-settings",  icon: Printer,         roles: ["super_admin", "owner", "manager"] },
     ],
   },
   {

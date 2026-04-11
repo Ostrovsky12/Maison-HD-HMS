@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { legalEntitiesTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { checkboxSignin, ensureShiftOpen } from "../services/checkbox.js";
 
 const router = Router();
 const getOrg = (req: any): number => (req as any).user?.organizationId;
@@ -130,6 +131,55 @@ router.delete("/:id", requireAuth, async (req, res) => {
     await db_.query(`UPDATE legal_entities SET is_active = false, updated_at = NOW() WHERE id = $1 AND organization_id = $2`, [id, orgId]);
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Checkbox ПРРО: test connection ────────────────────────────────────────────
+router.post("/checkbox-test", requireAuth, async (req, res) => {
+  try {
+    const { login, password, licenseKey } = req.body;
+    if (!login || !password || !licenseKey) {
+      return res.status(400).json({ error: "login, password, licenseKey required" });
+    }
+    const token = await checkboxSignin({ login, password, licenseKey });
+    // Get cashier info
+    const cashierR = await fetch("https://api.checkbox.in.ua/api/v1/cashier/me", {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    const cashierData = cashierR.ok ? await cashierR.json() : {};
+    // Get shift status
+    let shiftStatus = "unknown";
+    try {
+      const shiftR = await fetch("https://api.checkbox.in.ua/api/v1/cashier/shift", {
+        headers: { "Authorization": `Bearer ${token}`, "X-License-Key": licenseKey },
+      });
+      if (shiftR.ok) {
+        const s = await shiftR.json();
+        shiftStatus = s?.status || "unknown";
+      }
+    } catch {}
+    res.json({
+      ok: true,
+      cashier_name: cashierData.full_name || cashierData.login || login,
+      shift_status: shiftStatus,
+    });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Checkbox ПРРО: open shift ─────────────────────────────────────────────────
+router.post("/:id/checkbox-open-shift", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = Number(req.params.id);
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `SELECT * FROM legal_entities WHERE id = $1 AND organization_id = $2 AND prro_enabled = true`, [id, orgId]
+    );
+    const le = r.rows[0];
+    if (!le) return res.status(404).json({ error: "Legal entity not found or ПРРО not enabled" });
+    const token = await checkboxSignin({ login: le.checkbox_login, password: le.checkbox_password, licenseKey: le.checkbox_license_key });
+    const shiftId = await ensureShiftOpen(token, le.checkbox_license_key);
+    res.json({ ok: true, shiftId });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

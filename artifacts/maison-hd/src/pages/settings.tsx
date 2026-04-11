@@ -370,7 +370,8 @@ function LegalEntitiesTab() {
     queryFn: async () => {
       const r = await authFetch(`${API}/legal-entities`);
       if (!r.ok) return [];
-      return r.json();
+      const d = await r.json();
+      return d.legalEntities || d || [];
     },
   });
 
@@ -403,55 +404,148 @@ function LegalEntitiesTab() {
 
   const fv = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }));
 
+  const [testingPrro, setTestingPrro] = useState(false);
+
+  const testCheckbox = async () => {
+    if (!form.checkboxLogin || !form.checkboxPassword || !form.checkboxLicenseKey) {
+      toast({ title: "Заповніть Checkbox credentials", variant: "destructive" }); return;
+    }
+    setTestingPrro(true);
+    try {
+      const r = await authFetch(`${API}/legal-entities/checkbox-test`, {
+        method: "POST",
+        body: JSON.stringify({ login: form.checkboxLogin, password: form.checkboxPassword, licenseKey: form.checkboxLicenseKey }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Помилка");
+      toast({ title: "✅ Checkbox підключено", description: `Касир: ${d.cashier_name || "OK"} · Зміна: ${d.shift_status || "—"}` });
+    } catch (e: any) {
+      toast({ title: "❌ Помилка Checkbox", description: e.message, variant: "destructive" });
+    } finally { setTestingPrro(false); }
+  };
+
   const renderForm = (isNew: boolean) => (
-    <div className="border rounded-xl p-5 space-y-4 mt-3 bg-muted/10">
+    <div className="border rounded-xl p-5 space-y-5 mt-3 bg-muted/10">
       <h4 className="font-semibold">{isNew ? "Нова юридична особа" : "Редагування"}</h4>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5 col-span-2">
-          <Label className="text-xs">Назва організації</Label>
-          <Input placeholder='ТОВ "Готель Плюс"' value={form.name || ""} onChange={e => fv("name", e.target.value)} />
+
+      {/* ── Основна інформація ─────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Реєстраційні дані</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5 col-span-2">
+            <Label className="text-xs">Повна назва *</Label>
+            <Input placeholder='ТОВ "Готель Плюс"' value={form.name || ""} onChange={e => fv("name", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Скорочена назва</Label>
+            <Input placeholder='ТОВ "Готель Плюс"' value={form.shortName || ""} onChange={e => fv("shortName", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Тип</Label>
+            <Select value={form.type || "tov"} onValueChange={v => fv("type", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="tov">ТОВ</SelectItem>
+                <SelectItem value="fop">ФОП</SelectItem>
+                <SelectItem value="pp">ПП</SelectItem>
+                <SelectItem value="other">Інше</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">ЄДРПОУ / ІПН</Label>
+            <Input placeholder="12345678" value={form.edrpou || ""} onChange={e => fv("edrpou", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">ІПН (якщо ФОП)</Label>
+            <Input placeholder="1234567890" value={form.ipn || ""} onChange={e => fv("ipn", e.target.value)} />
+          </div>
+          <div className="space-y-1.5 col-span-2">
+            <Label className="text-xs">Юридична адреса</Label>
+            <Input placeholder="м. Київ, вул. Хрещатик 1" value={form.legalAddress || ""} onChange={e => fv("legalAddress", e.target.value)} />
+          </div>
+          <div className="space-y-1.5 col-span-2">
+            <Label className="text-xs">IBAN</Label>
+            <Input placeholder="UA21300000000000000000000000" value={form.iban || ""} onChange={e => fv("iban", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Банк</Label>
+            <Input placeholder="ПриватБанк" value={form.bank || ""} onChange={e => fv("bank", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">МФО</Label>
+            <Input placeholder="305299" value={form.mfo || ""} onChange={e => fv("mfo", e.target.value)} />
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Тип</Label>
-          <Select value={form.type || "tov"} onValueChange={v => fv("type", v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="tov">ТОВ</SelectItem>
-              <SelectItem value="fop">ФОП</SelectItem>
-              <SelectItem value="pp">ПП</SelectItem>
-              <SelectItem value="at">АТ</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">ЄДРПОУ</Label>
-          <Input placeholder="12345678" value={form.edrpou || ""} onChange={e => fv("edrpou", e.target.value)} />
-        </div>
-        <div className="space-y-1.5 col-span-2">
-          <Label className="text-xs">IBAN</Label>
-          <Input placeholder="UA21300000000000000000000000" value={form.iban || ""} onChange={e => fv("iban", e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Банк</Label>
-          <Input placeholder="ПриватБанк" value={form.bank || ""} onChange={e => fv("bank", e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">МФО</Label>
-          <Input placeholder="305299" value={form.mfo || ""} onChange={e => fv("mfo", e.target.value)} />
-        </div>
-        <div className="space-y-1.5 col-span-2">
-          <Label className="text-xs">Адреса</Label>
-          <Input placeholder="м. Київ, вул. Хрещатик 1" value={form.address || ""} onChange={e => fv("address", e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">LiqPay Public Key</Label>
-          <Input placeholder="sandbox_..." value={form.liqpayPublicKey || ""} onChange={e => fv("liqpayPublicKey", e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">LiqPay Private Key</Label>
-          <Input type="password" placeholder="••••••••" value={form.liqpayPrivateKey || ""} onChange={e => fv("liqpayPrivateKey", e.target.value)} />
+        <div className="mt-3 flex items-center gap-2">
+          <input type="checkbox" id="handles_alcohol" checked={!!form.handlesAlcohol} onChange={e => fv("handlesAlcohol", e.target.checked)} className="accent-amber-600" />
+          <label htmlFor="handles_alcohol" className="text-sm text-muted-foreground cursor-pointer">🍺 Ця юр. особа реалізує алкоголь (підакцизні товари)</label>
         </div>
       </div>
+
+      {/* ── Checkbox ПРРО ─────────────────────────────────── */}
+      <div className="border rounded-lg p-4 space-y-3 bg-blue-50/60 border-blue-200">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🖨️</span>
+            <p className="text-sm font-semibold text-blue-900">Checkbox ПРРО</p>
+            <Badge variant="outline" className="text-xs border-blue-300 text-blue-700">checkbox.ua</Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="prro_enabled" checked={!!form.prroEnabled} onChange={e => fv("prroEnabled", e.target.checked)} className="accent-blue-600" />
+            <label htmlFor="prro_enabled" className="text-xs text-blue-800 cursor-pointer">Увімкнути ПРРО</label>
+          </div>
+        </div>
+        {form.prroEnabled && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Логін касира (checkbox.ua)</Label>
+                <Input placeholder="cashier@example.com" value={form.checkboxLogin || ""} onChange={e => fv("checkboxLogin", e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Пароль касира</Label>
+                <Input type="password" placeholder="••••••••" value={form.checkboxPassword || ""} onChange={e => fv("checkboxPassword", e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Ключ ліцензії (License Key)</Label>
+              <Input placeholder="XXXX-XXXX-XXXX-XXXX" value={form.checkboxLicenseKey || ""} onChange={e => fv("checkboxLicenseKey", e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Податковий номер ПРРО</Label>
+              <Input placeholder="4000000001" value={form.taxNumber || ""} onChange={e => fv("taxNumber", e.target.value)} />
+            </div>
+            <Button
+              size="sm" variant="outline" type="button"
+              className="border-blue-400 text-blue-700 hover:bg-blue-50"
+              onClick={testCheckbox} disabled={testingPrro}
+            >
+              {testingPrro ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 mr-1" />}
+              Перевірити з'єднання з Checkbox
+            </Button>
+          </div>
+        )}
+        {!form.prroEnabled && (
+          <p className="text-xs text-blue-700/70">Увімкніть ПРРО щоб автоматично формувати фіскальні чеки при оплаті через POS</p>
+        )}
+      </div>
+
+      {/* ── LiqPay ─────────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">LiqPay (онлайн-платежі)</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">LiqPay Public Key</Label>
+            <Input placeholder="sandbox_..." value={form.liqpayPublicKey || ""} onChange={e => fv("liqpayPublicKey", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">LiqPay Private Key</Label>
+            <Input type="password" placeholder="••••••••" value={form.liqpayPrivateKey || ""} onChange={e => fv("liqpayPrivateKey", e.target.value)} />
+          </div>
+        </div>
+      </div>
+
       <div className="flex gap-2 justify-end">
         <Button variant="ghost" size="sm" onClick={() => { setShowAdd(false); setEditId(null); setForm({}); }}>
           <X className="h-3.5 w-3.5 mr-1" /> Скасувати
@@ -493,28 +587,45 @@ function LegalEntitiesTab() {
                       <div className="flex items-center gap-2">
                         <span className="font-medium">{e.name}</span>
                         <Badge variant="outline" className="text-xs">{e.type?.toUpperCase()}</Badge>
-                        {e.isDefault && <Badge className="text-xs gap-1"><Star className="h-3 w-3" /> Основна</Badge>}
+                        {(e.is_default || e.isDefault) && <Badge className="text-xs gap-1"><Star className="h-3 w-3" /> Основна</Badge>}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1.5 space-y-0.5">
                         {e.edrpou && <p>ЄДРПОУ: {e.edrpou}</p>}
                         {e.iban && <p>IBAN: {e.iban}</p>}
                         {e.bank && <p>Банк: {e.bank}</p>}
-                        {e.liqpayPublicKey && (
+                        {e.handles_alcohol && <p className="text-amber-600">🍺 Реалізує алкоголь</p>}
+                        {e.liqpay_public_key && (
                           <p className="flex items-center gap-1 text-emerald-600">
                             <ShieldCheck className="h-3 w-3" /> LiqPay підключено
+                          </p>
+                        )}
+                        {e.prro_enabled && (
+                          <p className="flex items-center gap-1 text-blue-600">
+                            🖨️ Checkbox ПРРО підключено
                           </p>
                         )}
                       </div>
                     </div>
                     <div className="flex gap-1.5">
-                      {!e.isDefault && (
+                      {!e.is_default && (
                         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setDefault(e.id)}>
                           <Star className="h-3 w-3 mr-1" /> Основна
                         </Button>
                       )}
                       <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => {
                         setEditId(e.id);
-                        setForm({ name: e.name, type: e.type, edrpou: e.edrpou, iban: e.iban, bank: e.bank, mfo: e.mfo, address: e.address, liqpayPublicKey: e.liqpayPublicKey });
+                        setForm({
+                          name: e.name, type: e.type, edrpou: e.edrpou, ipn: e.ipn,
+                          iban: e.iban, bank: e.bank, mfo: e.mfo, address: e.address,
+                          legalAddress: e.legal_address, shortName: e.short_name,
+                          liqpayPublicKey: e.liqpay_public_key,
+                          prroEnabled: e.prro_enabled || false,
+                          checkboxLogin: e.checkbox_login || "",
+                          checkboxPassword: "",
+                          checkboxLicenseKey: e.checkbox_license_key || "",
+                          taxNumber: e.tax_number || "",
+                          handlesAlcohol: e.handles_alcohol || false,
+                        });
                       }}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>

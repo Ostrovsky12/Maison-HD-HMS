@@ -88,6 +88,7 @@ export default function FbPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [legalEntities, setLegalEntities] = useState<any[]>([]);
   const [kitchenOrders, setKitchenOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [orderDetail, setOrderDetail] = useState<any>(null);
@@ -135,6 +136,11 @@ export default function FbPage() {
   };
   const loadItems = async () => { const r = await apiFetch("/items"); if (r.ok) { const d = await r.json(); setItems(d.items || []); } };
   const loadCategories = async () => { const r = await apiFetch("/categories"); if (r.ok) { const d = await r.json(); setCategories(d.categories || []); } };
+  const loadLegalEntities = async () => {
+    const apiBase = API.replace("/fb", "");
+    const r = await fetch(`${apiBase}/legal-entities`, { headers: { Authorization: `Bearer ${token()}` } });
+    if (r.ok) { const d = await r.json(); setLegalEntities(d.legalEntities || []); }
+  };
   const loadOrderDetail = async (id: number) => { const r = await apiFetch(`/orders/${id}`); if (r.ok) { const d = await r.json(); setOrderDetail(d); } };
   const loadKitchen = useCallback(async () => {
     setKitchenLoading(true);
@@ -143,7 +149,7 @@ export default function FbPage() {
     setKitchenLoading(false);
   }, []);
 
-  useEffect(() => { loadStats(); loadTables(); loadCategories(); loadItems(); }, []);
+  useEffect(() => { loadStats(); loadTables(); loadCategories(); loadItems(); loadLegalEntities(); }, []);
   useEffect(() => { if (tab === "orders") loadOrders(); }, [tab, statusFilter, typeFilter]);
   useEffect(() => {
     if (tab === "kitchen") {
@@ -710,7 +716,7 @@ export default function FbPage() {
           }
         }} />
 
-      <NewMenuItemDialog open={showNewItem} categories={categories} onClose={() => setShowNewItem(false)}
+      <NewMenuItemDialog open={showNewItem} categories={categories} legalEntities={legalEntities} onClose={() => setShowNewItem(false)}
         onSave={async (data: any) => {
           const r = await apiFetch("/items", { method: "POST", body: JSON.stringify(data) });
           if (r.ok) { toast({ title: "Страву додано" }); setShowNewItem(false); loadItems(); }
@@ -744,7 +750,7 @@ export default function FbPage() {
 
       {/* Edit menu item dialog */}
       {editingItem && (
-        <EditMenuItemDialog open={showEditItem} item={editingItem} categories={categories}
+        <EditMenuItemDialog open={showEditItem} item={editingItem} categories={categories} legalEntities={legalEntities}
           onClose={() => { setShowEditItem(false); setEditingItem(null); }}
           onSave={async (data: any) => {
             const r = await apiFetch(`/items/${editingItem.id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -918,7 +924,15 @@ const VAT_OPTIONS = [
   { value: "20", label: "20% — стандартний" },
 ];
 
-function MenuItemForm({ form, setForm, categories }: any) {
+const STATION_OPTIONS = [
+  { value: "kitchen_general",      label: "🍳 Кухня (загальна)" },
+  { value: "kitchen_hot",          label: "🔥 Кухня (гаряча)" },
+  { value: "kitchen_cold",         label: "🥗 Кухня (холодна)" },
+  { value: "kitchen_confectionery",label: "🎂 Кондитерська" },
+  { value: "bar",                  label: "🍸 Бар" },
+];
+
+function MenuItemForm({ form, setForm, categories, legalEntities = [] }: any) {
   const [classifying, setClassifying] = useState(false);
   const { toast } = useToast();
 
@@ -971,6 +985,31 @@ function MenuItemForm({ form, setForm, categories }: any) {
         </div>
       </div>
 
+      {/* Station + Legal entity */}
+      <div className="grid grid-cols-2 gap-2">
+        <div><Label>Станція приготування</Label>
+          <Select value={form.station || "kitchen_general"} onValueChange={v => setForm((f: any) => ({ ...f, station: v }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {STATION_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div><Label>Юридична особа</Label>
+          <Select value={form.legal_entity_id ? String(form.legal_entity_id) : "none"} onValueChange={v => setForm((f: any) => ({ ...f, legal_entity_id: v === "none" ? null : parseInt(v) }))}>
+            <SelectTrigger><SelectValue placeholder="Авто" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">— Авто / не вказано</SelectItem>
+              {legalEntities.map((le: any) => (
+                <SelectItem key={le.id} value={String(le.id)}>
+                  {le.short_name || le.name} ({le.type?.toUpperCase()})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {/* Alcohol section */}
       <div className="border rounded-lg p-3 space-y-2 bg-amber-50/60">
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
@@ -1006,15 +1045,21 @@ function MenuItemForm({ form, setForm, categories }: any) {
   );
 }
 
-const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "" };
+const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "", station: "kitchen_general", legal_entity_id: null };
 
-function NewMenuItemDialog({ open, onClose, categories, onSave }: any) {
-  const [form, setForm] = useState(EMPTY_ITEM_FORM);
+function NewMenuItemDialog({ open, onClose, categories, legalEntities, onSave }: any) {
+  const [form, setForm] = useState<any>(EMPTY_ITEM_FORM);
   const [loading, setLoading] = useState(false);
   const handleSubmit = async () => {
     if (!form.name || !form.price) return;
     setLoading(true);
-    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15, vat_rate: parseInt(form.vat_rate) || 20, alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null });
+    await onSave({
+      ...form,
+      categoryId: form.categoryId ? parseInt(form.categoryId) : null,
+      cookMinutes: parseInt(String(form.cookMinutes)) || 15,
+      vat_rate: parseInt(form.vat_rate) || 20,
+      alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
+    });
     setLoading(false);
     setForm(EMPTY_ITEM_FORM);
   };
@@ -1022,7 +1067,7 @@ function NewMenuItemDialog({ open, onClose, categories, onSave }: any) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Нова страва / позиція меню</DialogTitle></DialogHeader>
-        <MenuItemForm form={form} setForm={setForm} categories={categories} />
+        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
           <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Додати"}</Button>
@@ -1033,7 +1078,7 @@ function NewMenuItemDialog({ open, onClose, categories, onSave }: any) {
 }
 
 // ── Edit menu item dialog ─────────────────────────────────────────────────────
-function EditMenuItemDialog({ open, item, onClose, categories, onSave }: any) {
+function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, onSave }: any) {
   const [form, setForm] = useState<any>({});
   const [loading, setLoading] = useState(false);
 
@@ -1051,13 +1096,21 @@ function EditMenuItemDialog({ open, item, onClose, categories, onSave }: any) {
       alcohol_volume_pct: item.alcohol_volume_pct != null ? String(item.alcohol_volume_pct) : "",
       uktzed_code: item.uktzed_code || "",
       excise_code: item.excise_code || "",
+      station: item.station || "kitchen_general",
+      legal_entity_id: item.legal_entity_id || null,
     });
   }, [item]);
 
   const handleSubmit = async () => {
     if (!form.name || !form.price) return;
     setLoading(true);
-    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15, vat_rate: parseInt(form.vat_rate) || 20, alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null });
+    await onSave({
+      ...form,
+      categoryId: form.categoryId ? parseInt(form.categoryId) : null,
+      cookMinutes: parseInt(String(form.cookMinutes)) || 15,
+      vat_rate: parseInt(form.vat_rate) || 20,
+      alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
+    });
     setLoading(false);
   };
 
@@ -1065,7 +1118,7 @@ function EditMenuItemDialog({ open, item, onClose, categories, onSave }: any) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Редагувати: {item?.name}</DialogTitle></DialogHeader>
-        <MenuItemForm form={form} setForm={setForm} categories={categories} />
+        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
           <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Зберегти зміни"}</Button>
