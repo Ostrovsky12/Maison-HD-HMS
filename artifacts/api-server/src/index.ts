@@ -246,27 +246,60 @@ async function bootstrap() {
     });
   });
 
-  server.listen(port, (err?: Error) => {
-    if (err) {
-      logger.error({ err }, "Error listening on port");
+  // Keep-alive of 1 s so connections are released quickly on restart
+  server.keepAliveTimeout = 1000;
+  server.headersTimeout   = 2000;
+
+  // Handle EADDRINUSE and other server-level errors without crashing uncaught
+  server.on("error", (err: any) => {
+    if (err.code === "EADDRINUSE") {
+      logger.warn({ port }, "Port already in use — retrying in 1 s…");
+      setTimeout(() => {
+        server.close();
+        server.listen(port);
+      }, 1000);
+    } else {
+      logger.error({ err }, "HTTP server error");
       process.exit(1);
     }
+  });
+
+  server.listen(port, () => {
     logger.info({ port }, "Server listening");
   });
 
-  // Graceful shutdown — release port before exit so restarts never hit EADDRINUSE
+  // Graceful shutdown — closeAllConnections drops keep-alive connections instantly
+  // so the port is freed before the new process tries to bind it.
   const shutdown = (signal: string) => {
-    logger.info({ signal }, "Shutdown signal received, closing server...");
+    logger.info({ signal }, "Shutdown signal received — draining…");
+    // Drop all idle keep-alive connections immediately (Node ≥ 18.2)
+    if (typeof (server as any).closeAllConnections === "function") {
+      (server as any).closeAllConnections();
+    }
     server.close(() => {
-      logger.info("Server closed.");
+      logger.info("Server closed cleanly.");
       process.exit(0);
     });
-    // Force-exit after 5s if connections are still open
-    setTimeout(() => process.exit(0), 5000).unref();
+    // Hard-kill after 3 s in case something is still stuck
+    setTimeout(() => {
+      logger.warn("Forced exit after 3 s shutdown timeout");
+      process.exit(0);
+    }, 3000).unref();
   };
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT",  () => shutdown("SIGINT"));
 }
+
+// ─── Global error safety net ──────────────────────────────────────────────────
+// Prevents the process from crashing on unhandled promise rejections or
+// unexpected thrown errors — logs them and keeps the server alive.
+process.on("unhandledRejection", (reason: unknown) => {
+  logger.error({ reason }, "⚠️  Unhandled promise rejection — server keeps running");
+});
+
+process.on("uncaughtException", (err: Error) => {
+  logger.error({ err }, "⚠️  Uncaught exception — server keeps running");
+});
 
 bootstrap();
