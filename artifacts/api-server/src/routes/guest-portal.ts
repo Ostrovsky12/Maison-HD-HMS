@@ -4,7 +4,7 @@ import {
   bookingsTable, unitsTable, propertiesTable, guestServiceOrdersTable, organizationsTable,
   guestLoyaltyTable, loyaltyTransactionsTable, guestReviewsTable,
   guestPortalMessagesTable, guestSpecialOffersTable, guestCommunicationLogTable,
-  addonsTable, notificationsTable, usersTable,
+  addonsTable, notificationsTable, usersTable, legalEntitiesTable,
 } from "@workspace/db";
 import { eq, and, desc, asc, ne, sql, inArray } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -539,7 +539,18 @@ router.get("/:code", async (req, res) => {
         eq(guestSpecialOffersTable.status, "active" as any),
       )).limit(4);
 
-    res.json({ booking, orders, loyalty, messages, review: review || null, offers });
+    // Resolve address: prefer legal entity address (same source as invoices), fallback to property address
+    let resolvedAddress = booking.propertyAddress;
+    const legalEntities = await db.select({
+      address: legalEntitiesTable.address,
+      isDefault: legalEntitiesTable.isDefault,
+      isActive: legalEntitiesTable.isActive,
+    }).from(legalEntitiesTable)
+      .where(eq(legalEntitiesTable.organizationId, booking.orgId));
+    const legalEntity = legalEntities.find(e => e.isDefault) || legalEntities.find(e => e.isActive) || legalEntities[0];
+    if (legalEntity?.address) resolvedAddress = legalEntity.address;
+
+    res.json({ booking: { ...booking, propertyAddress: resolvedAddress }, orders, loyalty, messages, review: review || null, offers });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Помилка сервера" });
