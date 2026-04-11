@@ -477,4 +477,164 @@ router.patch("/order-items/:id", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// CASHBOX SESSION — POS Каса
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET current open session
+router.get("/cashbox/session", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `SELECT cs.*, u.name AS cashier_name FROM cashbox_sessions cs
+       LEFT JOIN users u ON u.id = cs.cashier_id
+       WHERE cs.organization_id = $1 AND cs.status = 'open'
+       ORDER BY cs.opened_at DESC LIMIT 1`, [orgId]
+    );
+    res.json({ session: r.rows[0] || null });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST open session
+router.post("/cashbox/session", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const cashierId = req.user?.userId;
+    const { openingBalance = 0, cashboxName = "Каса 1" } = req.body;
+    const db_ = (db as any).$client;
+    // Check if already open
+    const existing = await db_.query(
+      `SELECT id FROM cashbox_sessions WHERE organization_id = $1 AND status = 'open' LIMIT 1`, [orgId]
+    );
+    if (existing.rows.length) {
+      res.status(409).json({ error: "Зміна вже відкрита", sessionId: existing.rows[0].id });
+      return;
+    }
+    const r = await db_.query(
+      `INSERT INTO cashbox_sessions (organization_id, cashier_id, cashbox_name, opening_balance, expected_balance, cash_in, cash_out, status)
+       VALUES ($1, $2, $3, $4, $4, 0, 0, 'open') RETURNING *`,
+      [orgId, cashierId, cashboxName, Number(openingBalance)]
+    );
+    res.status(201).json({ session: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH close session
+router.patch("/cashbox/session/:id/close", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const { closingBalance, notes } = req.body;
+    const db_ = (db as any).$client;
+    // Get current session stats
+    const stats = await db_.query(
+      `SELECT expected_balance, cash_in, cash_out FROM cashbox_sessions WHERE id = $1 AND organization_id = $2`, [id, orgId]
+    );
+    if (!stats.rows.length) { res.status(404).json({ error: "Session not found" }); return; }
+    const { expected_balance } = stats.rows[0];
+    const discrepancy = closingBalance !== undefined ? (Number(closingBalance) - Number(expected_balance)) : 0;
+    const r = await db_.query(
+      `UPDATE cashbox_sessions SET status='closed', closed_at=NOW(), closing_balance=$1, discrepancy=$2, notes=$3 WHERE id=$4 AND organization_id=$5 RETURNING *`,
+      [closingBalance ?? expected_balance, discrepancy, notes || null, id, orgId]
+    );
+    res.json({ session: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET daily / session report (Z-звіт)
+router.get("/cashbox/report", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const date = String(req.query.date || new Date().toISOString().split("T")[0]);
+    const db_ = (db as any).$client;
+    const orders = await db_.query(
+      `SELECT payment_method, COUNT(*)::int AS cnt,
+              COALESCE(SUM(total_amount), 0)::numeric AS total,
+              COALESCE(SUM(discount_amount), 0)::numeric AS discounts
+       FROM fb_orders
+       WHERE organization_id = $1 AND status = 'closed'
+         AND DATE(closed_at) = $2::date
+       GROUP BY payment_method`, [orgId, date]
+    );
+    const totals = await db_.query(
+      `SELECT COUNT(*)::int AS orders, COALESCE(SUM(total_amount),0)::numeric AS revenue,
+              COALESCE(SUM(discount_amount),0)::numeric AS discounts,
+              COALESCE(AVG(total_amount),0)::numeric AS avg_check
+       FROM fb_orders WHERE organization_id = $1 AND status = 'closed' AND DATE(closed_at) = $2::date`,
+      [orgId, date]
+    );
+    res.json({
+      date,
+      byPaymentMethod: orders.rows,
+      totals: totals.rows[0],
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── PAY ORDER ────────────────────────────────────────────────────────────────
+router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const orderId = parseInt(req.params.id);
+    const { paymentMethod = "cash", paidAmount, discountAmount = 0, notes } = req.body;
+    const db_ = (db as any).$client;
+
+    // Get order
+    const orderRow = await db_.query(
+      `SELECT * FROM fb_orders WHERE id = $1 AND organization_id = $2`, [orderId, orgId]
+    );
+    if (!orderRow.rows.length) { res.status(404).json({ error: "Order not found" }); return; }
+    const order = orderRow.rows[0];
+
+    if (order.status === "closed" || order.status === "cancelled") {
+      res.status(400).json({ error: "Order already closed" }); return;
+    }
+
+    const finalAmount = Number(order.total_amount) - Number(discountAmount);
+
+    // Generate receipt number
+    const cnt = await db_.query(
+      `SELECT COUNT(*)::int AS cnt FROM fb_orders WHERE organization_id = $1 AND receipt_number IS NOT NULL`, [orgId]
+    );
+    const receiptNum = `R-${orgId}-${String((cnt.rows[0]?.cnt || 0) + 1).padStart(5, "0")}`;
+
+    // Update order
+    const r = await db_.query(
+      `UPDATE fb_orders SET
+         status = 'closed', paid_amount = $1, payment_method = $2,
+         discount_amount = $3, receipt_number = $4, closed_at = NOW(),
+         notes = COALESCE($5, notes), updated_at = NOW()
+       WHERE id = $6 AND organization_id = $7 RETURNING *`,
+      [paidAmount ?? finalAmount, paymentMethod, discountAmount, receiptNum, notes || null, orderId, orgId]
+    );
+
+    // Free the table
+    if (order.table_id) {
+      await db_.query(
+        `UPDATE restaurant_tables SET status = 'free', current_order_id = NULL, updated_at = NOW()
+         WHERE id = $1 AND organization_id = $2`, [order.table_id, orgId]
+      );
+    }
+
+    // Update cashbox session if cash payment
+    if (paymentMethod === "cash") {
+      await db_.query(
+        `UPDATE cashbox_sessions SET
+           cash_in = cash_in + $1, expected_balance = expected_balance + $1, updated_at = NOW()
+         WHERE organization_id = $2 AND status = 'open'`,
+        [paidAmount ?? finalAmount, orgId]
+      );
+    }
+
+    res.json({
+      order: r.rows[0],
+      receiptNumber: receiptNum,
+      change: paymentMethod === "cash" && paidAmount
+        ? Math.max(0, Number(paidAmount) - finalAmount)
+        : 0,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

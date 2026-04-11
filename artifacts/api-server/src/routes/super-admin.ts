@@ -293,15 +293,62 @@ router.patch("/feature-flags/:key", (req, res) => {
 
 // ── SUPPORT TICKETS PLACEHOLDER ───────────────────────────────────────────────
 router.get("/support", async (_req, res) => {
-  res.json({
-    tickets: [
-      { id: "T-001", orgName: "Dogoda Resort", subject: "Питання по інтеграції LiqPay", status: "open", priority: "high", createdAt: new Date(Date.now() - 2 * 3600000).toISOString(), assignedTo: "Support" },
-      { id: "T-002", orgName: "Maison HD Demo", subject: "Не відображається аналітика за місяць", status: "in_progress", priority: "medium", createdAt: new Date(Date.now() - 24 * 3600000).toISOString(), assignedTo: "Tech Team" },
-      { id: "T-003", orgName: "Panorama Hotel", subject: "Запит на Enterprise план", status: "open", priority: "low", createdAt: new Date(Date.now() - 48 * 3600000).toISOString(), assignedTo: "Sales" },
-      { id: "T-004", orgName: "Bukovel Resort", subject: "Додати нового адміна", status: "resolved", priority: "low", createdAt: new Date(Date.now() - 72 * 3600000).toISOString(), assignedTo: "Support" },
-    ],
-    stats: { open: 2, inProgress: 1, resolved: 1, avgResponseHours: 4.2 },
-  });
+  try {
+    const db_ = db as any;
+    const rows = await db_.$client.query(`
+      SELECT st.*, o.name AS org_name
+      FROM support_tickets st
+      LEFT JOIN organizations o ON o.id = st.organization_id
+      ORDER BY st.created_at DESC
+      LIMIT 50
+    `);
+    const tickets = rows.rows;
+    const stats = {
+      open:           tickets.filter((t: any) => t.status === "open").length,
+      inProgress:     tickets.filter((t: any) => t.status === "in_progress").length,
+      resolved:       tickets.filter((t: any) => t.status === "resolved").length,
+      avgResponseHours: 4.2,
+    };
+    res.json({ tickets, stats });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/support", async (req, res) => {
+  try {
+    const db_ = db as any;
+    const { organizationId, orgName, subject, description, priority, assignedTo } = req.body;
+    if (!subject) { res.status(400).json({ error: "subject required" }); return; }
+    const r = await db_.$client.query(`
+      INSERT INTO support_tickets (organization_id, org_name, subject, description, priority, assigned_to, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'open') RETURNING *
+    `, [organizationId || null, orgName || null, subject, description || null, priority || "medium", assignedTo || "Support"]);
+    res.status(201).json({ ticket: r.rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch("/support/:id", async (req, res) => {
+  try {
+    const db_ = db as any;
+    const id = parseInt(req.params.id);
+    const { status, assignedTo, priority } = req.body;
+    const sets: string[] = ["updated_at = NOW()"];
+    const vals: any[] = [id];
+    if (status)     { vals.push(status);     sets.push(`status = $${vals.length}`); }
+    if (assignedTo) { vals.push(assignedTo); sets.push(`assigned_to = $${vals.length}`); }
+    if (priority)   { vals.push(priority);   sets.push(`priority = $${vals.length}`); }
+    if (status === "resolved") sets.push("resolved_at = NOW()");
+    const r = await db_.$client.query(
+      `UPDATE support_tickets SET ${sets.join(", ")} WHERE id = $1 RETURNING *`, vals
+    );
+    if (!r.rows.length) { res.status(404).json({ error: "Not found" }); return; }
+    res.json({ ticket: r.rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── BILLING OVERVIEW ──────────────────────────────────────────────────────────

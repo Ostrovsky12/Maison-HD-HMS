@@ -81,6 +81,9 @@ const MODULE_LIST = [
   { key: "events",         label: "Заходи та банкети",        icon: "🎭", plan: "pro",        group: "advanced" },
   { key: "spa",            label: "SPA & Wellness",           icon: "🌿", plan: "pro",        group: "advanced" },
   { key: "fb",             label: "Ресторан & F&B",           icon: "🍽️", plan: "pro",        group: "advanced" },
+  { key: "fb_warehouse",   label: "F&B Склад (Warehouse)",    icon: "🏪", plan: "pro",        group: "advanced" },
+  { key: "fb_analytics",   label: "F&B Аналітика",            icon: "📉", plan: "enterprise", group: "advanced" },
+  { key: "fb_pos",         label: "F&B Каса (POS)",           icon: "🖨️", plan: "enterprise", group: "advanced" },
   { key: "hq_dashboard",   label: "HQ Multi-property",        icon: "🏢", plan: "enterprise", group: "advanced" },
 ];
 

@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  useLogout, useGetMe, useListNotifications,
+  useLogout, useGetMe, useGetMyOrganization, useListNotifications,
   useMarkAllNotificationsRead, useMarkNotificationRead,
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
@@ -24,7 +24,7 @@ import { uk } from "date-fns/locale";
 import { CommandPalette, useCommandPalette } from "@/components/command-palette";
 
 // ── NAV STRUCTURE ─────────────────────────────────────────────────────────────
-type NavItem = { name: string; path: string; icon: any; roles?: string[] | null; badge?: string };
+type NavItem = { name: string; path: string; icon: any; roles?: string[] | null; badge?: string; moduleKey?: string };
 type NavSection = { label: string; items: NavItem[] };
 
 const NAV: NavSection[] = [
@@ -81,22 +81,23 @@ const NAV: NavSection[] = [
   {
     label: "Гостинність",
     items: [
-      { name: "SPA & Wellness",  path: "/spa",      icon: Waves,           roles: null },
-      { name: "Events & Банкети",path: "/events",   icon: PartyPopper,     roles: null },
-      { name: "Ресторан & F&B",  path: "/fb",            icon: UtensilsCrossed, roles: null },
-      { name: "F&B Склад",       path: "/fb-warehouse",  icon: Warehouse,       roles: null },
+      { name: "SPA & Wellness",  path: "/spa",           icon: Waves,           roles: null,                                       moduleKey: "spa" },
+      { name: "Events & Банкети",path: "/events",        icon: PartyPopper,     roles: null,                                       moduleKey: "events" },
+      { name: "Ресторан & F&B",  path: "/fb",            icon: UtensilsCrossed, roles: null,                                       moduleKey: "fb" },
+      { name: "F&B Склад",       path: "/fb-warehouse",  icon: Warehouse,       roles: null,                                       moduleKey: "fb_warehouse" },
+      { name: "F&B Каса",        path: "/fb-pos",        icon: Coins,           roles: null,                                       moduleKey: "fb_pos" },
       { name: "QR-замовлення",   path: "/qr-ordering",   icon: QrCode,          roles: null },
-      { name: "Мінібар",         path: "/minibar",      icon: Wine,            roles: null },
+      { name: "Мінібар",         path: "/minibar",       icon: Wine,            roles: null },
     ],
   },
   {
     label: "AI & Автоматизація",
     items: [
-      { name: "AI Hub",       path: "/ai-hub",     icon: Brain, roles: ["super_admin", "owner", "manager"] },
-      { name: "Автоматизація",path: "/automation", icon: Bot,   roles: ["super_admin", "owner", "manager"] },
+      { name: "AI Hub",       path: "/ai-hub",     icon: Brain,   roles: ["super_admin", "owner", "manager"], moduleKey: "ai_hub" },
+      { name: "Автоматизація",path: "/automation", icon: Bot,     roles: ["super_admin", "owner", "manager"], moduleKey: "automation" },
       { name: "Пакети",       path: "/packages",   icon: Package, roles: ["super_admin", "owner", "manager"] },
       { name: "Лояльність",   path: "/loyalty",    icon: Coins,   roles: ["super_admin", "owner", "manager"] },
-      { name: "Upsell Engine",path: "/upsell",     icon: Zap,     roles: ["super_admin", "owner", "manager"] },
+      { name: "Upsell Engine",path: "/upsell",     icon: Zap,     roles: ["super_admin", "owner", "manager"], moduleKey: "upsell" },
     ],
   },
   {
@@ -104,16 +105,16 @@ const NAV: NavSection[] = [
     items: [
       { name: "Фінанси",      path: "/finance",      icon: Wallet,   roles: ["super_admin", "owner", "manager", "reception"] },
       { name: "Рахунки",      path: "/invoices",     icon: FileText, roles: null },
-      { name: "Бухгалтерія",  path: "/accounting",   icon: Landmark, roles: ["super_admin", "owner", "manager"] },
-      { name: "Нічний аудит", path: "/night-audit",  icon: Moon,     roles: ["super_admin", "owner", "manager"] },
+      { name: "Бухгалтерія",  path: "/accounting",   icon: Landmark, roles: ["super_admin", "owner", "manager"], moduleKey: "accounting" },
+      { name: "Нічний аудит", path: "/night-audit",  icon: Moon,     roles: ["super_admin", "owner", "manager"], moduleKey: "night_audit" },
       { name: "Продажі & CRM",path: "/sales",        icon: Target,   roles: ["super_admin", "owner", "manager", "reception"] },
     ],
   },
   {
     label: "Аналітика",
     items: [
-      { name: "Аналітика", path: "/analytics", icon: BarChart3,  roles: ["super_admin", "owner", "manager"] },
-      { name: "Звіти",     path: "/reports",   icon: FileText,   roles: null },
+      { name: "Аналітика", path: "/analytics", icon: BarChart3, roles: ["super_admin", "owner", "manager"], moduleKey: "analytics" },
+      { name: "Звіти",     path: "/reports",   icon: FileText,  roles: null },
     ],
   },
   {
@@ -126,12 +127,17 @@ const NAV: NavSection[] = [
     label: "Платформа",
     items: [
       { name: "Інтеграції",    path: "/integrations",  icon: Plug,          roles: ["super_admin", "owner", "manager"] },
-      { name: "Тарифи",        path: "/pricing",       icon: Tag,           roles: ["super_admin", "owner"] },
       { name: "Підписка",      path: "/subscription",  icon: CreditCard,    roles: ["owner", "super_admin"] },
       { name: "Міграція",      path: "/migration",     icon: ArrowRightLeft,roles: ["super_admin", "owner", "manager"] },
-      { name: "Demo Заявки",   path: "/demo-requests", icon: ClipboardList, roles: ["super_admin"] },
-      { name: "Super Admin",   path: "/admin",         icon: Crown,         roles: ["super_admin"] },
       { name: "Презентація",   path: "/pitch",         icon: Sparkles,      roles: ["super_admin", "owner", "manager"] },
+    ],
+  },
+  {
+    label: "⚙ Адміністрація",
+    items: [
+      { name: "Панель адміна", path: "/admin",         icon: Crown,         roles: ["super_admin"] },
+      { name: "Demo Заявки",   path: "/demo-requests", icon: ClipboardList, roles: ["super_admin"] },
+      { name: "Тарифи SaaS",   path: "/pricing",       icon: Tag,           roles: ["super_admin"] },
     ],
   },
 ];
@@ -266,6 +272,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const isSuperAdmin = user?.role === "super_admin";
   const userRole = user?.role || "";
 
+  // Fetch org modules — only for non-super_admin (super_admin sees everything)
+  const { data: orgData } = useGetMyOrganization();
+  // enabled_modules: null/undefined = all allowed; array = whitelist
+  const enabledModules: string[] | null = isSuperAdmin
+    ? null
+    : ((orgData as any)?.enabledModules ?? (orgData as any)?.enabled_modules ?? null);
+
+  const isModuleEnabled = (moduleKey?: string) => {
+    if (!moduleKey) return true;                         // no gate → always visible
+    if (isSuperAdmin) return true;                       // super_admin sees everything
+    if (!enabledModules || !Array.isArray(enabledModules)) return true; // null / non-array → no restrictions
+    return enabledModules.includes(moduleKey);
+  };
+
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Brand header */}
@@ -281,38 +301,45 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-5">
-        {NAV.map(section => {
+        {NAV.map((section) => {
           const visibleItems = section.items.filter(item =>
-            !item.roles || item.roles.includes(userRole)
+            (!item.roles || item.roles.includes(userRole)) &&
+            isModuleEnabled(item.moduleKey)
           );
           if (!visibleItems.length) return null;
+          const isAdminSection = section.label.includes("Адміністрація");
           return (
             <div key={section.label}>
+              {isAdminSection && (
+                <div className="mx-3 mb-3 border-t border-amber-500/20" />
+              )}
               <div className="px-3 mb-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-white/25">
-                  {section.label}
+                <span className={`text-[10px] font-semibold uppercase tracking-widest ${isAdminSection ? "text-amber-400/60" : "text-white/25"}`}>
+                  {isAdminSection ? "Адміністрація" : section.label}
                 </span>
               </div>
               <div className="space-y-0.5">
                 {visibleItems.map(item => {
                   const active = isActive(item.path);
                   const Icon = item.icon;
-                  const isAdminItem = item.path === "/admin";
+                  const isAdminItem = isAdminSection;
                   return (
                     <button
                       key={item.path}
                       onClick={() => goTo(item.path)}
                       className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all group ${
                         active
-                          ? "bg-white/12 text-white font-medium shadow-sm"
+                          ? isAdminItem
+                            ? "bg-amber-500/15 text-amber-200 font-medium shadow-sm"
+                            : "bg-white/12 text-white font-medium shadow-sm"
                           : isAdminItem
-                            ? "text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300"
+                            ? "text-amber-400/70 hover:bg-amber-500/10 hover:text-amber-300"
                             : "text-white/50 hover:bg-white/7 hover:text-white/80"
                       }`}
                     >
-                      <Icon className={`w-4 h-4 shrink-0 ${active ? "text-indigo-300" : isAdminItem ? "text-amber-400" : "text-white/35 group-hover:text-white/60"}`} />
+                      <Icon className={`w-4 h-4 shrink-0 ${active ? (isAdminItem ? "text-amber-300" : "text-indigo-300") : isAdminItem ? "text-amber-400/60 group-hover:text-amber-400" : "text-white/35 group-hover:text-white/60"}`} />
                       <span className="truncate text-left">{item.name}</span>
-                      {active && <ChevronRight className="w-3 h-3 ml-auto text-white/30 shrink-0" />}
+                      {active && <ChevronRight className={`w-3 h-3 ml-auto shrink-0 ${isAdminItem ? "text-amber-400/50" : "text-white/30"}`} />}
                     </button>
                   );
                 })}
