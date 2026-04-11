@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInCalendarDays, addDays } from "date-fns";
 import { uk } from "date-fns/locale";
 import { toast } from "@/hooks/use-toast";
+import { InvoiceModal, type InvoiceData } from "./invoice-modal";
 import {
   X, ChevronRight, ChevronLeft, BedDouble, Calendar, User, Star,
   Minus, Plus, Tag, Check, AlertTriangle, Loader2,
@@ -665,6 +666,9 @@ function StepPayment({ form, nights, pricingPreview, addonPriceMap, totalAmount,
     } else if (usePartial && partialAmount > 0 && partialAmount < totalAmount) {
       extra.partialAmount = partialAmount;
     }
+    if (type === "invoice" && legalEntityId) {
+      extra.legalEntityId = Number(legalEntityId);
+    }
     // Link = save as PENDING (awaiting online payment), everything else = confirmed
     const saveStatus = type === "link" ? "pending" : "confirmed";
     const result = await onConfirm(saveStatus, type, extra);
@@ -967,6 +971,8 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [draftConflict, setDraftConflict] = useState<any>(null);
+  const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null);
+  const [invoiceBookingId, setInvoiceBookingId] = useState<number | null>(null);
 
   const [form, setForm] = useState<BookingForm>(() => {
     if (booking) {
@@ -1202,16 +1208,39 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["calendar"] });
       const payLabels: Record<string, string> = {
-        invoice: "Рахунок виставлено",
+        invoice: "Бронювання збережено — відкриваю рахунок…",
         link:    "Бронювання збережено — генерую посилання…",
         card:    "Оплачено карткою",
         cash:    "Оплачено готівкою",
         arrival: "Збережено — оплата при заїзді",
       };
-      if (paymentMethod !== "link") {
+      if (paymentMethod !== "link" && paymentMethod !== "invoice") {
         toast({ title: payLabels[paymentMethod || ""] || (isEdit ? "Бронювання оновлено" : "Бронювання створено") });
       }
       onSuccess?.(saved);
+
+      // For invoice: don't close — fetch invoice data and open InvoiceModal
+      if (paymentMethod === "invoice") {
+        const leId = (extra as any)?.legalEntityId;
+        const invUrl = `${API}/bookings/${saved.id}/invoice${leId ? `?legalEntityId=${leId}` : ""}`;
+        try {
+          const ir = await authFetch(invUrl);
+          if (ir.ok) {
+            const invData = await ir.json();
+            setInvoiceBookingId(saved.id);
+            setInvoiceData(invData);
+            onClose(); // close the booking dialog — InvoiceModal opens via portal
+          } else {
+            toast({ title: "Бронювання збережено", description: "Не вдалося завантажити рахунок" });
+            onClose();
+          }
+        } catch {
+          toast({ title: "Бронювання збережено" });
+          onClose();
+        }
+        return saved;
+      }
+
       if (paymentMethod !== "link") onClose();
       return saved;
     } catch (e: any) {
@@ -1340,6 +1369,15 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
           )}
         </div>
       </div>
+
+      {/* Invoice Modal — opens via portal after booking is saved with "invoice" action */}
+      {invoiceData && invoiceBookingId && (
+        <InvoiceModal
+          bookingId={invoiceBookingId}
+          data={invoiceData}
+          onClose={() => { setInvoiceData(null); setInvoiceBookingId(null); }}
+        />
+      )}
     </>
   );
 }
