@@ -212,6 +212,20 @@ export default function GuestPortalPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Live polling: refresh messages every 15s when chat tab is open
+  useEffect(() => {
+    if (!code || activeTab !== "messages") return;
+    const poll = setInterval(() => {
+      fetch(`${API}/guest/${code}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.messages) setMessages(d.messages);
+        })
+        .catch(() => {});
+    }, 15000);
+    return () => clearInterval(poll);
+  }, [code, activeTab]);
+
   const nights = data ? differenceInCalendarDays(parseISO(data.booking.checkOut), parseISO(data.booking.checkIn)) : 0;
   const now = new Date();
   const checkInDate = data ? parseISO(data.booking.checkIn) : null;
@@ -1275,6 +1289,12 @@ export default function GuestPortalPage() {
         {/* Footer */}
         <div className="mt-6 text-center text-xs text-gray-400 pb-4">
           <p>🏨 {booking.orgName} · {booking.propertyName}</p>
+          {booking.propertyAddress && (
+            <p className="mt-0.5 flex items-center justify-center gap-1">
+              <MapPin className="w-3 h-3 inline-block" />
+              {booking.propertyAddress}
+            </p>
+          )}
           <p className="mt-1">Гостьовий портал — приємного відпочинку!</p>
         </div>
       </div>

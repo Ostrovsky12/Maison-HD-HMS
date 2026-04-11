@@ -52,12 +52,12 @@ const LOYALTY_CFG: Record<string, { label: string; color: string; icon: typeof S
 // ── Tabs ──────────────────────────────────────────────────────────────────
 const TABS = [
   { key: "summary",  label: "Огляд",    icon: Calendar },
-  { key: "guest",    label: "Гість",    icon: User },
-  { key: "payments", label: "Оплата",   icon: CreditCard },
-  { key: "services", label: "Послуги",  icon: ShoppingBag },
-  { key: "notes",    label: "Нотатки",  icon: StickyNote },
-  { key: "tasks",    label: "Завдання", icon: ClipboardList },
   { key: "comms",    label: "Зв'язок",  icon: MessageSquare },
+  { key: "guest",    label: "Гість",    icon: User },
+  { key: "services", label: "Послуги",  icon: ShoppingBag },
+  { key: "payments", label: "Оплата",   icon: CreditCard },
+  { key: "tasks",    label: "Завдання", icon: ClipboardList },
+  { key: "notes",    label: "Нотатки",  icon: StickyNote },
   { key: "upsell",   label: "Апсейл",   icon: Sparkles },
 ];
 

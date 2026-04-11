@@ -4,11 +4,46 @@ import {
   bookingsTable, unitsTable, propertiesTable, guestServiceOrdersTable, organizationsTable,
   guestLoyaltyTable, loyaltyTransactionsTable, guestReviewsTable,
   guestPortalMessagesTable, guestSpecialOffersTable, guestCommunicationLogTable,
-  addonsTable,
+  addonsTable, notificationsTable, usersTable,
 } from "@workspace/db";
 import { eq, and, desc, asc, ne, sql, inArray } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { requireAuth } from "../lib/auth.js";
+import { sendPushToOrg } from "./push.js";
+import { sendTelegram } from "../lib/notify.js";
+
+// ── Helper: notify all staff of an org about a guest portal action ──────────
+async function notifyOrgStaff(
+  orgId: number,
+  bookingId: number,
+  type: "checkin" | "alert",
+  title: string,
+  message: string,
+) {
+  try {
+    // Push notification to all staff devices
+    sendPushToOrg(orgId, { title, body: message }).catch(() => {});
+    // Telegram notification
+    sendTelegram(orgId, `🔔 <b>${title}</b>\n${message}\n#бронювання${bookingId}`).catch(() => {});
+    // In-app notifications for all staff of this org
+    const staffUsers = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(and(eq(usersTable.organizationId, orgId), eq(usersTable.isActive, true)));
+    if (staffUsers.length > 0) {
+      await db.insert(notificationsTable).values(
+        staffUsers.map(u => ({
+          userId: u.id,
+          bookingId,
+          type: type as any,
+          title,
+          message,
+          priority: "normal" as const,
+        }))
+      ).catch(() => {});
+    }
+  } catch { /* fire-and-forget */ }
+}
 
 const router = Router();
 
@@ -571,6 +606,17 @@ router.post("/:code/checkin", async (req, res) => {
       content: `Гість ${firstName} ${lastName} заповнив форму онлайн чекіну`,
     });
 
+    // Notify reception
+    db.select({ orgId: propertiesTable.organizationId, unitName: unitsTable.name })
+      .from(unitsTable).innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(unitsTable.id, booking.unitId)).limit(1)
+      .then(([ctx]) => {
+        if (ctx) notifyOrgStaff(ctx.orgId, booking.id, "checkin",
+          "📋 Онлайн чекін заповнено",
+          `${firstName || ""} ${lastName || ""} (${ctx.unitName}) заповнив форму заїзду через портал. Підтвердьте заїзд.`
+        );
+      }).catch(() => {});
+
     res.json({ success: true, message: "Форму заїзду успішно подано. Вам нараховано 50 балів лояльності!" });
   } catch (err) {
     console.error(err);
@@ -657,6 +703,17 @@ router.post("/:code/service-order", async (req, res) => {
       metadata: { serviceId: serviceId || "" },
     }).returning();
 
+    // Notify reception
+    db.select({ orgId: propertiesTable.organizationId, unitName: unitsTable.name })
+      .from(unitsTable).innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(unitsTable.id, booking.unitId)).limit(1)
+      .then(([ctx]) => {
+        if (ctx) notifyOrgStaff(ctx.orgId, booking.id, "alert",
+          "🛎 Нове замовлення від гостя",
+          `${ctx.unitName}: замовлено «${serviceName}» (×${qty}${pricePerUnit ? `, ${(pricePerUnit * qty).toLocaleString("uk-UA")} грн` : ""}). Потрібне підтвердження.`
+        );
+      }).catch(() => {});
+
     res.json({ success: true, order });
   } catch (err) {
     console.error(err);
@@ -678,6 +735,18 @@ router.post("/:code/checkout-request", async (req, res) => {
       status: "pending",
       metadata: { type: "checkout_request", preferredTime: preferredTime || "", luggageStorage: luggageStorage ? "yes" : "no", feedbackRating: feedbackRating?.toString() || "" },
     });
+
+    // Notify reception
+    db.select({ orgId: propertiesTable.organizationId, unitName: unitsTable.name })
+      .from(unitsTable).innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(unitsTable.id, booking.unitId)).limit(1)
+      .then(([ctx]) => {
+        if (ctx) notifyOrgStaff(ctx.orgId, booking.id, "alert",
+          "🚪 Запит на виїзд",
+          `${ctx.unitName}: гість запланував виїзд о ${preferredTime || "стандартний час"}${luggageStorage ? ", зберігання багажу" : ""}. Підтвердіть виїзд.`
+        );
+      }).catch(() => {});
+
     res.json({ success: true, message: "Запит на виїзд прийнято. Адміністратор зв'яжеться з вами." });
   } catch (err) {
     console.error(err);
@@ -716,6 +785,20 @@ router.post("/:code/message", async (req, res) => {
     const [msg] = await db.insert(guestPortalMessagesTable).values({
       bookingId: booking.id, direction: "guest_to_hotel", senderName: guestName, message: message.trim(),
     }).returning();
+
+    // Notify reception
+    db.select({ orgId: propertiesTable.organizationId, unitName: unitsTable.name })
+      .from(bookingsTable)
+      .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(bookingsTable.id, booking.id)).limit(1)
+      .then(([ctx]) => {
+        if (ctx) notifyOrgStaff(ctx.orgId, booking.id, "alert",
+          "💬 Нове повідомлення від гостя",
+          `${guestName} (${ctx.unitName}): «${message.trim().slice(0, 120)}${message.trim().length > 120 ? "…" : ""}»`
+        );
+      }).catch(() => {});
+
     res.json({ success: true, message: msg });
   } catch (err) {
     console.error(err);
