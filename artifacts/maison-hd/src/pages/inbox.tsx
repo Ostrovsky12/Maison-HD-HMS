@@ -344,6 +344,25 @@ export default function InboxPage() {
     } finally { setPortalLoading(false); }
   }
 
+  // ── Portal: confirm guest payment ─────────────────────────────────────────
+  const [confirmingPayment, setConfirmingPayment] = useState<number | null>(null);
+  async function confirmGuestPayment(bookingId: number) {
+    setConfirmingPayment(bookingId);
+    try {
+      const r = await apiFetch(`${API}/guest/payment-confirm/${bookingId}`, { method: "POST" });
+      if (r.ok) {
+        const d = await r.json();
+        toast({ title: "✅ Оплату підтверджено", description: `${d.guestName} — ${(d.confirmedAmount || 0).toLocaleString("uk-UA")} ₴. Баланс гостя: 0 ₴.` });
+        await loadPortalMessages(bookingId);
+      } else {
+        const d = await r.json().catch(() => ({}));
+        toast({ title: "Помилка", description: d.error || "Не вдалося підтвердити оплату", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Помилка мережі", variant: "destructive" });
+    } finally { setConfirmingPayment(null); }
+  }
+
   // ── Portal: send reply ────────────────────────────────────────────────────
   async function sendPortalReply() {
     if (!selectedPortal || !portalDraft.trim()) return;
@@ -978,19 +997,39 @@ export default function InboxPage() {
                 </div>
               ) : portalMessages.map((msg: any) => {
                 const isStaff = msg.direction === "hotel_to_guest";
+                const isPaymentClaim = !isStaff && msg.message?.includes("PAYMENT_CLAIM");
+                const paymentClaimMatch = isPaymentClaim ? msg.message.match(/amount=([\d.]+)/) : null;
+                const paymentClaimAmount = paymentClaimMatch ? parseFloat(paymentClaimMatch[1]) : 0;
+                const displayMessage = isPaymentClaim
+                  ? msg.message.replace(/💸 PAYMENT_CLAIM\|bookingId=\d+\|amount=[\d.]+\n?/, "💸 ")
+                  : msg.message;
                 return (
-                  <div key={msg.id} className={`flex ${isStaff ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[70%] rounded-2xl px-3 py-2 ${isStaff
+                  <div key={msg.id} className={`flex flex-col ${isStaff ? "items-end" : "items-start"}`}>
+                    <div className={`max-w-[75%] rounded-2xl px-3 py-2 ${isStaff
                       ? "bg-emerald-600 text-white rounded-br-sm"
-                      : "bg-white border border-gray-100 text-gray-800 rounded-bl-sm shadow-sm"}`}>
+                      : isPaymentClaim
+                        ? "bg-amber-50 border-2 border-amber-300 text-gray-800 rounded-bl-sm shadow-sm"
+                        : "bg-white border border-gray-100 text-gray-800 rounded-bl-sm shadow-sm"}`}>
                       {!isStaff && (
-                        <p className="text-[10px] font-semibold mb-0.5 text-emerald-600">{msg.sender_name || selectedPortal.guest_name}</p>
+                        <p className={`text-[10px] font-semibold mb-0.5 ${isPaymentClaim ? "text-amber-600" : "text-emerald-600"}`}>
+                          {msg.sender_name || selectedPortal.guest_name}
+                        </p>
                       )}
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.message}</p>
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{displayMessage}</p>
                       <p className={`text-[10px] mt-1 ${isStaff ? "text-emerald-200" : "text-gray-400"}`}>
                         {msg.created_at ? new Date(msg.created_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }) : ""}
                       </p>
                     </div>
+                    {isPaymentClaim && (
+                      <button
+                        onClick={() => confirmGuestPayment(selectedPortal.booking_id)}
+                        disabled={confirmingPayment === selectedPortal.booking_id}
+                        className="mt-1 max-w-[75%] w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-xs font-semibold rounded-xl px-3 py-2 flex items-center justify-center gap-1.5 transition">
+                        {confirmingPayment === selectedPortal.booking_id
+                          ? "Підтверджуємо…"
+                          : `✅ Підтвердити оплату ${paymentClaimAmount > 0 ? `${paymentClaimAmount.toLocaleString("uk-UA")} ₴` : ""}`}
+                      </button>
+                    )}
                   </div>
                 );
               })}

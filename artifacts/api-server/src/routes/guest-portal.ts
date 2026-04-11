@@ -826,6 +826,87 @@ router.get("/:code/orders", async (req, res) => {
   }
 });
 
+// POST /api/guest/:code/payment-notify — guest notifies about online payment (public)
+router.post("/:code/payment-notify", async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase();
+    const [booking] = await db.select({
+      id: bookingsTable.id,
+      firstName: bookingsTable.firstName,
+      lastName: bookingsTable.lastName,
+      totalAmount: bookingsTable.totalAmount,
+      paidAmount: bookingsTable.paidAmount,
+      unitId: bookingsTable.unitId,
+    }).from(bookingsTable).where(eq(bookingsTable.guestAccessCode, code));
+    if (!booking) return res.status(404).json({ error: "Бронювання не знайдено" });
+
+    const guestName = [booking.firstName, booking.lastName].filter(Boolean).join(" ") || "Гість";
+    const debt = Math.max(0, parseFloat(booking.totalAmount || "0") - parseFloat(booking.paidAmount || "0"));
+
+    const msgText = `💸 PAYMENT_CLAIM|bookingId=${booking.id}|amount=${debt}\nГість підтверджує онлайн-оплату ${debt.toLocaleString("uk-UA")} ₴. Перевірте надходження та підтвердіть.`;
+    await db.insert(guestPortalMessagesTable).values({
+      bookingId: booking.id, direction: "guest_to_hotel" as any,
+      senderName: guestName, message: msgText, isRead: false,
+    });
+
+    db.select({ orgId: propertiesTable.organizationId, unitName: unitsTable.name })
+      .from(unitsTable).innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(unitsTable.id, booking.unitId)).limit(1)
+      .then(([ctx]) => {
+        if (ctx) notifyOrgStaff(ctx.orgId, booking.id, "alert",
+          "💸 Оплата від гостя",
+          `${guestName} підтверджує оплату ${debt.toLocaleString("uk-UA")} ₴. Перевірте та натисніть «Підтвердити» у чаті порталу.`
+        );
+      }).catch(() => {});
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Помилка сервера" });
+  }
+});
+
+// POST /api/guest/payment-confirm/:bookingId — staff confirms guest payment (auth required)
+router.post("/payment-confirm/:bookingId", requireAuth, async (req: any, res) => {
+  try {
+    const bookingId = parseInt(req.params.bookingId);
+    const orgId = req.user?.organizationId;
+    const [booking] = await db.select().from(bookingsTable)
+      .where(and(eq(bookingsTable.id, bookingId)));
+    if (!booking) return res.status(404).json({ error: "Бронювання не знайдено" });
+
+    const total = parseFloat(booking.totalAmount || "0");
+    const paid = parseFloat(booking.paidAmount || "0");
+    const debt = Math.max(0, total - paid);
+    if (debt <= 0) return res.json({ success: true, message: "Вже повністю сплачено" });
+
+    await db.update(bookingsTable).set({
+      paidAmount: String(total),
+      paymentStatus: "paid",
+      updatedAt: new Date(),
+    }).where(eq(bookingsTable.id, bookingId));
+
+    await db.execute(sql`
+      INSERT INTO payments (booking_id, amount, method, status, description, payment_type, currency)
+      VALUES (${bookingId}, ${debt}, 'card', 'completed', 'Онлайн-оплата (підтверджено рецепцією)', 'payment', 'UAH')
+    `);
+
+    const guestName = [booking.firstName, booking.lastName].filter(Boolean).join(" ") || "Гість";
+    await db.insert(guestPortalMessagesTable).values({
+      bookingId,
+      direction: "hotel_to_guest" as any,
+      senderName: "Рецепція",
+      message: `✅ Оплату ${debt.toLocaleString("uk-UA")} ₴ підтверджено! Ваш баланс: 0 ₴. Дякуємо!`,
+      isRead: false,
+    });
+
+    res.json({ success: true, confirmedAmount: debt, guestName });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Помилка сервера" });
+  }
+});
+
 // POST /api/guest/:code/message — guest sends message
 router.post("/:code/message", async (req, res) => {
   try {

@@ -193,6 +193,25 @@ export default function GuestPortalPage() {
     } catch {}
   }
 
+  // Payment notify
+  const [paymentNotifying, setPaymentNotifying] = useState(false);
+  const [paymentNotified, setPaymentNotified] = useState(() =>
+    Boolean(localStorage.getItem(`pn_${params.code}`))
+  );
+
+  async function sendPaymentNotify() {
+    if (paymentNotifying || paymentNotified) return;
+    setPaymentNotifying(true);
+    try {
+      const r = await fetch(`/api/guest/${code}/payment-notify`, { method: "POST" });
+      if (r.ok) {
+        setPaymentNotified(true);
+        localStorage.setItem(`pn_${params.code}`, "1");
+      }
+    } catch {}
+    setPaymentNotifying(false);
+  }
+
   // Review
   const [reviewForm, setReviewForm] = useState({
     overallRating: 0, cleanlinessRating: 0, serviceRating: 0,
@@ -1328,6 +1347,20 @@ export default function GuestPortalPage() {
                       </button>
                     </a>
                   )}
+                  {(booking.paymentLink || booking.orgPaymentUrl) && (
+                    paymentNotified ? (
+                      <div className="mt-2 rounded-xl bg-white/20 py-2.5 text-sm text-center font-medium">
+                        ✅ Рецепцію повідомлено — очікуйте підтвердження
+                      </div>
+                    ) : (
+                      <button
+                        onClick={sendPaymentNotify}
+                        disabled={paymentNotifying}
+                        className="mt-2 w-full bg-white/20 hover:bg-white/30 text-white font-semibold rounded-xl py-2.5 text-sm flex items-center justify-center gap-2 transition disabled:opacity-60">
+                        {paymentNotifying ? "Надсилаємо…" : "✓ Я сплатив — повідомити рецепцію"}
+                      </button>
+                    )
+                  )}
                 </div>
               )}
               {!hasDebt && (
@@ -1402,13 +1435,27 @@ export default function GuestPortalPage() {
                 </div>
               )}
 
-              {/* Payment link (redundant but useful when scrolled down) */}
+              {/* Payment link + "I paid" notification */}
               {hasDebt && (booking.paymentLink || booking.orgPaymentUrl) && (
-                <a href={booking.paymentLink || booking.orgPaymentUrl!} target="_blank" rel="noopener noreferrer">
-                  <Button className="w-full bg-green-600 hover:bg-green-700 text-base h-12">
-                    <CreditCard className="h-4 w-4 mr-2" />Сплатити {totalDebt.toLocaleString("uk-UA")} ₴ онлайн
-                  </Button>
-                </a>
+                <div className="space-y-2">
+                  <a href={booking.paymentLink || booking.orgPaymentUrl!} target="_blank" rel="noopener noreferrer">
+                    <Button className="w-full bg-green-600 hover:bg-green-700 text-base h-12">
+                      <CreditCard className="h-4 w-4 mr-2" />Сплатити {totalDebt.toLocaleString("uk-UA")} ₴ онлайн
+                    </Button>
+                  </a>
+                  {paymentNotified ? (
+                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 py-3 text-sm text-center text-emerald-700 font-medium">
+                      ✅ Рецепцію повідомлено — очікуйте підтвердження оплати
+                    </div>
+                  ) : (
+                    <button
+                      onClick={sendPaymentNotify}
+                      disabled={paymentNotifying}
+                      className="w-full border-2 border-green-600 text-green-700 hover:bg-green-50 font-semibold rounded-xl py-3 text-sm flex items-center justify-center gap-2 transition disabled:opacity-60">
+                      {paymentNotifying ? "Надсилаємо повідомлення…" : "✓ Я вже сплатив — повідомити рецепцію"}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           );
