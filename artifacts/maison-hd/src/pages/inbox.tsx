@@ -10,7 +10,7 @@ import {
   Plus, X, User, Calendar, MoreVertical, Loader2, Bot, Paperclip,
   ArrowLeft, ChevronDown, StickyNote, Tag, UserCheck, TrendingUp,
   Building2, Hash, Inbox, Target, ChevronRight, Edit3, Check,
-  DollarSign, Star, Zap, Bell, FileText, Eye,
+  DollarSign, Star, Zap, Bell, BellOff, FileText, Eye,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -188,6 +188,37 @@ export default function InboxPage() {
   const [portalLoading, setPortalLoading] = useState(false);
   const portalBottomRef = useRef<HTMLDivElement>(null);
 
+  // ── Sound notifications ───────────────────────────────────────────────────
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("inbox_sound") !== "off");
+  const lastUnreadRef = useRef<number>(0);
+  const lastPortalUnreadRef = useRef<number>(0);
+  const lastCheckinIdRef = useRef<number>(0);
+
+  function playChime(type: "message" | "checkin" = "message") {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const notes = type === "checkin" ? [523, 659, 784] : [880, 1047];
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.14);
+        gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + i * 0.14 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.14 + 0.28);
+        osc.start(ctx.currentTime + i * 0.14);
+        osc.stop(ctx.currentTime + i * 0.14 + 0.3);
+      });
+    } catch {}
+  }
+
+  function showBrowserNotif(title: string, body: string) {
+    if (Notification.permission === "granted") {
+      new Notification(title, { body, icon: "/favicon.ico", tag: "inbox-msg" });
+    }
+  }
+
   const [showChannelSettings, setShowChannelSettings] = useState(false);
   const [channels, setChannels] = useState<any[]>([]);
   const [tgToken, setTgToken] = useState("");
@@ -269,7 +300,16 @@ export default function InboxPage() {
   async function loadPortalThreads() {
     try {
       const r = await apiFetch(`${API}/guest/portal-threads`);
-      if (r.ok) { const d = await r.json(); if (Array.isArray(d)) setPortalThreads(d); }
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d)) {
+          setPortalThreads(d);
+          // Init ref to avoid false sound on first load
+          if (lastPortalUnreadRef.current === 0) {
+            lastPortalUnreadRef.current = d.reduce((a: number, t: any) => a + parseInt(t.unread_count || "0"), 0);
+          }
+        }
+      }
     } catch {}
   }
 
@@ -323,12 +363,76 @@ export default function InboxPage() {
       if (Array.isArray(leadR)) setLeads(leadR);
       if (Array.isArray(cannedR)) setCannedReplies(cannedR);
       if (Array.isArray(staffR)) setStaff(staffR);
+      // Initialize unread ref to avoid false-positive sound on first load
+      if (lastUnreadRef.current === 0 && statsR?.unreadByStatus?.all) {
+        lastUnreadRef.current = statsR.unreadByStatus.all;
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { loadAll(); loadPortalThreads(); }, []);
+  useEffect(() => {
+    loadAll();
+    loadPortalThreads();
+    // Request browser notification permission
+    if (Notification.permission === "default") Notification.requestPermission();
+  }, []);
+
+  // ── Polling: check for new messages every 30s ─────────────────────────────
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        // Check inbox unread
+        const sR = await apiFetch(`${API}/inbox/stats`);
+        if (sR.ok) {
+          const s = await sR.json();
+          const total = (s.unreadByStatus?.all || 0) as number;
+          if (total > lastUnreadRef.current && lastUnreadRef.current >= 0) {
+            if (soundEnabled) playChime("message");
+            showBrowserNotif("Новe повідомлення — Inbox", `${total - lastUnreadRef.current} нових повідомлень`);
+            toast({ title: "💬 Нові повідомлення", description: `${total - lastUnreadRef.current} непрочитаних` });
+            // Refresh conversations
+            const cR = await apiFetch(`${API}/inbox/conversations`);
+            if (cR.ok) { const cd = await cR.json(); if (cd.conversations) setConversations(cd.conversations); }
+          }
+          if (total !== lastUnreadRef.current) lastUnreadRef.current = total;
+          setStats(s);
+        }
+        // Check portal unread
+        const pR = await apiFetch(`${API}/guest/portal-threads`);
+        if (pR.ok) {
+          const threads = await pR.json();
+          if (Array.isArray(threads)) {
+            const portalUnread = threads.reduce((acc: number, t: any) => acc + parseInt(t.unread_count || "0"), 0);
+            if (portalUnread > lastPortalUnreadRef.current && lastPortalUnreadRef.current >= 0) {
+              if (soundEnabled) playChime("message");
+              showBrowserNotif("Нове повідомлення — Гостьовий портал", "Гість написав через портал");
+              toast({ title: "🏠 Портал: нове повідомлення", description: "Гість написав через гостьовий портал" });
+            }
+            if (portalUnread !== lastPortalUnreadRef.current) lastPortalUnreadRef.current = portalUnread;
+            setPortalThreads(threads);
+          }
+        }
+        // Check new checkin submissions
+        const ciR = await apiFetch(`${API}/guest/checkins?limit=1`);
+        if (ciR.ok) {
+          const ci = await ciR.json();
+          if (Array.isArray(ci) && ci.length > 0) {
+            const latestId = ci[0].id as number;
+            const prevId = lastCheckinIdRef.current;
+            if (prevId > 0 && latestId > prevId) {
+              if (soundEnabled) playChime("checkin");
+              showBrowserNotif("✅ Онлайн чекін", `${ci[0].first_name} ${ci[0].last_name} заповнив форму заїзду`);
+              toast({ title: "✅ Онлайн чекін", description: `${ci[0].first_name} ${ci[0].last_name} зареєструвався онлайн` });
+            }
+            if (latestId !== prevId) lastCheckinIdRef.current = latestId;
+          }
+        }
+      } catch {}
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [soundEnabled]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -548,6 +652,19 @@ export default function InboxPage() {
               </div>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={loadAll}><RefreshCw className="w-3.5 h-3.5" /></Button>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                  title={soundEnabled ? "Звук увімкнено (натисніть, щоб вимкнути)" : "Звук вимкнено (натисніть, щоб увімкнути)"}
+                  onClick={() => {
+                    const next = !soundEnabled;
+                    setSoundEnabled(next);
+                    localStorage.setItem("inbox_sound", next ? "on" : "off");
+                    if (next) playChime("message");
+                    toast({ title: next ? "🔔 Звук увімкнено" : "🔕 Звук вимкнено" });
+                  }}>
+                  {soundEnabled
+                    ? <Bell className="w-3.5 h-3.5 text-indigo-500" />
+                    : <BellOff className="w-3.5 h-3.5 text-gray-400" />}
+                </Button>
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Налаштування каналів"
                   onClick={() => { setShowChannelSettings(true); loadChannels(); }}>
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>

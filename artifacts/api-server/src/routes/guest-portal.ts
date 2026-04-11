@@ -401,7 +401,7 @@ router.get("/checkins", requireAuth, async (req: any, res) => {
         eq(bookingsTable.checkinFormSubmitted, true)
       ))
       .orderBy(desc(bookingsTable.updatedAt))
-      .limit(200);
+      .limit(req.query.limit ? parseInt(req.query.limit as string) : 200);
 
     res.json(rows.map(r => ({
       ...r,
