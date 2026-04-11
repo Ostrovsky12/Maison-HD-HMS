@@ -102,6 +102,46 @@ router.post("/review-request/:bookingId", requireAuth, async (req: any, res) => 
   }
 });
 
+// ── Staff: Get messages for a booking ─────────────────────────────────────
+router.get("/messages/:bookingId", requireAuth, async (req: any, res) => {
+  try {
+    const bookingId = parseInt(req.params.bookingId);
+    const msgs = await db.select().from(guestPortalMessagesTable)
+      .where(eq(guestPortalMessagesTable.bookingId, bookingId))
+      .orderBy(asc(guestPortalMessagesTable.createdAt));
+    res.json(msgs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Staff: Get checkin form data for a booking ─────────────────────────────
+router.get("/checkin-data/:bookingId", requireAuth, async (req: any, res) => {
+  try {
+    const bookingId = parseInt(req.params.bookingId);
+    const [booking] = await db.select({
+      checkinFormSubmitted: bookingsTable.checkinFormSubmitted,
+      checkinFormData: bookingsTable.checkinFormData,
+      guestAccessCode: bookingsTable.guestAccessCode,
+    }).from(bookingsTable).where(eq(bookingsTable.id, bookingId));
+    if (!booking) return res.status(404).json({ error: "Не знайдено" });
+    res.json(booking);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Staff: Mark message as read ────────────────────────────────────────────
+router.patch("/messages/:id/read", requireAuth, async (req: any, res) => {
+  try {
+    await db.update(guestPortalMessagesTable).set({ isRead: true })
+      .where(eq(guestPortalMessagesTable.id, parseInt(req.params.id)));
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Staff: Loyalty overview ────────────────────────────────────────────────
 router.get("/loyalty-overview", requireAuth, async (req: any, res) => {
   try {

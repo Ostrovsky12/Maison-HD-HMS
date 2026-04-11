@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { format, differenceInDays } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -299,6 +299,15 @@ ${guestUrl}
 }
 
 // ── Tab: Guest ─────────────────────────────────────────────────────────────
+const CHECKIN_FIELD_LABELS: Record<string, string> = {
+  firstName: "Ім'я", lastName: "Прізвище", middleName: "По батькові",
+  phone: "Телефон", email: "Email", passportType: "Тип документа",
+  passportNumber: "Номер документа", nationality: "Громадянство",
+  birthDate: "Дата народження", arrivalTime: "Час прибуття",
+  specialRequests: "Побажання", carNumber: "Номер авто",
+  hasPet: "Тварина", petType: "Вид тварини", petName: "Кличка",
+};
+
 function TabGuest({ b }: { b: any }) {
   const { toast } = useToast();
   const loyalty = b.loyaltyTier ? LOYALTY_CFG[b.loyaltyTier] : null;
@@ -306,6 +315,15 @@ function TabGuest({ b }: { b: any }) {
   const [guestCode, setGuestCode] = useState<string>(b.guestAccessCode || "");
   const [generating, setGenerating] = useState(false);
   const [showSendModal, setShowSendModal] = useState(false);
+  const [checkinData, setCheckinData] = useState<{ checkinFormSubmitted: boolean; checkinFormData: Record<string, any> } | null>(null);
+  const [loadingCheckin, setLoadingCheckin] = useState(true);
+
+  useEffect(() => {
+    apiFetch(`${API}/guest/checkin-data/${b.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setCheckinData(d); })
+      .finally(() => setLoadingCheckin(false));
+  }, [b.id]);
 
   const guestUrl = guestCode ? `${window.location.origin}${BASE}/guest/${guestCode}` : "";
 
@@ -404,7 +422,61 @@ function TabGuest({ b }: { b: any }) {
         </button>
       )}
 
-      {/* Stay history placeholder */}
+      {/* ── Online Checkin Data ── */}
+      {loadingCheckin ? (
+        <div className="p-4 rounded-2xl border border-gray-100 flex items-center gap-2 text-gray-400">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="text-sm">Завантаження даних чекіну…</span>
+        </div>
+      ) : checkinData?.checkinFormSubmitted ? (
+        <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/40">
+          <div className="flex items-center gap-2 mb-3">
+            <BadgeCheck className="w-4 h-4 text-emerald-600" />
+            <SectionLabel>Онлайн чекін заповнено ✓</SectionLabel>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {Object.entries(checkinData.checkinFormData || {})
+              .filter(([k, v]) => v && k !== "coGuests" && typeof v !== "object" && k !== "hasPet")
+              .map(([k, v]) => (
+                <div key={k} className="text-xs">
+                  <span className="text-gray-400 block">{CHECKIN_FIELD_LABELS[k] || k}</span>
+                  <span className="font-semibold text-gray-800">{String(v)}</span>
+                </div>
+              ))}
+            {checkinData.checkinFormData?.hasPet && (
+              <div className="col-span-2 text-xs">
+                <span className="text-gray-400 block">Тварина</span>
+                <span className="font-semibold text-gray-800">
+                  {checkinData.checkinFormData?.petType || "Так"}{checkinData.checkinFormData?.petName ? ` — ${checkinData.checkinFormData.petName}` : ""}
+                </span>
+              </div>
+            )}
+          </div>
+          {checkinData.checkinFormData?.coGuests && Array.isArray(checkinData.checkinFormData.coGuests) && checkinData.checkinFormData.coGuests.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-emerald-100">
+              <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Супутники ({checkinData.checkinFormData.coGuests.length})</p>
+              {(checkinData.checkinFormData.coGuests as any[]).map((g, i) => (
+                <p key={i} className="text-xs text-gray-700">• {g.firstName} {g.lastName} — {g.passportNumber}</p>
+              ))}
+            </div>
+          )}
+          {checkinData.checkinFormData?.specialRequests && (
+            <div className="mt-3 bg-amber-50 border border-amber-100 rounded-xl p-2.5">
+              <p className="text-xs text-amber-700">💬 <span className="font-semibold">Побажання:</span> {checkinData.checkinFormData.specialRequests}</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="p-4 rounded-2xl border border-dashed border-gray-200">
+          <div className="flex items-center gap-2 mb-1">
+            <ClipboardSignature className="w-4 h-4 text-gray-300" />
+            <span className="text-sm text-gray-400 font-medium">Онлайн чекін не заповнено</span>
+          </div>
+          <p className="text-xs text-gray-300">Гість заповнить форму через гостьовий портал</p>
+        </div>
+      )}
+
+      {/* Stay stats */}
       <div className="p-4 rounded-2xl border border-gray-100">
         <SectionLabel>Статистика гостя</SectionLabel>
         <div className="grid grid-cols-3 gap-2">
@@ -1055,55 +1127,151 @@ function TabTasks({ b }: { b: any }) {
 
 // ── Tab: Communication ─────────────────────────────────────────────────────
 function TabComms({ b }: { b: any }) {
-  return (
-    <div className="space-y-4">
-      {/* Quick actions */}
-      <div className="grid grid-cols-2 gap-2">
-        {[
-          { label: "SMS гостю",   icon: Smartphone, color: "text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-100" },
-          { label: "Email гостю", icon: Mail,        color: "text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100" },
-          { label: "Telegram",    icon: Send,         color: "text-sky-600 bg-sky-50 border-sky-100 hover:bg-sky-100" },
-          { label: "Зателефонуй", icon: Phone,        color: "text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-100" },
-        ].map(a => (
-          <button key={a.label} className={`flex items-center gap-2 p-3.5 rounded-2xl border text-sm font-semibold transition-colors ${a.color}`}>
-            <a.icon className="w-4 h-4 shrink-0" /> {a.label}
-          </button>
-        ))}
-      </div>
+  const { toast } = useToast();
+  const [messages, setMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-      {/* Message log */}
-      <div>
-        <SectionLabel>Листування</SectionLabel>
-        <div className="space-y-3">
-          {[
-            { from: "Система", text: "Підтвердження бронювання надіслано", time: "10:32", out: true },
-            { from: b.guestName || "Гість", text: "Дякую, чекаємо з нетерпінням!", time: "10:45", out: false },
-          ].map((m, i) => (
-            <div key={i} className={`flex gap-2 ${m.out ? "justify-end" : "justify-start"}`}>
-              {!m.out && (
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">
-                  {(m.from || "?")[0].toUpperCase()}
-                </div>
-              )}
-              <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${m.out ? "bg-indigo-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 rounded-tl-sm"}`}>
-                <p>{m.text}</p>
-                <p className={`text-[10px] mt-1 ${m.out ? "text-indigo-200" : "text-gray-400"} text-right`}>{m.time}</p>
+  const loadMessages = useCallback(async () => {
+    const r = await apiFetch(`${API}/guest/messages/${b.id}`);
+    if (r.ok) {
+      const msgs = await r.json();
+      setMessages(msgs);
+    }
+    setLoading(false);
+  }, [b.id]);
+
+  useEffect(() => { loadMessages(); }, [loadMessages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const sendMessage = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setSending(true);
+    try {
+      const r = await apiFetch(`${API}/guest/message/${b.id}`, {
+        method: "POST", body: JSON.stringify({ message: text }),
+      });
+      if (r.ok) {
+        setDraft("");
+        await loadMessages();
+      } else {
+        toast({ title: "Помилка відправки", variant: "destructive" });
+      }
+    } finally { setSending(false); }
+  };
+
+  const fmtTime = (d: string) => {
+    try { return new Date(d).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }); }
+    catch { return ""; }
+  };
+  const fmtDate = (d: string) => {
+    try { return new Date(d).toLocaleDateString("uk-UA", { day: "2-digit", month: "short" }); }
+    catch { return ""; }
+  };
+
+  // Group messages by date
+  const grouped: { date: string; msgs: any[] }[] = [];
+  for (const m of messages) {
+    const day = fmtDate(m.createdAt);
+    const last = grouped[grouped.length - 1];
+    if (last?.date === day) last.msgs.push(m);
+    else grouped.push({ date: day, msgs: [m] });
+  }
+
+  return (
+    <div className="flex flex-col h-full" style={{ minHeight: 0 }}>
+      {/* Quick link to guest portal */}
+      {b.guestAccessCode && (
+        <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-xl">
+          <MessageSquare className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+          <span className="text-xs text-indigo-600 font-medium flex-1 truncate">Чат через гостьовий портал /guest/{b.guestAccessCode}</span>
+          <button onClick={loadMessages} className="p-1 text-indigo-400 hover:text-indigo-600">
+            <RefreshCw className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Message list */}
+      <div className="flex-1 overflow-y-auto space-y-4 pb-3" style={{ maxHeight: "400px", minHeight: "200px" }}>
+        {loading ? (
+          <div className="flex items-center justify-center h-24 text-gray-400">
+            <Loader2 className="w-5 h-5 animate-spin" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-32 gap-2 text-gray-400">
+            <MessageSquare className="w-8 h-8 text-gray-200" />
+            <p className="text-sm">Повідомлень ще немає</p>
+            <p className="text-xs text-gray-300">Напишіть першими або гість напише через портал</p>
+          </div>
+        ) : (
+          grouped.map(({ date, msgs }) => (
+            <div key={date}>
+              <div className="flex items-center gap-2 my-2">
+                <div className="flex-1 h-px bg-gray-100" />
+                <span className="text-[10px] text-gray-400 font-medium px-2">{date}</span>
+                <div className="flex-1 h-px bg-gray-100" />
+              </div>
+              <div className="space-y-2">
+                {msgs.map((m: any) => {
+                  const isOut = m.direction === "hotel_to_guest";
+                  return (
+                    <div key={m.id} className={`flex gap-2 ${isOut ? "justify-end" : "justify-start"}`}>
+                      {!isOut && (
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">
+                          {(m.senderName || b.guestName || "Г")[0].toUpperCase()}
+                        </div>
+                      )}
+                      <div className={`max-w-[78%] group`}>
+                        {!isOut && <p className="text-[10px] text-gray-400 mb-0.5 ml-1">{m.senderName || b.guestName || "Гість"}</p>}
+                        <div className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                          isOut
+                            ? "bg-indigo-600 text-white rounded-tr-sm"
+                            : m.isRead === false
+                            ? "bg-amber-50 text-gray-800 border border-amber-100 rounded-tl-sm"
+                            : "bg-gray-100 text-gray-800 rounded-tl-sm"
+                        }`}>
+                          <p style={{ whiteSpace: "pre-wrap" }}>{m.message}</p>
+                          <p className={`text-[10px] mt-1 text-right ${isOut ? "text-indigo-200" : "text-gray-400"}`}>{fmtTime(m.createdAt)}</p>
+                        </div>
+                      </div>
+                      {isOut && (
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">
+                          АД
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          ))}
-        </div>
+          ))
+        )}
+        <div ref={bottomRef} />
       </div>
 
       {/* Compose */}
-      <div className="flex gap-2 items-end">
-        <textarea
-          rows={2}
-          placeholder="Написати повідомлення..."
-          className="flex-1 px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 resize-none"
-        />
-        <button className="h-9 w-9 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center shrink-0 transition-colors">
-          <Send className="w-4 h-4" />
-        </button>
+      <div className="border-t border-gray-100 pt-3 mt-2">
+        <div className="flex gap-2 items-end">
+          <textarea
+            rows={2}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+            placeholder="Написати повідомлення гостю... (Enter — надіслати)"
+            className="flex-1 px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 resize-none"
+          />
+          <button
+            onClick={sendMessage}
+            disabled={sending || !draft.trim()}
+            className="h-10 w-10 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-2xl flex items-center justify-center shrink-0 transition-colors"
+          >
+            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        </div>
+        <p className="text-[10px] text-gray-300 mt-1.5 text-center">Повідомлення з'явиться в гостьовому порталі гостя</p>
       </div>
     </div>
   );
