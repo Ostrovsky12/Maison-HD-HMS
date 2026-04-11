@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,7 @@ import {
   Clock, CheckCircle2, Loader2, Star, ShoppingBag, Wine, Home,
   ChevronRight, RefreshCw, SquarePlus, Minus, Search, Flame,
   Sunrise, PartyPopper, Building2, AlarmClock, Truck,
-  Edit2, Trash2, Settings, X,
+  Edit2, Trash2, Settings, X, Warehouse, Sparkles,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -81,6 +82,7 @@ const TABS = [
 
 export default function FbPage() {
   const [tab, setTab] = useState("hall");
+  const [, navigate] = useLocation();
   const [stats, setStats] = useState<any>(null);
   const [tables, setTables] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
@@ -364,9 +366,14 @@ export default function FbPage() {
             </h1>
             <p className="text-gray-500 text-sm mt-0.5">Столи, замовлення, кухня, меню</p>
           </div>
-          <Button className="bg-orange-600 hover:bg-orange-700" onClick={() => { setNewOrderTable(null); setShowNewOrder(true); }}>
-            <Plus className="h-4 w-4 mr-2" /> Нове замовлення
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => navigate("/fb-warehouse")} className="gap-1.5 border-violet-200 text-violet-700 hover:bg-violet-50">
+              <Warehouse className="h-4 w-4" /> Склад
+            </Button>
+            <Button className="bg-orange-600 hover:bg-orange-700" onClick={() => { setNewOrderTable(null); setShowNewOrder(true); }}>
+              <Plus className="h-4 w-4 mr-2" /> Нове замовлення
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -901,9 +908,48 @@ function NewOrderDialog({ open, onClose, tables, defaultTable, onSave }: any) {
 }
 
 // ── New menu item dialog ──────────────────────────────────────────────────────
+const BASE_WH = (import.meta.env.BASE_URL?.replace(/\/$/, "") || "").replace("/maison-hd", "") + "/api/fb/warehouse";
+const whFetch = (path: string, opts: RequestInit = {}) =>
+  fetch(BASE_WH + path, { ...opts, headers: { "Authorization": `Bearer ${localStorage.getItem("hms_token") || ""}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
+
+const VAT_OPTIONS = [
+  { value: "0", label: "0% — без ПДВ" },
+  { value: "7", label: "7% — пільговий" },
+  { value: "20", label: "20% — стандартний" },
+];
+
 function MenuItemForm({ form, setForm, categories }: any) {
+  const [classifying, setClassifying] = useState(false);
+  const { toast } = useToast();
+
+  const classifyAlcohol = async () => {
+    if (!form.name) return;
+    setClassifying(true);
+    try {
+      const r = await whFetch("/ai/classify-alcohol", {
+        method: "POST",
+        body: JSON.stringify({
+          product_name: form.name,
+          description: form.description || "",
+          alcohol_pct: parseFloat(form.alcohol_volume_pct) || null,
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setForm((f: any) => ({
+          ...f,
+          uktzed_code: d.uktzed_code || f.uktzed_code,
+          excise_code: d.excise_rate_uah ? String(d.excise_rate_uah) : f.excise_code,
+        }));
+        toast({ title: "AI класифікація", description: `УКТЗЕД: ${d.uktzed_code || "—"}  Акциз: ${d.excise_rate_uah ?? "—"} ${d.excise_unit || ""}` });
+      }
+    } finally {
+      setClassifying(false);
+    }
+  };
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
       <div><Label>Назва *</Label><Input placeholder="Борщ із пампушками" value={form.name} onChange={e => setForm((f: any) => ({ ...f, name: e.target.value }))} /></div>
       <div><Label>Опис</Label><Textarea rows={2} value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} /></div>
       <div className="grid grid-cols-2 gap-2">
@@ -915,7 +961,43 @@ function MenuItemForm({ form, setForm, categories }: any) {
         </div>
         <div><Label>Ціна (₴) *</Label><Input type="number" value={form.price} onChange={e => setForm((f: any) => ({ ...f, price: e.target.value }))} /></div>
       </div>
-      <div><Label>Час приготування (хв)</Label><Input type="number" value={form.cookMinutes} onChange={e => setForm((f: any) => ({ ...f, cookMinutes: parseInt(e.target.value) || 15 }))} /></div>
+      <div className="grid grid-cols-2 gap-2">
+        <div><Label>Час приготування (хв)</Label><Input type="number" value={form.cookMinutes} onChange={e => setForm((f: any) => ({ ...f, cookMinutes: parseInt(e.target.value) || 15 }))} /></div>
+        <div><Label>Ставка ПДВ</Label>
+          <Select value={String(form.vat_rate ?? "20")} onValueChange={v => setForm((f: any) => ({ ...f, vat_rate: v }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>{VAT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Alcohol section */}
+      <div className="border rounded-lg p-3 space-y-2 bg-amber-50/60">
+        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+          <input type="checkbox" className="accent-amber-600" checked={!!form.is_alcohol} onChange={e => setForm((f: any) => ({ ...f, is_alcohol: e.target.checked }))} />
+          🍺 Алкогольний напій (підакцизний товар)
+        </label>
+        {form.is_alcohol && (
+          <div className="space-y-2 pt-1">
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">Міцність (% об.)</Label>
+                <Input type="number" min="0" max="100" step="0.1" placeholder="5.0" value={form.alcohol_volume_pct || ""} onChange={e => setForm((f: any) => ({ ...f, alcohol_volume_pct: e.target.value }))} />
+              </div>
+              <div><Label className="text-xs">УКТЗЕД код</Label>
+                <Input placeholder="2203001000" value={form.uktzed_code || ""} onChange={e => setForm((f: any) => ({ ...f, uktzed_code: e.target.value }))} />
+              </div>
+            </div>
+            <div><Label className="text-xs">Акцизна ставка (грн)</Label>
+              <Input placeholder="2.18" value={form.excise_code || ""} onChange={e => setForm((f: any) => ({ ...f, excise_code: e.target.value }))} />
+            </div>
+            <Button type="button" variant="outline" size="sm" disabled={classifying || !form.name} onClick={classifyAlcohol} className="w-full text-xs border-amber-300 text-amber-700 hover:bg-amber-50">
+              {classifying ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+              AI: Визначити УКТЗЕД та акциз автоматично
+            </Button>
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-4">
         <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={!!form.isVegetarian} onChange={e => setForm((f: any) => ({ ...f, isVegetarian: e.target.checked }))} />🌿 Вегетаріанське</label>
         <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={!!form.isPopular} onChange={e => setForm((f: any) => ({ ...f, isPopular: e.target.checked }))} />⭐ Популярне</label>
@@ -924,15 +1006,17 @@ function MenuItemForm({ form, setForm, categories }: any) {
   );
 }
 
+const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "" };
+
 function NewMenuItemDialog({ open, onClose, categories, onSave }: any) {
-  const [form, setForm] = useState({ name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false });
+  const [form, setForm] = useState(EMPTY_ITEM_FORM);
   const [loading, setLoading] = useState(false);
   const handleSubmit = async () => {
     if (!form.name || !form.price) return;
     setLoading(true);
-    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15 });
+    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15, vat_rate: parseInt(form.vat_rate) || 20, alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null });
     setLoading(false);
-    setForm({ name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false });
+    setForm(EMPTY_ITEM_FORM);
   };
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -962,13 +1046,18 @@ function EditMenuItemDialog({ open, item, onClose, categories, onSave }: any) {
       cookMinutes: item.cookMinutes || 15,
       isVegetarian: !!item.isVegetarian,
       isPopular: !!item.isPopular,
+      vat_rate: String(item.vat_rate ?? "20"),
+      is_alcohol: !!item.is_alcohol,
+      alcohol_volume_pct: item.alcohol_volume_pct != null ? String(item.alcohol_volume_pct) : "",
+      uktzed_code: item.uktzed_code || "",
+      excise_code: item.excise_code || "",
     });
   }, [item]);
 
   const handleSubmit = async () => {
     if (!form.name || !form.price) return;
     setLoading(true);
-    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15 });
+    await onSave({ ...form, categoryId: form.categoryId ? parseInt(form.categoryId) : null, cookMinutes: parseInt(String(form.cookMinutes)) || 15, vat_rate: parseInt(form.vat_rate) || 20, alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null });
     setLoading(false);
   };
 
