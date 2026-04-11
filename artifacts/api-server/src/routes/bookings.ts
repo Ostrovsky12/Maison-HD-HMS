@@ -7,6 +7,11 @@ import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../li
 import { generateBookingQR } from "../lib/qr.js";
 import { logger } from "../lib/logger.js";
 import { notifyBookingCreated, notifyCheckIn } from "../lib/notify.js";
+import { randomBytes } from "crypto";
+
+function genGuestCode(): string {
+  return randomBytes(5).toString("hex").toUpperCase();
+}
 
 const CALENDAR_COLORS = [
   "#4f86c6", "#e07b54", "#5cb85c", "#9b59b6",
@@ -212,12 +217,20 @@ router.post("/", requireAuth, async (req, res) => {
 
   const guestName = g ? `${g.firstName} ${g.lastName}` : (lastName ? `${lastName} ${firstName || ""}`.trim() : "Гість");
 
+  // Auto-generate guest access code for confirmed/checked_in bookings
+  let guestAccessCode = booking.guestAccessCode;
+  if (!isDraft && !guestAccessCode) {
+    guestAccessCode = genGuestCode();
+    await db.update(bookingsTable).set({ guestAccessCode, updatedAt: new Date() }).where(eq(bookingsTable.id, booking.id));
+  }
+
   res.status(201).json({
     ...booking,
     totalAmount: Number(booking.totalAmount),
     paidAmount: Number(booking.paidAmount),
     guestName,
     unitName: u?.name || null,
+    guestAccessCode,
   });
 
   // Fire-and-forget notifications (don't block response)
@@ -332,7 +345,13 @@ router.post("/group", requireAuth, async (req, res) => {
       draftExpiresAt,
     } as any).returning();
     const [u] = await db.select().from(unitsTable).where(eq(unitsTable.id, unit.unitId)).limit(1);
-    created.push({ ...booking, totalAmount: Number(booking.totalAmount), unitName: u?.name || null });
+    // Auto-generate guest access code for non-draft bookings
+    let guestAccessCode = booking.guestAccessCode;
+    if (!isDraft && !guestAccessCode) {
+      guestAccessCode = genGuestCode();
+      await db.update(bookingsTable).set({ guestAccessCode, updatedAt: new Date() }).where(eq(bookingsTable.id, booking.id));
+    }
+    created.push({ ...booking, totalAmount: Number(booking.totalAmount), unitName: u?.name || null, guestAccessCode });
   }
 
   // Update guest stats
