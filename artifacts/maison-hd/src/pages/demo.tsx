@@ -6,6 +6,8 @@ import {
   MessageSquare, Users, Zap, Globe2, Shield, TrendingUp,
   Calendar, Star, Hotel, Clock, Sparkles, X,
   Wand2, Tv, LayoutDashboard, QrCode, BrainCircuit,
+  UtensilsCrossed, Receipt, Printer, Split, Wifi,
+  Package, ChefHat, Coins, Building2, AlertCircle,
 } from "lucide-react";
 import { MaisonLogo } from "@/components/MaisonLogo";
 
@@ -33,19 +35,69 @@ const CELL_CLR: Record<string, string> = {
 };
 
 const FEATURES = [
-  { icon: Calendar,       title: "Шахматка бронювань",      desc: "Drag-and-drop grid. Всі юніти. 60-денний вид. Без плутанини." },
-  { icon: BarChart3,      title: "Аналітика власника",       desc: "ADR, RevPAR, Occupancy, Revenue — в реальному часі." },
-  { icon: Globe2,         title: "OTA-синхронізація",        desc: "Booking.com, Airbnb, Expedia. Один інвентар, жодного овербукінгу." },
-  { icon: MessageSquare,  title: "Unified Inbox",            desc: "SMS, Email, Telegram — один потік. Жодного пропущеного запиту." },
-  { icon: Zap,            title: "Автоматизація",            desc: "Нічний аудит, HK-завдання, нагадування — без ручного втручання." },
-  { icon: Users,          title: "Ролева система",           desc: "Власник → Менеджер → Ресепшн → Покоївка. Чіткі права доступу." },
-  { icon: Shield,         title: "Фіскальний модуль",       desc: "Checkbox ПРРО, VCHASNO, ПДВ — вбудована комплаєнс-модель." },
-  { icon: TrendingUp,     title: "Yield Management",         desc: "Динамічні ціни. Сезонні множники. Пакети. Знижки зі стратегією." },
-  { icon: Wand2,          title: "Майстер налаштування",     desc: "Покроковий онбординг від першого входу до повноцінної роботи. Підключення за 48 годин — без участі ІТ-команди.", highlight: true },
-  { icon: Tv,             title: "Hotel TV",                 desc: "Цифровий канал для кожного номера: вітання гостя, QR-меню, акції та сервісні оголошення — без додаткового обладнання.", highlight: true },
-  { icon: LayoutDashboard, title: "Guest Portal",            desc: "A personal hub for every guest — reservations, service requests, invoices, and documents, all accessible from a single link before, during, and after the stay.", highlight: true },
-  { icon: QrCode,         title: "Mobile Check-in & Check-out", desc: "Guests arrive and leave on their own terms — no queues, no paperwork. ID verification, digital room key, and bill settlement, entirely from their smartphone.", highlight: true },
-  { icon: BrainCircuit,   title: "AI Hub",                   desc: "Вбудований AI-асистент прискорює обробку запитів, генерує звіти, підказує цінові рішення та автоматизує щоденні комунікації.", highlight: true },
+  { icon: Calendar,        title: "Шахматка бронювань",       desc: "Drag-and-drop grid. Всі юніти. 60-денний вид. Без плутанини." },
+  { icon: BarChart3,       title: "Аналітика власника",        desc: "ADR, RevPAR, Occupancy, Revenue — в реальному часі." },
+  { icon: Globe2,          title: "OTA-синхронізація",         desc: "Booking.com, Airbnb, Expedia. Один інвентар, жодного овербукінгу." },
+  { icon: MessageSquare,   title: "Unified Inbox",             desc: "SMS, Email, Telegram — один потік. Жодного пропущеного запиту." },
+  { icon: Coins,           title: "F&B POS Каса",              desc: "Повноцінна каса ресторану прямо в системі. Столи, замовлення, розрахунок — без окремого POS-рішення." },
+  { icon: Zap,             title: "Автоматизація",             desc: "Нічний аудит, HK-завдання, нагадування — без ручного втручання." },
+  { icon: Users,           title: "Ролева система",            desc: "Власник → Менеджер → Ресепшн → Покоївка. Чіткі права доступу." },
+  { icon: Shield,          title: "Checkbox ПРРО",             desc: "Автоматичні фіскальні чеки при кожній оплаті. Підтримка кількох ФОП/ТОВ одночасно." },
+  { icon: QrCode,          title: "QR-замовлення",             desc: "Гість сканує QR з столу або номера, обирає страви, замовляє — без офіціанта.", highlight: true },
+  { icon: UtensilsCrossed, title: "PMS + POS в одному",        desc: "Сніданок нараховується на номер, room service з кімнати — один гість, один рахунок, одна система.", highlight: true },
+  { icon: Wand2,           title: "Майстер налаштування",      desc: "Покроковий онбординг від першого входу до повноцінної роботи. Підключення за 48 годин — без ІТ-команди.", highlight: true },
+  { icon: Tv,              title: "Hotel TV",                  desc: "Цифровий канал для кожного номера: вітання гостя, QR-меню, акції та сервісні оголошення.", highlight: true },
+  { icon: BrainCircuit,    title: "AI Hub",                    desc: "Вбудований AI-асистент прискорює обробку запитів, генерує звіти, підказує цінові рішення та автоматизує комунікації.", highlight: true },
+];
+
+const POS_VS = [
+  {
+    competitor: "Poster POS",
+    badge: "Популярний в UA",
+    badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    cons: [
+      "Немає PMS-модуля — готель і ресторан у різних системах",
+      "Немає вбудованого Checkbox ПРРО — окремий договір",
+      "Один ФОП / одна юр. особа на заклад",
+      "Щомісячна плата за кожен пристрій",
+      "Немає QR-замовлення з доставкою в номер",
+    ],
+  },
+  {
+    competitor: "Syrve / iiko",
+    badge: "Колишній іко (РФ)",
+    badgeColor: "bg-red-500/10 text-red-400 border-red-500/20",
+    cons: [
+      "Складне розгортання, потрібна ІТ-команда",
+      "Висока вартість: $500–2000+/міс залежно від модулів",
+      "Немає вбудованого Checkbox ПРРО",
+      "Немає PMS-інтеграції для готелів",
+      "Обмежена українська локалізація фіскалки",
+    ],
+  },
+  {
+    competitor: "Checkbox POS",
+    badge: "Тільки фіскалка",
+    badgeColor: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+    cons: [
+      "Це касовий апарат, а не повноцінна POS-система",
+      "Немає складу, меню, аналітики, QR-замовлення",
+      "Немає управління столами та кухонним дисплеєм",
+      "Немає інтеграції з готелем чи бронюванням",
+      "Потрібна додаткова система для обліку",
+    ],
+  },
+];
+
+const POS_ADVANTAGES = [
+  { icon: UtensilsCrossed, title: "PMS + POS — одна система",     desc: "Нарахування сніданку, room service, мінібару — все на рахунок гостя. Без ручного перенесення між програмами." },
+  { icon: Building2,       title: "Кілька юр. осіб — одна каса",  desc: "ФОП веде бар, ТОВ — ресторан. Фіскальний чек автоматично формується на правильну юридичну особу при оплаті." },
+  { icon: Receipt,         title: "Checkbox ПРРО вбудовано",       desc: "Жодного окремого договору з ПРРО-провайдером. Ключ ліцензії — в налаштуваннях юр. особи, решта — автоматично." },
+  { icon: QrCode,          title: "QR-замовлення без персоналу",   desc: "Гість сканує QR зі столу чи з номера, обирає страви, обирає чайові — замовлення йде одразу на кухню." },
+  { icon: Split,           title: "Роздільна оплата",              desc: "Оплата готівкою, карткою або через LiqPay — по окремих ключах під кожну юр. особу. Автоматичний розрахунок решти." },
+  { icon: Printer,         title: "Мультистанційний друк",         desc: "Бар, гаряча кухня, холодна, кондитерська — кожна позиція йде на правильний принтер автоматично." },
+  { icon: Package,         title: "Склад і фудкост в одному",      desc: "Закупівлі, залишки, ABC-аналіз позицій — і одразу бачите собівартість і маржу по кожній страві." },
+  { icon: ChefHat,         title: "Кухонний дисплей (KDS)",        desc: "Повноекранний вид замовлень для кухні — без паперових листочків, з таймером приготування по кожній позиції." },
 ];
 
 const TESTIMONIALS = [
@@ -355,7 +407,7 @@ export default function DemoPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 md:px-12 py-4 bg-[#050914]/80 backdrop-blur-xl border-b border-white/5">
         <MaisonLogo size={34} textVariant="dark" />
         <div className="hidden md:flex items-center gap-8 text-sm text-white/50">
-          {[["Продукт","#features"], ["Рішення","#solution"], ["Ціни","#pricing"], ["Відгуки","#testimonials"]].map(([l, h]) => (
+          {[["Продукт","#features"], ["Ресторан","#restaurant"], ["Ціни","#pricing"], ["Відгуки","#testimonials"]].map(([l, h]) => (
             <a key={l} href={h} className="hover:text-white transition-colors">{l}</a>
           ))}
         </div>
@@ -384,7 +436,7 @@ export default function DemoPage() {
             {/* Tag */}
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs text-white/60 font-medium mb-8">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-              Hospitality System Development
+              Готель · Ресторан · Єдина платформа
             </div>
 
             {/* Headline */}
@@ -392,16 +444,30 @@ export default function DemoPage() {
               <span className="block text-white">Maison HD</span>
             </h1>
             <p className="text-2xl md:text-3xl font-light text-white/40 mb-6 leading-tight">
-              RevPAR — це лише поверхня
+              PMS + POS — один продукт
             </p>
 
             {/* Main copy */}
             <h2 className="text-xl md:text-2xl font-bold text-white mb-4 leading-tight">
-              Керуйте готелем через<br className="hidden md:block" /> систему, а не через людей
+              Управляйте готелем і рестораном<br className="hidden md:block" /> з однієї системи
             </h2>
-            <p className="text-base text-white/50 leading-relaxed mb-10 max-w-md">
-              Побудуйте операційну модель, де <strong className="text-white">1 адміністратор замість 3</strong>, а всі процеси — від бронювання до сервісу — працюють автоматично.
+            <p className="text-base text-white/50 leading-relaxed mb-8 max-w-md">
+              Від бронювання номера до фіскального чеку в ресторані — <strong className="text-white">один гість, один рахунок, одна система.</strong> Без інтеграцій, без зайвих підписок, без ручного перенесення даних між програмами.
             </p>
+
+            {/* Quick segments */}
+            <div className="flex flex-wrap gap-2 mb-10">
+              {[
+                { icon: BedDouble, label: "Готелі та глемпінги" },
+                { icon: UtensilsCrossed, label: "Ресторани при готелі" },
+                { icon: Building2, label: "Окремі ресторани" },
+              ].map(({ icon: Icon, label }) => (
+                <div key={label} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/8 text-xs text-white/50">
+                  <Icon className="w-3.5 h-3.5 text-indigo-400" />
+                  {label}
+                </div>
+              ))}
+            </div>
 
             {/* CTAs */}
             <div className="flex flex-wrap gap-3">
@@ -441,10 +507,10 @@ export default function DemoPage() {
       <section className="border-y border-white/5 bg-white/[0.02]">
         <div className="max-w-7xl mx-auto px-6 md:px-12 py-12 grid grid-cols-2 md:grid-cols-4 gap-8">
           {[
-            { value: 500, suffix: "+", label: "Об'єктів довіряють" },
-            { value: 50000, suffix: "+", label: "Бронювань / місяць" },
-            { value: 98, suffix: "%", label: "Задоволеність" },
-            { value: 24, suffix: "/7", label: "Підтримка" },
+            { value: 500,   suffix: "+",  label: "Об'єктів довіряють" },
+            { value: 50000, suffix: "+",  label: "Бронювань / місяць" },
+            { value: 1200,  suffix: "+",  label: "F&B чеків / день" },
+            { value: 24,    suffix: "/7", label: "Підтримка" },
           ].map((s, i) => (
             <div key={i} className="text-center">
               <div className="text-4xl md:text-5xl font-black text-white mb-1">
@@ -458,27 +524,58 @@ export default function DemoPage() {
 
       {/* ── SOLUTION ── */}
       <section id="solution" className="py-24 px-6 md:px-12 max-w-7xl mx-auto">
-        <div className="grid md:grid-cols-2 gap-16 items-center">
-          {/* Left: problem vs solution */}
-          <div className="space-y-6">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-red-500/30 bg-red-500/10 text-xs text-red-400 font-semibold">
-              ❌ Як зараз у більшості готелів
-            </div>
-            {["3+ адміністратори на зміну", "Excel-таблиці і WhatsApp-чати", "Ручний облік і помилки в рахунках", "OTA — вручну, кожен день", "Звіт готується 2 години"].map((t, i) => (
-              <div key={i} className="flex items-center gap-3 text-white/40 text-sm line-through decoration-red-500/50">
-                <X className="w-4 h-4 text-red-500/50 shrink-0" /> {t}
+        <div className="text-center mb-14">
+          <p className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-3">Проблема → Рішення</p>
+          <h2 className="text-4xl md:text-5xl font-black text-white mb-4">Як це виглядає насправді</h2>
+        </div>
+        <div className="grid md:grid-cols-2 gap-8">
+          {/* Готель */}
+          <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-8 space-y-5">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center">
+                <BedDouble className="w-4 h-4 text-indigo-400" />
               </div>
-            ))}
+              <span className="font-bold text-white">Готель</span>
+            </div>
+            <div className="space-y-3">
+              {["3+ адміністратори на зміну", "Excel і WhatsApp замість системи", "OTA синхронізується вручну щодня", "Звіт власника готується 2 години"].map((t, i) => (
+                <div key={i} className="flex items-center gap-3 text-white/35 text-sm line-through decoration-red-500/40">
+                  <X className="w-4 h-4 text-red-500/40 shrink-0" /> {t}
+                </div>
+              ))}
+            </div>
+            <div className="h-px bg-white/5 my-2" />
+            <div className="space-y-3">
+              {["1 адміністратор керує всім", "Шахматка, OTA, аналітика — в одному вікні", "OTA синк у реальному часі", "Дашборд власника — завжди актуальний"].map((t, i) => (
+                <div key={i} className="flex items-center gap-3 text-white text-sm font-medium">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" /> {t}
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="space-y-6">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-400 font-semibold">
-              ✅ З Maison HD
-            </div>
-            {["1 адміністратор керує всім", "Єдина система — нічого поза нею", "Автоматичні рахунки і фіскальні чеки", "OTA синхронізується в реальному часі", "Дашборд власника — завжди актуальний"].map((t, i) => (
-              <div key={i} className="flex items-center gap-3 text-white text-sm font-medium">
-                <Check className="w-4 h-4 text-emerald-400 shrink-0" /> {t}
+          {/* Ресторан */}
+          <div className="rounded-2xl border border-amber-500/15 bg-amber-500/[0.03] p-8 space-y-5">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="w-8 h-8 rounded-xl bg-amber-600/20 border border-amber-500/20 flex items-center justify-center">
+                <UtensilsCrossed className="w-4 h-4 text-amber-400" />
               </div>
-            ))}
+              <span className="font-bold text-white">Ресторан / F&B</span>
+            </div>
+            <div className="space-y-3">
+              {["Окрема POS-система без зв'язку з готелем", "Окремий договір на Checkbox ПРРО", "Ручне перенесення рахунків у бухгалтерію", "Кілька ФОП — окремі каси і програми"].map((t, i) => (
+                <div key={i} className="flex items-center gap-3 text-white/35 text-sm line-through decoration-red-500/40">
+                  <X className="w-4 h-4 text-red-500/40 shrink-0" /> {t}
+                </div>
+              ))}
+            </div>
+            <div className="h-px bg-white/5 my-2" />
+            <div className="space-y-3">
+              {["POS вбудований у PMS — один гість, один рахунок", "Checkbox ПРРО вбудовано — ключ у налаштуваннях", "Фіскальний чек формується автоматично при оплаті", "Кілька юр. осіб з окремими LiqPay і Checkbox"].map((t, i) => (
+                <div key={i} className="flex items-center gap-3 text-white text-sm font-medium">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" /> {t}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -531,13 +628,101 @@ export default function DemoPage() {
         </div>
       </section>
 
+      {/* ── RESTAURANT / POS SECTION ── */}
+      <section id="restaurant" className="py-24 px-6 md:px-12 bg-white/[0.015] border-y border-white/5">
+        <div className="max-w-7xl mx-auto">
+
+          {/* Header */}
+          <div className="text-center mb-16">
+            <p className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-3">F&B / Ресторан</p>
+            <h2 className="text-4xl md:text-5xl font-black text-white mb-4 leading-tight">
+              POS для готельних рестораторів
+            </h2>
+            <p className="text-white/40 text-lg max-w-2xl mx-auto">
+              Не черговий Poster або Syrve. Система, яка знає що гість з номера 201 вже сплатив сніданок — і автоматично формує фіскальний чек на правильний ФОП.
+            </p>
+          </div>
+
+          {/* POS advantages grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-20">
+            {POS_ADVANTAGES.map((a, i) => (
+              <div key={i} className="group p-6 rounded-2xl bg-amber-500/[0.04] border border-amber-500/10 hover:border-amber-500/25 hover:bg-amber-500/[0.07] transition-all">
+                <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/20 flex items-center justify-center mb-4 group-hover:bg-amber-600/30 transition-colors">
+                  <a.icon className="w-5 h-5 text-amber-400" />
+                </div>
+                <h3 className="font-bold text-white text-sm mb-2">{a.title}</h3>
+                <p className="text-white/40 text-xs leading-relaxed">{a.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Competitor comparison */}
+          <div>
+            <div className="flex items-center gap-4 mb-8">
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-red-500/20" />
+              <span className="text-xs font-bold text-red-400/80 uppercase tracking-widest px-3 py-1.5 rounded-full border border-red-500/20 bg-red-500/8 flex items-center gap-1.5">
+                <AlertCircle className="w-3 h-3" /> Чим відрізняємось від конкурентів
+              </span>
+              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-red-500/20" />
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-5 mb-10">
+              {POS_VS.map((c, i) => (
+                <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <span className="font-bold text-white/70">{c.competitor}</span>
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded-full border ${c.badgeColor}`}>{c.badge}</span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {c.cons.map((con, j) => (
+                      <div key={j} className="flex items-start gap-2">
+                        <X className="w-3.5 h-3.5 text-red-400/50 mt-0.5 shrink-0" />
+                        <span className="text-xs text-white/35 leading-snug">{con}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Maison HD summary win row */}
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] p-6 md:p-8">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center">
+                  <Check className="w-4 h-4 text-emerald-400" />
+                </div>
+                <span className="font-bold text-white">Maison HD — що ми маємо, чого немає у конкурентів</span>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {[
+                  "PMS + POS в одному продукті — один гість, один рахунок",
+                  "Checkbox ПРРО вбудовано — ніяких зовнішніх договорів",
+                  "Кілька ФОП / ТОВ з окремими Checkbox і LiqPay",
+                  "QR-замовлення для гостей прямо зі столу або номера",
+                  "Мультистанційний друк: бар, гаряча, холодна, кондитерська",
+                  "Склад + фудкост + ABC-аналіз — без додаткових систем",
+                  "Чайові (5/7/10/15%) з коректним фіскальним обліком",
+                  "Оплата на кімнату з автоматичним закриттям рахунку при виїзді",
+                  "Єдина підписка — жодної плати за кожен пристрій або принтер",
+                ].map((win, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                    <span className="text-sm text-white/70 leading-snug">{win}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── DASHBOARD BIG PREVIEW ── */}
       <section className="py-24 px-6 md:px-12 overflow-hidden">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
             <p className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-3">Інтерфейс</p>
             <h2 className="text-4xl md:text-5xl font-black text-white mb-4">Живий продукт, не концепт</h2>
-            <p className="text-white/40 text-lg">Понад 50 екранів. 34 000+ рядків коду. Реальні дані. Вже сьогодні.</p>
+            <p className="text-white/40 text-lg">Понад 60 екранів: PMS, POS, Ресторан, SPA, AI. 40 000+ рядків коду. Реальні дані. Вже сьогодні.</p>
           </div>
 
           {/* Extended mockup with more detail */}
@@ -901,7 +1086,7 @@ export default function DemoPage() {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <MaisonLogo size={28} textVariant="dark" />
           <div className="flex items-center gap-8 text-xs text-white/25">
-            {[["Продукт","#features"], ["Ціни","#pricing"], ["Демо","#demo-form"]].map(([l, h]) => (
+            {[["Продукт","#features"], ["Ресторан","#restaurant"], ["Ціни","#pricing"], ["Демо","#demo-form"]].map(([l, h]) => (
               <a key={l} href={h} className="hover:text-white/60 transition-colors">{l}</a>
             ))}
           </div>
