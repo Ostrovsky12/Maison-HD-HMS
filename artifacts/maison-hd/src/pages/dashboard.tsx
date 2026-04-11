@@ -98,7 +98,10 @@ export default function DashboardPage() {
   const revenue = analytics?.totalRevenue || 0;
   const revenueData = analytics?.revenueByMonth || [];
   const bookingsByDay = analytics?.bookingsByDay || [];
-  const recent = todayBookings?.slice(0, 8) || [];
+  const bookingsArr: any[] = Array.isArray(todayBookings)
+    ? todayBookings
+    : (todayBookings as any)?.bookings || [];
+  const recent = bookingsArr.slice(0, 8);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Доброго ранку" : hour < 18 ? "Доброго дня" : "Доброго вечора";
@@ -199,7 +202,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { label: "Всього гостей", value: totalGuests, icon: Users, color: "text-violet-600", bg: "bg-violet-100" },
-            { label: "Бронювань сьогодні", value: todayBookings?.length || 0, icon: CalendarCheck, color: "text-rose-600", bg: "bg-rose-100" },
+            { label: "Бронювань сьогодні", value: bookingsArr.length, icon: CalendarCheck, color: "text-rose-600", bg: "bg-rose-100" },
             { label: "Активних резервацій", value: analytics?.activeBookings || 0, icon: CheckCircle, color: "text-teal-600", bg: "bg-teal-100" },
             { label: "Середнє перебування", value: `${(analytics?.avgStayLength || 0).toFixed(1)} н`, icon: Clock, color: "text-orange-600", bg: "bg-orange-100" },
           ].map(s => (

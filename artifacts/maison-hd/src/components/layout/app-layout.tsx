@@ -86,6 +86,7 @@ const NAV: NavSection[] = [
       { name: "Ресторан & F&B",  path: "/fb",            icon: UtensilsCrossed, roles: null,                                       moduleKey: "fb" },
       { name: "F&B Склад",       path: "/fb-warehouse",  icon: Warehouse,       roles: null,                                       moduleKey: "fb_warehouse" },
       { name: "F&B Каса",        path: "/fb-pos",        icon: Coins,           roles: null,                                       moduleKey: "fb_pos" },
+      { name: "F&B Костинг",     path: "/fb-costing",    icon: ChefHat,         roles: null,                                       moduleKey: "fb_analytics" },
       { name: "QR-замовлення",   path: "/qr-ordering",   icon: QrCode,          roles: null },
       { name: "Мінібар",         path: "/minibar",       icon: Wine,            roles: null },
     ],

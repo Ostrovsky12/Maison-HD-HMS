@@ -816,4 +816,98 @@ router.post("/ai/classify-alcohol", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// F&B COSTING REPORT
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get("/costing-report", requireAuth, async (req, res) => {
+  try {
+    const orgId = org(req);
+    const days  = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"))));
+    const cutoffStr = (() => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().split("T")[0]; })();
+    const db_ = (db as any).$client;
+
+    // 1. Per-item sales data + cost_price
+    const items = await db_.query(`
+      SELECT
+        fi.id                                                   AS item_id,
+        fi.name,
+        fc.name                                                 AS category_name,
+        COALESCE(fi.price, 0)::numeric                         AS selling_price,
+        COALESCE(fi.cost_price, 0)::numeric                    AS cost_price,
+        CASE WHEN COALESCE(fi.price,0) > 0 AND COALESCE(fi.cost_price,0) > 0
+             THEN ROUND((fi.cost_price / fi.price) * 100, 1)
+             ELSE NULL END                                      AS food_cost_pct,
+        CASE WHEN COALESCE(fi.price,0) > 0 AND COALESCE(fi.cost_price,0) > 0
+             THEN ROUND(((fi.price - fi.cost_price) / fi.price) * 100, 1)
+             ELSE NULL END                                      AS margin_pct,
+        COALESCE(SUM(oi.quantity), 0)::int                     AS qty_sold,
+        COALESCE(SUM(oi.total_price), 0)::numeric              AS revenue,
+        COALESCE(SUM(oi.quantity * fi.cost_price), 0)::numeric AS theoretical_cost
+      FROM fb_items fi
+      LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+      LEFT JOIN fb_order_items oi ON oi.item_id = fi.id
+        AND oi.organization_id = $1
+        AND oi.created_at >= $2::date
+      WHERE fi.organization_id = $1
+      GROUP BY fi.id, fi.name, fc.name, fi.price, fi.cost_price
+      ORDER BY revenue DESC
+    `, [orgId, cutoffStr]);
+
+    // 2. Totals
+    const totals = await db_.query(`
+      SELECT
+        COALESCE(SUM(oi.total_price), 0)::numeric              AS total_revenue,
+        COALESCE(SUM(oi.quantity * fi.cost_price), 0)::numeric AS total_theoretical_cost,
+        CASE WHEN COALESCE(SUM(oi.total_price),0) > 0
+             THEN ROUND(SUM(oi.quantity * COALESCE(fi.cost_price,0)) / SUM(oi.total_price) * 100, 1)
+             ELSE NULL END                                      AS overall_food_cost_pct
+      FROM fb_order_items oi
+      JOIN fb_items fi ON fi.id = oi.item_id AND fi.organization_id = $1
+      WHERE oi.organization_id = $1 AND oi.created_at >= $2::date
+    `, [orgId, cutoffStr]);
+
+    // 3. By category
+    const byCategory = await db_.query(`
+      SELECT
+        COALESCE(fc.name, 'Без категорії')                     AS category_name,
+        COUNT(DISTINCT fi.id)::int                             AS item_count,
+        COALESCE(SUM(oi.quantity), 0)::int                     AS qty_sold,
+        COALESCE(SUM(oi.total_price), 0)::numeric              AS revenue,
+        COALESCE(SUM(oi.quantity * fi.cost_price), 0)::numeric AS theoretical_cost,
+        CASE WHEN COALESCE(SUM(oi.total_price),0) > 0
+             THEN ROUND(SUM(oi.quantity * COALESCE(fi.cost_price,0)) / SUM(oi.total_price) * 100, 1)
+             ELSE NULL END                                      AS food_cost_pct,
+        CASE WHEN COALESCE(SUM(oi.total_price),0) > 0
+             THEN ROUND(AVG((fi.price - COALESCE(fi.cost_price,0)) / NULLIF(fi.price,0)) * 100, 1)
+             ELSE NULL END                                      AS avg_margin_pct
+      FROM fb_items fi
+      LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+      LEFT JOIN fb_order_items oi ON oi.item_id = fi.id
+        AND oi.organization_id = $1
+        AND oi.created_at >= $2::date
+      WHERE fi.organization_id = $1
+      GROUP BY fc.name
+      ORDER BY revenue DESC
+    `, [orgId, cutoffStr]);
+
+    // 4. Actual writeoffs cost in period
+    const writeoffs = await db_.query(`
+      SELECT COALESCE(SUM(total_amount), 0)::numeric AS actual_waste_cost
+      FROM fb_stock_writeoffs
+      WHERE organization_id = $1 AND writeoff_date >= $2::date
+    `, [orgId, cutoffStr]);
+
+    res.json({
+      period: { days, from: cutoffStr },
+      totals: {
+        ...totals.rows[0],
+        actual_waste_cost: writeoffs.rows[0]?.actual_waste_cost ?? 0,
+      },
+      items: items.rows,
+      byCategory: byCategory.rows,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
