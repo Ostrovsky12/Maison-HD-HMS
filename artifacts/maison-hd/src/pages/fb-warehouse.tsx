@@ -56,7 +56,7 @@ const STOCK_STATUS: Record<string, { label: string; color: string; icon: any }> 
   ok: { label: "Норма", color: "bg-green-100 text-green-700 border-green-200", icon: CheckCircle2 },
 };
 
-type Tab = "stock" | "ingredients" | "suppliers" | "receipts" | "recipes" | "writeoffs" | "analytics";
+type Tab = "stock" | "ingredients" | "suppliers" | "receipts" | "recipes" | "writeoffs" | "analytics" | "inventory";
 
 export default function FbWarehousePage() {
   const [tab, setTab] = useState<Tab>("stock");
@@ -87,6 +87,7 @@ export default function FbWarehousePage() {
             { key: "receipts", label: "Накладні", icon: FileText },
             { key: "recipes", label: "Тех. Карти", icon: BookOpen },
             { key: "writeoffs", label: "Списання", icon: Trash2 },
+            { key: "inventory", label: "Інвентаризація", icon: ClipboardList },
             { key: "analytics", label: "Аналітика", icon: TrendingUp },
           ] as { key: Tab; label: string; icon: any }[]).map(t => (
             <button
@@ -111,6 +112,7 @@ export default function FbWarehousePage() {
           {tab === "receipts" && <ReceiptsTab toast={toast} />}
           {tab === "recipes" && <RecipesTab toast={toast} />}
           {tab === "writeoffs" && <WriteoffsTab toast={toast} />}
+          {tab === "inventory" && <InventoryTab toast={toast} />}
           {tab === "analytics" && <AnalyticsTab toast={toast} />}
         </div>
       </div>
@@ -1629,6 +1631,324 @@ function WriteoffsTab({ toast }: { toast: any }) {
             <Button variant="outline" onClick={() => setModal(null)}>Скасувати</Button>
             <Button onClick={save} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white">
               {saving ? <Loader2 size={16} className="animate-spin" /> : "Зберегти"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB: INVENTORY — Інвентаризація
+// ═══════════════════════════════════════════════════════════════════
+
+function InventoryTab({ toast }: { toast: any }) {
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newForm, setNewForm] = useState({ name: "", date: new Date().toISOString().slice(0, 10), notes: "" });
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [selected, setSelected] = useState<any>(null);
+  const [lines, setLines] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const loadSessions = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch("/inventory");
+      const j = await r.json();
+      setSessions(j.sessions || []);
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  const openSession = async (session: any) => {
+    const r = await apiFetch(`/inventory/${session.id}`);
+    const j = await r.json();
+    setSelected(j.session);
+    setLines((j.lines || []).map((l: any) => ({ ...l, actual_qty_input: l.actual_qty !== null ? String(l.actual_qty) : "" })));
+    setSearch("");
+  };
+
+  const createSession = async () => {
+    if (!newForm.name) return toast({ title: "Вкажіть назву", variant: "destructive" });
+    setCreating(true);
+    try {
+      const r = await apiFetch("/inventory", { method: "POST", body: JSON.stringify(newForm) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      toast({ title: "Інвентаризацію створено" });
+      setShowNewForm(false);
+      setNewForm({ name: "", date: new Date().toISOString().slice(0, 10), notes: "" });
+      await openSession(j.session);
+      loadSessions();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setCreating(false); }
+  };
+
+  const saveLines = async () => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      const payload = lines.map(l => ({ id: l.id, actual_qty: l.actual_qty_input !== "" ? l.actual_qty_input : null }));
+      await apiFetch(`/inventory/${selected.id}/lines`, { method: "PUT", body: JSON.stringify({ lines: payload }) });
+      toast({ title: "Збережено" });
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setSaving(false); }
+  };
+
+  const completeSession = async () => {
+    if (!selected) return;
+    if (!confirm("Завершити інвентаризацію? Залишки на складі будуть оновлені до фактичних значень.")) return;
+    setCompleting(true);
+    try {
+      const payload = lines.map(l => ({ id: l.id, actual_qty: l.actual_qty_input !== "" ? l.actual_qty_input : null }));
+      await apiFetch(`/inventory/${selected.id}/lines`, { method: "PUT", body: JSON.stringify({ lines: payload }) });
+      const r = await apiFetch(`/inventory/${selected.id}/complete`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      toast({ title: `Завершено! Оновлено ${j.updated} позицій. Відхилення: ${parseFloat(j.variance_total).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴` });
+      setSelected(null);
+      loadSessions();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setCompleting(false); }
+  };
+
+  const deleteSession = async (s: any) => {
+    if (!confirm(`Видалити інвентаризацію "${s.name}"?`)) return;
+    await apiFetch(`/inventory/${s.id}`, { method: "DELETE" });
+    toast({ title: "Видалено" });
+    loadSessions();
+  };
+
+  const updateLine = (id: number, value: string) => {
+    setLines(ls => ls.map(l => l.id === id ? { ...l, actual_qty_input: value } : l));
+  };
+
+  if (selected) {
+    const isCompleted = selected.status === "completed";
+    const filtered = lines.filter(l => !search || l.ingredient_name.toLowerCase().includes(search.toLowerCase()));
+    const grouped: Record<string, any[]> = {};
+    filtered.forEach(l => {
+      const cat = l.category || "Без категорії";
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(l);
+    });
+
+    const counted = lines.filter(l => l.actual_qty_input !== "").length;
+    const total = lines.length;
+    const variance = lines.reduce((s, l) => {
+      if (l.actual_qty_input === "") return s;
+      const diff = parseFloat(l.actual_qty_input || 0) - parseFloat(l.system_qty || 0);
+      return s + Math.abs(diff * parseFloat(l.cost_per_unit || 0));
+    }, 0);
+
+    return (
+      <div className="space-y-4 max-w-4xl mx-auto">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={18} /></button>
+          <div className="flex-1">
+            <h2 className="font-bold text-gray-900">{selected.name}</h2>
+            <p className="text-xs text-gray-500">{new Date(selected.date).toLocaleDateString("uk-UA")} · {counted}/{total} підраховано</p>
+          </div>
+          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${isCompleted ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+            {isCompleted ? "Завершено" : "Чернетка"}
+          </span>
+          {!isCompleted && (
+            <>
+              <Button variant="outline" size="sm" onClick={saveLines} disabled={saving}>
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <><Check size={14} className="mr-1" />Зберегти</>}
+              </Button>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1" onClick={completeSession} disabled={completing}>
+                {completing ? <Loader2 size={14} className="animate-spin" /> : <><CheckCircle2 size={14} />Завершити</>}
+              </Button>
+            </>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <Card className="shadow-none border"><CardContent className="p-3 text-center">
+            <div className="text-xs text-gray-500">Підраховано</div>
+            <div className="font-bold text-gray-900">{counted} / {total}</div>
+            <div className="mt-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+              <div className="bg-violet-500 h-full transition-all" style={{ width: total > 0 ? `${(counted / total) * 100}%` : "0%" }} />
+            </div>
+          </CardContent></Card>
+          <Card className="shadow-none border"><CardContent className="p-3 text-center">
+            <div className="text-xs text-gray-500">Відхилень (₴)</div>
+            <div className={`font-bold ${variance > 0 ? "text-red-600" : "text-gray-900"}`}>{variance.toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</div>
+          </CardContent></Card>
+          <Card className="shadow-none border"><CardContent className="p-3 text-center">
+            <div className="text-xs text-gray-500">Залишилось</div>
+            <div className="font-bold text-gray-900">{total - counted}</div>
+          </CardContent></Card>
+        </div>
+
+        <div className="relative max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+          <Input placeholder="Пошук..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 h-9 text-sm" />
+        </div>
+
+        {Object.entries(grouped).map(([cat, catLines]) => (
+          <Card key={cat} className="shadow-none border overflow-hidden">
+            <CardHeader className="px-4 py-2.5 bg-gray-50 border-b">
+              <CardTitle className="text-sm font-medium text-gray-700">{cat} <span className="text-gray-400 font-normal">({catLines.length})</span></CardTitle>
+            </CardHeader>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-medium text-gray-600">Інгредієнт</th>
+                    <th className="text-right px-4 py-2 font-medium text-gray-600">Система</th>
+                    <th className="text-right px-4 py-2 font-medium text-gray-600">Фактично</th>
+                    <th className="text-right px-4 py-2 font-medium text-gray-600">Відхилення</th>
+                    <th className="text-right px-4 py-2 font-medium text-gray-600">Сума ₴</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {catLines.map(line => {
+                    const hasActual = line.actual_qty_input !== "";
+                    const actualNum = hasActual ? parseFloat(line.actual_qty_input || 0) : null;
+                    const sysNum = parseFloat(line.system_qty || 0);
+                    const diff = actualNum !== null ? actualNum - sysNum : null;
+                    const diffVal = diff !== null ? diff * parseFloat(line.cost_per_unit || 0) : null;
+                    return (
+                      <tr key={line.id} className={`border-b transition-colors ${hasActual ? "bg-green-50/30" : "hover:bg-gray-50"}`}>
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{line.ingredient_name}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-500">{sysNum.toLocaleString("uk-UA", { maximumFractionDigits: 3 })} {line.unit}</td>
+                        <td className="px-4 py-2.5">
+                          {isCompleted ? (
+                            <span className="block text-right font-medium">
+                              {actualNum !== null ? actualNum.toLocaleString("uk-UA", { maximumFractionDigits: 3 }) : "—"} {line.unit}
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-1 justify-end">
+                              <Input
+                                type="number" min="0" step="0.001"
+                                value={line.actual_qty_input}
+                                onChange={e => updateLine(line.id, e.target.value)}
+                                placeholder={sysNum.toLocaleString("uk-UA", { maximumFractionDigits: 3 })}
+                                className="h-7 text-xs text-right w-24"
+                              />
+                              <span className="text-xs text-gray-400">{line.unit}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          {diff !== null ? (
+                            <span className={`font-medium text-sm ${diff < 0 ? "text-red-600" : diff > 0 ? "text-green-600" : "text-gray-400"}`}>
+                              {diff > 0 ? "+" : ""}{diff.toLocaleString("uk-UA", { maximumFractionDigits: 3 })} {line.unit}
+                            </span>
+                          ) : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-xs">
+                          {diffVal !== null ? (
+                            <span className={diffVal < 0 ? "text-red-600" : diffVal > 0 ? "text-green-600" : "text-gray-400"}>
+                              {diffVal > 0 ? "+" : ""}{diffVal.toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴
+                            </span>
+                          ) : <span className="text-gray-300">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-semibold text-gray-900">Інвентаризації</h2>
+          <p className="text-xs text-gray-500">Перерахунок залишків та звірка зі складом</p>
+        </div>
+        <Button onClick={() => setShowNewForm(true)} size="sm" className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
+          <Plus size={15} /> Нова інвентаризація
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12"><Loader2 className="animate-spin inline text-gray-400" size={22} /></div>
+      ) : sessions.length === 0 ? (
+        <Card className="shadow-none border">
+          <CardContent className="py-12 text-center text-gray-400">
+            <ClipboardList size={32} className="mx-auto mb-3 opacity-30" />
+            <p className="font-medium mb-1">Немає інвентаризацій</p>
+            <p className="text-xs">Створіть першу — система автоматично підтягне всі інгредієнти зі складу</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3">
+          {sessions.map(s => (
+            <Card
+              key={s.id}
+              className="shadow-none border hover:border-violet-200 cursor-pointer transition-colors"
+              onClick={() => openSession(s)}
+            >
+              <CardContent className="p-4 flex items-center gap-3">
+                <ClipboardList size={18} className={s.status === "completed" ? "text-green-500" : "text-amber-500"} />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-900">{s.name}</h3>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.status === "completed" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                      {s.status === "completed" ? "Завершено" : "Чернетка"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5 flex gap-3">
+                    <span>{new Date(s.date).toLocaleDateString("uk-UA")}</span>
+                    <span>{s.counted_count}/{s.line_count} підраховано</span>
+                    {s.variance_total > 0 && <span className="text-red-500">Відхилення: {parseFloat(s.variance_total).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</span>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {s.status !== "completed" && (
+                    <button onClick={e => { e.stopPropagation(); deleteSession(s); }} className="p-1.5 text-gray-300 hover:text-red-500 rounded transition-colors">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                  <ChevronRight size={16} className="text-gray-300" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={showNewForm} onOpenChange={setShowNewForm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Нова інвентаризація</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Назва *</Label>
+              <Input value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))} placeholder="Напр. Тижнева інвентаризація квітень 2026" />
+            </div>
+            <div>
+              <Label>Дата</Label>
+              <Input type="date" value={newForm.date} onChange={e => setNewForm(f => ({ ...f, date: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Примітки</Label>
+              <Textarea value={newForm.notes} onChange={e => setNewForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="text-sm" />
+            </div>
+            <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg p-3">
+              Система автоматично створить рядки для всіх активних інгредієнтів зі складу з поточними залишками.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowNewForm(false)}>Скасувати</Button>
+            <Button onClick={createSession} disabled={creating} className="bg-violet-600 hover:bg-violet-700 text-white">
+              {creating ? <Loader2 size={16} className="animate-spin mr-2" /> : null}Створити
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -910,4 +910,182 @@ router.get("/costing-report", requireAuth, async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// INVENTORY — Інвентаризація
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureInventoryTables(db_: any) {
+  await db_.query(`
+    CREATE TABLE IF NOT EXISTS fb_inventory_sessions (
+      id               SERIAL PRIMARY KEY,
+      organization_id  INT NOT NULL,
+      name             TEXT NOT NULL,
+      date             DATE NOT NULL DEFAULT CURRENT_DATE,
+      status           TEXT NOT NULL DEFAULT 'draft',
+      notes            TEXT,
+      variance_total   NUMERIC(12,2) DEFAULT 0,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at     TIMESTAMPTZ
+    )
+  `);
+  await db_.query(`
+    CREATE TABLE IF NOT EXISTS fb_inventory_lines (
+      id              SERIAL PRIMARY KEY,
+      session_id      INT NOT NULL REFERENCES fb_inventory_sessions(id) ON DELETE CASCADE,
+      ingredient_id   INT NOT NULL REFERENCES fb_ingredients(id) ON DELETE CASCADE,
+      system_qty      NUMERIC(12,4) NOT NULL DEFAULT 0,
+      actual_qty      NUMERIC(12,4),
+      cost_per_unit   NUMERIC(12,4) NOT NULL DEFAULT 0,
+      UNIQUE (session_id, ingredient_id)
+    )
+  `);
+}
+
+router.get("/inventory", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    await ensureInventoryTables(db_);
+    const r = await db_.query(`
+      SELECT s.*,
+        COUNT(l.id)::int AS line_count,
+        COUNT(CASE WHEN l.actual_qty IS NOT NULL THEN 1 END)::int AS counted_count
+      FROM fb_inventory_sessions s
+      LEFT JOIN fb_inventory_lines l ON l.session_id = s.id
+      WHERE s.organization_id = $1
+      GROUP BY s.id
+      ORDER BY s.created_at DESC
+      LIMIT 50
+    `, [orgId]);
+    res.json({ sessions: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/inventory", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    await ensureInventoryTables(db_);
+    const { name, date, notes } = req.body;
+    if (!name) return res.status(400).json({ error: "Вкажіть назву" });
+
+    const sr = await db_.query(`
+      INSERT INTO fb_inventory_sessions (organization_id, name, date, notes)
+      VALUES ($1, $2, $3, $4) RETURNING *
+    `, [orgId, name, date || new Date().toISOString().slice(0, 10), notes || null]);
+    const session = sr.rows[0];
+
+    const ings = await db_.query(`
+      SELECT id, current_stock, cost_per_unit FROM fb_ingredients
+      WHERE organization_id = $1 AND is_active = TRUE ORDER BY name
+    `, [orgId]);
+
+    if (ings.rows.length > 0) {
+      const vals = ings.rows.map((i: any, idx: number) =>
+        `(${session.id}, ${i.id}, ${parseFloat(i.current_stock) || 0}, ${parseFloat(i.cost_per_unit) || 0})`
+      ).join(",");
+      await db_.query(`INSERT INTO fb_inventory_lines (session_id, ingredient_id, system_qty, cost_per_unit) VALUES ${vals} ON CONFLICT DO NOTHING`);
+    }
+
+    res.json({ ok: true, session });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/inventory/:id", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const { id } = req.params;
+    const sr = await db_.query(`SELECT * FROM fb_inventory_sessions WHERE id=$1 AND organization_id=$2`, [id, orgId]);
+    if (!sr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    const lr = await db_.query(`
+      SELECT l.*, i.name AS ingredient_name, i.unit, i.category
+      FROM fb_inventory_lines l
+      JOIN fb_ingredients i ON i.id = l.ingredient_id
+      WHERE l.session_id = $1
+      ORDER BY i.category NULLS LAST, i.name
+    `, [id]);
+    res.json({ session: sr.rows[0], lines: lr.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/inventory/:id", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const { id } = req.params;
+    const { name, notes, date } = req.body;
+    await db_.query(`
+      UPDATE fb_inventory_sessions SET
+        name = COALESCE($1, name),
+        notes = COALESCE($2, notes),
+        date = COALESCE($3, date)
+      WHERE id = $4 AND organization_id = $5
+    `, [name || null, notes ?? null, date || null, id, orgId]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/inventory/:id/lines", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const { id } = req.params;
+    const { lines } = req.body;
+    if (!Array.isArray(lines)) return res.status(400).json({ error: "lines array required" });
+    for (const l of lines) {
+      if (l.id) {
+        await db_.query(`UPDATE fb_inventory_lines SET actual_qty = $1 WHERE id = $2 AND session_id = $3`,
+          [l.actual_qty !== "" && l.actual_qty !== null ? parseFloat(l.actual_qty) : null, l.id, id]);
+      }
+    }
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/inventory/:id/complete", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const { id } = req.params;
+
+    const sr = await db_.query(`SELECT * FROM fb_inventory_sessions WHERE id=$1 AND organization_id=$2`, [id, orgId]);
+    if (!sr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    if (sr.rows[0].status === "completed") return res.status(400).json({ error: "Вже завершено" });
+
+    const lr = await db_.query(`
+      SELECT l.*, i.name FROM fb_inventory_lines l
+      JOIN fb_warehouse_ingredients i ON i.id = l.ingredient_id
+      WHERE l.session_id = $1 AND l.actual_qty IS NOT NULL
+    `, [id]);
+
+    for (const line of lr.rows) {
+      await db_.query(`UPDATE fb_warehouse_ingredients SET current_stock = $1 WHERE id = $2`, [parseFloat(line.actual_qty), line.ingredient_id]);
+    }
+
+    const varTot = lr.rows.reduce((s: number, l: any) => {
+      return s + Math.abs((parseFloat(l.actual_qty) - parseFloat(l.system_qty)) * parseFloat(l.cost_per_unit || 0));
+    }, 0);
+
+    await db_.query(`
+      UPDATE fb_inventory_sessions SET status='completed', completed_at=NOW(), variance_total=$1 WHERE id=$2
+    `, [varTot, id]);
+
+    res.json({ ok: true, updated: lr.rows.length, variance_total: varTot });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/inventory/:id", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const { id } = req.params;
+    const sr = await db_.query(`SELECT status FROM fb_inventory_sessions WHERE id=$1 AND organization_id=$2`, [id, orgId]);
+    if (!sr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    if (sr.rows[0].status === "completed") return res.status(400).json({ error: "Не можна видалити завершену інвентаризацію" });
+    await db_.query(`DELETE FROM fb_inventory_sessions WHERE id=$1`, [id]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
+
