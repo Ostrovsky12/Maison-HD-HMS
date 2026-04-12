@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useParams } from "wouter";
 import {
   ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle2,
   Leaf, Flame, Star, Clock, Search, ArrowRight, Loader2,
+  Bot, Send, Mic, MicOff, Sparkles, MessageCircle,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -16,11 +17,17 @@ type Item = {
   allergens?: string[]; tags?: string[];
 };
 
-type Category = {
-  id: number; name: string; emoji: string; items: Item[];
-};
-
+type Category = { id: number; name: string; emoji: string; items: Item[] };
 type CartItem = Item & { quantity: number; notes?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; isAction?: boolean };
+
+// ─── Quick reply suggestions shown before first user message ──────────────────
+const QUICK_REPLIES = [
+  { label: "⭐ Що рекомендуєте?", text: "Що порадите спробувати? Ваші хіти?" },
+  { label: "🌿 Вегетаріанське", text: "Які у вас вегетаріанські страви?" },
+  { label: "🍷 Рекомендуй вино", text: "Порадь вино до мого замовлення" },
+  { label: "⚠️ Є алергія", text: "У мене алергія на горіхи. Що можна замовити?" },
+];
 
 export default function QrMenuPage() {
   const params = useParams<{ orgSlug: string; tableId: string }>();
@@ -41,6 +48,20 @@ export default function QrMenuPage() {
   const [orderId, setOrderId] = useState<number | null>(null);
   const [tipPct, setTipPct] = useState(0);
 
+  // ── AI Chat state ──────────────────────────────────────────────────────────
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatHint, setChatHint] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [userHasSentMsg, setUserHasSentMsg] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const prevCartLen = useRef(0);
+
+  // ── Menu load ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -53,19 +74,29 @@ export default function QrMenuPage() {
         if (menuData.error) { setError(menuData.error); setLoading(false); return; }
         setMenu(menuData);
         if (menuData.categories.length > 0) setActiveCategory(menuData.categories[0].id);
-
-        if (tableRes?.ok) {
-          const td = await tableRes.json();
-          setTableInfo(td.table);
-        }
-      } catch (e) {
-        setError("Не вдалося завантажити меню");
-      }
+        if (tableRes?.ok) { const td = await tableRes.json(); setTableInfo(td.table); }
+      } catch { setError("Не вдалося завантажити меню"); }
       setLoading(false);
     };
     load();
   }, [orgSlug, tableId]);
 
+  // ── Proactive chat hint when first item added ──────────────────────────────
+  useEffect(() => {
+    if (cart.length > 0 && prevCartLen.current === 0 && !chatOpen) {
+      setChatHint(true);
+      const t = setTimeout(() => setChatHint(false), 6000);
+      return () => clearTimeout(t);
+    }
+    prevCartLen.current = cart.length;
+  }, [cart.length]);
+
+  // ── Auto-scroll chat to bottom ─────────────────────────────────────────────
+  useEffect(() => {
+    chatScrollRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, chatLoading]);
+
+  // ── Cart helpers ───────────────────────────────────────────────────────────
   const addToCart = (item: Item) => {
     setCart(prev => {
       const ex = prev.find(c => c.id === item.id);
@@ -73,6 +104,18 @@ export default function QrMenuPage() {
       return [...prev, { ...item, quantity: 1 }];
     });
   };
+
+  const addToCartById = useCallback((itemId: number, qty: number = 1, notes?: string) => {
+    const allItems = menu?.categories.flatMap(c => c.items) || [];
+    const item = allItems.find(i => i.id === itemId);
+    if (!item) return false;
+    setCart(prev => {
+      const ex = prev.find(c => c.id === item.id);
+      if (ex) return prev.map(c => c.id === item.id ? { ...c, quantity: c.quantity + qty, notes: notes || c.notes } : c);
+      return [...prev, { ...item, quantity: qty, notes }];
+    });
+    return true;
+  }, [menu]);
 
   const removeFromCart = (id: number) => {
     setCart(prev => {
@@ -82,6 +125,105 @@ export default function QrMenuPage() {
     });
   };
 
+  const removeFromCartById = useCallback((itemId: number) => {
+    setCart(prev => prev.filter(c => c.id !== itemId));
+  }, []);
+
+  // ── AI Chat helpers ────────────────────────────────────────────────────────
+  const applyActions = useCallback((actions: any[]) => {
+    for (const a of actions) {
+      if (a.type === "add_to_cart") addToCartById(a.item_id, a.quantity || 1, a.notes);
+      if (a.type === "remove_from_cart") removeFromCartById(a.item_id);
+    }
+  }, [addToCartById, removeFromCartById]);
+
+  const sendToAI = useCallback(async (msgs: ChatMsg[], showUserMsg: boolean = true) => {
+    setChatLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/ai-waiter/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orgSlug,
+          messages: msgs.map(m => ({ role: m.role, content: m.content })),
+          cart: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
+        }),
+      });
+      const data = await r.json();
+      if (data.actions?.length) applyActions(data.actions);
+      if (data.reply) {
+        setChatMessages(prev => [...prev, { role: "assistant", content: data.reply }]);
+      }
+    } catch {
+      setChatMessages(prev => [...prev, { role: "assistant", content: "Вибачте, не вдалося підключитися. Спробуйте ще раз 🙏" }]);
+    }
+    setChatLoading(false);
+  }, [orgSlug, cart, applyActions]);
+
+  const sendMessage = async (textOverride?: string) => {
+    const text = (textOverride || chatInput).trim();
+    if (!text || chatLoading) return;
+    setUserHasSentMsg(true);
+    const userMsg: ChatMsg = { role: "user", content: text };
+    const newMsgs = [...chatMessages, userMsg];
+    setChatMessages(newMsgs);
+    setChatInput("");
+    await sendToAI(newMsgs);
+  };
+
+  const openChat = async () => {
+    setChatOpen(true);
+    setChatHint(false);
+    setTimeout(() => chatInputRef.current?.focus(), 300);
+    if (chatMessages.length === 0) {
+      // Trigger greeting via hidden system message
+      const greetMsg: ChatMsg = { role: "user", content: "__greet__" };
+      setChatLoading(true);
+      try {
+        const r = await fetch(`${API_BASE}/ai-waiter/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orgSlug,
+            messages: [{ role: "user", content: "__greet__" }],
+            cart: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
+          }),
+        });
+        const data = await r.json();
+        if (data.reply) setChatMessages([{ role: "assistant", content: data.reply }]);
+      } catch {
+        setChatMessages([{ role: "assistant", content: "Вітаємо! Я AI-офіціант, радий допомогти вам обрати страви. Що вас цікавить? 😊" }]);
+      }
+      setChatLoading(false);
+      void greetMsg; // used for type check
+    }
+  };
+
+  // ── Voice input ────────────────────────────────────────────────────────────
+  const toggleVoice = () => {
+    if (voiceActive) {
+      recognitionRef.current?.stop();
+      setVoiceActive(false);
+      return;
+    }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "uk-UA";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onresult = (e: any) => {
+      const t = e.results[0]?.[0]?.transcript;
+      if (t) { setChatInput(t); setVoiceActive(false); }
+    };
+    rec.onend = () => setVoiceActive(false);
+    rec.onerror = () => setVoiceActive(false);
+    recognitionRef.current = rec;
+    rec.start();
+    setVoiceActive(true);
+  };
+
+  // ── Cart math ─────────────────────────────────────────────────────────────
   const cartQty = (id: number) => cart.find(c => c.id === id)?.quantity || 0;
   const totalItems = cart.reduce((s, c) => s + c.quantity, 0);
   const totalAmount = cart.reduce((s, c) => s + parseFloat(c.price) * c.quantity, 0);
@@ -98,7 +240,9 @@ export default function QrMenuPage() {
     })).filter(cat => cat.items.length > 0);
   }, [menu, search, activeCategory]);
 
-  const displayCategories = search ? filteredCategories : (menu?.categories.filter(c => !activeCategory || c.id === activeCategory) || []);
+  const displayCategories = search
+    ? filteredCategories
+    : (menu?.categories.filter(c => !activeCategory || c.id === activeCategory) || []);
 
   const placeOrder = async () => {
     if (!cart.length) return;
@@ -131,7 +275,7 @@ export default function QrMenuPage() {
     setSubmitting(false);
   };
 
-  // ── Loading ──
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center">
       <div className="text-center">
@@ -141,7 +285,6 @@ export default function QrMenuPage() {
     </div>
   );
 
-  // ── Error ──
   if (error) return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center p-6">
       <div className="text-center max-w-sm">
@@ -154,7 +297,6 @@ export default function QrMenuPage() {
     </div>
   );
 
-  // ── Submitted ──
   if (submitted) return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50 to-stone-50 flex items-center justify-center p-6">
       <div className="text-center max-w-sm">
@@ -175,17 +317,17 @@ export default function QrMenuPage() {
     </div>
   );
 
+  // ── Main render ────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-stone-50 pb-32">
-      {/* ── Header ── */}
+
+      {/* Header */}
       <div className="bg-white border-b border-stone-100 sticky top-0 z-40">
         <div className="px-4 pt-4 pb-2 max-w-lg mx-auto">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h1 className="text-lg font-bold text-stone-900">{menu?.org.name}</h1>
-              {tableInfo && (
-                <p className="text-xs text-stone-500">Стіл {tableInfo.number} · {tableInfo.location}</p>
-              )}
+              {tableInfo && <p className="text-xs text-stone-500">Стіл {tableInfo.number} · {tableInfo.location}</p>}
             </div>
             <button
               onClick={() => setShowCart(true)}
@@ -196,7 +338,6 @@ export default function QrMenuPage() {
               {totalItems > 0 && <span className="hidden sm:inline">{fmtMoney(totalAmount)}</span>}
             </button>
           </div>
-          {/* Search */}
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
             <input
@@ -213,7 +354,6 @@ export default function QrMenuPage() {
           </div>
         </div>
 
-        {/* Category tabs */}
         {!search && (
           <div className="flex gap-2 px-4 pb-3 overflow-x-auto scrollbar-hide max-w-lg mx-auto">
             {menu?.categories.map(cat => (
@@ -229,7 +369,7 @@ export default function QrMenuPage() {
         )}
       </div>
 
-      {/* ── Menu Items ── */}
+      {/* Menu Items */}
       <div className="max-w-lg mx-auto px-4 pt-4 space-y-6">
         {displayCategories.map(cat => (
           <div key={cat.id}>
@@ -297,8 +437,8 @@ export default function QrMenuPage() {
         )}
       </div>
 
-      {/* ── Sticky Cart Button ── */}
-      {totalItems > 0 && !showCart && (
+      {/* Sticky Cart Button */}
+      {totalItems > 0 && !showCart && !chatOpen && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-sm px-4">
           <button
             onClick={() => setShowCart(true)}
@@ -311,7 +451,7 @@ export default function QrMenuPage() {
         </div>
       )}
 
-      {/* ── Cart Sheet ── */}
+      {/* Cart Sheet */}
       {showCart && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowCart(false)} />
@@ -337,6 +477,7 @@ export default function QrMenuPage() {
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-medium text-stone-800">{item.name}</p>
+                    {item.notes && <p className="text-xs text-stone-400">{item.notes}</p>}
                   </div>
                   <p className="font-semibold text-stone-800 text-sm">{fmtMoney(parseFloat(item.price) * item.quantity)}</p>
                 </div>
@@ -383,9 +524,7 @@ export default function QrMenuPage() {
                     </button>
                   ))}
                 </div>
-                {tipAmount > 0 && (
-                  <p className="text-xs text-stone-400 mt-1">Чайові: {fmtMoney(tipAmount)}</p>
-                )}
+                {tipAmount > 0 && <p className="text-xs text-stone-400 mt-1">Чайові: {fmtMoney(tipAmount)}</p>}
               </div>
               <div className="flex items-center justify-between mb-4 pt-2 border-t border-stone-100">
                 <span className="font-semibold text-stone-700">До сплати</span>
@@ -399,6 +538,165 @@ export default function QrMenuPage() {
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
                 {submitting ? "Оформлення..." : "Замовити"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── AI Chat Floating Button ─────────────────────────────────────────── */}
+      {!submitted && menu && (
+        <div className="fixed bottom-6 right-4 z-40 flex flex-col items-end gap-2">
+          {/* Proactive hint bubble */}
+          {chatHint && !chatOpen && (
+            <div className="bg-stone-900 text-white text-xs px-4 py-2.5 rounded-2xl shadow-xl max-w-[200px] text-center leading-snug animate-bounce-in">
+              <Sparkles className="w-3 h-3 inline mr-1 text-amber-400" />
+              Запитайте AI-офіціанта про доповнення!
+              <div className="absolute -bottom-1.5 right-6 w-3 h-3 bg-stone-900 rotate-45" />
+            </div>
+          )}
+          <button
+            onClick={chatOpen ? () => setChatOpen(false) : openChat}
+            className={`w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all active:scale-95 relative ${chatOpen ? "bg-stone-700" : "bg-gradient-to-br from-amber-400 to-orange-500 hover:scale-105"}`}
+          >
+            {chatOpen ? (
+              <X className="w-5 h-5 text-white" />
+            ) : (
+              <>
+                <Bot className="w-6 h-6 text-white" />
+                {chatHint && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white" />
+                )}
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* ─── AI Chat Drawer ───────────────────────────────────────────────────── */}
+      {chatOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={() => setChatOpen(false)} />
+
+          {/* Chat panel */}
+          <div className="relative bg-white rounded-t-3xl flex flex-col shadow-2xl" style={{ maxHeight: "88vh", minHeight: "60vh" }}>
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 rounded-t-3xl px-5 py-4 flex items-center gap-3 flex-shrink-0">
+              <div className="relative">
+                <div className="w-11 h-11 bg-white/25 rounded-2xl flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+                <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-white" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-white text-sm leading-tight">AI Офіціант</p>
+                <p className="text-amber-100 text-xs">Знає меню, склад, вина · Відповідає миттєво</p>
+              </div>
+              <button
+                onClick={() => setChatOpen(false)}
+                className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center text-white transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
+
+              {chatMessages.length === 0 && chatLoading && (
+                <div className="flex gap-2.5 justify-start">
+                  <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="bg-stone-100 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
+                    {[0, 150, 300].map(d => (
+                      <div key={d} className="w-2 h-2 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  {msg.role === "assistant" && (
+                    <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
+                      <Bot className="w-4 h-4 text-white" />
+                    </div>
+                  )}
+                  <div className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                    msg.role === "user"
+                      ? "bg-amber-500 text-white rounded-tr-sm"
+                      : "bg-stone-100 text-stone-800 rounded-tl-sm"
+                  }`}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+
+              {/* Typing indicator */}
+              {chatLoading && chatMessages.length > 0 && (
+                <div className="flex gap-2.5 justify-start">
+                  <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="bg-stone-100 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
+                    {[0, 150, 300].map(d => (
+                      <div key={d} className="w-2 h-2 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Quick reply chips — show only before first user message */}
+              {!userHasSentMsg && chatMessages.length > 0 && !chatLoading && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {QUICK_REPLIES.map(qr => (
+                    <button
+                      key={qr.label}
+                      onClick={() => sendMessage(qr.text)}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
+                    >
+                      {qr.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div ref={chatScrollRef} />
+            </div>
+
+            {/* Input bar */}
+            <div className="px-4 pb-safe pb-4 pt-2 border-t border-stone-100 bg-white flex-shrink-0">
+              <div className="flex gap-2 items-center">
+                <div className="flex-1 bg-stone-100 rounded-2xl flex items-center px-4 py-2.5 gap-2 min-h-[46px]">
+                  <input
+                    ref={chatInputRef}
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                    placeholder="Запитайте про страви, алергени, вина..."
+                    className="flex-1 bg-transparent text-sm text-stone-800 placeholder-stone-400 outline-none"
+                  />
+                  <button
+                    onClick={toggleVoice}
+                    title="Голосовий ввід"
+                    className={`flex-shrink-0 transition-colors ${voiceActive ? "text-red-500 animate-pulse" : "text-stone-400 hover:text-amber-500"}`}
+                  >
+                    {voiceActive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </button>
+                </div>
+                <button
+                  onClick={() => sendMessage()}
+                  disabled={!chatInput.trim() || chatLoading}
+                  className="w-11 h-11 bg-amber-500 hover:bg-amber-600 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-2xl flex items-center justify-center transition-all flex-shrink-0 shadow-sm"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-center text-xs text-stone-400 mt-2">
+                AI може помилятися · Уточнюйте алергени у персоналу
+              </p>
             </div>
           </div>
         </div>

@@ -7,6 +7,7 @@ import {
   ratesTable, channelRateSettingsTable,
 } from "@workspace/db";
 import { eq, and, or, gte, lte, ne, inArray, notInArray, sql, asc } from "drizzle-orm";
+import { openai } from "@workspace/integrations-openai-ai-server";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
 import { fireBookingEvent } from "../lib/automation-runner.js";
 import { sendGuestConfirmationEmail, sendGuestConfirmationSms, notifyBookingCreated } from "../lib/notify.js";
@@ -512,6 +513,174 @@ router.get("/rates", async (req, res) => {
       unitPrice,
     });
   } catch (e: any) { console.error("GET PUBLIC RATES ERROR:", e.message); res.status(500).json({ error: e.message }); }
+});
+
+// ─── POST /ai-waiter/chat — AI waiter for QR ordering ────────────────────────
+router.post("/ai-waiter/chat", async (req, res) => {
+  try {
+    const { orgSlug, messages, cart } = req.body;
+    if (!orgSlug || !Array.isArray(messages)) return res.status(400).json({ error: "orgSlug and messages required" });
+
+    const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
+    if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
+    const orgId = orgs[0].id;
+
+    // Fetch full menu
+    const cats = await db.select().from(fbCategoriesTable)
+      .where(and(eq(fbCategoriesTable.organizationId, orgId), eq(fbCategoriesTable.isActive, true)))
+      .orderBy(asc(fbCategoriesTable.sortOrder));
+    const menuItems = await db.select().from(fbItemsTable)
+      .where(and(eq(fbItemsTable.organizationId, orgId), eq(fbItemsTable.isAvailable, true)));
+
+    // Fetch recipe card ingredients for composition/allergen enrichment
+    const recipeRows = await db.execute(sql`
+      SELECT rc.menu_item_id, array_agg(DISTINCT i.name ORDER BY i.name) AS ingredients
+      FROM fb_recipe_cards rc
+      JOIN fb_recipe_card_items rci ON rci.recipe_id = rc.id
+      JOIN fb_ingredients i ON i.id = rci.ingredient_id
+      WHERE rc.organization_id = ${orgId} AND rc.is_active = true
+      GROUP BY rc.menu_item_id
+    `);
+    const ingByItem: Record<number, string[]> = {};
+    for (const r of recipeRows.rows as any[]) ingByItem[r.menu_item_id] = r.ingredients || [];
+
+    // Helpers
+    const toArr = (v: any): string[] => {
+      if (!v) return [];
+      if (Array.isArray(v)) return v.filter(Boolean);
+      if (typeof v === "object") return Object.keys(v).filter(k => v[k]);
+      if (typeof v === "string") return v.split(",").map((s: string) => s.trim()).filter(Boolean);
+      return [];
+    };
+
+    // Build compact menu string for system prompt
+    const menuCtx = cats.map(cat => {
+      const items = menuItems.filter(i => i.categoryId === cat.id);
+      if (!items.length) return null;
+      const lines = items.map(it => {
+        const parts = [`[${it.id}] ${it.name} — ${it.price}₴`];
+        if (it.description) parts.push(it.description);
+        const flags: string[] = [];
+        if (it.isVegetarian) flags.push("🌿 вег");
+        const tags = toArr(it.tags);
+        if (tags.some(t => /vegan|веган/i.test(t))) flags.push("🌱 веган");
+        if (tags.some(t => /gluten|глютен/i.test(t))) flags.push("без глютену");
+        if (flags.length) parts.push(flags.join(", "));
+        const allergens = toArr(it.allergens);
+        if (allergens.length) parts.push(`⚠️ алергени: ${allergens.join(", ")}`);
+        const ing = ingByItem[it.id] || [];
+        if (ing.length) parts.push(`склад: ${ing.join(", ")}`);
+        if (it.cookMinutes) parts.push(`~${it.cookMinutes} хв`);
+        return parts.join(" | ");
+      }).join("\n");
+      return `**${cat.emoji || ""}${cat.name}**\n${lines}`;
+    }).filter(Boolean).join("\n\n");
+
+    // Current cart context
+    const cartCtx = cart?.length
+      ? `Кошик гостя:\n${cart.map((c: any) => `• ${c.name} ×${c.quantity} (${(parseFloat(c.price) * c.quantity).toFixed(2)}₴)`).join("\n")}`
+      : "Кошик порожній.";
+
+    // Time of day greeting
+    const h = new Date().getHours();
+    const timeHint = h < 12 ? "ранок" : h < 17 ? "день" : h < 21 ? "вечір" : "ніч";
+
+    const systemPrompt = `Ти — AI-офіціант ресторану "${orgs[0].name}". Допомагаєш гостям через QR-меню. Час: ${timeHint}.
+
+ХАРАКТЕР: Теплий, лаконічний, компетентний. Відповідай КОРОТКО (1-3 речення). Жодних списків з усіма стравами без потреби.
+
+МОВА: Автоматично відповідай мовою гостя (укр/англ/польськ/рос тощо).
+
+ПОВЕДІНКА:
+• Рекомендуй 1 доповнення за раз — не будь нав'язливим
+• add_to_cart — ТІЛЬКИ якщо гість явно просить або підтверджує ("так", "ок", "додай", "беру")
+• Після додавання: "✅ [Назва] — у вашому замовленні!"
+• Якщо гість каже "все" або "готово" → перевір кошик: є напій? хліб? десерт?
+• Знаєш алергени з меню, але ЗАВЖДИ додавай: "⚠️ Уточніть у персоналу — сліди алергенів можливі"
+• Ніколи не вигадуй страви яких немає в меню
+
+СОМЕЛЬЄ-ЗНАННЯ:
+• Червоне → яловичина, баранина, паста з м'ясом, витримані сири
+• Біле → риба, морепродукти, птиця, легкі салати
+• Рожеве → піца, салати, легкі страви
+• Просекко/шампанське → закуски, устриці, десерти
+• Пиво → бургери, піца, смажене
+• Якщо гість п'є чай → запропонуй мед/лимон якщо є в меню
+
+ПОТОЧНИЙ КОШИК:
+${cartCtx}
+
+МЕНЮ (формат: [ID] Назва — Ціна | опис | теги | алергени | склад):
+${menuCtx}
+
+СПЕЦ: Якщо перше повідомлення "__greet__" → це початок сесії. Привітайся (1 речення), враховуй ${timeHint} та кошик. Запитай чим допомогти.`;
+
+    const tools: any[] = [
+      {
+        type: "function",
+        function: {
+          name: "add_to_cart",
+          description: "Додати страву до кошика. ТІЛЬКИ якщо гість явно просить або підтверджує.",
+          parameters: {
+            type: "object",
+            properties: {
+              item_id: { type: "integer", description: "ID страви з меню (число в [квадратних дужках])" },
+              quantity: { type: "integer", description: "Кількість порцій, зазвичай 1", default: 1 },
+              notes: { type: "string", description: "Побажання: без часнику, добре прожарений тощо" },
+            },
+            required: ["item_id", "quantity"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "remove_from_cart",
+          description: "Видалити страву з кошика гостя",
+          parameters: {
+            type: "object",
+            properties: {
+              item_id: { type: "integer", description: "ID страви яку видалити" },
+            },
+            required: ["item_id"],
+          },
+        },
+      },
+    ];
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
+      tools,
+      tool_choice: "auto",
+      max_tokens: 400,
+      temperature: 0.75,
+    });
+
+    const msg = completion.choices[0].message;
+    const actions: any[] = [];
+    let reply = msg.content || "";
+
+    if (msg.tool_calls?.length) {
+      for (const tc of msg.tool_calls) {
+        try { actions.push({ type: tc.function.name, ...JSON.parse(tc.function.arguments) }); } catch {}
+      }
+      // If no text reply alongside tool calls, generate confirmation text
+      if (!reply) {
+        reply = actions.map(a => {
+          const item = menuItems.find(i => i.id === a.item_id);
+          if (a.type === "add_to_cart") return `✅ ${item?.name || "Страву"} додано до замовлення!${a.notes ? ` (${a.notes})` : ""}`;
+          if (a.type === "remove_from_cart") return `❌ ${item?.name || "Страву"} видалено.`;
+          return "";
+        }).filter(Boolean).join(" ");
+      }
+    }
+
+    res.json({ reply: reply || "Слухаю вас!", actions });
+  } catch (e: any) {
+    console.error("AI WAITER ERROR:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;
