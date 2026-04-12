@@ -627,7 +627,7 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     const orderId = parseInt(req.params.id);
     const {
       paymentMethod = "cash", paidAmount, discountAmount = 0, notes,
-      tipAmount = 0, tipPct = 0, legalEntityId,
+      tipAmount = 0, tipPct = 0, legalEntityId, discountLabel,
     } = req.body;
     const db_ = (db as any).$client;
 
@@ -638,7 +638,7 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     if (!orderRow.rows.length) { res.status(404).json({ error: "Order not found" }); return; }
     const order = orderRow.rows[0];
 
-    if (order.status === "closed" || order.status === "cancelled") {
+    if (order.status === "billed" || order.status === "cancelled") {
       res.status(400).json({ error: "Order already closed" }); return;
     }
 
@@ -655,14 +655,17 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     // Update order (includes tip + legal entity)
     const r = await db_.query(
       `UPDATE fb_orders SET
-         status = 'closed', paid_amount = $1, payment_method = $2,
+         status = 'billed', paid_amount = $1, payment_method = $2,
          discount_amount = $3, receipt_number = $4, closed_at = NOW(),
          tip_amount = $5, tip_pct = $6,
          legal_entity_id = COALESCE($7, legal_entity_id),
-         notes = COALESCE($8, notes), updated_at = NOW()
+         notes = COALESCE($8, notes),
+         discount_label = COALESCE($11, discount_label),
+         updated_at = NOW()
        WHERE id = $9 AND organization_id = $10 RETURNING *`,
       [paidAmount ?? finalAmount, paymentMethod, discountAmount, receiptNum,
-       tip, tipPct || 0, legalEntityId || null, notes || null, orderId, orgId]
+       tip, tipPct || 0, legalEntityId || null, notes || null, orderId, orgId,
+       discountLabel || null]
     );
 
     // Free the table
@@ -678,7 +681,7 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       const cashIn = paidAmount ?? finalAmount;
       await db_.query(
         `UPDATE cashbox_sessions SET
-           cash_in = cash_in + $1, expected_balance = expected_balance + $1, updated_at = NOW()
+           cash_in = cash_in + $1, expected_balance = expected_balance + $1
          WHERE organization_id = $2 AND status = 'open'`,
         [cashIn, orgId]
       );
@@ -736,11 +739,133 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       );
     }
 
+    // ── Auto Stock Deduction — списання по тех. картках (non-blocking) ─────────
+    let stockDeductionLog: any = null;
+    try {
+      // 1. Отримуємо всі позиції замовлення
+      const itemsRow = await db_.query(
+        `SELECT oi.item_id, oi.quantity, oi.name
+         FROM fb_order_items oi
+         WHERE oi.order_id = $1`,
+        [orderId]
+      );
+      const orderItems = itemsRow.rows;
+
+      if (orderItems.length > 0) {
+        // 2. Для кожної позиції знаходимо тех. картку
+        const deductions: Array<{
+          ingredientId: number; quantity: number; unit: string;
+          costPerUnit: number; menuItemName: string;
+        }> = [];
+
+        for (const oi of orderItems) {
+          // Знаходимо активну тех. картку для цього пункту меню
+          const rcRow = await db_.query(
+            `SELECT id, yield_quantity FROM fb_recipe_cards
+             WHERE menu_item_id = $1 AND organization_id = $2 AND is_active = true
+             LIMIT 1`,
+            [oi.item_id, orgId]
+          );
+          if (!rcRow.rows.length) continue;
+          const recipe = rcRow.rows[0];
+
+          // Yield = кількість порцій з 1 замовлення (зазвичай 1)
+          const yieldQty = Number(recipe.yield_quantity) || 1;
+
+          // Отримуємо інгредієнти тех. картки (net_quantity = фактичне споживання)
+          const rciRow = await db_.query(
+            `SELECT rci.ingredient_id, rci.net_quantity, rci.unit,
+                    i.cost_per_unit, i.name AS ingredient_name
+             FROM fb_recipe_card_items rci
+             JOIN fb_ingredients i ON i.id = rci.ingredient_id
+             WHERE rci.recipe_id = $1`,
+            [recipe.id]
+          );
+
+          for (const rci of rciRow.rows) {
+            const deductQty = (Number(rci.net_quantity) / yieldQty) * Number(oi.quantity);
+            if (deductQty <= 0) continue;
+            deductions.push({
+              ingredientId: rci.ingredient_id,
+              quantity: deductQty,
+              unit: rci.unit,
+              costPerUnit: Number(rci.cost_per_unit) || 0,
+              menuItemName: oi.name,
+            });
+          }
+        }
+
+        if (deductions.length > 0) {
+          // 3. Підбиваємо дублікати по інгредієнту (може бути одна страва в кількох позиціях)
+          const merged: Record<number, typeof deductions[0]> = {};
+          for (const d of deductions) {
+            if (merged[d.ingredientId]) {
+              merged[d.ingredientId].quantity += d.quantity;
+            } else {
+              merged[d.ingredientId] = { ...d };
+            }
+          }
+          const finalDeductions = Object.values(merged);
+
+          // 4. Створюємо запис в fb_stock_writeoffs (reason: auto_sale)
+          const woRow = await db_.query(
+            `INSERT INTO fb_stock_writeoffs
+               (organization_id, writeoff_date, reason, notes, created_by, total_amount)
+             VALUES ($1, CURRENT_DATE, 'auto_sale', $2, $3, 0)
+             RETURNING id`,
+            [
+              orgId,
+              `Авто-списання по замовленню ${receiptNum}`,
+              req.user?.id || null,
+            ]
+          );
+          const writeoffId = woRow.rows[0].id;
+          let totalCost = 0;
+
+          // 5. Записуємо кожен інгредієнт і знімаємо зі складу
+          for (const d of finalDeductions) {
+            const lineTotal = d.quantity * d.costPerUnit;
+            totalCost += lineTotal;
+
+            // Вставка рядка списання
+            await db_.query(
+              `INSERT INTO fb_stock_writeoff_items
+                 (writeoff_id, ingredient_id, quantity, unit, cost_per_unit, total_cost, notes)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [writeoffId, d.ingredientId, d.quantity, d.unit, d.costPerUnit, lineTotal,
+               `Авто: ${d.menuItemName}`]
+            );
+
+            // Знімаємо зі складу (не нижче 0)
+            await db_.query(
+              `UPDATE fb_ingredients
+               SET current_stock = GREATEST(0, current_stock - $1), updated_at = NOW()
+               WHERE id = $2 AND organization_id = $3`,
+              [d.quantity, d.ingredientId, orgId]
+            );
+          }
+
+          // 6. Оновлюємо загальну суму списання
+          await db_.query(
+            `UPDATE fb_stock_writeoffs SET total_amount = $1 WHERE id = $2`,
+            [totalCost, writeoffId]
+          );
+
+          stockDeductionLog = { writeoffId, lines: finalDeductions.length, totalCost };
+        }
+      }
+    } catch (stockErr: any) {
+      // Non-blocking — не ламаємо оплату якщо списання не спрацювало
+      console.error("[AUTO STOCK DEDUCTION] Error:", stockErr.message);
+      stockDeductionLog = { error: stockErr.message };
+    }
+
     res.json({
       order:         updatedOrder,
       receiptNumber: receiptNum,
       tipAmount:     tip,
       fiscal:        fiscalResult,
+      stockDeduction: stockDeductionLog,
       change: paymentMethod === "cash" && paidAmount
         ? Math.max(0, Number(paidAmount) - finalAmount)
         : 0,

@@ -41,6 +41,7 @@ const WRITEOFF_REASONS: Record<string, string> = {
   production: "Виробнича втрата",
   damage: "Пошкодження",
   inventory: "Інвентаризація",
+  auto_sale: "Авто-списання (продаж)",
   other: "Інше",
 };
 const VAT_RATES = [
@@ -2015,7 +2016,7 @@ function AnalyticsTab({ toast }: { toast: any }) {
   })();
 
   const wasteChart = (waste_by_reason || []).map((w: any) => ({
-    name: ({ spoilage: "Псування", production: "Виробниче", damage: "Пошкодження", inventory: "Інвентаризація" } as any)[w.reason] || "Інше",
+    name: ({ spoilage: "Псування", production: "Виробниче", damage: "Пошкодження", inventory: "Інвентаризація", auto_sale: "Продаж (авто)" } as any)[w.reason] || "Інше",
     value: Number(w.total_cost),
   }));
 
