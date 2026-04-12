@@ -210,12 +210,12 @@ router.post("/items", requireAuth, async (req: any, res) => {
     const db_ = (db as any).$client;
     const r = await db_.query(
       `INSERT INTO fb_items (organization_id, name, description, price, category_id, cook_minutes,
-         is_available, is_popular, is_vegetarian, allergens, tags, sort_order,
+         is_available, is_popular, is_vegetarian, allergens, tags, sort_order, image_url,
          vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
          station, legal_entity_id, ingredient_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
       [orgId, name, description||null, price, categoryId||null, cookMinutes||15,
-       isAvailable, isPopular, isVegetarian, allergens||null, tags||null, sortOrder,
+       isAvailable, isPopular, isVegetarian, allergens||null, tags||null, sortOrder, imageUrl||null,
        vat_rate||20, is_alcohol||false, alcohol_volume_pct||null, uktzed_code||null, excise_code||null,
        station||"kitchen_general", legal_entity_id||null, ingredient_id||null]
     );
@@ -237,6 +237,7 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
     const ingredientIdVal = req.body.hasOwnProperty("ingredient_id")
       ? (ingredient_id ?? null)
       : undefined;
+    const imageUrlVal = req.body.hasOwnProperty("imageUrl") ? (imageUrl ?? null) : undefined;
     const r = await db_.query(
       `UPDATE fb_items SET
          name               = COALESCE($1, name),
@@ -256,6 +257,7 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
          station            = COALESCE($15, station),
          legal_entity_id    = COALESCE($16, legal_entity_id),
          ingredient_id      = CASE WHEN $20::boolean THEN $17::int ELSE ingredient_id END,
+         image_url          = CASE WHEN $22::boolean THEN $21 ELSE image_url END,
          updated_at         = NOW()
        WHERE id = $18 AND organization_id = $19 RETURNING *`,
       [name||null, description||null, price??null, categoryId||null, cookMinutes??null,
@@ -264,7 +266,9 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
        station||null, legal_entity_id||null,
        ingredientIdVal ?? null,
        id, orgId,
-       ingredientIdVal !== undefined]
+       ingredientIdVal !== undefined,
+       imageUrlVal ?? null,
+       imageUrlVal !== undefined]
     );
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
     res.json({ item: r.rows[0] });
@@ -1208,6 +1212,39 @@ router.delete("/customers/:id", requireAuth, async (req: any, res) => {
     const db_ = (db as any).$client;
     await db_.query(`DELETE FROM fb_customers WHERE id = $1 AND organization_id = $2`, [id, orgId]);
     res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── AI Waiter Settings ───────────────────────────────────────────────────────
+router.get("/ai-waiter-settings", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    const r = await db_.query(`SELECT * FROM fb_ai_waiter_settings WHERE org_id = $1`, [orgId]);
+    res.json({ settings: r.rows[0] || null });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/ai-waiter-settings", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { waiter_name, personality, promo_text, greeting_text, language_hint } = req.body;
+    const db_ = (db as any).$client;
+    const r = await db_.query(`
+      INSERT INTO fb_ai_waiter_settings (org_id, waiter_name, personality, promo_text, greeting_text, language_hint, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (org_id) DO UPDATE SET
+        waiter_name   = EXCLUDED.waiter_name,
+        personality   = EXCLUDED.personality,
+        promo_text    = EXCLUDED.promo_text,
+        greeting_text = EXCLUDED.greeting_text,
+        language_hint = EXCLUDED.language_hint,
+        updated_at    = NOW()
+      RETURNING *`,
+      [orgId, waiter_name || "AI Офіціант", personality || "friendly",
+       promo_text || null, greeting_text || null, language_hint || "auto"]
+    );
+    res.json({ settings: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

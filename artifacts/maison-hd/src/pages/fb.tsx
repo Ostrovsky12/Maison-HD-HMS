@@ -969,10 +969,44 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
     }
   };
 
+  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast({ title: "Файл занадто великий", description: "Максимум 2 МБ", variant: "destructive" }); return; }
+    const reader = new FileReader();
+    reader.onload = ev => setForm((f: any) => ({ ...f, image_url: ev.target?.result as string }));
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
       <div><Label>Назва *</Label><Input placeholder="Борщ із пампушками" value={form.name} onChange={e => setForm((f: any) => ({ ...f, name: e.target.value }))} /></div>
       <div><Label>Опис</Label><Textarea rows={2} value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} /></div>
+
+      {/* Image upload */}
+      <div className="border rounded-lg p-3 space-y-2 bg-sky-50/60">
+        <Label className="text-sm font-medium text-sky-800">📸 Фото страви (для QR-меню)</Label>
+        <div className="flex gap-2 items-start">
+          {form.image_url && (
+            <div className="relative shrink-0">
+              <img src={form.image_url} alt="preview" className="w-16 h-16 object-cover rounded-lg border" />
+              <button type="button" onClick={() => setForm((f: any) => ({ ...f, image_url: "" }))} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs">×</button>
+            </div>
+          )}
+          <div className="flex-1 space-y-1.5">
+            <Input
+              placeholder="https://example.com/photo.jpg (або завантаж файл)"
+              value={form.image_url?.startsWith("data:") ? "" : (form.image_url || "")}
+              onChange={e => setForm((f: any) => ({ ...f, image_url: e.target.value }))}
+              className="text-xs"
+            />
+            <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-white border border-sky-300 rounded-md text-sky-700 hover:bg-sky-50">
+              📁 Завантажити файл
+              <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+            </label>
+          </div>
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <div><Label>Категорія</Label>
           <Select value={String(form.categoryId || "")} onValueChange={v => setForm((f: any) => ({ ...f, categoryId: v }))}>
@@ -1080,7 +1114,7 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
   );
 }
 
-const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "", station: "kitchen_general", legal_entity_id: null, ingredient_id: null };
+const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "", station: "kitchen_general", legal_entity_id: null, ingredient_id: null, image_url: "" };
 
 function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredients, onSave }: any) {
   const [form, setForm] = useState<any>(EMPTY_ITEM_FORM);
@@ -1095,6 +1129,7 @@ function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredien
       vat_rate: parseInt(form.vat_rate) || 20,
       alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
       ingredient_id: form.ingredient_id ?? null,
+      imageUrl: form.image_url || null,
     });
     setLoading(false);
     setForm(EMPTY_ITEM_FORM);
@@ -1135,6 +1170,7 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, in
       station: item.station || "kitchen_general",
       legal_entity_id: item.legal_entity_id || null,
       ingredient_id: item.ingredient_id ?? null,
+      image_url: item.image_url || "",
     });
   }, [item]);
 
@@ -1148,6 +1184,7 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, in
       vat_rate: parseInt(form.vat_rate) || 20,
       alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
       ingredient_id: form.ingredient_id ?? null,
+      imageUrl: form.image_url || null,
     });
     setLoading(false);
   };

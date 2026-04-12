@@ -11,8 +11,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Printer, Plus, Pencil, Trash2, Wifi, WifiOff, CheckCircle2,
-  Loader2, Settings, AlertTriangle, X, Check, Tag, Percent,
+  Loader2, Settings, AlertTriangle, X, Check, Tag, Percent, Bot, Save,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_FB = BASE.replace("/maison-hd", "") + "/api/fb";
@@ -444,6 +445,156 @@ function DiscountsTab() {
   );
 }
 
+// ── AI Waiter Tab ──────────────────────────────────────────────────────────────
+const PERSONALITY_OPTIONS = [
+  { value: "friendly", label: "😊 Дружній та теплий" },
+  { value: "formal",   label: "🎩 Офіційний та ввічливий" },
+  { value: "fun",      label: "🎉 Енергійний та грайливий" },
+];
+
+const LANG_OPTIONS = [
+  { value: "auto", label: "🌐 Авто (мова гостя)" },
+  { value: "uk",   label: "🇺🇦 Українська" },
+  { value: "en",   label: "🇬🇧 English" },
+];
+
+function AiWaiterTab() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [form, setForm] = useState<any>({ waiter_name: "AI Офіціант", personality: "friendly", promo_text: "", greeting_text: "", language_hint: "auto" });
+
+  const { isLoading } = useQuery({
+    queryKey: ["ai-waiter-settings"],
+    queryFn: async () => {
+      const r = await apiFetch("/ai-waiter-settings");
+      const d = await r.json();
+      if (d.settings) setForm({
+        waiter_name:   d.settings.waiter_name   || "AI Офіціант",
+        personality:   d.settings.personality   || "friendly",
+        promo_text:    d.settings.promo_text     || "",
+        greeting_text: d.settings.greeting_text  || "",
+        language_hint: d.settings.language_hint  || "auto",
+      });
+      return d.settings;
+    },
+  });
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const r = await apiFetch("/ai-waiter-settings", { method: "PUT", body: JSON.stringify(form) });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Помилка"); }
+      return r.json();
+    },
+    onSuccess: () => { toast({ title: "✅ Налаштування AI збережено" }); qc.invalidateQueries({ queryKey: ["ai-waiter-settings"] }); },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  const fv = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }));
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4">
+        <div className="flex gap-3">
+          <Bot className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-sm text-amber-800 space-y-1">
+            <p className="font-semibold">AI Офіціант — унікальна перевага Maison HD</p>
+            <p className="text-xs leading-snug">Гості спілкуються з AI через QR-меню, отримують рекомендації, AI додає страви до кошика. Налаштуйте особистість та промо-повідомлення нижче.</p>
+          </div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <Label>Ім'я офіціанта</Label>
+            <Input placeholder="AI Офіціант" value={form.waiter_name} onChange={e => fv("waiter_name", e.target.value)} className="mt-1" />
+            <p className="text-xs text-gray-500 mt-1">Буде показано гостям у чаті</p>
+          </div>
+
+          <div>
+            <Label>Характер / стиль спілкування</Label>
+            <Select value={form.personality} onValueChange={v => fv("personality", v)}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PERSONALITY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label>Мова за замовчуванням</Label>
+            <Select value={form.language_hint} onValueChange={v => fv("language_hint", v)}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {LANG_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label>Вітальне повідомлення (необов'язково)</Label>
+            <Textarea
+              rows={2}
+              placeholder="Привіт! Я — Макс, ваш AI-помічник у ресторані Dogoda. Готовий допомогти підібрати страви..."
+              value={form.greeting_text}
+              onChange={e => fv("greeting_text", e.target.value)}
+              className="mt-1"
+            />
+            <p className="text-xs text-gray-500 mt-1">Якщо порожньо — AI генерує привітання автоматично з урахуванням часу дня</p>
+          </div>
+
+          <div>
+            <Label>Промо-повідомлення (акція / спеціальна пропозиція)</Label>
+            <Textarea
+              rows={2}
+              placeholder="Сьогодні діє акція: бокал вина у подарунок при замовленні на суму від 800₴"
+              value={form.promo_text}
+              onChange={e => fv("promo_text", e.target.value)}
+              className="mt-1"
+            />
+            <p className="text-xs text-gray-500 mt-1">AI згадуватиме цю акцію доречно в розмові з гостем</p>
+          </div>
+
+          <div className="bg-stone-50 border border-stone-200 rounded-xl p-4">
+            <p className="text-xs font-semibold text-stone-700 mb-2">📱 Попередній перегляд чату</p>
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <div className="w-7 h-7 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-3.5 h-3.5 text-white" />
+                </div>
+                <div className="bg-stone-100 rounded-2xl rounded-tl-sm px-3 py-2 text-xs text-stone-700 max-w-[80%]">
+                  {form.greeting_text || `Вітаємо! Я — ${form.waiter_name || "AI Офіціант"}. Раді бачити вас! Чим можу допомогти?`}
+                </div>
+              </div>
+              {form.promo_text && (
+                <div className="flex gap-2">
+                  <div className="w-7 h-7 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Bot className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl rounded-tl-sm px-3 py-2 text-xs text-amber-800 max-w-[80%]">
+                    🎁 {form.promo_text}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Button
+            onClick={() => saveMut.mutate()}
+            disabled={saveMut.isPending}
+            className="w-full bg-amber-500 hover:bg-amber-600 text-white gap-2"
+          >
+            {saveMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Зберегти налаштування AI
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function PosSettingsPage() {
   return (
@@ -462,9 +613,13 @@ export default function PosSettingsPage() {
             <TabsTrigger value="discounts" className="gap-1.5">
               <Tag className="w-4 h-4" /> Акції та знижки
             </TabsTrigger>
+            <TabsTrigger value="ai-waiter" className="gap-1.5">
+              <Bot className="w-4 h-4" /> AI Офіціант
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="printers"><PrintersTab /></TabsContent>
           <TabsContent value="discounts"><DiscountsTab /></TabsContent>
+          <TabsContent value="ai-waiter"><AiWaiterTab /></TabsContent>
         </Tabs>
       </div>
     </AppLayout>

@@ -391,7 +391,7 @@ router.get("/table/:orgSlug/:tableId", async (req, res) => {
 // ─── POST /menu-order — place QR order from guest ────────────────────────────
 router.post("/menu-order", async (req, res) => {
   try {
-    const { orgSlug, tableId, guestName, guestCount, items, notes } = req.body;
+    const { orgSlug, tableId, guestName, guestCount, items, notes, guestPhone } = req.body;
     if (!orgSlug || !items?.length) return res.status(400).json({ error: "orgSlug та items обов'язкові" });
 
     const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
@@ -432,6 +432,31 @@ router.post("/menu-order", async (req, res) => {
 
     if (tableRecord) {
       await db.update(fbTablesTable).set({ status: "occupied", currentOrderId: order.id }).where(eq(fbTablesTable.id, tableRecord.id));
+    }
+
+    // Upsert fb_customers + append order_history if phone provided
+    if (guestPhone) {
+      try {
+        const db_ = (db as any).$client;
+        const historyEntry = {
+          order_id: order.id,
+          date: new Date().toISOString(),
+          items: items.map((i: any) => ({ name: i.name, qty: i.quantity || 1, price: i.price })),
+          total: totalAmount,
+        };
+        await db_.query(`
+          INSERT INTO fb_customers (organization_id, name, phone, visits_count, total_spent, last_visit_at, order_history)
+          VALUES ($1, $2, $3, 1, $4, NOW(), $5::jsonb)
+          ON CONFLICT (organization_id, phone) DO UPDATE SET
+            name           = COALESCE(EXCLUDED.name, fb_customers.name),
+            visits_count   = fb_customers.visits_count + 1,
+            total_spent    = fb_customers.total_spent + $4,
+            last_visit_at  = NOW(),
+            order_history  = (COALESCE(fb_customers.order_history, '[]'::jsonb) || $5::jsonb)
+        `, [orgId, guestName || null, guestPhone, totalAmount, JSON.stringify([historyEntry])]);
+      } catch (guestErr: any) {
+        console.warn("Guest upsert warn:", guestErr.message);
+      }
     }
 
     res.status(201).json({ orderId: order.id, orderNumber: order.id, total: totalAmount });
@@ -515,15 +540,57 @@ router.get("/rates", async (req, res) => {
   } catch (e: any) { console.error("GET PUBLIC RATES ERROR:", e.message); res.status(500).json({ error: e.message }); }
 });
 
+// ─── GET /ai-waiter/guest/:orgSlug/:phone — get guest session ─────────────────
+router.get("/ai-waiter/guest/:orgSlug/:phone", async (req, res) => {
+  try {
+    const { orgSlug, phone } = req.params;
+    const orgs = await db.select({ id: organizationsTable.id }).from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
+    if (!orgs.length) return res.status(404).json({ error: "Not found" });
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `SELECT name, phone, visits_count, total_spent, last_visit_at, order_history
+       FROM fb_customers WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
+      [orgs[0].id, phone]
+    );
+    if (!r.rows.length) return res.json({ guest: null });
+    res.json({ guest: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── POST /ai-waiter/chat — AI waiter for QR ordering ────────────────────────
 router.post("/ai-waiter/chat", async (req, res) => {
   try {
-    const { orgSlug, messages, cart } = req.body;
+    const { orgSlug, messages, cart, guestPhone } = req.body;
     if (!orgSlug || !Array.isArray(messages)) return res.status(400).json({ error: "orgSlug and messages required" });
 
     const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
     if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
     const orgId = orgs[0].id;
+
+    // Load AI waiter settings
+    const db_ = (db as any).$client;
+    const settingsRow = await db_.query(`SELECT * FROM fb_ai_waiter_settings WHERE org_id = $1`, [orgId]);
+    const settings = settingsRow.rows[0] || {};
+    const waiterName = settings.waiter_name || "AI Офіціант";
+    const personality = settings.personality || "friendly";
+    const promoText = settings.promo_text || "";
+    const greetingText = settings.greeting_text || "";
+
+    // Load guest history if phone provided
+    let guestCtx = "";
+    if (guestPhone) {
+      const guestRow = await db_.query(
+        `SELECT name, visits_count, total_spent, order_history FROM fb_customers WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
+        [orgId, guestPhone]
+      );
+      if (guestRow.rows.length) {
+        const g = guestRow.rows[0];
+        const lastOrders = (g.order_history || []).slice(-3).map((o: any) =>
+          `замовлення від ${new Date(o.date).toLocaleDateString("uk")}: ${o.items.map((i: any) => i.name).join(", ")} (${o.total}₴)`
+        ).join("; ");
+        guestCtx = `\nГОСТЬ: ${g.name || "постійний гість"}, ${g.visits_count || 1} візит(ів), витрат ${g.total_spent || 0}₴.${lastOrders ? ` Останні замовлення: ${lastOrders}.` : ""}`;
+      }
+    }
 
     // Fetch full menu
     const cats = await db.select().from(fbCategoriesTable)
@@ -585,17 +652,23 @@ router.post("/ai-waiter/chat", async (req, res) => {
     const h = new Date().getHours();
     const timeHint = h < 12 ? "ранок" : h < 17 ? "день" : h < 21 ? "вечір" : "ніч";
 
-    const systemPrompt = `Ти — AI-офіціант ресторану "${orgs[0].name}". Допомагаєш гостям через QR-меню. Час: ${timeHint}.
+    const personalityHint = personality === "formal" ? "Офіційний, ввічливий, стриманий." :
+      personality === "fun" ? "Енергійний, трохи грайливий, використовуй emoji помірно." :
+      "Теплий, лаконічний, компетентний.";
 
-ХАРАКТЕР: Теплий, лаконічний, компетентний. Відповідай КОРОТКО (1-3 речення). Жодних списків з усіма стравами без потреби.
+    const systemPrompt = `Ти — ${waiterName}, AI-офіціант ресторану "${orgs[0].name}". Допомагаєш гостям через QR-меню. Час: ${timeHint}.
 
-МОВА: Автоматично відповідай мовою гостя (укр/англ/польськ/рос тощо).
+ХАРАКТЕР: ${personalityHint} Відповідай КОРОТКО (1-3 речення). Жодних списків з усіма стравами без потреби.
+
+МОВА: Автоматично відповідай мовою гостя (укр/англ/польськ/рос тощо).${guestCtx}
+${promoText ? `\nАКЦІЯ: ${promoText}` : ""}
 
 ПОВЕДІНКА:
 • Рекомендуй 1 доповнення за раз — не будь нав'язливим
 • add_to_cart — ТІЛЬКИ якщо гість явно просить або підтверджує ("так", "ок", "додай", "беру")
 • Після додавання: "✅ [Назва] — у вашому замовленні!"
 • Якщо гість каже "все" або "готово" → перевір кошик: є напій? хліб? десерт?
+• Якщо гість — постійний (є дані ГІСТЬ) → привітай його по імені тепло, можна нагадати що він замовляв раніше
 • Знаєш алергени з меню, але ЗАВЖДИ додавай: "⚠️ Уточніть у персоналу — сліди алергенів можливі"
 • Ніколи не вигадуй страви яких немає в меню
 
@@ -613,7 +686,7 @@ ${cartCtx}
 МЕНЮ (формат: [ID] Назва — Ціна | опис | теги | алергени | склад):
 ${menuCtx}
 
-СПЕЦ: Якщо перше повідомлення "__greet__" → це початок сесії. Привітайся (1 речення), враховуй ${timeHint} та кошик. Запитай чим допомогти.`;
+СПЕЦ: Якщо перше повідомлення "__greet__" → це початок сесії. ${greetingText || `Привітайся (1 речення), враховуй ${timeHint} та кошик.`} Запитай чим допомогти.`;
 
     const tools: any[] = [
       {

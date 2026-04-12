@@ -14,7 +14,7 @@ const fmtMoney = (n: any) => parseFloat(n || 0).toLocaleString("uk-UA") + " ₴"
 type Item = {
   id: number; name: string; description?: string; price: string;
   cookMinutes?: number; isVegetarian?: boolean; isPopular?: boolean;
-  allergens?: string[]; tags?: string[];
+  allergens?: string[]; tags?: string[]; image_url?: string;
 };
 
 type Category = { id: number; name: string; emoji: string; items: Item[] };
@@ -27,6 +27,7 @@ const QUICK_REPLIES = [
   { label: "🌿 Вегетаріанське", text: "Які у вас вегетаріанські страви?" },
   { label: "🍷 Рекомендуй вино", text: "Порадь вино до мого замовлення" },
   { label: "⚠️ Є алергія", text: "У мене алергія на горіхи. Що можна замовити?" },
+  { label: "🛒 Перевір кошик", text: "Перевір мій кошик — чого не вистачає?" },
 ];
 
 export default function QrMenuPage() {
@@ -48,14 +49,28 @@ export default function QrMenuPage() {
   const [orderId, setOrderId] = useState<number | null>(null);
   const [tipPct, setTipPct] = useState(0);
 
+  // ── Guest phone state ──────────────────────────────────────────────────────
+  const [guestPhone, setGuestPhone] = useState<string>(() => {
+    try { return localStorage.getItem(`qr_phone_${orgSlug}`) || ""; } catch { return ""; }
+  });
+  const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [phoneInput, setPhoneInput] = useState("");
+  const [pendingMsg, setPendingMsg] = useState<string | null>(null);
+  const [guestGreeting, setGuestGreeting] = useState<string | null>(null);
+
   // ── AI Chat state ──────────────────────────────────────────────────────────
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>(() => {
+    try {
+      const saved = sessionStorage.getItem(`qr_chat_${orgSlug}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatHint, setChatHint] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
-  const [userHasSentMsg, setUserHasSentMsg] = useState(false);
+  const [userHasSentMsg, setUserHasSentMsg] = useState(chatMessages.some(m => m.role === "user"));
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -80,6 +95,22 @@ export default function QrMenuPage() {
     };
     load();
   }, [orgSlug, tableId]);
+
+  // ── Persist chat messages in sessionStorage ────────────────────────────────
+  useEffect(() => {
+    try { sessionStorage.setItem(`qr_chat_${orgSlug}`, JSON.stringify(chatMessages)); } catch {}
+  }, [chatMessages, orgSlug]);
+
+  // ── Load guest info if phone known ─────────────────────────────────────────
+  useEffect(() => {
+    if (!guestPhone) return;
+    fetch(`${API_BASE}/ai-waiter/guest/${orgSlug}/${encodeURIComponent(guestPhone)}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.guest?.name) setGuestGreeting(d.guest.name);
+      })
+      .catch(() => {});
+  }, [guestPhone, orgSlug]);
 
   // ── Proactive chat hint when first item added ──────────────────────────────
   useEffect(() => {
@@ -137,7 +168,7 @@ export default function QrMenuPage() {
     }
   }, [addToCartById, removeFromCartById]);
 
-  const sendToAI = useCallback(async (msgs: ChatMsg[], showUserMsg: boolean = true) => {
+  const sendToAI = useCallback(async (msgs: ChatMsg[], _showUserMsg: boolean = true) => {
     setChatLoading(true);
     try {
       const r = await fetch(`${API_BASE}/ai-waiter/chat`, {
@@ -147,6 +178,7 @@ export default function QrMenuPage() {
           orgSlug,
           messages: msgs.map(m => ({ role: m.role, content: m.content })),
           cart: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
+          guestPhone: guestPhone || undefined,
         }),
       });
       const data = await r.json();
@@ -158,11 +190,18 @@ export default function QrMenuPage() {
       setChatMessages(prev => [...prev, { role: "assistant", content: "Вибачте, не вдалося підключитися. Спробуйте ще раз 🙏" }]);
     }
     setChatLoading(false);
-  }, [orgSlug, cart, applyActions]);
+  }, [orgSlug, cart, applyActions, guestPhone]);
 
   const sendMessage = async (textOverride?: string) => {
     const text = (textOverride || chatInput).trim();
     if (!text || chatLoading) return;
+    // On first user message, if no phone stored yet — show phone capture modal
+    if (!userHasSentMsg && !guestPhone) {
+      setPendingMsg(text);
+      setShowPhoneModal(true);
+      setChatInput("");
+      return;
+    }
     setUserHasSentMsg(true);
     const userMsg: ChatMsg = { role: "user", content: text };
     const newMsgs = [...chatMessages, userMsg];
@@ -171,13 +210,30 @@ export default function QrMenuPage() {
     await sendToAI(newMsgs);
   };
 
+  const submitPhone = async () => {
+    const ph = phoneInput.trim();
+    if (ph) {
+      try { localStorage.setItem(`qr_phone_${orgSlug}`, ph); } catch {}
+      setGuestPhone(ph);
+    }
+    setShowPhoneModal(false);
+    setPhoneInput("");
+    const text = pendingMsg;
+    setPendingMsg(null);
+    if (text) {
+      setUserHasSentMsg(true);
+      const userMsg: ChatMsg = { role: "user", content: text };
+      const newMsgs = [...chatMessages, userMsg];
+      setChatMessages(newMsgs);
+      await sendToAI(newMsgs);
+    }
+  };
+
   const openChat = async () => {
     setChatOpen(true);
     setChatHint(false);
     setTimeout(() => chatInputRef.current?.focus(), 300);
     if (chatMessages.length === 0) {
-      // Trigger greeting via hidden system message
-      const greetMsg: ChatMsg = { role: "user", content: "__greet__" };
       setChatLoading(true);
       try {
         const r = await fetch(`${API_BASE}/ai-waiter/chat`, {
@@ -187,15 +243,18 @@ export default function QrMenuPage() {
             orgSlug,
             messages: [{ role: "user", content: "__greet__" }],
             cart: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
+            guestPhone: guestPhone || undefined,
           }),
         });
         const data = await r.json();
         if (data.reply) setChatMessages([{ role: "assistant", content: data.reply }]);
       } catch {
-        setChatMessages([{ role: "assistant", content: "Вітаємо! Я AI-офіціант, радий допомогти вам обрати страви. Що вас цікавить? 😊" }]);
+        const defaultGreet = guestGreeting
+          ? `З поверненням, ${guestGreeting}! 👋 Раді бачити вас знову. Чим можу допомогти?`
+          : "Вітаємо! Я AI-офіціант, радий допомогти вам обрати страви. Що вас цікавить? 😊";
+        setChatMessages([{ role: "assistant", content: defaultGreet }]);
       }
       setChatLoading(false);
-      void greetMsg; // used for type check
     }
   };
 
@@ -254,12 +313,13 @@ export default function QrMenuPage() {
         body: JSON.stringify({
           orgSlug,
           tableId: tableId ? parseInt(tableId) : undefined,
-          guestName: guestName || "Гість",
+          guestName: guestName || (guestGreeting ? guestGreeting : "Гість"),
           guestCount: 1,
           notes: orderNotes || null,
           tipPct: tipPct || null,
           tipAmount: tipAmount > 0 ? tipAmount : null,
           items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity, notes: c.notes })),
+          guestPhone: guestPhone || undefined,
         }),
       });
       const d = await r.json();
@@ -268,6 +328,28 @@ export default function QrMenuPage() {
         setSubmitted(true);
         setCart([]);
         setShowCart(false);
+        // Post-order AI message in chat
+        try {
+          const postMsg = "Моє замовлення щойно оформлено!";
+          const aiR = await fetch(`${API_BASE}/ai-waiter/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              orgSlug,
+              messages: [...chatMessages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: postMsg }],
+              cart: [],
+              guestPhone: guestPhone || undefined,
+            }),
+          });
+          const aiD = await aiR.json();
+          if (aiD.reply) {
+            setChatMessages(prev => [
+              ...prev,
+              { role: "user", content: postMsg },
+              { role: "assistant", content: aiD.reply },
+            ]);
+          }
+        } catch {}
       } else {
         alert(d.error || "Помилка при оформленні замовлення");
       }
@@ -382,7 +464,14 @@ export default function QrMenuPage() {
               {cat.items.map(item => {
                 const qty = cartQty(item.id);
                 return (
-                  <div key={item.id} className={`bg-white rounded-2xl p-4 border transition-all ${qty > 0 ? "border-amber-300 shadow-sm" : "border-stone-100"}`}>
+                  <div key={item.id} className={`bg-white rounded-2xl border transition-all overflow-hidden ${qty > 0 ? "border-amber-300 shadow-sm" : "border-stone-100"}`}>
+                    {/* Item image — full width banner if present */}
+                    {item.image_url && (
+                      <div className="w-full h-36 bg-stone-100 overflow-hidden">
+                        <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                      </div>
+                    )}
+                    <div className="p-4">
                     <div className="flex gap-3">
                       <div className="flex-1">
                         <div className="flex items-start gap-2 mb-1">
@@ -422,6 +511,7 @@ export default function QrMenuPage() {
                           </div>
                         )}
                       </div>
+                    </div>
                     </div>
                   </div>
                 );
@@ -539,6 +629,43 @@ export default function QrMenuPage() {
                 {submitting ? "Оформлення..." : "Замовити"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Phone Capture Modal ─────────────────────────────────────────────── */}
+      {showPhoneModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => { setShowPhoneModal(false); setPendingMsg(null); }} />
+          <div className="relative bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="text-center mb-4">
+              <div className="w-14 h-14 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <Bot className="w-7 h-7 text-white" />
+              </div>
+              <h2 className="font-bold text-stone-900 text-lg">AI-офіціант запам'ятає вас</h2>
+              <p className="text-stone-500 text-sm mt-1">Введіть номер телефону, щоб AI знав ваші смаки та вітав вас по-особливому при наступному візиті.</p>
+            </div>
+            <input
+              type="tel"
+              value={phoneInput}
+              onChange={e => setPhoneInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") submitPhone(); }}
+              placeholder="+380 XX XXX XX XX"
+              autoFocus
+              className="w-full border-2 border-stone-200 focus:border-amber-400 rounded-2xl px-4 py-3 text-center text-lg font-medium outline-none mb-3"
+            />
+            <button
+              onClick={submitPhone}
+              className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3.5 rounded-2xl font-bold text-sm mb-2"
+            >
+              Продовжити
+            </button>
+            <button
+              onClick={() => { setShowPhoneModal(false); setPendingMsg(null); }}
+              className="w-full text-stone-400 text-sm py-1"
+            >
+              Пропустити
+            </button>
           </div>
         </div>
       )}
