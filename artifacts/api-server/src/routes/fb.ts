@@ -815,4 +815,228 @@ router.delete("/printers/:id", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// DISCOUNTS — Акції та знижки
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function ensureDiscountsTable(db_: any) {
+  await db_.query(`
+    CREATE TABLE IF NOT EXISTS fb_discounts (
+      id                     SERIAL PRIMARY KEY,
+      organization_id        INT NOT NULL,
+      name                   TEXT NOT NULL,
+      type                   TEXT NOT NULL DEFAULT 'percent',
+      value                  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      min_order_amount       NUMERIC(10,2) DEFAULT 0,
+      requires_manager       BOOLEAN DEFAULT false,
+      is_active              BOOLEAN DEFAULT true,
+      description            TEXT,
+      created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+router.get("/discounts", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    await ensureDiscountsTable(db_);
+    const r = await db_.query(
+      `SELECT * FROM fb_discounts WHERE organization_id = $1 AND is_active = true ORDER BY name`,
+      [orgId]
+    );
+    res.json({ discounts: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/discounts/all", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    await ensureDiscountsTable(db_);
+    const r = await db_.query(
+      `SELECT * FROM fb_discounts WHERE organization_id = $1 ORDER BY is_active DESC, name`,
+      [orgId]
+    );
+    res.json({ discounts: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/discounts", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    await ensureDiscountsTable(db_);
+    const { name, type = "percent", value = 0, min_order_amount = 0, requires_manager = false, description } = req.body;
+    if (!name) return res.status(400).json({ error: "Назва обов'язкова" });
+    if (!["percent", "fixed", "compliment"].includes(type)) return res.status(400).json({ error: "Невірний тип знижки" });
+    const r = await db_.query(
+      `INSERT INTO fb_discounts (organization_id, name, type, value, min_order_amount, requires_manager, description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [orgId, name, type, value, min_order_amount, requires_manager, description || null]
+    );
+    res.status(201).json({ discount: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/discounts/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const db_ = (db as any).$client;
+    const { name, type, value, min_order_amount, requires_manager, description, is_active } = req.body;
+    const r = await db_.query(
+      `UPDATE fb_discounts SET
+        name             = COALESCE($1, name),
+        type             = COALESCE($2, type),
+        value            = COALESCE($3, value),
+        min_order_amount = COALESCE($4, min_order_amount),
+        requires_manager = COALESCE($5, requires_manager),
+        description      = COALESCE($6, description),
+        is_active        = COALESCE($7, is_active)
+       WHERE id = $8 AND organization_id = $9 RETURNING *`,
+      [name||null, type||null, value??null, min_order_amount??null, requires_manager??null, description??null, is_active??null, id, orgId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Не знайдено" });
+    res.json({ discount: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/discounts/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const db_ = (db as any).$client;
+    await db_.query(`UPDATE fb_discounts SET is_active = false WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUSTOMERS — Клієнти / CRM
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function ensureCustomersTable(db_: any) {
+  await db_.query(`
+    CREATE TABLE IF NOT EXISTS fb_customers (
+      id              SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL,
+      name            TEXT NOT NULL,
+      phone           TEXT,
+      email           TEXT,
+      birthday        DATE,
+      notes           TEXT,
+      visits_count    INT NOT NULL DEFAULT 0,
+      total_spent     NUMERIC(12,2) NOT NULL DEFAULT 0,
+      last_visit_at   TIMESTAMPTZ,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db_.query(`CREATE INDEX IF NOT EXISTS idx_fb_customers_org ON fb_customers(organization_id)`);
+  await db_.query(`CREATE INDEX IF NOT EXISTS idx_fb_customers_phone ON fb_customers(phone)`);
+  await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS customer_id INT REFERENCES fb_customers(id) ON DELETE SET NULL`);
+  await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS discount_label TEXT`);
+}
+
+router.get("/customers", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    await ensureCustomersTable(db_);
+    const search = (req.query.search as string) || "";
+    const limit = Math.min(100, parseInt(String(req.query.limit || "50")));
+    const r = await db_.query(
+      `SELECT * FROM fb_customers
+       WHERE organization_id = $1
+         AND ($2 = '' OR name ILIKE $3 OR phone ILIKE $3)
+       ORDER BY last_visit_at DESC NULLS LAST, name
+       LIMIT $4`,
+      [orgId, search, `%${search}%`, limit]
+    );
+    res.json({ customers: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/customers/search", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    await ensureCustomersTable(db_);
+    const q = (req.query.q as string) || "";
+    const r = await db_.query(
+      `SELECT id, name, phone, visits_count, total_spent FROM fb_customers
+       WHERE organization_id = $1 AND (name ILIKE $2 OR phone ILIKE $2)
+       ORDER BY visits_count DESC LIMIT 10`,
+      [orgId, `%${q}%`]
+    );
+    res.json({ customers: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/customers/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const db_ = (db as any).$client;
+    await ensureCustomersTable(db_);
+    const cr = await db_.query(`SELECT * FROM fb_customers WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    if (!cr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    const or = await db_.query(
+      `SELECT id, created_at, total_amount, discount_amount, tip_amount, payment_method, status, order_type, receipt_number
+       FROM fb_orders WHERE customer_id = $1 AND organization_id = $2
+       ORDER BY created_at DESC LIMIT 20`,
+      [id, orgId]
+    );
+    res.json({ customer: cr.rows[0], orders: or.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/customers", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    await ensureCustomersTable(db_);
+    const { name, phone, email, birthday, notes } = req.body;
+    if (!name) return res.status(400).json({ error: "Ім'я обов'язкове" });
+    const r = await db_.query(
+      `INSERT INTO fb_customers (organization_id, name, phone, email, birthday, notes)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [orgId, name, phone || null, email || null, birthday || null, notes || null]
+    );
+    res.status(201).json({ customer: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/customers/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const db_ = (db as any).$client;
+    const { name, phone, email, birthday, notes } = req.body;
+    const r = await db_.query(
+      `UPDATE fb_customers SET
+        name     = COALESCE($1, name),
+        phone    = COALESCE($2, phone),
+        email    = COALESCE($3, email),
+        birthday = COALESCE($4, birthday),
+        notes    = COALESCE($5, notes)
+       WHERE id = $6 AND organization_id = $7 RETURNING *`,
+      [name||null, phone||null, email||null, birthday||null, notes||null, id, orgId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Не знайдено" });
+    res.json({ customer: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/customers/:id", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = parseInt(req.params.id);
+    const db_ = (db as any).$client;
+    await db_.query(`DELETE FROM fb_customers WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
+

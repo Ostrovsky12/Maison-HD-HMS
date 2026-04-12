@@ -89,6 +89,7 @@ const NAV: NavSection[] = [
       { name: "F&B Костинг",     path: "/fb-costing",    icon: ChefHat,         roles: null,                                       moduleKey: "fb_analytics" },
       { name: "QR-замовлення",   path: "/qr-ordering",   icon: QrCode,          roles: null },
       { name: "Мінібар",         path: "/minibar",       icon: Wine,            roles: null },
+      { name: "F&B CRM Клієнти", path: "/fb-customers",  icon: Users,           roles: null,                                       moduleKey: "fb_pos" },
       { name: "POS Налаштування",path: "/pos-settings",  icon: Printer,         roles: ["super_admin", "owner", "manager"] },
     ],
   },
