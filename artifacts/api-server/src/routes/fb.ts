@@ -179,22 +179,23 @@ router.get("/items", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const { categoryId, available } = req.query;
-    let conditions: any[] = [eq(fbItemsTable.organizationId, orgId)];
-    if (categoryId) conditions.push(eq(fbItemsTable.categoryId, parseInt(categoryId as string)));
-    if (available === "true") conditions.push(eq(fbItemsTable.isAvailable, true));
-
-    const items = await db.select({
-      id: fbItemsTable.id, name: fbItemsTable.name, description: fbItemsTable.description,
-      price: fbItemsTable.price, cookMinutes: fbItemsTable.cookMinutes, categoryId: fbItemsTable.categoryId,
-      isAvailable: fbItemsTable.isAvailable, isPopular: fbItemsTable.isPopular, isVegetarian: fbItemsTable.isVegetarian,
-      allergens: fbItemsTable.allergens, tags: fbItemsTable.tags, sortOrder: fbItemsTable.sortOrder,
-      categoryName: fbCategoriesTable.name, categoryEmoji: fbCategoriesTable.emoji,
-    })
-      .from(fbItemsTable)
-      .leftJoin(fbCategoriesTable, eq(fbItemsTable.categoryId, fbCategoriesTable.id))
-      .where(and(...conditions))
-      .orderBy(asc(fbCategoriesTable.sortOrder), asc(fbItemsTable.sortOrder));
-    res.json({ items });
+    const db_ = (db as any).$client;
+    const conditions: string[] = [`fi.organization_id = $1`];
+    const params: any[] = [orgId];
+    if (categoryId) { params.push(parseInt(categoryId as string)); conditions.push(`fi.category_id = $${params.length}`); }
+    if (available === "true") conditions.push(`fi.is_available = true`);
+    const r = await db_.query(
+      `SELECT fi.*, fc.name AS "categoryName", fc.emoji AS "categoryEmoji",
+              fi.ingredient_id,
+              ing.name AS ingredient_name, ing.unit AS ingredient_unit
+       FROM fb_items fi
+       LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+       LEFT JOIN fb_ingredients ing ON ing.id = fi.ingredient_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY fc.sort_order ASC NULLS LAST, fi.sort_order ASC`,
+      params
+    );
+    res.json({ items: r.rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -204,19 +205,19 @@ router.post("/items", requireAuth, async (req: any, res) => {
     const { name, description, price, categoryId, cookMinutes, isAvailable = true, isPopular = false, isVegetarian = false,
       allergens, tags, sortOrder = 0, imageUrl,
       vat_rate = 20, is_alcohol = false, alcohol_volume_pct, uktzed_code, excise_code,
-      station = "kitchen_general", legal_entity_id,
+      station = "kitchen_general", legal_entity_id, ingredient_id,
     } = req.body;
     const db_ = (db as any).$client;
     const r = await db_.query(
       `INSERT INTO fb_items (organization_id, name, description, price, category_id, cook_minutes,
-         is_available, is_popular, is_vegetarian, allergens, tags, sort_order, image_url,
+         is_available, is_popular, is_vegetarian, allergens, tags, sort_order,
          vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
-         station, legal_entity_id)
+         station, legal_entity_id, ingredient_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
       [orgId, name, description||null, price, categoryId||null, cookMinutes||15,
-       isAvailable, isPopular, isVegetarian, allergens||null, tags||null, sortOrder, imageUrl||null,
+       isAvailable, isPopular, isVegetarian, allergens||null, tags||null, sortOrder,
        vat_rate||20, is_alcohol||false, alcohol_volume_pct||null, uktzed_code||null, excise_code||null,
-       station||"kitchen_general", legal_entity_id||null]
+       station||"kitchen_general", legal_entity_id||null, ingredient_id||null]
     );
     res.json({ item: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -229,9 +230,13 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
     const { name, description, price, categoryId, cookMinutes, isAvailable, isPopular, isVegetarian,
       allergens, tags, sortOrder, imageUrl,
       vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
-      station, legal_entity_id,
+      station, legal_entity_id, ingredient_id,
     } = req.body;
     const db_ = (db as any).$client;
+    // ingredient_id can be explicitly null to clear the link
+    const ingredientIdVal = req.body.hasOwnProperty("ingredient_id")
+      ? (ingredient_id ?? null)
+      : undefined;
     const r = await db_.query(
       `UPDATE fb_items SET
          name               = COALESCE($1, name),
@@ -243,21 +248,23 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
          is_popular         = COALESCE($7, is_popular),
          is_vegetarian      = COALESCE($8, is_vegetarian),
          sort_order         = COALESCE($9, sort_order),
-         image_url          = COALESCE($10, image_url),
-         vat_rate           = COALESCE($11, vat_rate),
-         is_alcohol         = COALESCE($12, is_alcohol),
-         alcohol_volume_pct = COALESCE($13, alcohol_volume_pct),
-         uktzed_code        = COALESCE($14, uktzed_code),
-         excise_code        = COALESCE($15, excise_code),
-         station            = COALESCE($16, station),
-         legal_entity_id    = COALESCE($17, legal_entity_id),
+         vat_rate           = COALESCE($10, vat_rate),
+         is_alcohol         = COALESCE($11, is_alcohol),
+         alcohol_volume_pct = COALESCE($12, alcohol_volume_pct),
+         uktzed_code        = COALESCE($13, uktzed_code),
+         excise_code        = COALESCE($14, excise_code),
+         station            = COALESCE($15, station),
+         legal_entity_id    = COALESCE($16, legal_entity_id),
+         ingredient_id      = CASE WHEN $20::boolean THEN $17::int ELSE ingredient_id END,
          updated_at         = NOW()
        WHERE id = $18 AND organization_id = $19 RETURNING *`,
       [name||null, description||null, price??null, categoryId||null, cookMinutes??null,
-       isAvailable??null, isPopular??null, isVegetarian??null, sortOrder??null, imageUrl||null,
+       isAvailable??null, isPopular??null, isVegetarian??null, sortOrder??null,
        vat_rate??null, is_alcohol??null, alcohol_volume_pct??null, uktzed_code||null, excise_code||null,
        station||null, legal_entity_id||null,
-       id, orgId]
+       ingredientIdVal ?? null,
+       id, orgId,
+       ingredientIdVal !== undefined]
     );
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
     res.json({ item: r.rows[0] });
@@ -755,43 +762,67 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
         // 2. Для кожної позиції знаходимо тех. картку
         const deductions: Array<{
           ingredientId: number; quantity: number; unit: string;
-          costPerUnit: number; menuItemName: string;
+          costPerUnit: number; menuItemName: string; deductionType?: string;
         }> = [];
 
         for (const oi of orderItems) {
-          // Знаходимо активну тех. картку для цього пункту меню
+          // ── Шлях 1: Тех. картка (страви/напої зі складними рецептами) ──────
           const rcRow = await db_.query(
             `SELECT id, yield_quantity FROM fb_recipe_cards
              WHERE menu_item_id = $1 AND organization_id = $2 AND is_active = true
              LIMIT 1`,
             [oi.item_id, orgId]
           );
-          if (!rcRow.rows.length) continue;
-          const recipe = rcRow.rows[0];
 
-          // Yield = кількість порцій з 1 замовлення (зазвичай 1)
-          const yieldQty = Number(recipe.yield_quantity) || 1;
+          if (rcRow.rows.length) {
+            // Тех. картка знайдена — списуємо інгредієнти по рецепту
+            const recipe = rcRow.rows[0];
+            const yieldQty = Number(recipe.yield_quantity) || 1;
 
-          // Отримуємо інгредієнти тех. картки (net_quantity = фактичне споживання)
-          const rciRow = await db_.query(
-            `SELECT rci.ingredient_id, rci.net_quantity, rci.unit,
-                    i.cost_per_unit, i.name AS ingredient_name
-             FROM fb_recipe_card_items rci
-             JOIN fb_ingredients i ON i.id = rci.ingredient_id
-             WHERE rci.recipe_id = $1`,
-            [recipe.id]
-          );
+            const rciRow = await db_.query(
+              `SELECT rci.ingredient_id, rci.net_quantity, rci.unit,
+                      i.cost_per_unit, i.name AS ingredient_name
+               FROM fb_recipe_card_items rci
+               JOIN fb_ingredients i ON i.id = rci.ingredient_id
+               WHERE rci.recipe_id = $1`,
+              [recipe.id]
+            );
 
-          for (const rci of rciRow.rows) {
-            const deductQty = (Number(rci.net_quantity) / yieldQty) * Number(oi.quantity);
-            if (deductQty <= 0) continue;
-            deductions.push({
-              ingredientId: rci.ingredient_id,
-              quantity: deductQty,
-              unit: rci.unit,
-              costPerUnit: Number(rci.cost_per_unit) || 0,
-              menuItemName: oi.name,
-            });
+            for (const rci of rciRow.rows) {
+              const deductQty = (Number(rci.net_quantity) / yieldQty) * Number(oi.quantity);
+              if (deductQty <= 0) continue;
+              deductions.push({
+                ingredientId: rci.ingredient_id,
+                quantity: deductQty,
+                unit: rci.unit,
+                costPerUnit: Number(rci.cost_per_unit) || 0,
+                menuItemName: oi.name,
+                deductionType: "recipe",
+              });
+            }
+          } else if (oi.item_id) {
+            // ── Шлях 2: Штучний товар (пряма прив'язка до інгредієнту) ────────
+            // Перевіряємо чи є ingredient_id на самому пункті меню
+            const itemRow = await db_.query(
+              `SELECT fi.ingredient_id, ing.unit, ing.cost_per_unit, ing.name AS ingredient_name
+               FROM fb_items fi
+               JOIN fb_ingredients ing ON ing.id = fi.ingredient_id
+               WHERE fi.id = $1 AND fi.organization_id = $2 AND fi.ingredient_id IS NOT NULL`,
+              [oi.item_id, orgId]
+            );
+            if (itemRow.rows.length) {
+              const itm = itemRow.rows[0];
+              // 1 продаж = 1 одиниця зі складу × кількість
+              deductions.push({
+                ingredientId: itm.ingredient_id,
+                quantity: Number(oi.quantity),
+                unit: itm.unit,
+                costPerUnit: Number(itm.cost_per_unit) || 0,
+                menuItemName: oi.name,
+                deductionType: "direct",
+              });
+            }
+            // Якщо жодного зв'язку — просто пропускаємо (послуга, страва без картки)
           }
         }
 

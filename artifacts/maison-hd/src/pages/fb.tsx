@@ -89,6 +89,7 @@ export default function FbPage() {
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [legalEntities, setLegalEntities] = useState<any[]>([]);
+  const [fbIngredients, setFbIngredients] = useState<any[]>([]);
   const [kitchenOrders, setKitchenOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [orderDetail, setOrderDetail] = useState<any>(null);
@@ -141,6 +142,11 @@ export default function FbPage() {
     const r = await fetch(`${apiBase}/legal-entities`, { headers: { Authorization: `Bearer ${token()}` } });
     if (r.ok) { const d = await r.json(); setLegalEntities(d.legalEntities || []); }
   };
+  const loadFbIngredients = async () => {
+    const whBase = API.replace("/fb", "/fb/warehouse");
+    const r = await fetch(`${whBase}/ingredients`, { headers: { Authorization: `Bearer ${token()}` } });
+    if (r.ok) { const d = await r.json(); setFbIngredients((d.ingredients || []).filter((i: any) => i.is_active !== false)); }
+  };
   const loadOrderDetail = async (id: number) => { const r = await apiFetch(`/orders/${id}`); if (r.ok) { const d = await r.json(); setOrderDetail(d); } };
   const loadKitchen = useCallback(async () => {
     setKitchenLoading(true);
@@ -149,7 +155,7 @@ export default function FbPage() {
     setKitchenLoading(false);
   }, []);
 
-  useEffect(() => { loadStats(); loadTables(); loadCategories(); loadItems(); loadLegalEntities(); }, []);
+  useEffect(() => { loadStats(); loadTables(); loadCategories(); loadItems(); loadLegalEntities(); loadFbIngredients(); }, []);
   useEffect(() => { if (tab === "orders") loadOrders(); }, [tab, statusFilter, typeFilter]);
   useEffect(() => {
     if (tab === "kitchen") {
@@ -668,6 +674,7 @@ export default function FbPage() {
                           <span className="font-medium text-sm">{it.name}</span>
                           {it.isPopular && <Star className="h-3 w-3 text-yellow-400 fill-yellow-400" />}
                           {it.isVegetarian && <span className="text-xs">🌿</span>}
+                          {it.ingredient_id && <span className="text-xs" title={`Склад: ${it.ingredient_name || "прив'язано"}`}>📦</span>}
                           {!it.isAvailable && <Badge variant="outline" className="text-xs text-gray-400">Немає</Badge>}
                         </div>
                         {it.description && <p className="text-xs text-gray-500 truncate">{it.description}</p>}
@@ -716,7 +723,7 @@ export default function FbPage() {
           }
         }} />
 
-      <NewMenuItemDialog open={showNewItem} categories={categories} legalEntities={legalEntities} onClose={() => setShowNewItem(false)}
+      <NewMenuItemDialog open={showNewItem} categories={categories} legalEntities={legalEntities} ingredients={fbIngredients} onClose={() => setShowNewItem(false)}
         onSave={async (data: any) => {
           const r = await apiFetch("/items", { method: "POST", body: JSON.stringify(data) });
           if (r.ok) { toast({ title: "Страву додано" }); setShowNewItem(false); loadItems(); }
@@ -750,7 +757,7 @@ export default function FbPage() {
 
       {/* Edit menu item dialog */}
       {editingItem && (
-        <EditMenuItemDialog open={showEditItem} item={editingItem} categories={categories} legalEntities={legalEntities}
+        <EditMenuItemDialog open={showEditItem} item={editingItem} categories={categories} legalEntities={legalEntities} ingredients={fbIngredients}
           onClose={() => { setShowEditItem(false); setEditingItem(null); }}
           onSave={async (data: any) => {
             const r = await apiFetch(`/items/${editingItem.id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -932,7 +939,7 @@ const STATION_OPTIONS = [
   { value: "bar",                  label: "🍸 Бар" },
 ];
 
-function MenuItemForm({ form, setForm, categories, legalEntities = [] }: any) {
+function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredients = [] }: any) {
   const [classifying, setClassifying] = useState(false);
   const { toast } = useToast();
 
@@ -1010,6 +1017,34 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [] }: any) {
         </div>
       </div>
 
+      {/* Stock deduction: пряме списання штучного товару */}
+      <div className="border rounded-lg p-3 space-y-1.5 bg-green-50/60">
+        <div className="flex items-center gap-2 text-sm font-medium text-green-800">
+          <span>📦</span> Списання зі складу (штучний товар)
+        </div>
+        <p className="text-xs text-green-700 leading-snug">
+          Якщо ця позиція є готовим товаром (Кока-кола, вода, пиво тощо) — оберіть інгредієнт на складі.
+          При продажу буде автоматично списано 1 одиницю × кількість замовлення.
+          Якщо страва має тех. картку — це поле не потрібне.
+        </p>
+        <Select
+          value={form.ingredient_id ? String(form.ingredient_id) : "none"}
+          onValueChange={v => setForm((f: any) => ({ ...f, ingredient_id: v === "none" ? null : parseInt(v) }))}
+        >
+          <SelectTrigger className="bg-white">
+            <SelectValue placeholder="— Не прив'язано (є тех. картка або послуга)" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">— Не прив'язано</SelectItem>
+            {ingredients.map((ing: any) => (
+              <SelectItem key={ing.id} value={String(ing.id)}>
+                {ing.name} ({ing.current_stock} {ing.unit})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Alcohol section */}
       <div className="border rounded-lg p-3 space-y-2 bg-amber-50/60">
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
@@ -1045,9 +1080,9 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [] }: any) {
   );
 }
 
-const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "", station: "kitchen_general", legal_entity_id: null };
+const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "", station: "kitchen_general", legal_entity_id: null, ingredient_id: null };
 
-function NewMenuItemDialog({ open, onClose, categories, legalEntities, onSave }: any) {
+function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredients, onSave }: any) {
   const [form, setForm] = useState<any>(EMPTY_ITEM_FORM);
   const [loading, setLoading] = useState(false);
   const handleSubmit = async () => {
@@ -1059,6 +1094,7 @@ function NewMenuItemDialog({ open, onClose, categories, legalEntities, onSave }:
       cookMinutes: parseInt(String(form.cookMinutes)) || 15,
       vat_rate: parseInt(form.vat_rate) || 20,
       alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
+      ingredient_id: form.ingredient_id ?? null,
     });
     setLoading(false);
     setForm(EMPTY_ITEM_FORM);
@@ -1067,7 +1103,7 @@ function NewMenuItemDialog({ open, onClose, categories, legalEntities, onSave }:
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Нова страва / позиція меню</DialogTitle></DialogHeader>
-        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} />
+        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} ingredients={ingredients} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
           <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Додати"}</Button>
@@ -1078,7 +1114,7 @@ function NewMenuItemDialog({ open, onClose, categories, legalEntities, onSave }:
 }
 
 // ── Edit menu item dialog ─────────────────────────────────────────────────────
-function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, onSave }: any) {
+function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, ingredients, onSave }: any) {
   const [form, setForm] = useState<any>({});
   const [loading, setLoading] = useState(false);
 
@@ -1098,6 +1134,7 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, on
       excise_code: item.excise_code || "",
       station: item.station || "kitchen_general",
       legal_entity_id: item.legal_entity_id || null,
+      ingredient_id: item.ingredient_id ?? null,
     });
   }, [item]);
 
@@ -1110,6 +1147,7 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, on
       cookMinutes: parseInt(String(form.cookMinutes)) || 15,
       vat_rate: parseInt(form.vat_rate) || 20,
       alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
+      ingredient_id: form.ingredient_id ?? null,
     });
     setLoading(false);
   };
@@ -1118,7 +1156,7 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, on
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Редагувати: {item?.name}</DialogTitle></DialogHeader>
-        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} />
+        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} ingredients={ingredients} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
           <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Зберегти зміни"}</Button>
