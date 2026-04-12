@@ -16,6 +16,7 @@ import {
   Building2, Phone, Mail, MapPin, Calculator, Beef, Wine, Info,
   ShoppingCart, ClipboardList, Warehouse, TrendingUp, TrendingDown,
   DollarSign, PieChart as PieChartIcon, Activity,
+  Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, Utensils, Users, FlaskConical, Clock, Zap,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -37,13 +38,82 @@ const apiFbFetch = (path: string, opts: RequestInit = {}) =>
 const UNIT_OPTIONS = ["кг", "г", "л", "мл", "шт", "пляш", "упак", "пор", "пач"];
 const CATEGORY_OPTIONS = ["М'ясо та риба", "Овочі та фрукти", "Молочні продукти", "Бакалія", "Напої", "Алкоголь", "Спеції та соуси", "Хліб та випічка", "Заморожені", "Інше"];
 const WRITEOFF_REASONS: Record<string, string> = {
-  spoilage: "Псування/прострочення",
-  production: "Виробнича втрата",
-  damage: "Пошкодження",
-  inventory: "Інвентаризація",
-  auto_sale: "Авто-списання (продаж)",
-  other: "Інше",
+  production:  "Виробниче списання",
+  staff_meal:  "Харчування штату",
+  tasting:     "Пропрацювання/дегустація",
+  spoilage:    "Псування",
+  expired:     "Прострочення",
+  damage:      "Пошкодження/бій",
+  inventory:   "Коригування (інвентаризація)",
+  auto_sale:   "Авто-списання (продаж)",
+  other:       "Інше",
 };
+
+const WRITEOFF_REASON_META: Record<string, { icon: any; color: string; hint: string }> = {
+  production: { icon: Utensils,     color: "text-orange-500", hint: "Списання при приготуванні страв (залишки обрізки, кістки тощо)" },
+  staff_meal: { icon: Users,        color: "text-blue-500",   hint: "Харчування персоналу за рахунок закладу" },
+  tasting:    { icon: FlaskConical, color: "text-purple-500", hint: "Дегустація, розробка нових страв, навчання" },
+  spoilage:   { icon: AlertTriangle,color: "text-yellow-500", hint: "Зіпсований товар, неналежне зберігання" },
+  expired:    { icon: Clock,        color: "text-red-500",    hint: "Товар з вичерпаним терміном придатності" },
+  damage:     { icon: XCircle,      color: "text-red-600",    hint: "Бій посуду, пошкодження при зберіганні" },
+  inventory:  { icon: ClipboardList,color: "text-gray-500",   hint: "Коригування за результатами інвентаризації" },
+  auto_sale:  { icon: Zap,          color: "text-green-500",  hint: "Автоматичне списання при продажу (POS)" },
+  other:      { icon: FileText,     color: "text-gray-400",   hint: "Вкажіть причину у коментарі" },
+};
+
+// ── Компонент VoiceMicButton (Web Speech API, uk-UA) ────────────────────────
+function VoiceMicButton({
+  onTranscript, onEnd, className = "", size = 16, language = "uk-UA"
+}: { onTranscript: (t: string) => void; onEnd?: (t: string) => void; className?: string; size?: number; language?: string }) {
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const transcriptRef = useRef("");
+
+  const toggle = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert("Голосовий ввід не підтримується. Використовуйте Google Chrome або Microsoft Edge.");
+      return;
+    }
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    transcriptRef.current = "";
+    const recognition = new SR();
+    recognition.lang = language;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onresult = (e: any) => {
+      const text = Array.from(e.results).map((r: any) => r[0].transcript).join(" ");
+      transcriptRef.current = text;
+      onTranscript(text);
+    };
+    recognition.onerror = () => { setListening(false); };
+    recognition.onend = () => {
+      setListening(false);
+      onEnd?.(transcriptRef.current);
+    };
+    recognition.start();
+    recognitionRef.current = recognition;
+    setListening(true);
+  };
+
+  return (
+    <button
+      onClick={toggle}
+      title={listening ? "Зупинити запис (клік)" : "Голосовий ввід (uk-UA)"}
+      className={`inline-flex items-center justify-center rounded-full transition-all ${
+        listening
+          ? "bg-red-100 text-red-600 ring-2 ring-red-300 animate-pulse p-2"
+          : "text-gray-400 hover:text-violet-600 hover:bg-violet-50 p-2"
+      } ${className}`}
+    >
+      {listening ? <MicOff size={size} /> : <Mic size={size} />}
+    </button>
+  );
+}
 const VAT_RATES = [
   { value: "20", label: "20% — стандартна" },
   { value: "7", label: "7% — пільгова" },
@@ -713,8 +783,12 @@ function ReceiptsTab({ toast }: { toast: any }) {
                 {receipts.map((r: any) => (
                   <tr key={r.id} className="border-b hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openReceipt(r.id)}>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{r.receipt_no || `#${r.id}`}</div>
-                      {r.ai_scanned && <div className="text-xs text-violet-500 flex items-center gap-0.5 mt-0.5"><Sparkles size={10} /> AI-скановано</div>}
+                      <div className="font-medium text-gray-900 flex items-center gap-1.5">
+                        {r.receipt_no || `#${r.id}`}
+                        {r.invoice_image && <Paperclip size={11} className="text-violet-400" title="Є вкладення фото накладної" />}
+                      </div>
+                      {r.notes?.includes("голосовий") && <div className="text-xs text-blue-500 flex items-center gap-0.5 mt-0.5"><Mic size={9} /> Голос (AI)</div>}
+                      {r.notes?.includes("AI-скан") && <div className="text-xs text-violet-500 flex items-center gap-0.5 mt-0.5"><Sparkles size={9} /> AI-скановано</div>}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{r.receipt_date}</td>
                     <td className="px-4 py-3 text-gray-600">{r.supplier_name || "—"}</td>
@@ -739,30 +813,45 @@ function ReceiptsTab({ toast }: { toast: any }) {
 
 function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: () => void; toast: any }) {
   const [step, setStep] = useState<"input" | "reviewing" | "saving">("input");
+  const [inputMode, setInputMode] = useState<"text" | "voice">("text");
   const [inputText, setInputText] = useState("");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null); // збережемо для вкладення
   const [scanning, setScanning] = useState(false);
   const [parsed, setParsed] = useState<any>(null);
   const [newCount, setNewCount] = useState(0);
   const [supplierId, setSupplierId] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const handleImageSelect = async (file: File) => {
+    setImageFile(file);
+    setInputText("");
+    // Конвертуємо в base64 одразу при виборі
+    const b64 = await new Promise<string>((res) => {
+      const reader = new FileReader();
+      reader.onload = () => res((reader.result as string).split(",")[1]);
+      reader.readAsDataURL(file);
+    });
+    setImageBase64(b64);
+  };
+
   const scan = async () => {
-    if (!inputText && !imageFile) return toast({ title: "Вставте текст або завантажте фото накладної", variant: "destructive" });
+    const textToScan = inputMode === "voice" ? voiceTranscript : inputText;
+    if (!textToScan && !imageBase64) return toast({ title: "Вставте текст, завантажте фото або промовте накладну", variant: "destructive" });
     setScanning(true);
     try {
       let body: any = {};
-      if (imageFile) {
-        const b64 = await new Promise<string>((res) => {
-          const reader = new FileReader();
-          reader.onload = () => res((reader.result as string).split(",")[1]);
-          reader.readAsDataURL(imageFile);
-        });
-        body = { image_base64: b64 };
+      let endpoint = "/receipts/ai-scan";
+      if (imageBase64) {
+        body = { image_base64: imageBase64 };
+      } else if (inputMode === "voice") {
+        body = { text: voiceTranscript };
+        endpoint = "/receipts/ai-voice-receipt";
       } else {
-        body = { text: inputText };
+        body = { text: textToScan };
       }
-      const r = await apiFetch("/receipts/ai-scan", { method: "POST", body: JSON.stringify(body) });
+      const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify(body) });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Помилка AI");
       setParsed(j.parsed);
@@ -784,7 +873,10 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
           supplier_id: supplierId ? parseInt(supplierId) : null,
           receipt_no: parsed.receipt_no,
           receipt_date: parsed.receipt_date,
-          notes: "Імпортовано через AI-сканування",
+          notes: inputMode === "voice"
+            ? "Імпортовано через голосовий ввід (AI)"
+            : imageBase64 ? "Імпортовано через AI-сканування (фото)" : "Імпортовано через AI-сканування",
+          invoice_image: imageBase64 || null, // зберігаємо фото як вкладення
         })
       });
       const { receipt } = await cr.json();
@@ -827,34 +919,95 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
 
       <Card className="shadow-none border">
         <CardContent className="p-5 space-y-4">
-          <div
-            className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-violet-300 hover:bg-violet-50 transition-colors"
-            onClick={() => fileRef.current?.click()}
+          {/* Перемикач режиму вводу */}
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            {([
+              { key: "text", icon: FileText, label: "Фото або текст" },
+              { key: "voice", icon: Mic, label: "Голосовий ввід" },
+            ] as const).map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setInputMode(tab.key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-sm font-medium transition-all ${inputMode === tab.key ? "bg-white shadow-sm text-violet-700" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                <tab.icon size={14} /> {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {inputMode === "text" ? (
+            <>
+              {/* Фото */}
+              <div
+                className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-violet-300 hover:bg-violet-50 transition-colors"
+                onClick={() => fileRef.current?.click()}
+              >
+                {imageFile ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <ImageIcon size={20} className="text-violet-500" />
+                    <span className="text-sm font-medium text-gray-700">{imageFile.name}</span>
+                    <button className="text-gray-400 hover:text-red-500 ml-1" onClick={e => { e.stopPropagation(); setImageFile(null); setImageBase64(null); }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload size={24} className="mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm font-medium text-gray-600">Завантажити фото накладної</p>
+                    <p className="text-xs text-gray-400 mt-1">JPG, PNG, HEIC (до 10 МБ) · Фото буде збережено як вкладення</p>
+                  </>
+                )}
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files?.[0]) handleImageSelect(e.target.files[0]); }} />
+              </div>
+
+              {!imageFile && (
+                <>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="text-xs text-gray-400 font-medium">АБО текст</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+                  <div>
+                    <Textarea
+                      value={inputText}
+                      onChange={e => setInputText(e.target.value)}
+                      placeholder={"Видаткова накладна №123 від 10.04.2026\nПостачальник: ТОВ Агро-Плюс\n\n1. Куряча грудка охол. 10 кг × 120 грн = 1200 грн\n2. Масло вершкове 82.5% 5 кг × 180 грн = 900 грн\n..."}
+                      rows={6}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            /* Голосовий режим */
+            <div className="space-y-3">
+              <div className="bg-violet-50 border border-violet-100 rounded-xl p-4 text-center">
+                <VoiceMicButton
+                  onTranscript={t => setVoiceTranscript(t)}
+                  size={28}
+                  className="mx-auto mb-3 !p-4"
+                />
+                <p className="text-xs text-violet-600 font-medium mb-1">Натисніть мікрофон та продиктуйте накладну</p>
+                <p className="text-xs text-gray-400">Приклад: "Накладна від Агро-Плюс, 10 квітня. Куряча грудка 10 кілограм по 120 гривень, масло вершкове 5 кілограм по 180 гривень"</p>
+              </div>
+              {voiceTranscript && (
+                <div className="bg-gray-50 border rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-medium text-gray-600">Розпізнаний текст:</p>
+                    <button className="text-xs text-gray-400 hover:text-red-500" onClick={() => setVoiceTranscript("")}>Очистити</button>
+                  </div>
+                  <p className="text-sm text-gray-700 italic">"{voiceTranscript}"</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <Button
+            onClick={scan}
+            disabled={scanning || (inputMode === "text" ? !inputText && !imageBase64 : !voiceTranscript)}
+            className="w-full bg-violet-600 hover:bg-violet-700 text-white gap-2"
           >
-            <Upload size={28} className="mx-auto mb-2 text-gray-300" />
-            <p className="text-sm font-medium text-gray-600">{imageFile ? imageFile.name : "Завантажити фото накладної"}</p>
-            <p className="text-xs text-gray-400 mt-1">JPG, PNG, HEIC (до 10 МБ)</p>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { setImageFile(e.target.files?.[0] || null); setInputText(""); }} />
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-xs text-gray-400 font-medium">АБО</span>
-            <div className="flex-1 h-px bg-gray-200" />
-          </div>
-
-          <div>
-            <Label>Вставте текст накладної</Label>
-            <Textarea
-              value={inputText}
-              onChange={e => { setInputText(e.target.value); setImageFile(null); }}
-              placeholder="Видаткова накладна №123 від 10.04.2026&#10;Постачальник: ТОВ Агро-Плюс&#10;&#10;1. Куряча грудка охол. 10 кг × 120 грн = 1200 грн&#10;2. Масло вершкове 82.5% 5 кг × 180 грн = 900 грн&#10;..."
-              rows={8}
-              className="font-mono text-xs"
-            />
-          </div>
-
-          <Button onClick={scan} disabled={scanning || (!inputText && !imageFile)} className="w-full bg-violet-600 hover:bg-violet-700 text-white gap-2">
             {scanning ? <><Loader2 size={16} className="animate-spin" /> AI обробляє...</> : <><Sparkles size={16} /> Розпізнати накладну</>}
           </Button>
         </CardContent>
@@ -1545,6 +1698,9 @@ function WriteoffsTab({ toast }: { toast: any }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [voiceModal, setVoiceModal] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceParsing, setVoiceParsing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1557,11 +1713,13 @@ function WriteoffsTab({ toast }: { toast: any }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => setModal({
+  const openNew = (prefill?: any) => setModal({
     writeoff_date: new Date().toISOString().split("T")[0],
-    reason: "spoilage",
+    reason: "production",
     notes: "",
-    items: [{ ingredient_id: "", quantity: 0, unit: "кг", notes: "" }]
+    notes_detail: "",
+    items: [{ ingredient_id: "", quantity: 0, unit: "кг", notes: "" }],
+    ...(prefill || {}),
   });
 
   const addItem = () => setModal((m: any) => ({ ...m, items: [...m.items, { ingredient_id: "", quantity: 0, unit: "кг", notes: "" }] }));
@@ -1586,7 +1744,10 @@ function WriteoffsTab({ toast }: { toast: any }) {
     try {
       const r = await apiFetch("/writeoffs", {
         method: "POST",
-        body: JSON.stringify({ ...modal, items: validItems.map((i: any) => ({ ...i, ingredient_id: parseInt(i.ingredient_id) })) })
+        body: JSON.stringify({
+          ...modal,
+          items: validItems.map((i: any) => ({ ...i, ingredient_id: parseInt(i.ingredient_id) }))
+        })
       });
       if (!r.ok) throw new Error((await r.json()).error);
       toast({ title: "Списання створено" });
@@ -1602,16 +1763,49 @@ function WriteoffsTab({ toast }: { toast: any }) {
     else toast({ title: (await r.json()).error, variant: "destructive" });
   };
 
+  // ── Голосовий парсинг списання ──────────────────────────────────
+  const parseVoice = async () => {
+    if (!voiceTranscript.trim()) return;
+    setVoiceParsing(true);
+    try {
+      const r = await apiFetch("/ai-voice-writeoff", { method: "POST", body: JSON.stringify({ text: voiceTranscript }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      const p = j.parsed;
+      // Pre-fill the modal with parsed data
+      openNew({
+        writeoff_date: p.writeoff_date || new Date().toISOString().split("T")[0],
+        reason: p.reason || "other",
+        notes: p.notes || `Голосовий ввід: "${voiceTranscript.slice(0, 80)}${voiceTranscript.length > 80 ? "..." : ""}"`,
+        notes_detail: p.notes || "",
+        items: (p.items || []).map((item: any) => ({
+          ingredient_id: item.ingredient_id?.toString() || "",
+          quantity: item.quantity || 0,
+          unit: item.unit || "кг",
+          notes: "",
+        })),
+      });
+      setVoiceModal(false);
+      setVoiceTranscript("");
+      toast({ title: "AI розпізнав списання — перевірте та збережіть" });
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setVoiceParsing(false); }
+  };
+
   const STATUS_COLORS: Record<string, string> = {
     draft: "bg-gray-100 text-gray-600 border-gray-200",
     confirmed: "bg-green-100 text-green-700 border-green-200",
   };
   const STATUS_UA: Record<string, string> = { draft: "Чернетка", confirmed: "Підтверджено" };
+  const needsDetail = (r: string) => ["tasting", "other", "damage", "spoilage"].includes(r);
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={openNew} size="sm" className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
+      <div className="flex items-center gap-2 justify-end">
+        <Button onClick={() => { setVoiceTranscript(""); setVoiceModal(true); }} size="sm" variant="outline" className="gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50">
+          <Mic size={14} /> Голосове списання
+        </Button>
+        <Button onClick={() => openNew()} size="sm" className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
           <Plus size={15} /> Нове списання
         </Button>
       </div>
@@ -1622,7 +1816,10 @@ function WriteoffsTab({ toast }: { toast: any }) {
         <Card className="shadow-none border">
           <CardContent className="py-12 text-center text-gray-400">
             <Trash2 size={32} className="mx-auto mb-3 opacity-30" />
-            <p>Немає актів списання</p>
+            <p className="mb-3">Немає актів списання</p>
+            <Button onClick={() => { setVoiceTranscript(""); setVoiceModal(true); }} variant="outline" size="sm" className="gap-1.5 text-blue-600 border-blue-200">
+              <Mic size={13} /> Спробувати голосовий ввід
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -1633,6 +1830,7 @@ function WriteoffsTab({ toast }: { toast: any }) {
                 <tr>
                   <th className="text-left px-4 py-2.5 font-medium text-gray-600">Дата</th>
                   <th className="text-left px-4 py-2.5 font-medium text-gray-600">Причина</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Коментар</th>
                   <th className="text-right px-4 py-2.5 font-medium text-gray-600">Сума</th>
                   <th className="text-right px-4 py-2.5 font-medium text-gray-600">Позицій</th>
                   <th className="text-center px-4 py-2.5 font-medium text-gray-600">Статус</th>
@@ -1640,50 +1838,158 @@ function WriteoffsTab({ toast }: { toast: any }) {
                 </tr>
               </thead>
               <tbody>
-                {writeoffs.map((w: any) => (
-                  <tr key={w.id} className="border-b hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 text-gray-700">{w.writeoff_date}</td>
-                    <td className="px-4 py-3 text-gray-600">{WRITEOFF_REASONS[w.reason] || w.reason}</td>
-                    <td className="px-4 py-3 text-right font-medium">{parseFloat(w.total_amount || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</td>
-                    <td className="px-4 py-3 text-right text-gray-500">{w.item_count}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs border ${STATUS_COLORS[w.status]}`}>{STATUS_UA[w.status]}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {w.status === "draft" && (
-                        <Button size="sm" variant="outline" onClick={() => confirm(w.id)} className="h-7 text-xs gap-1 text-green-600 border-green-200 hover:bg-green-50">
-                          <Check size={12} /> Підтвердити
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {writeoffs.map((w: any) => {
+                  const meta = WRITEOFF_REASON_META[w.reason];
+                  const Icon = meta?.icon || FileText;
+                  return (
+                    <tr key={w.id} className="border-b hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 text-gray-700 text-xs">{w.writeoff_date}</td>
+                      <td className="px-4 py-3">
+                        <div className={`flex items-center gap-1.5 text-xs font-medium ${meta?.color || "text-gray-600"}`}>
+                          <Icon size={13} /> {WRITEOFF_REASONS[w.reason] || w.reason}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500 max-w-[180px] truncate" title={w.notes_detail || w.notes || ""}>
+                        {w.notes_detail || w.notes || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-xs">{parseFloat(w.total_amount || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</td>
+                      <td className="px-4 py-3 text-right text-gray-500 text-xs">{w.item_count}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs border ${STATUS_COLORS[w.status]}`}>{STATUS_UA[w.status]}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {w.status === "draft" && (
+                          <Button size="sm" variant="outline" onClick={() => confirm(w.id)} className="h-7 text-xs gap-1 text-green-600 border-green-200 hover:bg-green-50">
+                            <Check size={12} /> Підтвердити
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </Card>
       )}
 
-      <Dialog open={!!modal} onOpenChange={() => setModal(null)}>
-        <DialogContent className="max-w-xl">
+      {/* ── Голосовий ввід списання ── */}
+      <Dialog open={voiceModal} onOpenChange={v => { if (!v) { setVoiceModal(false); setVoiceTranscript(""); } }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Новий акт списання</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><Mic size={18} className="text-blue-500" /> Голосове списання</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-5 text-center">
+              <VoiceMicButton
+                onTranscript={t => setVoiceTranscript(t)}
+                size={30}
+                className="mx-auto mb-3 !p-4"
+              />
+              <p className="text-xs text-blue-600 font-medium">Натисніть мікрофон та продиктуйте</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Приклад: "Виробниче списання, сьогодні. Борошно 500 грам, масло 200 грам, яйця 6 штук"
+              </p>
+            </div>
+
+            {voiceTranscript && (
+              <div className="bg-gray-50 border rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-medium text-gray-600">Розпізнаний текст:</p>
+                  <button className="text-xs text-gray-400 hover:text-red-500" onClick={() => setVoiceTranscript("")}>Очистити</button>
+                </div>
+                <p className="text-sm text-gray-700 italic">"{voiceTranscript}"</p>
+              </div>
+            )}
+
+            <p className="text-xs text-gray-400 text-center">
+              Або вкажіть причину і позиції вручну → <button className="text-violet-600 underline" onClick={() => { setVoiceModal(false); openNew(); }}>Ручний ввід</button>
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVoiceModal(false)}>Скасувати</Button>
+            <Button onClick={parseVoice} disabled={!voiceTranscript || voiceParsing} className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5">
+              {voiceParsing ? <><Loader2 size={14} className="animate-spin" /> AI обробляє...</> : <><Sparkles size={14} /> Розпізнати</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Ручний ввід списання ── */}
+      <Dialog open={!!modal} onOpenChange={() => setModal(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Акт списання</DialogTitle>
           </DialogHeader>
           {modal && (
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
               <div className="grid grid-cols-2 gap-3">
-                <div><Label className="text-xs">Дата</Label><Input type="date" value={modal.writeoff_date} onChange={e => setModal((m: any) => ({ ...m, writeoff_date: e.target.value }))} className="h-8 text-sm" /></div>
+                <div>
+                  <Label className="text-xs">Дата</Label>
+                  <Input type="date" value={modal.writeoff_date} onChange={e => setModal((m: any) => ({ ...m, writeoff_date: e.target.value }))} className="h-8 text-sm" />
+                </div>
                 <div>
                   <Label className="text-xs">Причина</Label>
                   <Select value={modal.reason} onValueChange={v => setModal((m: any) => ({ ...m, reason: v }))}>
                     <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {Object.entries(WRITEOFF_REASONS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                      {Object.entries(WRITEOFF_REASONS)
+                        .filter(([k]) => k !== "auto_sale")
+                        .map(([k, v]) => {
+                          const meta = WRITEOFF_REASON_META[k];
+                          const Icon = meta?.icon || FileText;
+                          return (
+                            <SelectItem key={k} value={k}>
+                              <div className="flex items-center gap-1.5">
+                                <Icon size={13} className={meta?.color} /> {v}
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
+              {/* Підказка по причині */}
+              {modal.reason && WRITEOFF_REASON_META[modal.reason] && (
+                <div className={`flex items-start gap-2 px-3 py-2 rounded-lg bg-gray-50 text-xs text-gray-500`}>
+                  <Info size={12} className="mt-0.5 shrink-0" />
+                  {WRITEOFF_REASON_META[modal.reason].hint}
+                </div>
+              )}
+
+              {/* Коментар (обов'язковий для деяких причин) */}
+              {needsDetail(modal.reason) && (
+                <div>
+                  <Label className="text-xs">
+                    Коментар {["other", "tasting"].includes(modal.reason) ? "(обов'язково)" : "(необов'язково)"}
+                  </Label>
+                  <div className="relative">
+                    <Textarea
+                      value={modal.notes_detail || ""}
+                      onChange={e => setModal((m: any) => ({ ...m, notes_detail: e.target.value }))}
+                      placeholder={
+                        modal.reason === "tasting" ? "Напр.: Дегустація нового меню, страва Карпаччо — 3 порції на відбір шеф-кухарем..." :
+                        modal.reason === "other" ? "Вкажіть причину списання..." :
+                        modal.reason === "damage" ? "Напр.: Розбито 2 ящики томатів при розвантаженні..." :
+                        "Деталі списання..."
+                      }
+                      rows={2}
+                      className="text-sm pr-10"
+                    />
+                    <div className="absolute right-2 top-2">
+                      <VoiceMicButton
+                        size={13}
+                        onTranscript={t => setModal((m: any) => ({ ...m, notes_detail: t }))}
+                        className="!p-1"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Позиції */}
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
@@ -1700,17 +2006,27 @@ function WriteoffsTab({ toast }: { toast: any }) {
                         <td className="px-3 py-1.5">
                           <Select value={item.ingredient_id?.toString() || "_none"} onValueChange={v => updateItem(idx, "ingredient_id", v === "_none" ? "" : v)}>
                             <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Виберіть..." /></SelectTrigger>
-                            <SelectContent>{ingredients.map((i: any) => <SelectItem key={i.id} value={i.id.toString()}>{i.name} ({parseFloat(i.current_stock || 0).toLocaleString("uk-UA", { maximumFractionDigits: 2 })} {i.unit})</SelectItem>)}</SelectContent>
+                            <SelectContent>
+                              {ingredients.map((i: any) => (
+                                <SelectItem key={i.id} value={i.id.toString()}>
+                                  {i.name} <span className="text-gray-400">({parseFloat(i.current_stock || 0).toLocaleString("uk-UA", { maximumFractionDigits: 2 })} {i.unit})</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
                           </Select>
                         </td>
-                        <td className="px-3 py-1.5"><Input type="number" min="0" step="0.001" value={item.quantity} onChange={e => updateItem(idx, "quantity", parseFloat(e.target.value) || 0)} className="h-7 text-xs text-right w-20" /></td>
+                        <td className="px-3 py-1.5">
+                          <Input type="number" min="0" step="0.001" value={item.quantity} onChange={e => updateItem(idx, "quantity", parseFloat(e.target.value) || 0)} className="h-7 text-xs text-right w-20" />
+                        </td>
                         <td className="px-3 py-1.5">
                           <Select value={item.unit} onValueChange={v => updateItem(idx, "unit", v)}>
                             <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                             <SelectContent>{UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
                           </Select>
                         </td>
-                        <td className="px-3 py-1.5"><button onClick={() => removeItem(idx)} className="text-gray-300 hover:text-red-500 transition-colors"><X size={12} /></button></td>
+                        <td className="px-3 py-1.5">
+                          <button onClick={() => removeItem(idx)} className="text-gray-300 hover:text-red-500 transition-colors"><X size={12} /></button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1722,13 +2038,16 @@ function WriteoffsTab({ toast }: { toast: any }) {
                 </div>
               </div>
 
-              <div><Label>Примітки</Label><Textarea value={modal.notes} onChange={e => setModal((m: any) => ({ ...m, notes: e.target.value }))} rows={2} /></div>
+              <div>
+                <Label className="text-xs">Внутрішня примітка</Label>
+                <Textarea value={modal.notes || ""} onChange={e => setModal((m: any) => ({ ...m, notes: e.target.value }))} rows={2} className="text-sm" placeholder="Необов'язково..." />
+              </div>
             </div>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setModal(null)}>Скасувати</Button>
-            <Button onClick={save} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white">
-              {saving ? <Loader2 size={16} className="animate-spin" /> : "Зберегти"}
+            <Button onClick={save} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <><Check size={14} /> Зберегти чернетку</>}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2113,7 +2432,7 @@ function AnalyticsTab({ toast }: { toast: any }) {
   })();
 
   const wasteChart = (waste_by_reason || []).map((w: any) => ({
-    name: ({ spoilage: "Псування", production: "Виробниче", damage: "Пошкодження", inventory: "Інвентаризація", auto_sale: "Продаж (авто)" } as any)[w.reason] || "Інше",
+    name: WRITEOFF_REASONS[w.reason] || w.reason,
     value: Number(w.total_cost),
   }));
 

@@ -292,11 +292,11 @@ router.get("/receipts/:id", async (req, res) => {
 
 router.post("/receipts", async (req, res) => {
   try {
-    const { supplier_id, receipt_no, receipt_date, notes } = req.body;
+    const { supplier_id, receipt_no, receipt_date, notes, invoice_image } = req.body;
     const r = await db.execute(sql`
-      INSERT INTO fb_stock_receipts (organization_id, supplier_id, receipt_no, receipt_date, notes, created_by)
-      VALUES (${org(req)}, ${supplier_id || null}, ${receipt_no || null}, ${receipt_date || new Date().toISOString().split("T")[0]}, ${notes || null}, ${uid(req)})
-      RETURNING *
+      INSERT INTO fb_stock_receipts (organization_id, supplier_id, receipt_no, receipt_date, notes, invoice_image, created_by)
+      VALUES (${org(req)}, ${supplier_id || null}, ${receipt_no || null}, ${receipt_date || new Date().toISOString().split("T")[0]}, ${notes || null}, ${invoice_image || null}, ${uid(req)})
+      RETURNING id, organization_id, supplier_id, receipt_no, receipt_date, notes, status, total_amount, created_at
     `);
     res.json({ receipt: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -509,6 +509,113 @@ ${ingredientsList || "список порожній"}
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── AI голосовий парсинг: накладна з голосу ────────────────────────────────
+// Те саме що ai-scan але для тексту вже з SpeechRecognition браузера
+// Повертає той же формат — можна перенаправити в existing AI review form
+router.post("/receipts/ai-voice-receipt", async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: "text required" });
+  // Reuse same logic as ai-scan but always with text
+  req.body.text = text;
+  req.body.image_base64 = null;
+  // Forward to ai-scan logic inline (duplicating minimal code)
+  try {
+    const orgId = org(req);
+    const existingIngredients = (await db.execute(sql`
+      SELECT id, name, unit FROM fb_ingredients WHERE organization_id = ${orgId} AND is_active = true ORDER BY name
+    `)).rows as any[];
+    const existingSuppliers = (await db.execute(sql`
+      SELECT id, name FROM fb_suppliers WHERE organization_id = ${orgId} AND is_active = true ORDER BY name
+    `)).rows as any[];
+    const ingredientsList = existingIngredients.map((i: any) => `${i.id}|${i.name}|${i.unit}`).join("\n");
+    const suppliersList = existingSuppliers.map((s: any) => `${s.id}|${s.name}`).join("\n");
+
+    const systemPrompt = `Ти система розпізнавання накладних для ресторану в Україні. Текст отриманий через голосовий ввід (може містити помилки розпізнавання). Витягни дані і поверни ТІЛЬКИ валідний JSON:
+{"receipt_no":null,"receipt_date":"YYYY-MM-DD або сьогодні","supplier_name":null,"total_amount":null,"items":[{"name":"назва","quantity":число,"unit":"кг/г/л/мл/шт/пляш","price_per_unit":0,"vat_rate":20,"ingredient_id":null,"match_confidence":0,"is_new_ingredient":true}]}
+Сьогодні: ${new Date().toISOString().split("T")[0]}
+Постачальники (id|name):\n${suppliersList || "—"}
+Інгредієнти (id|name|unit):\n${ingredientsList || "—"}
+Знайди збіги ingredient_id і supplier_id де можливо. Одиниці: кг/г/л/мл/шт/пляш/упак/пор/пач.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5.2",
+      max_completion_tokens: 2000,
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
+    });
+    const raw = completion.choices[0].message.content || "";
+    let parsed: any;
+    try { const m = raw.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : raw); }
+    catch { return res.status(422).json({ error: "Не вдалося розпізнати", raw }); }
+
+    const processedItems = [];
+    for (const item of parsed.items || []) {
+      if (!item.ingredient_id) {
+        const c = await db.execute(sql`INSERT INTO fb_ingredients (organization_id, name, unit, cost_per_unit) VALUES (${orgId}, ${item.name}, ${item.unit || "кг"}, ${item.price_per_unit || 0}) RETURNING id, name`);
+        item.ingredient_id = (c.rows[0] as any).id;
+        item.is_new_ingredient = true;
+      }
+      processedItems.push(item);
+    }
+    let matchedSupplierId = parsed.supplier_id || null;
+    if (!matchedSupplierId && parsed.supplier_name) {
+      const m = existingSuppliers.find((s: any) => s.name.toLowerCase().includes((parsed.supplier_name || "").toLowerCase().split(" ")[0]));
+      if (m) matchedSupplierId = m.id;
+    }
+    res.json({ parsed: { ...parsed, items: processedItems, supplier_id: matchedSupplierId }, new_ingredients_count: processedItems.filter((i: any) => i.is_new_ingredient).length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── AI голосовий парсинг: СПИСАННЯ з голосу ────────────────────────────────
+router.post("/ai-voice-writeoff", async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: "text required" });
+  try {
+    const orgId = org(req);
+    const existingIngredients = (await db.execute(sql`
+      SELECT id, name, unit, current_stock FROM fb_ingredients WHERE organization_id = ${orgId} AND is_active = true ORDER BY name
+    `)).rows as any[];
+    const ingredientsList = existingIngredients.map((i: any) => `${i.id}|${i.name}|${i.unit}`).join("\n");
+
+    const systemPrompt = `Ти система голосового вводу актів списання для ресторану в Україні.
+Текст отримано через голосовий ввід, можуть бути помилки. Визнач причину списання, дату та позиції.
+Поверни ТІЛЬКИ JSON:
+{
+  "reason": "production|staff_meal|tasting|spoilage|expired|damage|other",
+  "writeoff_date": "YYYY-MM-DD",
+  "notes": "пояснення/коментар або null",
+  "items": [{"ingredient_id": число або null, "name": "назва", "quantity": число, "unit": "кг/г/л/мл/шт/пляш"}]
+}
+Причини: production=виробниче списання, staff_meal=харчування штату, tasting=пропрацювання/дегустація, spoilage=псування, expired=прострочення, damage=пошкодження/бій, other=інше.
+Сьогодні: ${new Date().toISOString().split("T")[0]}
+Інгредієнти (id|name|unit):\n${ingredientsList || "—"}
+Знайди ingredient_id де можливо.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5.2",
+      max_completion_tokens: 1000,
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
+    });
+    const raw = completion.choices[0].message.content || "";
+    let parsed: any;
+    try { const m = raw.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : raw); }
+    catch { return res.status(422).json({ error: "Не вдалося розпізнати", raw }); }
+
+    // Enrich items with ingredient data
+    const enrichedItems = (parsed.items || []).map((item: any) => {
+      const ing = item.ingredient_id
+        ? existingIngredients.find((i: any) => i.id === item.ingredient_id)
+        : existingIngredients.find((i: any) => i.name.toLowerCase().includes((item.name || "").toLowerCase().slice(0, 5)));
+      return {
+        ...item,
+        ingredient_id: ing?.id || item.ingredient_id || "",
+        unit: item.unit || ing?.unit || "кг",
+        current_stock: ing?.current_stock || 0,
+      };
+    });
+    res.json({ parsed: { ...parsed, items: enrichedItems } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // WRITE-OFFS — Списання
 // ═══════════════════════════════════════════════════════════════════════════
@@ -550,13 +657,13 @@ router.get("/writeoffs/:id", async (req, res) => {
 
 router.post("/writeoffs", async (req, res) => {
   try {
-    const { writeoff_date, reason, notes, items } = req.body;
+    const { writeoff_date, reason, notes, notes_detail, items } = req.body;
     if (!items?.length) return res.status(400).json({ error: "items required" });
 
     let total = 0;
     const r = await db.execute(sql`
-      INSERT INTO fb_stock_writeoffs (organization_id, writeoff_date, reason, notes, created_by)
-      VALUES (${org(req)}, ${writeoff_date || new Date().toISOString().split("T")[0]}, ${reason || "spoilage"}, ${notes || null}, ${uid(req)})
+      INSERT INTO fb_stock_writeoffs (organization_id, writeoff_date, reason, notes, notes_detail, created_by)
+      VALUES (${org(req)}, ${writeoff_date || new Date().toISOString().split("T")[0]}, ${reason || "spoilage"}, ${notes || null}, ${notes_detail || null}, ${uid(req)})
       RETURNING *
     `);
     const writeoff = r.rows[0] as any;
