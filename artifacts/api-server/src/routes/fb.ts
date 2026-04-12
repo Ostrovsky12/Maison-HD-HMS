@@ -746,6 +746,21 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       );
     }
 
+    // ── Конвертація одиниць: рецепт → базова одиниця складу ─────────────────
+    const UNIT_CONV: Record<string, Record<string, number>> = {
+      "г":    { "кг": 0.001, "г": 1 },
+      "мл":   { "л": 0.001, "мл": 1 },
+      "кг":   { "г": 1000, "кг": 1 },
+      "л":    { "мл": 1000, "л": 1 },
+      "шт":   { "шт": 1 },
+      "пляш": { "пляш": 1 },
+      "пач":  { "пач": 1 },
+    };
+    const unitFactor = (from: string, to: string) => {
+      if (from === to) return 1;
+      return UNIT_CONV[from]?.[to] ?? 1;
+    };
+
     // ── Auto Stock Deduction — списання по тех. картках (non-blocking) ─────────
     let stockDeductionLog: any = null;
     try {
@@ -780,8 +795,8 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
             const yieldQty = Number(recipe.yield_quantity) || 1;
 
             const rciRow = await db_.query(
-              `SELECT rci.ingredient_id, rci.net_quantity, rci.unit,
-                      i.cost_per_unit, i.name AS ingredient_name
+              `SELECT rci.ingredient_id, rci.net_quantity, rci.unit AS recipe_unit,
+                      i.cost_per_unit, i.name AS ingredient_name, i.unit AS base_unit
                FROM fb_recipe_card_items rci
                JOIN fb_ingredients i ON i.id = rci.ingredient_id
                WHERE rci.recipe_id = $1`,
@@ -789,12 +804,14 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
             );
 
             for (const rci of rciRow.rows) {
-              const deductQty = (Number(rci.net_quantity) / yieldQty) * Number(oi.quantity);
+              // Автоконвертація: г→кг, мл→л та ін.
+              const conv = unitFactor(rci.recipe_unit, rci.base_unit);
+              const deductQty = (Number(rci.net_quantity) * conv / yieldQty) * Number(oi.quantity);
               if (deductQty <= 0) continue;
               deductions.push({
                 ingredientId: rci.ingredient_id,
                 quantity: deductQty,
-                unit: rci.unit,
+                unit: rci.base_unit,      // списуємо в базових одиницях складу
                 costPerUnit: Number(rci.cost_per_unit) || 0,
                 menuItemName: oi.name,
                 deductionType: "recipe",

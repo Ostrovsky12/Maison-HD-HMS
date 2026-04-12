@@ -791,7 +791,13 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
 
       await apiFetch(`/receipts/${receipt.id}/items`, {
         method: "PUT",
-        body: JSON.stringify({ items: parsed.items })
+        body: JSON.stringify({
+          items: parsed.items.map((item: any) => ({
+            ...item,
+            receipt_unit: item.receipt_unit || item.unit,
+            conversion_factor: item.conversion_factor || 1,
+          }))
+        })
       });
 
       toast({ title: `Накладну збережено! ${newCount > 0 ? `${newCount} нових інгредієнтів додано автоматично.` : ""}` });
@@ -918,6 +924,10 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
                 <th className="text-left px-3 py-2 font-medium text-gray-600">Назва в накладній</th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600">К-сть</th>
                 <th className="text-left px-3 py-2 font-medium text-gray-600">Од.</th>
+                <th className="text-center px-3 py-2 font-medium text-gray-600 w-20">
+                  <span>× Конв.</span>
+                  <div className="text-[10px] text-gray-400 font-normal">(якщо не база)</div>
+                </th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600">Ціна/од.</th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600">Сума</th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600">ПДВ</th>
@@ -925,39 +935,55 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
               </tr>
             </thead>
             <tbody>
-              {(parsed.items || []).map((item: any, idx: number) => (
-                <tr key={idx} className={`border-b ${item.is_new_ingredient ? "bg-amber-50" : ""}`}>
-                  <td className="px-3 py-2">
-                    <Input value={item.name} onChange={e => updateItem(idx, "name", e.target.value)} className="h-7 text-xs border-0 bg-transparent p-0 focus:bg-white focus:border focus:px-2 transition-all" />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Input type="number" value={item.quantity} onChange={e => updateItem(idx, "quantity", parseFloat(e.target.value))} className="h-7 text-xs w-20 text-right" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Select value={item.unit || "кг"} onValueChange={v => updateItem(idx, "unit", v)}>
-                      <SelectTrigger className="h-7 text-xs w-16"><SelectValue /></SelectTrigger>
-                      <SelectContent>{UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Input type="number" value={item.price_per_unit} onChange={e => updateItem(idx, "price_per_unit", parseFloat(e.target.value))} className="h-7 text-xs w-24 text-right" />
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium text-xs">
-                    {((item.quantity || 0) * (item.price_per_unit || 0)).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴
-                  </td>
-                  <td className="px-3 py-2 text-right text-gray-500 text-xs">{item.vat_rate || 20}%</td>
-                  <td className="px-3 py-2 text-center">
-                    {item.is_new_ingredient
-                      ? <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200" variant="outline">новий</Badge>
-                      : <span className="text-[10px] text-green-600 flex items-center gap-0.5 justify-center"><Check size={10} /> знайдено ({item.match_confidence || 0}%)</span>
-                    }
-                  </td>
-                </tr>
-              ))}
+              {(parsed.items || []).map((item: any, idx: number) => {
+                const conv = item.conversion_factor || 1;
+                return (
+                  <tr key={idx} className={`border-b ${item.is_new_ingredient ? "bg-amber-50" : ""}`}>
+                    <td className="px-3 py-2">
+                      <Input value={item.name} onChange={e => updateItem(idx, "name", e.target.value)} className="h-7 text-xs border-0 bg-transparent p-0 focus:bg-white focus:border focus:px-2 transition-all" />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Input type="number" value={item.quantity} onChange={e => updateItem(idx, "quantity", parseFloat(e.target.value))} className="h-7 text-xs w-20 text-right" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Select value={item.unit || "кг"} onValueChange={v => updateItem(idx, "unit", v)}>
+                        <SelectTrigger className="h-7 text-xs w-16"><SelectValue /></SelectTrigger>
+                        <SelectContent>{UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <Input type="number" min="0.0001" step="0.001" value={conv}
+                        onChange={e => updateItem(idx, "conversion_factor", parseFloat(e.target.value) || 1)}
+                        className="h-7 text-xs text-center w-16 mx-auto" />
+                      {conv !== 1 && (
+                        <div className="text-[10px] text-green-600">
+                          ={(item.quantity * conv).toFixed(3)} база
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Input type="number" value={item.price_per_unit} onChange={e => updateItem(idx, "price_per_unit", parseFloat(e.target.value))} className="h-7 text-xs w-24 text-right" />
+                      {conv !== 1 && item.price_per_unit > 0 && (
+                        <div className="text-[10px] text-gray-400 text-right">{(item.price_per_unit / conv).toFixed(2)} ₴/база</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium text-xs">
+                      {((item.quantity || 0) * (item.price_per_unit || 0)).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-500 text-xs">{item.vat_rate || 20}%</td>
+                    <td className="px-3 py-2 text-center">
+                      {item.is_new_ingredient
+                        ? <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200" variant="outline">новий</Badge>
+                        : <span className="text-[10px] text-green-600 flex items-center gap-0.5 justify-center"><Check size={10} /> знайдено ({item.match_confidence || 0}%)</span>
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot className="bg-gray-50 border-t">
               <tr>
-                <td colSpan={4} className="px-3 py-2 text-right font-medium text-sm">Разом:</td>
+                <td colSpan={5} className="px-3 py-2 text-right font-medium text-sm">Разом:</td>
                 <td className="px-3 py-2 text-right font-bold text-sm">
                   {(parsed.items || []).reduce((s: number, i: any) => s + (i.quantity || 0) * (i.price_per_unit || 0), 0).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴
                 </td>
@@ -999,19 +1025,30 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
 
 // ── New Receipt (Manual) ──────────────────────────────────────────
 
+const EMPTY_RECEIPT_LINE = { ingredient_id: "", name: "", quantity: 1, receipt_unit: "кг", unit: "кг", conversion_factor: 1, price_per_unit: 0, vat_rate: 20 };
+
 function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: () => void; toast: any }) {
   const [form, setForm] = useState({ supplier_id: "", receipt_no: "", receipt_date: new Date().toISOString().split("T")[0], notes: "" });
   const [ingredients, setIngredients] = useState<any[]>([]);
-  const [lines, setLines] = useState<any[]>([{ ingredient_id: "", name: "", quantity: 1, unit: "кг", price_per_unit: 0, vat_rate: 20 }]);
+  const [lines, setLines] = useState<any[]>([{ ...EMPTY_RECEIPT_LINE }]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     apiFetch("/ingredients").then(r => r.json()).then(j => setIngredients(j.ingredients || []));
   }, []);
 
-  const addLine = () => setLines(l => [...l, { ingredient_id: "", name: "", quantity: 1, unit: "кг", price_per_unit: 0, vat_rate: 20 }]);
+  const addLine = () => setLines(l => [...l, { ...EMPTY_RECEIPT_LINE }]);
   const removeLine = (i: number) => setLines(l => l.filter((_, idx) => idx !== i));
-  const updateLine = (i: number, field: string, value: any) => setLines(l => l.map((line, idx) => idx === i ? { ...line, [field]: value } : line));
+  const updateLine = (i: number, field: string, value: any) => setLines(l => l.map((line, idx) => {
+    if (idx !== i) return line;
+    const updated = { ...line, [field]: value };
+    // При зміні інгредієнту — підставляємо базову одиницю і скидаємо конвертацію
+    if (field === "ingredient_id") {
+      const ing = ingredients.find((x: any) => x.id.toString() === value);
+      if (ing) { updated.name = ing.name; updated.unit = ing.unit; updated.receipt_unit = ing.unit; updated.conversion_factor = 1; }
+    }
+    return updated;
+  }));
 
   const save = async () => {
     setSaving(true);
@@ -1021,7 +1058,12 @@ function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack
       await apiFetch(`/receipts/${receipt.id}/items`, {
         method: "PUT",
         body: JSON.stringify({
-          items: lines.map(l => ({ ...l, ingredient_id: l.ingredient_id ? parseInt(l.ingredient_id) : null }))
+          items: lines.map(l => ({
+            ...l,
+            ingredient_id: l.ingredient_id ? parseInt(l.ingredient_id) : null,
+            conversion_factor: l.conversion_factor || 1,
+            receipt_unit: l.receipt_unit || l.unit,
+          }))
         })
       });
       toast({ title: "Накладну створено" });
@@ -1033,7 +1075,7 @@ function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack
   const total = lines.reduce((s, l) => s + (l.quantity || 0) * (l.price_per_unit || 0), 0);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-4xl mx-auto space-y-4">
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={18} /></button>
         <h2 className="font-bold text-gray-900">Нова накладна</h2>
@@ -1056,61 +1098,116 @@ function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack
         </CardContent>
       </Card>
 
+      {/* Підказка */}
+      <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-700">
+        <span className="text-base leading-none mt-0.5">💡</span>
+        <span>
+          <strong>Конвертація одиниць:</strong> Якщо товар надходить в ящиках/упаковках, вкажіть одиницю приходу (напр. "ящик") та коефіцієнт — скільки базових одиниць в 1 одиниці приходу (напр. 24 шт/ящик). Ціна вказується за одиницю приходу. Собівартість та залишки на складі автоматично перерахуються в базових одиницях.
+        </span>
+      </div>
+
       <Card className="shadow-none border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="text-left px-3 py-2 font-medium text-gray-600">Інгредієнт</th>
-                <th className="text-right px-3 py-2 font-medium text-gray-600 w-24">К-сть</th>
-                <th className="text-left px-3 py-2 font-medium text-gray-600 w-20">Од.</th>
+                <th className="text-left px-3 py-2 font-medium text-gray-600 min-w-[180px]">Інгредієнт/Товар</th>
+                <th className="text-right px-3 py-2 font-medium text-gray-600 w-20">К-сть</th>
+                <th className="text-left px-3 py-2 font-medium text-gray-600 w-24">
+                  <span>Од. в документі</span>
+                  <div className="text-[10px] text-gray-400 font-normal">шт/ящик/упак/л…</div>
+                </th>
+                <th className="text-center px-3 py-2 font-medium text-gray-600 w-20">
+                  <span>× Кіл-сть</span>
+                  <div className="text-[10px] text-gray-400 font-normal">в базов. од.</div>
+                </th>
+                <th className="text-left px-3 py-2 font-medium text-gray-600 w-16">
+                  <span>Склад</span>
+                  <div className="text-[10px] text-gray-400 font-normal">базова од.</div>
+                </th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600 w-28">Ціна/од. ₴</th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600 w-24">Сума ₴</th>
-                <th className="text-right px-3 py-2 font-medium text-gray-600 w-20">ПДВ %</th>
+                <th className="text-right px-3 py-2 font-medium text-gray-600 w-16">ПДВ</th>
                 <th className="w-8"></th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((line, idx) => (
-                <tr key={idx} className="border-b">
-                  <td className="px-3 py-2">
-                    <Select value={line.ingredient_id || "_none"} onValueChange={v => {
-                      const ing = ingredients.find((i: any) => i.id.toString() === v);
-                      updateLine(idx, "ingredient_id", v === "_none" ? "" : v);
-                      if (ing) { updateLine(idx, "name", ing.name); updateLine(idx, "unit", ing.unit); }
-                    }}>
-                      <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Виберіть або вручну..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="_none">Вільний ввід</SelectItem>
-                        {ingredients.map((i: any) => <SelectItem key={i.id} value={i.id.toString()}>{i.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    {!line.ingredient_id && (
-                      <Input value={line.name} onChange={e => updateLine(idx, "name", e.target.value)} placeholder="Назва товару..." className="mt-1 h-7 text-xs" />
-                    )}
-                  </td>
-                  <td className="px-3 py-2"><Input type="number" min="0" step="0.001" value={line.quantity} onChange={e => updateLine(idx, "quantity", parseFloat(e.target.value) || 0)} className="h-7 text-xs text-right" /></td>
-                  <td className="px-3 py-2">
-                    <Select value={line.unit} onValueChange={v => updateLine(idx, "unit", v)}>
-                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>{UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </td>
-                  <td className="px-3 py-2"><Input type="number" min="0" step="0.01" value={line.price_per_unit} onChange={e => updateLine(idx, "price_per_unit", parseFloat(e.target.value) || 0)} className="h-7 text-xs text-right" /></td>
-                  <td className="px-3 py-2 text-right text-xs font-medium">{((line.quantity || 0) * (line.price_per_unit || 0)).toLocaleString("uk-UA", { minimumFractionDigits: 2 })}</td>
-                  <td className="px-3 py-2">
-                    <Select value={line.vat_rate?.toString() || "20"} onValueChange={v => updateLine(idx, "vat_rate", parseInt(v))}>
-                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>{VAT_RATES.map(v => <SelectItem key={v.value} value={v.value}>{v.value}%</SelectItem>)}</SelectContent>
-                    </Select>
-                  </td>
-                  <td className="px-3 py-2">
-                    <button onClick={() => removeLine(idx)} className="text-gray-300 hover:text-red-500 transition-colors"><X size={14} /></button>
-                  </td>
-                </tr>
-              ))}
+              {lines.map((line, idx) => {
+                const conv = line.conversion_factor || 1;
+                const baseQty = (line.quantity || 0) * conv;
+                const costPerBase = conv !== 1 && line.price_per_unit ? line.price_per_unit / conv : null;
+                const hasConversion = conv !== 1 || line.receipt_unit !== line.unit;
+                return (
+                  <tr key={idx} className={`border-b ${hasConversion ? "bg-amber-50/30" : ""}`}>
+                    <td className="px-3 py-2">
+                      <Select value={line.ingredient_id || "_none"} onValueChange={v => updateLine(idx, "ingredient_id", v === "_none" ? "" : v)}>
+                        <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Виберіть або вручну..." /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_none">Вільний ввід</SelectItem>
+                          {ingredients.map((i: any) => (
+                            <SelectItem key={i.id} value={i.id.toString()}>
+                              {i.name} <span className="text-gray-400">({i.current_stock} {i.unit})</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!line.ingredient_id && (
+                        <Input value={line.name} onChange={e => updateLine(idx, "name", e.target.value)} placeholder="Назва товару..." className="mt-1 h-7 text-xs" />
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input type="number" min="0" step="0.001" value={line.quantity}
+                        onChange={e => updateLine(idx, "quantity", parseFloat(e.target.value) || 0)}
+                        className="h-7 text-xs text-right" />
+                    </td>
+                    <td className="px-3 py-2">
+                      {/* Одиниця в накладній — може бути ящик, упак, пляш і т.д. */}
+                      <Input value={line.receipt_unit || line.unit}
+                        onChange={e => updateLine(idx, "receipt_unit", e.target.value)}
+                        className="h-7 text-xs w-full" placeholder="кг, шт, ящик…" />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {/* Скільки базових одиниць в 1 одиниці приходу */}
+                      <Input type="number" min="0.0001" step="0.001" value={line.conversion_factor || 1}
+                        onChange={e => updateLine(idx, "conversion_factor", parseFloat(e.target.value) || 1)}
+                        className="h-7 text-xs text-center w-full" />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {/* Базова одиниця складу */}
+                      <span className="text-xs text-gray-500 font-medium">{line.unit || "—"}</span>
+                      {hasConversion && (
+                        <div className="text-[10px] text-green-600 font-medium">
+                          ={baseQty.toFixed(baseQty % 1 === 0 ? 0 : 3)} {line.unit}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input type="number" min="0" step="0.01" value={line.price_per_unit}
+                        onChange={e => updateLine(idx, "price_per_unit", parseFloat(e.target.value) || 0)}
+                        className="h-7 text-xs text-right" />
+                      {costPerBase !== null && (
+                        <div className="text-[10px] text-gray-400 text-right">
+                          {costPerBase.toFixed(2)} ₴/{line.unit}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs font-medium">
+                      {((line.quantity || 0) * (line.price_per_unit || 0)).toLocaleString("uk-UA", { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Select value={line.vat_rate?.toString() || "20"} onValueChange={v => updateLine(idx, "vat_rate", parseInt(v))}>
+                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>{VAT_RATES.map(v => <SelectItem key={v.value} value={v.value}>{v.value}%</SelectItem>)}</SelectContent>
+                      </Select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <button onClick={() => removeLine(idx)} className="text-gray-300 hover:text-red-500 transition-colors"><X size={14} /></button>
+                    </td>
+                  </tr>
+                );
+              })}
               <tr>
-                <td colSpan={7} className="px-3 py-2">
+                <td colSpan={9} className="px-3 py-2">
                   <button onClick={addLine} className="text-xs text-violet-600 hover:text-violet-700 flex items-center gap-1 font-medium">
                     <Plus size={13} /> Додати позицію
                   </button>
@@ -1119,7 +1216,7 @@ function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack
             </tbody>
             <tfoot className="bg-gray-50 border-t">
               <tr>
-                <td colSpan={4} className="px-3 py-2 text-right font-medium">Разом:</td>
+                <td colSpan={6} className="px-3 py-2 text-right font-medium">Разом:</td>
                 <td className="px-3 py-2 text-right font-bold">{total.toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</td>
                 <td colSpan={2} />
               </tr>

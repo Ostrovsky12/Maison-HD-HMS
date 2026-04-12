@@ -325,20 +325,33 @@ router.patch("/receipts/:id", async (req, res) => {
 router.put("/receipts/:id/items", async (req, res) => {
   try {
     const receiptId = parseInt(req.params.id);
-    const { items } = req.body as { items: Array<{ ingredient_id?: number; name: string; quantity: number; unit: string; price_per_unit: number; vat_rate?: number; is_new_ingredient?: boolean; match_confidence?: number }> };
+    const { items } = req.body as { items: Array<{
+      ingredient_id?: number; name: string;
+      quantity: number; unit: string;
+      receipt_unit?: string; conversion_factor?: number;
+      price_per_unit: number; vat_rate?: number;
+      is_new_ingredient?: boolean; match_confidence?: number;
+    }> };
 
     await db.execute(sql`DELETE FROM fb_stock_receipt_items WHERE receipt_id = ${receiptId}`);
     let total = 0;
     let vat = 0;
     for (const item of items || []) {
       const vatRate = item.vat_rate ?? 20;
+      const conv = item.conversion_factor && item.conversion_factor > 0 ? item.conversion_factor : 1;
+      const rcptUnit = item.receipt_unit || item.unit;
       const totalPrice = item.quantity * item.price_per_unit;
       const vatAmount = totalPrice * vatRate / (100 + vatRate);
       total += totalPrice;
       vat += vatAmount;
       await db.execute(sql`
-        INSERT INTO fb_stock_receipt_items (receipt_id, ingredient_id, name, quantity, unit, price_per_unit, total_price, vat_rate, vat_amount, is_new_ingredient, match_confidence)
-        VALUES (${receiptId}, ${item.ingredient_id || null}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.price_per_unit}, ${totalPrice}, ${vatRate}, ${vatAmount}, ${item.is_new_ingredient || false}, ${item.match_confidence ?? null})
+        INSERT INTO fb_stock_receipt_items
+          (receipt_id, ingredient_id, name, quantity, unit, receipt_unit, conversion_factor,
+           price_per_unit, total_price, vat_rate, vat_amount, is_new_ingredient, match_confidence)
+        VALUES (${receiptId}, ${item.ingredient_id || null}, ${item.name}, ${item.quantity},
+                ${item.unit}, ${rcptUnit}, ${conv},
+                ${item.price_per_unit}, ${totalPrice}, ${vatRate}, ${vatAmount},
+                ${item.is_new_ingredient || false}, ${item.match_confidence ?? null})
       `);
     }
     await db.execute(sql`UPDATE fb_stock_receipts SET total_amount = ${total}, vat_amount = ${vat}, updated_at = NOW() WHERE id = ${receiptId}`);
@@ -356,22 +369,29 @@ router.post("/receipts/:id/confirm", async (req, res) => {
 
     const items = (await db.execute(sql`SELECT * FROM fb_stock_receipt_items WHERE receipt_id = ${receiptId}`)).rows as any[];
 
+    const summary: any[] = [];
     for (const item of items) {
       if (!item.ingredient_id) continue;
+      // conversion_factor: скільки базових одиниць у 1 одиниці приходу
+      // напр. 1 ящик = 24 шт → conv=24; 5 ящик → +120 шт; ціна/ящик÷24=собівартість/шт
+      const conv = parseFloat(item.conversion_factor) > 0 ? parseFloat(item.conversion_factor) : 1;
+      const stockAdded = parseFloat(item.quantity) * conv;
+      const costPerBaseUnit = parseFloat(item.price_per_unit) / conv;
       await db.execute(sql`
         UPDATE fb_ingredients SET
-          current_stock = current_stock + ${parseFloat(item.quantity)},
-          cost_per_unit = ${parseFloat(item.price_per_unit)},
+          current_stock = current_stock + ${stockAdded},
+          cost_per_unit = ${costPerBaseUnit},
           updated_at = NOW()
         WHERE id = ${item.ingredient_id}
       `);
+      summary.push({ ingredient_id: item.ingredient_id, name: item.name, stock_added: stockAdded, base_unit: item.unit, cost_per_unit: costPerBaseUnit });
     }
 
     await db.execute(sql`
       UPDATE fb_stock_receipts SET status = 'confirmed', confirmed_at = NOW(), updated_at = NOW()
       WHERE id = ${receiptId}
     `);
-    res.json({ success: true });
+    res.json({ success: true, summary });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
