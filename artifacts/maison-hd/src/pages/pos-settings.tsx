@@ -640,7 +640,7 @@ function ExciseRatesTab() {
         <FlaskConical className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
         <div className="text-sm text-amber-800">
           <p className="font-semibold mb-1">Акцизний податок на алкоголь (ст. 215 ПКУ)</p>
-          <p className="text-amber-700">Ставки оновлюються щорічно Законом про держбюджет. Акциз = об&apos;єм (л) × ставка (грн/л). Для міцного алкоголю (&gt;22%) обов&apos;язкова акцизна марка.</p>
+          <p className="text-amber-700">{"Ставки оновлюються щорічно Законом про держбюджет. Акциз = об'єм (л) × ставка (грн/л). Для міцного алкоголю (>22%) обов'язкова акцизна марка."}</p>
         </div>
       </div>
 

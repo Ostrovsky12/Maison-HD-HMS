@@ -8,6 +8,18 @@ import { createFiscalReceipt, buildCheckboxGoods, toCheckboxPaymentType } from "
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
 
+// ─── Role helpers ─────────────────────────────────────────────────────────────
+const CASHIER_ROLES = ["cashier", "manager", "owner", "super_admin"];
+
+const checkRole = (req: any, res: any, allowed: string[]): boolean => {
+  const role = req.user?.role || "";
+  if (!allowed.includes(role)) {
+    res.status(403).json({ error: "Недостатньо прав. Потрібна роль: " + allowed.join(" / ") });
+    return false;
+  }
+  return true;
+};
+
 // ─── Demo seed ────────────────────────────────────────────────────────────────
 async function seedDemo(orgId: number) {
   const ex = await db.select({ id: fbCategoriesTable.id }).from(fbCategoriesTable).where(eq(fbCategoriesTable.organizationId, orgId)).limit(1);
@@ -612,6 +624,7 @@ router.get("/cashbox/session", requireAuth, async (req: any, res) => {
 router.post("/cashbox/session", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
+    if (!checkRole(req, res, CASHIER_ROLES)) return;
     const cashierId = req.user?.userId;
     const { openingBalance = 0, cashboxName = "Каса 1" } = req.body;
     const db_ = (db as any).$client;
@@ -636,6 +649,7 @@ router.post("/cashbox/session", requireAuth, async (req: any, res) => {
 router.patch("/cashbox/session/:id/close", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
+    if (!checkRole(req, res, CASHIER_ROLES)) return;
     const id = parseInt(req.params.id);
     const { closingBalance, notes } = req.body;
     const db_ = (db as any).$client;
@@ -692,7 +706,15 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     const {
       paymentMethod = "cash", paidAmount, discountAmount = 0, notes,
       tipAmount = 0, tipPct = 0, legalEntityId, discountLabel,
+      payments, // [{method, amount}] for mixed payment
     } = req.body;
+
+    // Mixed payment resolution
+    const isMixed = Array.isArray(payments) && payments.length > 1;
+    const effectiveMethod = isMixed ? "mixed" : (payments?.[0]?.method || paymentMethod);
+    const effectivePaidAmount = isMixed
+      ? payments.reduce((s: number, p: any) => s + Number(p.amount), 0)
+      : (paidAmount ?? undefined);
     const db_ = (db as any).$client;
 
     // Get order
@@ -709,6 +731,7 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     const baseAmount  = Number(order.total_amount) - Number(discountAmount);
     const tip         = Number(tipAmount) || 0;
     const finalAmount = baseAmount + tip;
+    const resolvedPaidAmount = effectivePaidAmount ?? finalAmount;
 
     // Generate receipt number
     const cnt = await db_.query(
@@ -731,7 +754,7 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       return sum + (parseFloat(row.excise_per_unit) || 0) * (parseInt(row.quantity) || 1);
     }, 0);
 
-    // Update order (includes tip + legal entity + excise_total)
+    // Update order (includes tip + legal entity + excise_total + mixed payment)
     const r = await db_.query(
       `UPDATE fb_orders SET
          status = 'billed', paid_amount = $1, payment_method = $2,
@@ -741,11 +764,13 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
          notes = COALESCE($8, notes),
          discount_label = COALESCE($11, discount_label),
          excise_total = $12,
+         payment_details = COALESCE($13::jsonb, payment_details),
          updated_at = NOW()
        WHERE id = $9 AND organization_id = $10 RETURNING *`,
-      [paidAmount ?? finalAmount, paymentMethod, discountAmount, receiptNum,
+      [resolvedPaidAmount, effectiveMethod, discountAmount, receiptNum,
        tip, tipPct || 0, legalEntityId || null, notes || null, orderId, orgId,
-       discountLabel || null, Math.round(exciseTotal * 100) / 100]
+       discountLabel || null, Math.round(exciseTotal * 100) / 100,
+       isMixed ? JSON.stringify(payments) : null]
     );
 
     // Free the table
@@ -756,14 +781,19 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       );
     }
 
-    // Update cashbox session if cash payment (include tip in cash flow)
-    if (paymentMethod === "cash") {
-      const cashIn = paidAmount ?? finalAmount;
+    // Update cashbox session — only cash portions count
+    if (isMixed) {
+      const cashEntry = payments.find((p: any) => p.method === "cash");
+      if (cashEntry) {
+        await db_.query(
+          `UPDATE cashbox_sessions SET cash_in = cash_in + $1, expected_balance = expected_balance + $1 WHERE organization_id = $2 AND status = 'open'`,
+          [Number(cashEntry.amount), orgId]
+        );
+      }
+    } else if (effectiveMethod === "cash") {
       await db_.query(
-        `UPDATE cashbox_sessions SET
-           cash_in = cash_in + $1, expected_balance = expected_balance + $1
-         WHERE organization_id = $2 AND status = 'open'`,
-        [cashIn, orgId]
+        `UPDATE cashbox_sessions SET cash_in = cash_in + $1, expected_balance = expected_balance + $1 WHERE organization_id = $2 AND status = 'open'`,
+        [resolvedPaidAmount, orgId]
       );
     }
 
@@ -987,10 +1017,66 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       tipAmount:     tip,
       fiscal:        fiscalResult,
       stockDeduction: stockDeductionLog,
-      change: paymentMethod === "cash" && paidAmount
-        ? Math.max(0, Number(paidAmount) - finalAmount)
+      change: effectiveMethod === "cash" && !isMixed
+        ? Math.max(0, resolvedPaidAmount - finalAmount)
         : 0,
     });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SPLIT ORDER ───────────────────────────────────────────────────────────────
+router.post("/orders/:id/split", requireAuth, async (req: any, res) => {
+  try {
+    const orgId   = getOrg(req);
+    const orderId = parseInt(req.params.id);
+    const { itemIds } = req.body; // fb_order_items.id[] to move to new bill
+    if (!Array.isArray(itemIds) || !itemIds.length) {
+      res.status(400).json({ error: "itemIds required" }); return;
+    }
+    const db_ = (db as any).$client;
+
+    // Validate order belongs to org
+    const origRow = await db_.query(
+      `SELECT * FROM fb_orders WHERE id = $1 AND organization_id = $2`, [orderId, orgId]
+    );
+    if (!origRow.rows.length) { res.status(404).json({ error: "Order not found" }); return; }
+    const orig = origRow.rows[0];
+
+    // Create new order (Bill 2) — no table assignment, same metadata
+    const newOrderRow = await db_.query(
+      `INSERT INTO fb_orders (organization_id, order_type, guest_name, guest_count, status, notes, parent_order_id)
+       VALUES ($1, $2, $3, $4, 'open', $5, $6) RETURNING *`,
+      [orgId, orig.order_type, orig.guest_name, orig.guest_count, orig.notes, orderId]
+    );
+    const newOrderId = newOrderRow.rows[0].id;
+
+    // Move selected items to new order
+    await db_.query(
+      `UPDATE fb_order_items SET order_id = $1
+       WHERE id = ANY($2::int[]) AND order_id = $3 AND organization_id = $4`,
+      [newOrderId, itemIds, orderId, orgId]
+    );
+
+    // Recalculate totals for both orders
+    await db_.query(
+      `UPDATE fb_orders
+       SET total_amount = (
+         SELECT COALESCE(SUM(total_price), 0)
+         FROM fb_order_items WHERE order_id = fb_orders.id
+       ), updated_at = NOW()
+       WHERE id = ANY($1::int[])`,
+      [[orderId, newOrderId]]
+    );
+
+    // Return both order summaries
+    const fetchOrder = (id: number) => db_.query(
+      `SELECT o.*, json_agg(row_to_json(oi)) FILTER (WHERE oi.id IS NOT NULL) AS items
+       FROM fb_orders o
+       LEFT JOIN fb_order_items oi ON oi.order_id = o.id
+       WHERE o.id = $1 GROUP BY o.id`, [id]
+    );
+    const [r1, r2] = await Promise.all([fetchOrder(orderId), fetchOrder(newOrderId)]);
+    res.json({ order1: r1.rows[0], order2: r2.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -2075,6 +2075,8 @@ function UsersManagementTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                 <SelectContent>
                   <SelectItem value="owner">Власник</SelectItem>
                   <SelectItem value="manager">Менеджер</SelectItem>
+                  <SelectItem value="cashier">Касир (F&B POS)</SelectItem>
+                  <SelectItem value="waiter">Офіціант (F&B POS)</SelectItem>
                   <SelectItem value="reception">Рецепція</SelectItem>
                   <SelectItem value="housekeeping">Прибирання</SelectItem>
                 </SelectContent>

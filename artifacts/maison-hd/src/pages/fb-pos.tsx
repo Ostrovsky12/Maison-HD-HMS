@@ -14,6 +14,7 @@ import {
   Clock, Users, CheckCircle2, LogIn, LogOut, Loader2, RefreshCw,
   Receipt, TrendingUp, Table2, UtensilsCrossed, Percent, Hash,
   ChevronRight, AlertCircle, Heart, Building2, Tag, UserCircle, Phone, Search,
+  Scissors, PlusCircle, Layers, ShieldCheck,
 } from "lucide-react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -60,35 +61,69 @@ function fmt(n: number | string | undefined | null) {
   return `₴${Number(n || 0).toFixed(2)}`;
 }
 
+function getMyRole(): string {
+  try {
+    const t = localStorage.getItem("hms_token") || "";
+    if (!t) return "reception";
+    const payload = t.split(".")[1];
+    return JSON.parse(atob(payload)).role || "reception";
+  } catch { return "reception"; }
+}
+
+const CASHIER_ROLES_POS = ["cashier", "manager", "owner", "super_admin"];
+
+type PaymentEntry = { method: string; amount: string };
+
 // ── Session Banner ────────────────────────────────────────────────────────────
-function SessionBanner({ session, onOpen, onClose }: { session: Session | null; onOpen: () => void; onClose: () => void }) {
+const ROLE_LABELS: Record<string, { label: string; color: string }> = {
+  super_admin: { label: "Супер-адмін", color: "text-purple-300 bg-purple-500/15" },
+  owner:       { label: "Власник",     color: "text-indigo-300 bg-indigo-500/15" },
+  manager:     { label: "Менеджер",    color: "text-blue-300 bg-blue-500/15"     },
+  cashier:     { label: "Касир",       color: "text-emerald-300 bg-emerald-500/15" },
+  waiter:      { label: "Офіціант",    color: "text-amber-300 bg-amber-500/15"   },
+  reception:   { label: "Рецепція",    color: "text-sky-300 bg-sky-500/15"       },
+  housekeeping:{ label: "Покоївка",    color: "text-rose-300 bg-rose-500/15"     },
+};
+
+function SessionBanner({ session, myRole, onOpen, onClose }: {
+  session: Session | null; myRole: string; onOpen: () => void; onClose: () => void;
+}) {
+  const canManageCashbox = CASHIER_ROLES_POS.includes(myRole);
+  const roleInfo = ROLE_LABELS[myRole] || { label: myRole, color: "text-white/50 bg-white/5" };
+
   if (!session) {
     return (
       <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
         <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
         <span className="text-sm text-amber-300 flex-1">Зміна не відкрита. Щоб приймати замовлення, відкрийте зміну.</span>
-        <Button size="sm" onClick={onOpen} className="bg-amber-500 hover:bg-amber-600 text-white">
-          <LogIn className="w-3.5 h-3.5 mr-1.5" /> Відкрити зміну
-        </Button>
+        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${roleInfo.color}`}>{roleInfo.label}</span>
+        {canManageCashbox ? (
+          <Button size="sm" onClick={onOpen} className="bg-amber-500 hover:bg-amber-600 text-white shrink-0">
+            <LogIn className="w-3.5 h-3.5 mr-1.5" /> Відкрити зміну
+          </Button>
+        ) : (
+          <span className="text-xs text-amber-500/60 shrink-0">Тільки касир може відкрити зміну</span>
+        )}
       </div>
     );
   }
   return (
-    <div className="flex items-center gap-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-        <span className="text-sm font-medium text-emerald-300">{session.cashbox_name}</span>
-      </div>
-      <div className="text-xs text-emerald-400/70">
-        Відкрито: {format(new Date(session.opened_at), "HH:mm", { locale: uk })}
+    <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5">
+      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+      <span className="text-sm font-medium text-emerald-300 shrink-0">{session.cashbox_name}</span>
+      <span className="text-xs text-emerald-400/70 hidden sm:block">
+        {format(new Date(session.opened_at), "HH:mm", { locale: uk })}
         {session.cashier_name && ` · ${session.cashier_name}`}
-      </div>
-      <div className="text-xs text-emerald-400/70 ml-auto">
+      </span>
+      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${roleInfo.color}`}>{roleInfo.label}</span>
+      <span className="text-xs text-emerald-400/70 ml-auto">
         Каса: <span className="font-semibold text-emerald-300">{fmt(session.expected_balance)}</span>
-      </div>
-      <Button size="sm" variant="outline" onClick={onClose} className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 h-7">
-        <LogOut className="w-3 h-3 mr-1" /> Закрити зміну
-      </Button>
+      </span>
+      {canManageCashbox && (
+        <Button size="sm" variant="outline" onClick={onClose} className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 h-7 shrink-0">
+          <LogOut className="w-3 h-3 mr-1" /> Закрити
+        </Button>
+      )}
     </div>
   );
 }
@@ -217,6 +252,12 @@ function PaymentDialog({ order, onPaid, onClose }: {
   const [discounts, setDiscounts]         = useState<any[]>([]);
   const [selectedDiscount, setSelectedDiscount] = useState<any>(null);
   const [manualDiscount, setManualDiscount]     = useState("");
+  // Mixed payment
+  const [isMixed, setIsMixed]             = useState(false);
+  const [mixedPayments, setMixedPayments] = useState<PaymentEntry[]>([
+    { method: "cash", amount: "" },
+    { method: "card", amount: "" },
+  ]);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -232,32 +273,62 @@ function PaymentDialog({ order, onPaid, onClose }: {
     return Math.min(Number(manualDiscount) || 0, order.total_amount);
   };
 
-  const discountAmt = calcDiscountAmt();
-  const baseTotal   = order.total_amount - discountAmt;
-  const tipAmt      = tipPct > 0 ? Math.round(baseTotal * tipPct) / 100 : 0;
-  const finalTotal  = baseTotal + tipAmt;
-  const change      = method === "cash" && Number(given) > finalTotal ? Number(given) - finalTotal : 0;
-  const canPay      = method !== "cash" || !given || Number(given) >= finalTotal;
+  const discountAmt  = calcDiscountAmt();
+  const baseTotal    = order.total_amount - discountAmt;
+  const tipAmt       = tipPct > 0 ? Math.round(baseTotal * tipPct) / 100 : 0;
+  const finalTotal   = baseTotal + tipAmt;
+  const mixedSum     = mixedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const mixedOk      = isMixed ? Math.abs(mixedSum - finalTotal) < 0.01 : true;
+  const change       = !isMixed && method === "cash" && Number(given) > finalTotal ? Number(given) - finalTotal : 0;
+  const canPay       = isMixed ? mixedOk : (method !== "cash" || !given || Number(given) >= finalTotal);
 
   const toggleDiscount = (d: any) => {
-    if (selectedDiscount?.id === d.id) { setSelectedDiscount(null); }
+    if (selectedDiscount?.id === d.id) setSelectedDiscount(null);
     else { setSelectedDiscount(d); setManualDiscount(""); }
+  };
+
+  const updateMixedEntry = (idx: number, field: "method" | "amount", value: string) => {
+    setMixedPayments(prev => {
+      const updated = prev.map((p, i) => i === idx ? { ...p, [field]: value } : p);
+      // Auto-fill remaining amount into last entry
+      if (field === "amount" && idx < updated.length - 1) {
+        const filled = updated.slice(0, -1).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+        const remaining = Math.max(0, finalTotal - filled);
+        const last = updated[updated.length - 1];
+        if (!last.amount || Number(last.amount) === 0) {
+          updated[updated.length - 1] = { ...last, amount: remaining.toFixed(2) };
+        }
+      }
+      return updated;
+    });
+  };
+
+  const addMixedEntry = () => {
+    setMixedPayments(prev => [...prev, { method: "cash", amount: "" }]);
+  };
+
+  const removeMixedEntry = (idx: number) => {
+    setMixedPayments(prev => prev.filter((_, i) => i !== idx));
   };
 
   const pay = async () => {
     setLoading(true);
     try {
-      const r = await apiFetch(`/fb/orders/${order.id}/pay`, {
-        method: "POST",
-        body: JSON.stringify({
-          paymentMethod: method,
-          paidAmount: method === "cash" && given ? Number(given) : finalTotal,
-          discountAmount: discountAmt,
-          tipAmount: tipAmt,
-          tipPct,
-          discountLabel: selectedDiscount?.name || null,
-        }),
-      });
+      const body: any = {
+        discountAmount: discountAmt,
+        tipAmount: tipAmt,
+        tipPct,
+        discountLabel: selectedDiscount?.name || null,
+      };
+      if (isMixed) {
+        body.payments = mixedPayments
+          .filter(p => Number(p.amount) > 0)
+          .map(p => ({ method: p.method, amount: Number(p.amount) }));
+      } else {
+        body.paymentMethod = method;
+        body.paidAmount    = method === "cash" && given ? Number(given) : finalTotal;
+      }
+      const r = await apiFetch(`/fb/orders/${order.id}/pay`, { method: "POST", body: JSON.stringify(body) });
       const d = await r.json();
       if (!r.ok) { toast({ title: "Помилка", description: d.error, variant: "destructive" }); return; }
       if (d.fiscal) setFiscalResult(d.fiscal);
@@ -271,9 +342,11 @@ function PaymentDialog({ order, onPaid, onClose }: {
     return `${value} ₴`;
   };
 
+  const exciseTotal = (order.items || []).reduce((sum, i) => sum + ((i.excise_per_unit || 0) * i.quantity), 0);
+
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md bg-[#1e2235] border-white/10 text-white">
+      <DialogContent className="max-w-md bg-[#1e2235] border-white/10 text-white max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <Receipt className="w-4 h-4 text-indigo-300" /> Оплата замовлення
@@ -281,16 +354,15 @@ function PaymentDialog({ order, onPaid, onClose }: {
         </DialogHeader>
         <div className="space-y-4">
 
+          {/* ── Excise notice ──────────────────────────────── */}
+          {exciseTotal > 0 && (
+            <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-300">
+              🍺 <span className="flex-1">Акцизний податок включено в ціну</span>
+              <span className="font-mono font-semibold">{fmt(exciseTotal)}</span>
+            </div>
+          )}
+
           {/* ── Totals ──────────────────────────────────────── */}
-          {(() => {
-            const exciseTotal = (order.items || []).reduce((sum, i) => sum + ((i.excise_per_unit || 0) * i.quantity), 0);
-            return exciseTotal > 0 ? (
-              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-300">
-                🍺 <span className="flex-1">Акцизний податок включено в ціну</span>
-                <span className="font-mono font-semibold">{fmt(exciseTotal)}</span>
-              </div>
-            ) : null;
-          })()}
           <div className="bg-white/5 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm text-white/60">
               <span>Сума замовлення:</span>
@@ -321,15 +393,12 @@ function PaymentDialog({ order, onPaid, onClose }: {
             </p>
             <div className="flex gap-1.5">
               {TIP_OPTIONS.map(t => (
-                <button
-                  key={t.pct}
-                  onClick={() => setTipPct(t.pct)}
+                <button key={t.pct} onClick={() => setTipPct(t.pct)}
                   className={`flex-1 py-2 rounded-lg border text-xs font-medium transition-all ${
                     tipPct === t.pct
                       ? "bg-amber-500/25 border-amber-400/50 text-amber-200"
                       : "bg-white/4 border-white/8 text-white/40 hover:bg-white/8"
-                  }`}
-                >
+                  }`}>
                   {t.label}
                 </button>
               ))}
@@ -344,15 +413,12 @@ function PaymentDialog({ order, onPaid, onClose }: {
             {discounts.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {discounts.map((d: any) => (
-                  <button
-                    key={d.id}
-                    onClick={() => toggleDiscount(d)}
+                  <button key={d.id} onClick={() => toggleDiscount(d)}
                     className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all ${
                       selectedDiscount?.id === d.id
                         ? "bg-emerald-500/25 border-emerald-400/50 text-emerald-200"
                         : "bg-white/4 border-white/8 text-white/40 hover:bg-white/8"
-                    }`}
-                  >
+                    }`}>
                     {d.name} <span className="opacity-60">({discountTypeLabel(d.type, d.value)})</span>
                   </button>
                 ))}
@@ -361,61 +427,107 @@ function PaymentDialog({ order, onPaid, onClose }: {
             {!selectedDiscount && (
               <div className="flex items-center gap-2">
                 <Percent className="w-4 h-4 text-white/30 shrink-0" />
-                <Input
-                  type="number" min={0} max={order.total_amount}
-                  value={manualDiscount}
+                <Input type="number" min={0} max={order.total_amount} value={manualDiscount}
                   onChange={e => setManualDiscount(e.target.value)}
                   placeholder="Або введіть суму знижки (₴)"
-                  className="h-9 bg-white/5 border-white/10 text-white text-sm"
-                />
+                  className="h-9 bg-white/5 border-white/10 text-white text-sm" />
               </div>
             )}
           </div>
 
-          {/* ── Payment method ──────────────────────────────── */}
-          <div className="grid grid-cols-3 gap-2">
-            {PAYMENT_METHODS.map(pm => {
-              const Icon = pm.icon;
-              return (
-                <button
-                  key={pm.key}
-                  onClick={() => setMethod(pm.key)}
-                  className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-all ${
-                    method === pm.key
-                      ? "bg-indigo-500/20 border-indigo-400/40 text-white"
-                      : "bg-white/4 border-white/8 text-white/50 hover:bg-white/8"
-                  }`}
-                >
-                  <Icon className={`w-5 h-5 ${method === pm.key ? pm.color : ""}`} />
-                  <span className="text-xs">{pm.label}</span>
-                </button>
-              );
-            })}
+          {/* ── Payment method / Mixed toggle ────────────────── */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-white/40 flex items-center gap-1">
+                <Layers className="w-3 h-3" /> Спосіб оплати
+              </p>
+              <button onClick={() => setIsMixed(m => !m)}
+                className={`text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                  isMixed
+                    ? "bg-indigo-500/20 border-indigo-400/40 text-indigo-300"
+                    : "bg-white/4 border-white/8 text-white/40 hover:bg-white/8"
+                }`}>
+                <Layers className="w-3 h-3 inline mr-1" />
+                {isMixed ? "Звичайна оплата" : "Змішати оплату"}
+              </button>
+            </div>
+
+            {!isMixed ? (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  {PAYMENT_METHODS.map(pm => {
+                    const Icon = pm.icon;
+                    return (
+                      <button key={pm.key} onClick={() => setMethod(pm.key)}
+                        className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-all ${
+                          method === pm.key
+                            ? "bg-indigo-500/20 border-indigo-400/40 text-white"
+                            : "bg-white/4 border-white/8 text-white/50 hover:bg-white/8"
+                        }`}>
+                        <Icon className={`w-5 h-5 ${method === pm.key ? pm.color : ""}`} />
+                        <span className="text-xs">{pm.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {method === "cash" && (
+                  <div className="space-y-2 mt-3">
+                    <div className="flex items-center gap-2">
+                      <Banknote className="w-4 h-4 text-white/30 shrink-0" />
+                      <Input type="number" min={finalTotal} value={given}
+                        onChange={e => setGiven(e.target.value)}
+                        placeholder="Отримано від гостя (₴)"
+                        className="h-9 bg-white/5 border-white/10 text-white text-sm" />
+                    </div>
+                    {change > 0 && (
+                      <div className="flex justify-between items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+                        <span className="text-sm text-emerald-300">Решта:</span>
+                        <span className="text-lg font-bold text-emerald-300">{fmt(change)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="space-y-2">
+                {mixedPayments.map((p, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Select value={p.method} onValueChange={v => updateMixedEntry(idx, "method", v)}>
+                      <SelectTrigger className="w-32 h-9 bg-white/5 border-white/10 text-white text-xs shrink-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#1e2235] border-white/10">
+                        {PAYMENT_METHODS.map(pm => (
+                          <SelectItem key={pm.key} value={pm.key} className="text-white text-xs">{pm.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min={0} value={p.amount}
+                      onChange={e => updateMixedEntry(idx, "amount", e.target.value)}
+                      placeholder="Сума (₴)"
+                      className="flex-1 h-9 bg-white/5 border-white/10 text-white text-sm" />
+                    {mixedPayments.length > 2 && (
+                      <button onClick={() => removeMixedEntry(idx)} className="text-white/30 hover:text-red-400 shrink-0">
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <div className="flex items-center justify-between mt-1">
+                  <button onClick={addMixedEntry}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                    <PlusCircle className="w-3.5 h-3.5" /> Ще спосіб оплати
+                  </button>
+                  <span className={`text-xs font-mono ${mixedOk ? "text-emerald-400" : "text-amber-400"}`}>
+                    {fmt(mixedSum)} / {fmt(finalTotal)}
+                    {!mixedOk && ` (не вистачає ${fmt(finalTotal - mixedSum)})`}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* ── Cash input ──────────────────────────────────── */}
-          {method === "cash" && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Banknote className="w-4 h-4 text-white/30 shrink-0" />
-                <Input
-                  type="number" min={finalTotal}
-                  value={given}
-                  onChange={e => setGiven(e.target.value)}
-                  placeholder="Отримано від гостя (₴)"
-                  className="h-9 bg-white/5 border-white/10 text-white text-sm"
-                />
-              </div>
-              {change > 0 && (
-                <div className="flex justify-between items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
-                  <span className="text-sm text-emerald-300">Решта:</span>
-                  <span className="text-lg font-bold text-emerald-300">{fmt(change)}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Fiscal status ────────────────────────────────── */}
+          {/* ── Fiscal result ────────────────────────────────── */}
           {fiscalResult && (
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 space-y-1.5">
               <p className="text-xs text-blue-300 font-semibold flex items-center gap-1.5">
@@ -434,6 +546,114 @@ function PaymentDialog({ order, onPaid, onClose }: {
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/60">Скасувати</Button>
           <Button onClick={pay} disabled={!canPay || loading} className="bg-indigo-600 hover:bg-indigo-500 text-white min-w-28">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1.5" /> Сплачено</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Split Bill Dialog ─────────────────────────────────────────────────────────
+function SplitDialog({ order, orderItems, onSplit, onClose }: {
+  order: Order; orderItems: OrderItem[];
+  onSplit: (newOrder2: any) => void;
+  onClose: () => void;
+}) {
+  const [assignments, setAssignments] = useState<Record<number, 1 | 2>>(
+    Object.fromEntries(orderItems.map((_, i) => [i, 1]))
+  );
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+
+  const bill1 = orderItems.filter((_, i) => assignments[i] === 1);
+  const bill2 = orderItems.filter((_, i) => assignments[i] === 2);
+  const bill1Total = bill1.reduce((s, i) => s + i.total_price, 0);
+  const bill2Total = bill2.reduce((s, i) => s + i.total_price, 0);
+  const canSplit   = bill1.length > 0 && bill2.length > 0;
+
+  const toggle = (idx: number) => {
+    setAssignments(prev => ({ ...prev, [idx]: prev[idx] === 1 ? 2 : 1 }));
+  };
+
+  const confirm = async () => {
+    const bill2Ids = orderItems
+      .filter((item, i) => assignments[i] === 2 && item.id)
+      .map(item => item.id!);
+    if (!bill2Ids.length) {
+      toast({ title: "Оберіть позиції для рахунку 2", variant: "destructive" }); return;
+    }
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/fb/orders/${order.id}/split`, {
+        method: "POST",
+        body: JSON.stringify({ itemIds: bill2Ids }),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast({ title: "Помилка", description: d.error, variant: "destructive" }); return; }
+      toast({ title: "✅ Рахунок розділено", description: `Рахунок 2 → #${d.order2.id}` });
+      onSplit(d.order2);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-lg bg-[#1e2235] border-white/10 text-white">
+        <DialogHeader>
+          <DialogTitle className="text-white flex items-center gap-2">
+            <Scissors className="w-4 h-4 text-indigo-300" /> Розділити рахунок
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-white/40">Натисніть на позицію, щоб перемістити між рахунками</p>
+        <div className="grid grid-cols-2 gap-4 mt-2">
+          {/* Bill 1 */}
+          <div className="bg-white/5 rounded-xl p-3 space-y-2">
+            <p className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
+              <Receipt className="w-3.5 h-3.5" /> Рахунок 1
+            </p>
+            {bill1.length === 0 ? (
+              <p className="text-xs text-white/20 italic">Порожньо</p>
+            ) : bill1.map((item) => {
+              const idx = orderItems.indexOf(item);
+              return (
+                <button key={idx} onClick={() => toggle(idx)}
+                  className="w-full text-left px-2 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors">
+                  <p className="text-xs text-white/80 truncate">{item.name}</p>
+                  <p className="text-[10px] text-white/40">{Number(item.quantity) % 1 !== 0 ? item.quantity.toFixed(1) : item.quantity} × {fmt(item.price)} = {fmt(item.total_price)}</p>
+                </button>
+              );
+            })}
+            <div className="border-t border-white/10 pt-1 text-right">
+              <span className="text-sm font-bold text-indigo-300">{fmt(bill1Total)}</span>
+            </div>
+          </div>
+          {/* Bill 2 */}
+          <div className="bg-white/5 rounded-xl p-3 space-y-2">
+            <p className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
+              <Receipt className="w-3.5 h-3.5" /> Рахунок 2
+            </p>
+            {bill2.length === 0 ? (
+              <p className="text-xs text-white/20 italic">Переміщуйте позиції сюди →</p>
+            ) : bill2.map((item) => {
+              const idx = orderItems.indexOf(item);
+              return (
+                <button key={idx} onClick={() => toggle(idx)}
+                  className="w-full text-left px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors">
+                  <p className="text-xs text-white/80 truncate">{item.name}</p>
+                  <p className="text-[10px] text-white/40">{Number(item.quantity) % 1 !== 0 ? item.quantity.toFixed(1) : item.quantity} × {fmt(item.price)} = {fmt(item.total_price)}</p>
+                </button>
+              );
+            })}
+            {bill2.length > 0 && (
+              <div className="border-t border-white/10 pt-1 text-right">
+                <span className="text-sm font-bold text-emerald-300">{fmt(bill2Total)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/60">Скасувати</Button>
+          <Button onClick={confirm} disabled={!canSplit || loading} className="bg-indigo-600 hover:bg-indigo-500 text-white">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Scissors className="w-4 h-4 mr-1.5" /> Розділити</>}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -574,10 +794,14 @@ export default function FbPosPage() {
   const [customerLoading, setCustomerLoading] = useState(false);
   const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Role
+  const myRole = getMyRole();
+
   // Dialogs
   const [showOpenSession, setShowOpenSession]   = useState(false);
   const [showCloseSession, setShowCloseSession] = useState(false);
   const [showPayment, setShowPayment]           = useState(false);
+  const [showSplit, setShowSplit]               = useState(false);
   const [loading, setLoading]                   = useState(false);
   const [tab, setTab]                           = useState<"tables" | "menu">("tables");
 
@@ -746,6 +970,7 @@ export default function FbPosPage() {
           </div>
           <SessionBanner
             session={session}
+            myRole={myRole}
             onOpen={() => setShowOpenSession(true)}
             onClose={() => setShowCloseSession(true)}
           />
@@ -895,11 +1120,19 @@ export default function FbPosPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button onClick={() => changeQty(item.item_id, -1)} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50">
                       <Minus className="w-2.5 h-2.5" />
                     </button>
-                    <span className="w-5 text-center text-sm font-medium text-white">{item.quantity}</span>
+                    <button
+                      onClick={() => changeQty(item.item_id, -0.5)}
+                      title="Зменшити на ½ порції"
+                      className="w-5 h-5 rounded text-[9px] font-bold bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-400 flex items-center justify-center transition-colors">
+                      ½
+                    </button>
+                    <span className="w-6 text-center text-sm font-medium text-white">
+                      {Number(item.quantity) % 1 !== 0 ? Number(item.quantity).toFixed(1) : item.quantity}
+                    </span>
                     <button onClick={() => changeQty(item.item_id, +1)} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50">
                       <Plus className="w-2.5 h-2.5" />
                     </button>
@@ -922,9 +1155,16 @@ export default function FbPosPage() {
                 {currentOrder ? (
                   <>
                     <Button onClick={placeOrder} disabled={loading || !orderItems.length} variant="outline"
-                      className="flex-1 border-white/10 text-white/70 hover:bg-white/5 h-10">
-                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Оновити</>}
+                      className="border-white/10 text-white/70 hover:bg-white/5 h-10 px-3">
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                     </Button>
+                    {orderItems.length >= 2 && orderItems.every(i => i.id) && (
+                      <Button onClick={() => setShowSplit(true)} variant="outline"
+                        className="border-white/10 text-indigo-400 hover:bg-indigo-500/10 h-10 px-3"
+                        title="Розділити рахунок">
+                        <Scissors className="w-4 h-4" />
+                      </Button>
+                    )}
                     <Button onClick={() => setShowPayment(true)} disabled={!currentOrder || orderItems.length === 0}
                       className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white h-10">
                       <CreditCard className="w-4 h-4 mr-1.5" /> Оплатити
@@ -961,6 +1201,20 @@ export default function FbPosPage() {
           order={{ ...currentOrder, total_amount: orderTotal, items: orderItems }}
           onPaid={afterPayment}
           onClose={() => setShowPayment(false)}
+        />
+      )}
+      {showSplit && currentOrder && (
+        <SplitDialog
+          order={currentOrder}
+          orderItems={orderItems}
+          onSplit={(order2) => {
+            setShowSplit(false);
+            // Remove order2 items from local state and reload
+            load();
+            setOrderItems(prev => prev.filter(i => !order2.items?.some((o2i: any) => o2i.id === i.id)));
+            toast({ title: `Рахунок 2 відкрито — #${order2.id}`, description: "Сплатіть кожен рахунок окремо" });
+          }}
+          onClose={() => setShowSplit(false)}
         />
       )}
     </AppLayout>
