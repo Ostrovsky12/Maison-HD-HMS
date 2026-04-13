@@ -78,7 +78,7 @@ ${context ? `Додатковий контекст: ${context}` : ""}
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 512,
+      max_tokens: 512,
       messages: [
         { role: "system", content: systemPrompt },
         ...chatHistory,
@@ -134,7 +134,7 @@ router.post("/sales-suggest", requireAuth, async (req: any, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 1024,
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -198,7 +198,7 @@ ${guest.notes ? `Нотатки: ${guest.notes}` : ""}`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 1024,
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -259,7 +259,7 @@ router.get("/admin-tips", requireAuth, async (req: any, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 1024,
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -323,7 +323,7 @@ router.get("/owner-insights", requireAuth, async (req: any, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 1500,
+      max_tokens: 1500,
       messages: [
         {
           role: "system",
@@ -424,7 +424,7 @@ router.post("/knowledge/search", requireAuth, async (req: any, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 1024,
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -454,7 +454,7 @@ router.post("/route-task", requireAuth, async (req: any, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 512,
+      max_tokens: 512,
       messages: [
         {
           role: "system",
@@ -505,7 +505,7 @@ router.post("/copilot", requireAuth, async (req: any, res) => {
 
     const stream = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 8192,
+      max_tokens: 8192,
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },

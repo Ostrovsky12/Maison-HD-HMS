@@ -479,7 +479,7 @@ router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 400,
+      max_tokens: 400,
       messages: [
         { role: "system", content: systemPrompt },
         ...chatHistory,

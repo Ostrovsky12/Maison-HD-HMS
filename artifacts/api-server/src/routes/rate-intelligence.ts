@@ -200,7 +200,7 @@ ${websiteHint}
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_completion_tokens: 2000,
+      max_tokens: 2000,
     });
 
     let extracted: any[] = [];
@@ -309,7 +309,7 @@ ${existingNames.length > 0 ? `Вже відстежуються (виключи 
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_completion_tokens: 3000,
+      max_tokens: 3000,
     });
 
     const raw = (completion.choices[0]?.message?.content || "").trim();
@@ -491,7 +491,7 @@ ${rateTable || "Даних немає"}
         { role: "system", content: "Ти — провідний Revenue Manager для готельного бізнесу. Даєш конкретні, дієві рекомендації з числами." },
         { role: "user", content: prompt },
       ],
-      max_completion_tokens: 4096,
+      max_tokens: 4096,
       stream: true,
     });
 

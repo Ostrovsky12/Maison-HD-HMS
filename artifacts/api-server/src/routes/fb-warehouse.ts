@@ -460,7 +460,7 @@ ${ingredientsList || "список порожній"}
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 2000,
+      max_tokens: 2000,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent }
@@ -539,7 +539,7 @@ router.post("/receipts/ai-voice-receipt", async (req, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 2000,
+      max_tokens: 2000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
     const raw = completion.choices[0].message.content || "";
@@ -592,7 +592,7 @@ router.post("/ai-voice-writeoff", async (req, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 1000,
+      max_tokens: 1000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
     const raw = completion.choices[0].message.content || "";
@@ -909,7 +909,7 @@ router.post("/ai/classify-alcohol", async (req, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      max_completion_tokens: 500,
+      max_tokens: 500,
       messages: [
         {
           role: "system",
