@@ -11,7 +11,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Printer, Plus, Pencil, Trash2, Wifi, WifiOff, CheckCircle2,
-  Loader2, Settings, AlertTriangle, X, Check, Tag, Percent, Bot, Save,
+  Loader2, Settings, AlertTriangle, X, Check, Tag, Percent, Bot, Save, FlaskConical,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -596,6 +596,125 @@ function AiWaiterTab() {
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+const EXCISE_GROUP_LABELS: Record<string, string> = {
+  soft_alc: "Слабоалкогольні напої (<8.5%)",
+  beer_low:  "Пиво (до 8.5%)",
+  beer_high: "Пиво (понад 8.5%)",
+  wine:      "Вина, вермути (<22%)",
+  spirits:   "Міцний алкоголь (>22%)",
+};
+
+function ExciseRatesTab() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editRate, setEditRate] = useState("");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["excise-rates"],
+    queryFn: async () => {
+      const r = await apiFetch("/excise-rates");
+      const d = await r.json();
+      return d.rates || [];
+    },
+  });
+
+  const saveMut = useMutation({
+    mutationFn: async ({ id, rate }: { id: number; rate: string }) => {
+      const r = await apiFetch(`/excise-rates/${id}`, {
+        method: "PUT", body: JSON.stringify({ rate_per_liter: parseFloat(rate) }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["excise-rates"] });
+      toast({ title: "Ставку оновлено" });
+      setEditingId(null);
+    },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+        <FlaskConical className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+        <div className="text-sm text-amber-800">
+          <p className="font-semibold mb-1">Акцизний податок на алкоголь (ст. 215 ПКУ)</p>
+          <p className="text-amber-700">Ставки оновлюються щорічно Законом про держбюджет. Акциз = об&apos;єм (л) × ставка (грн/л). Для міцного алкоголю (&gt;22%) обов&apos;язкова акцизна марка.</p>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+      ) : (
+        <div className="border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Група товарів</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Ставка (грн/л)</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Марка</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Оновлено</th>
+                <th className="w-20"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {(data || []).map((rate: any) => (
+                <tr key={rate.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-gray-900">{EXCISE_GROUP_LABELS[rate.group_key] || rate.group_name}</p>
+                    <p className="text-xs text-gray-400 font-mono">{rate.group_key}</p>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {editingId === rate.id ? (
+                      <div className="flex items-center gap-1 justify-center">
+                        <Input
+                          type="number" step="0.0001" min="0"
+                          value={editRate} onChange={e => setEditRate(e.target.value)}
+                          className="w-24 text-center h-7 text-sm"
+                          onKeyDown={e => { if (e.key === "Enter") saveMut.mutate({ id: rate.id, rate: editRate }); if (e.key === "Escape") setEditingId(null); }}
+                          autoFocus
+                        />
+                        <button onClick={() => saveMut.mutate({ id: rate.id, rate: editRate })} className="text-emerald-600 hover:text-emerald-700">
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="font-mono font-semibold text-indigo-700">{parseFloat(rate.rate_per_liter).toFixed(4)}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {rate.requires_stamp ? (
+                      <span className="inline-flex items-center gap-1 text-xs bg-red-50 text-red-700 border border-red-200 rounded px-2 py-0.5">🏷️ Обов'язкова</span>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-center text-xs text-gray-400">
+                    {rate.updated_at ? new Date(rate.updated_at).toLocaleDateString("uk-UA") : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => { setEditingId(rate.id); setEditRate(parseFloat(rate.rate_per_liter).toFixed(4)); }}
+                      className="text-gray-400 hover:text-indigo-600 transition-colors"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-gray-400 text-center">Ставки акцизу діють з 01.01.2024 (Закон про Держбюджет). Для оновлення — натисніть ✏️ поруч з рядком.</p>
+    </div>
+  );
+}
+
 export default function PosSettingsPage() {
   return (
     <AppLayout title="POS Налаштування">
@@ -616,10 +735,14 @@ export default function PosSettingsPage() {
             <TabsTrigger value="ai-waiter" className="gap-1.5">
               <Bot className="w-4 h-4" /> AI Офіціант
             </TabsTrigger>
+            <TabsTrigger value="excise" className="gap-1.5">
+              <FlaskConical className="w-4 h-4" /> Акцизні ставки
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="printers"><PrintersTab /></TabsContent>
           <TabsContent value="discounts"><DiscountsTab /></TabsContent>
           <TabsContent value="ai-waiter"><AiWaiterTab /></TabsContent>
+          <TabsContent value="excise"><ExciseRatesTab /></TabsContent>
         </Tabs>
       </div>
     </AppLayout>

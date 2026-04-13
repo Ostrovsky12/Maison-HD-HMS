@@ -31,8 +31,8 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
 type Session = { id: number; cashbox_name: string; opening_balance: number; expected_balance: number; cash_in: number; opened_at: string; cashier_name?: string };
 type Table   = { id: number; table_number: string; section: string; capacity: number; status: string; current_order_id?: number };
 type Category = { id: number; name: string; icon?: string; sort_order: number };
-type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string };
-type OrderItem = { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string };
+type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean; excise_per_unit?: number };
+type OrderItem = { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string; is_alcohol?: boolean; excise_per_unit?: number };
 type Order = { id: number; table_id?: number; order_type: string; guest_name?: string; status: string; total_amount: number; items?: OrderItem[] };
 type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean };
 
@@ -282,6 +282,15 @@ function PaymentDialog({ order, onPaid, onClose }: {
         <div className="space-y-4">
 
           {/* ── Totals ──────────────────────────────────────── */}
+          {(() => {
+            const exciseTotal = (order.items || []).reduce((sum, i) => sum + ((i.excise_per_unit || 0) * i.quantity), 0);
+            return exciseTotal > 0 ? (
+              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-300">
+                🍺 <span className="flex-1">Акцизний податок включено в ціну</span>
+                <span className="font-mono font-semibold">{fmt(exciseTotal)}</span>
+              </div>
+            ) : null;
+          })()}
           <div className="bg-white/5 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm text-white/60">
               <span>Сума замовлення:</span>
@@ -599,6 +608,7 @@ export default function FbPosPage() {
         setOrderItems((r.order.items || []).map((i: any) => ({
           id: i.id, item_id: i.item_id, name: i.name,
           price: Number(i.price), quantity: i.quantity, total_price: Number(i.total_price),
+          is_alcohol: !!i.is_alcohol, excise_per_unit: parseFloat(i.excise_per_unit) || 0,
         })));
         setGuestName(r.order.guest_name || "");
         setGuestCount(r.order.guest_count || 1);
@@ -622,7 +632,7 @@ export default function FbPosPage() {
           : i
         );
       }
-      return [...prev, { item_id: item.id, name: item.name, price: Number(item.price), quantity: 1, total_price: Number(item.price) }];
+      return [...prev, { item_id: item.id, name: item.name, price: Number(item.price), quantity: 1, total_price: Number(item.price), is_alcohol: !!item.is_alcohol, excise_per_unit: Number(item.excise_per_unit) || 0 }];
     });
   };
 
@@ -876,7 +886,14 @@ export default function FbPosPage() {
                 <div key={`${item.item_id}-${idx}`} className="flex items-center gap-3 bg-white/4 rounded-xl px-3 py-2.5 border border-white/6">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white/85 truncate">{item.name}</p>
-                    <p className="text-xs text-white/30">{fmt(item.price)} / шт</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-white/30">{fmt(item.price)} / шт</p>
+                      {item.is_alcohol && item.excise_per_unit && item.excise_per_unit > 0 && (
+                        <span className="text-xs text-amber-400/70 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                          🍺 акциз {fmt(item.excise_per_unit * item.quantity)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button onClick={() => changeQty(item.item_id, -1)} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50">

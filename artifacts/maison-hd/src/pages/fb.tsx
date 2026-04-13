@@ -90,6 +90,7 @@ export default function FbPage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [legalEntities, setLegalEntities] = useState<any[]>([]);
   const [fbIngredients, setFbIngredients] = useState<any[]>([]);
+  const [exciseRates, setExciseRates] = useState<any[]>([]);
   const [kitchenOrders, setKitchenOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [orderDetail, setOrderDetail] = useState<any>(null);
@@ -147,6 +148,10 @@ export default function FbPage() {
     const r = await fetch(`${whBase}/ingredients`, { headers: { Authorization: `Bearer ${token()}` } });
     if (r.ok) { const d = await r.json(); setFbIngredients((d.ingredients || []).filter((i: any) => i.is_active !== false)); }
   };
+  const loadExciseRates = async () => {
+    const r = await apiFetch("/excise-rates");
+    if (r.ok) { const d = await r.json(); setExciseRates(d.rates || []); }
+  };
   const loadOrderDetail = async (id: number) => { const r = await apiFetch(`/orders/${id}`); if (r.ok) { const d = await r.json(); setOrderDetail(d); } };
   const loadKitchen = useCallback(async () => {
     setKitchenLoading(true);
@@ -155,7 +160,7 @@ export default function FbPage() {
     setKitchenLoading(false);
   }, []);
 
-  useEffect(() => { loadStats(); loadTables(); loadCategories(); loadItems(); loadLegalEntities(); loadFbIngredients(); }, []);
+  useEffect(() => { loadStats(); loadTables(); loadCategories(); loadItems(); loadLegalEntities(); loadFbIngredients(); loadExciseRates(); }, []);
   useEffect(() => { if (tab === "orders") loadOrders(); }, [tab, statusFilter, typeFilter]);
   useEffect(() => {
     if (tab === "kitchen") {
@@ -723,7 +728,7 @@ export default function FbPage() {
           }
         }} />
 
-      <NewMenuItemDialog open={showNewItem} categories={categories} legalEntities={legalEntities} ingredients={fbIngredients} onClose={() => setShowNewItem(false)}
+      <NewMenuItemDialog open={showNewItem} categories={categories} legalEntities={legalEntities} ingredients={fbIngredients} exciseRates={exciseRates} onClose={() => setShowNewItem(false)}
         onSave={async (data: any) => {
           const r = await apiFetch("/items", { method: "POST", body: JSON.stringify(data) });
           if (r.ok) { toast({ title: "Страву додано" }); setShowNewItem(false); loadItems(); }
@@ -757,7 +762,7 @@ export default function FbPage() {
 
       {/* Edit menu item dialog */}
       {editingItem && (
-        <EditMenuItemDialog open={showEditItem} item={editingItem} categories={categories} legalEntities={legalEntities} ingredients={fbIngredients}
+        <EditMenuItemDialog open={showEditItem} item={editingItem} categories={categories} legalEntities={legalEntities} ingredients={fbIngredients} exciseRates={exciseRates}
           onClose={() => { setShowEditItem(false); setEditingItem(null); }}
           onSave={async (data: any) => {
             const r = await apiFetch(`/items/${editingItem.id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -939,9 +944,29 @@ const STATION_OPTIONS = [
   { value: "bar",                  label: "🍸 Бар" },
 ];
 
-function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredients = [] }: any) {
+const EXCISE_GROUP_LABELS: Record<string, string> = {
+  soft_alc: "Слабоалкогольні напої (<8.5%)",
+  beer_low:  "Пиво (до 8.5%)",
+  beer_high: "Пиво (понад 8.5%)",
+  wine:      "Вина, вермути (<22%)",
+  spirits:   "Міцний алкоголь (>22%)",
+};
+
+function inferExciseGroup(abv: number): string {
+  if (abv <= 0) return "";
+  if (abv < 8.5)  return "beer_low";
+  if (abv < 22)   return "wine";
+  return "spirits";
+}
+
+function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredients = [], exciseRates = [] }: any) {
   const [classifying, setClassifying] = useState(false);
   const { toast } = useToast();
+
+  const selectedRate = exciseRates.find((r: any) => r.group_key === form.excise_group);
+  const excisePreview = (form.volume_l && selectedRate)
+    ? (parseFloat(form.volume_l) * parseFloat(selectedRate.rate_per_liter)).toFixed(2)
+    : null;
 
   const classifyAlcohol = async () => {
     if (!form.name) return;
@@ -957,12 +982,15 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
       });
       if (r.ok) {
         const d = await r.json();
+        const inferredGroup = d.excise_group || (d.excise_rate_uah != null
+          ? inferExciseGroup(parseFloat(form.alcohol_volume_pct) || 0)
+          : form.excise_group);
         setForm((f: any) => ({
           ...f,
           uktzed_code: d.uktzed_code || f.uktzed_code,
-          excise_code: d.excise_rate_uah ? String(d.excise_rate_uah) : f.excise_code,
+          excise_group: inferredGroup || f.excise_group,
         }));
-        toast({ title: "AI класифікація", description: `УКТЗЕД: ${d.uktzed_code || "—"}  Акциз: ${d.excise_rate_uah ?? "—"} ${d.excise_unit || ""}` });
+        toast({ title: "AI класифікація", description: `УКТЗЕД: ${d.uktzed_code || "—"}  Група: ${EXCISE_GROUP_LABELS[inferredGroup] || inferredGroup || "—"}` });
       }
     } finally {
       setClassifying(false);
@@ -1087,20 +1115,56 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
         </label>
         {form.is_alcohol && (
           <div className="space-y-2 pt-1">
+            {/* Row 1: excise group */}
+            <div>
+              <Label className="text-xs">Група акцизу *</Label>
+              <Select value={form.excise_group || ""} onValueChange={v => setForm((f: any) => ({ ...f, excise_group: v }))}>
+                <SelectTrigger className="text-xs"><SelectValue placeholder="Оберіть групу…" /></SelectTrigger>
+                <SelectContent>
+                  {exciseRates.map((r: any) => (
+                    <SelectItem key={r.group_key} value={r.group_key}>
+                      {EXCISE_GROUP_LABELS[r.group_key] || r.group_name}
+                      <span className="ml-2 text-muted-foreground">{r.rate_per_liter} грн/л</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Row 2: volume + ABV */}
             <div className="grid grid-cols-2 gap-2">
-              <div><Label className="text-xs">Міцність (% об.)</Label>
-                <Input type="number" min="0" max="100" step="0.1" placeholder="5.0" value={form.alcohol_volume_pct || ""} onChange={e => setForm((f: any) => ({ ...f, alcohol_volume_pct: e.target.value }))} />
+              <div>
+                <Label className="text-xs">Об'єм пляшки/порції (л)</Label>
+                <Input type="number" min="0" step="0.001" placeholder="0.500" value={form.volume_l || ""}
+                  onChange={e => setForm((f: any) => ({ ...f, volume_l: e.target.value }))} />
               </div>
-              <div><Label className="text-xs">УКТЗЕД код</Label>
+              <div>
+                <Label className="text-xs">Міцність (% об.)</Label>
+                <Input type="number" min="0" max="100" step="0.1" placeholder="5.0" value={form.alcohol_volume_pct || ""}
+                  onChange={e => setForm((f: any) => ({ ...f, alcohol_volume_pct: e.target.value }))} />
+              </div>
+            </div>
+            {/* Row 3: UKTZED + excise preview */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">УКТЗЕД код</Label>
                 <Input placeholder="2203001000" value={form.uktzed_code || ""} onChange={e => setForm((f: any) => ({ ...f, uktzed_code: e.target.value }))} />
               </div>
+              <div>
+                <Label className="text-xs">Акциз на порцію</Label>
+                <div className={`flex items-center h-9 px-3 rounded-md border text-sm font-mono ${excisePreview ? "bg-amber-100 border-amber-300 text-amber-800" : "bg-white border-input text-muted-foreground"}`}>
+                  {excisePreview ? `≈ ${excisePreview} грн` : "—"}
+                </div>
+              </div>
             </div>
-            <div><Label className="text-xs">Акцизна ставка (грн)</Label>
-              <Input placeholder="2.18" value={form.excise_code || ""} onChange={e => setForm((f: any) => ({ ...f, excise_code: e.target.value }))} />
-            </div>
+            {/* Requires stamp badge */}
+            {selectedRate?.requires_stamp && (
+              <div className="flex items-center gap-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+                🏷️ <strong>Обов'язкова акцизна марка</strong> (МРЦ діє)
+              </div>
+            )}
             <Button type="button" variant="outline" size="sm" disabled={classifying || !form.name} onClick={classifyAlcohol} className="w-full text-xs border-amber-300 text-amber-700 hover:bg-amber-50">
               {classifying ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
-              AI: Визначити УКТЗЕД та акциз автоматично
+              AI: Визначити УКТЗЕД та групу автоматично
             </Button>
           </div>
         )}
@@ -1114,9 +1178,9 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
   );
 }
 
-const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "", station: "kitchen_general", legal_entity_id: null, ingredient_id: null, image_url: "" };
+const EMPTY_ITEM_FORM = { name: "", description: "", categoryId: "", price: "", cookMinutes: 15, isVegetarian: false, isPopular: false, vat_rate: "20", is_alcohol: false, alcohol_volume_pct: "", uktzed_code: "", excise_code: "", excise_group: "", volume_l: "", station: "kitchen_general", legal_entity_id: null, ingredient_id: null, image_url: "" };
 
-function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredients, onSave }: any) {
+function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredients, exciseRates, onSave }: any) {
   const [form, setForm] = useState<any>(EMPTY_ITEM_FORM);
   const [loading, setLoading] = useState(false);
   const handleSubmit = async () => {
@@ -1128,6 +1192,8 @@ function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredien
       cookMinutes: parseInt(String(form.cookMinutes)) || 15,
       vat_rate: parseInt(form.vat_rate) || 20,
       alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
+      volume_l: form.volume_l ? parseFloat(form.volume_l) : null,
+      excise_group: form.excise_group || null,
       ingredient_id: form.ingredient_id ?? null,
       imageUrl: form.image_url || null,
     });
@@ -1138,7 +1204,7 @@ function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredien
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Нова страва / позиція меню</DialogTitle></DialogHeader>
-        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} ingredients={ingredients} />
+        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} ingredients={ingredients} exciseRates={exciseRates} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
           <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Додати"}</Button>
@@ -1149,7 +1215,7 @@ function NewMenuItemDialog({ open, onClose, categories, legalEntities, ingredien
 }
 
 // ── Edit menu item dialog ─────────────────────────────────────────────────────
-function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, ingredients, onSave }: any) {
+function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, ingredients, exciseRates, onSave }: any) {
   const [form, setForm] = useState<any>({});
   const [loading, setLoading] = useState(false);
 
@@ -1167,6 +1233,8 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, in
       alcohol_volume_pct: item.alcohol_volume_pct != null ? String(item.alcohol_volume_pct) : "",
       uktzed_code: item.uktzed_code || "",
       excise_code: item.excise_code || "",
+      excise_group: item.excise_group || "",
+      volume_l: item.volume_l != null ? String(item.volume_l) : "",
       station: item.station || "kitchen_general",
       legal_entity_id: item.legal_entity_id || null,
       ingredient_id: item.ingredient_id ?? null,
@@ -1183,6 +1251,8 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, in
       cookMinutes: parseInt(String(form.cookMinutes)) || 15,
       vat_rate: parseInt(form.vat_rate) || 20,
       alcohol_volume_pct: form.alcohol_volume_pct ? parseFloat(form.alcohol_volume_pct) : null,
+      volume_l: form.volume_l ? parseFloat(form.volume_l) : null,
+      excise_group: form.excise_group || null,
       ingredient_id: form.ingredient_id ?? null,
       imageUrl: form.image_url || null,
     });
@@ -1193,7 +1263,7 @@ function EditMenuItemDialog({ open, item, onClose, categories, legalEntities, in
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Редагувати: {item?.name}</DialogTitle></DialogHeader>
-        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} ingredients={ingredients} />
+        <MenuItemForm form={form} setForm={setForm} categories={categories} legalEntities={legalEntities} ingredients={ingredients} exciseRates={exciseRates} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
           <Button onClick={handleSubmit} disabled={loading || !form.name || !form.price} className="bg-orange-600 hover:bg-orange-700">{loading ? "…" : "Зберегти зміни"}</Button>

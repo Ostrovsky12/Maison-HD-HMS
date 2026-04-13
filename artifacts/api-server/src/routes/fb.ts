@@ -185,12 +185,19 @@ router.get("/items", requireAuth, async (req: any, res) => {
     if (categoryId) { params.push(parseInt(categoryId as string)); conditions.push(`fi.category_id = $${params.length}`); }
     if (available === "true") conditions.push(`fi.is_available = true`);
     const r = await db_.query(
-      `SELECT fi.*, fc.name AS "categoryName", fc.emoji AS "categoryEmoji",
-              fi.ingredient_id,
-              ing.name AS ingredient_name, ing.unit AS ingredient_unit
+      `SELECT fi.*,
+              fc.name AS "categoryName", fc.emoji AS "categoryEmoji",
+              ing.name AS ingredient_name, ing.unit AS ingredient_unit,
+              er.group_name  AS excise_group_name,
+              er.rate_per_liter,
+              er.requires_stamp,
+              CASE WHEN fi.is_alcohol AND fi.volume_l IS NOT NULL AND er.rate_per_liter IS NOT NULL
+                   THEN ROUND(fi.volume_l * er.rate_per_liter, 2)
+                   ELSE 0 END AS excise_per_unit
        FROM fb_items fi
        LEFT JOIN fb_categories fc ON fc.id = fi.category_id
        LEFT JOIN fb_ingredients ing ON ing.id = fi.ingredient_id
+       LEFT JOIN fb_excise_rates er ON er.group_key = fi.excise_group
        WHERE ${conditions.join(" AND ")}
        ORDER BY fc.sort_order ASC NULLS LAST, fi.sort_order ASC`,
       params
@@ -205,6 +212,7 @@ router.post("/items", requireAuth, async (req: any, res) => {
     const { name, description, price, categoryId, cookMinutes, isAvailable = true, isPopular = false, isVegetarian = false,
       allergens, tags, sortOrder = 0, imageUrl,
       vat_rate = 20, is_alcohol = false, alcohol_volume_pct, uktzed_code, excise_code,
+      volume_l, excise_group,
       station = "kitchen_general", legal_entity_id, ingredient_id,
     } = req.body;
     const db_ = (db as any).$client;
@@ -212,11 +220,13 @@ router.post("/items", requireAuth, async (req: any, res) => {
       `INSERT INTO fb_items (organization_id, name, description, price, category_id, cook_minutes,
          is_available, is_popular, is_vegetarian, allergens, tags, sort_order, image_url,
          vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
+         volume_l, excise_group,
          station, legal_entity_id, ingredient_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
       [orgId, name, description||null, price, categoryId||null, cookMinutes||15,
        isAvailable, isPopular, isVegetarian, allergens||null, tags||null, sortOrder, imageUrl||null,
        vat_rate||20, is_alcohol||false, alcohol_volume_pct||null, uktzed_code||null, excise_code||null,
+       volume_l||null, excise_group||null,
        station||"kitchen_general", legal_entity_id||null, ingredient_id||null]
     );
     res.json({ item: r.rows[0] });
@@ -230,6 +240,7 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
     const { name, description, price, categoryId, cookMinutes, isAvailable, isPopular, isVegetarian,
       allergens, tags, sortOrder, imageUrl,
       vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
+      volume_l, excise_group,
       station, legal_entity_id, ingredient_id,
     } = req.body;
     const db_ = (db as any).$client;
@@ -258,6 +269,8 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
          legal_entity_id    = COALESCE($16, legal_entity_id),
          ingredient_id      = CASE WHEN $20::boolean THEN $17::int ELSE ingredient_id END,
          image_url          = CASE WHEN $22::boolean THEN $21 ELSE image_url END,
+         volume_l           = COALESCE($23, volume_l),
+         excise_group       = COALESCE($24, excise_group),
          updated_at         = NOW()
        WHERE id = $18 AND organization_id = $19 RETURNING *`,
       [name||null, description||null, price??null, categoryId||null, cookMinutes??null,
@@ -268,7 +281,9 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
        id, orgId,
        ingredientIdVal !== undefined,
        imageUrlVal ?? null,
-       imageUrlVal !== undefined]
+       imageUrlVal !== undefined,
+       volume_l != null ? volume_l : null,
+       excise_group || null]
     );
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
     res.json({ item: r.rows[0] });
@@ -281,6 +296,33 @@ router.delete("/items/:id", requireAuth, async (req: any, res) => {
     await db.delete(fbItemsTable)
       .where(and(eq(fbItemsTable.id, parseInt(req.params.id)), eq(fbItemsTable.organizationId, orgId)));
     res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Excise Rates (global lookup table) ──────────────────────────────────────
+router.get("/excise-rates", requireAuth, async (req: any, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const r = await db_.query(`SELECT * FROM fb_excise_rates ORDER BY rate_per_liter ASC`);
+    res.json({ rates: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/excise-rates/:id", requireAuth, async (req: any, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const id = parseInt(req.params.id);
+    const { rate_per_liter } = req.body;
+    if (!rate_per_liter || isNaN(parseFloat(rate_per_liter))) {
+      return res.status(400).json({ error: "rate_per_liter is required" });
+    }
+    const r = await db_.query(
+      `UPDATE fb_excise_rates SET rate_per_liter = $1, updated_at = NOW()
+       WHERE id = $2 RETURNING *`,
+      [parseFloat(rate_per_liter), id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Not found" });
+    res.json({ rate: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -388,11 +430,22 @@ router.get("/orders/:id", requireAuth, async (req: any, res) => {
 
     if (!order) return res.status(404).json({ error: "Not found" });
 
-    const orderItems = await db.select().from(fbOrderItemsTable)
-      .where(eq(fbOrderItemsTable.orderId, orderId))
-      .orderBy(asc(fbOrderItemsTable.createdAt));
+    const db_ = (db as any).$client;
+    const itemsRow = await db_.query(
+      `SELECT oi.*,
+              fi.is_alcohol, fi.excise_group, fi.volume_l,
+              er.rate_per_liter,
+              CASE WHEN fi.is_alcohol AND fi.volume_l IS NOT NULL AND er.rate_per_liter IS NOT NULL
+                   THEN ROUND(fi.volume_l * er.rate_per_liter, 2)
+                   ELSE 0 END AS excise_per_unit
+       FROM fb_order_items oi
+       LEFT JOIN fb_items fi ON fi.id = oi.item_id
+       LEFT JOIN fb_excise_rates er ON er.group_key = fi.excise_group
+       WHERE oi.order_id = $1
+       ORDER BY oi.created_at ASC`, [orderId]
+    );
 
-    res.json({ order, items: orderItems });
+    res.json({ order, items: itemsRow.rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -663,7 +716,22 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     );
     const receiptNum = `R-${orgId}-${String((cnt.rows[0]?.cnt || 0) + 1).padStart(5, "0")}`;
 
-    // Update order (includes tip + legal entity)
+    // Calculate excise total from alcohol items
+    const exciseItemsRow = await db_.query(
+      `SELECT oi.quantity,
+              CASE WHEN fi.is_alcohol AND fi.volume_l IS NOT NULL AND er.rate_per_liter IS NOT NULL
+                   THEN ROUND(fi.volume_l * er.rate_per_liter, 4)
+                   ELSE 0 END AS excise_per_unit
+       FROM fb_order_items oi
+       LEFT JOIN fb_items fi ON fi.id = oi.item_id
+       LEFT JOIN fb_excise_rates er ON er.group_key = fi.excise_group
+       WHERE oi.order_id = $1`, [orderId]
+    );
+    const exciseTotal = exciseItemsRow.rows.reduce((sum: number, row: any) => {
+      return sum + (parseFloat(row.excise_per_unit) || 0) * (parseInt(row.quantity) || 1);
+    }, 0);
+
+    // Update order (includes tip + legal entity + excise_total)
     const r = await db_.query(
       `UPDATE fb_orders SET
          status = 'billed', paid_amount = $1, payment_method = $2,
@@ -672,11 +740,12 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
          legal_entity_id = COALESCE($7, legal_entity_id),
          notes = COALESCE($8, notes),
          discount_label = COALESCE($11, discount_label),
+         excise_total = $12,
          updated_at = NOW()
        WHERE id = $9 AND organization_id = $10 RETURNING *`,
       [paidAmount ?? finalAmount, paymentMethod, discountAmount, receiptNum,
        tip, tipPct || 0, legalEntityId || null, notes || null, orderId, orgId,
-       discountLabel || null]
+       discountLabel || null, Math.round(exciseTotal * 100) / 100]
     );
 
     // Free the table
