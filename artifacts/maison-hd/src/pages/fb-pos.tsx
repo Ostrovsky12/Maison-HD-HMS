@@ -258,10 +258,28 @@ function PaymentDialog({ order, onPaid, onClose }: {
     { method: "cash", amount: "" },
     { method: "card", amount: "" },
   ]);
+  // Legal entities
+  const [legalEntities, setLegalEntities]     = useState<LegalEntity[]>([]);
+  const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const { toast } = useToast();
+
+  // Detect alcohol in this order
+  const hasAlcohol = (order.items || []).some((i: any) => i.is_alcohol);
 
   useEffect(() => {
     apiFetch("/fb/discounts").then(r => r.json()).then(d => setDiscounts(d.discounts || []));
+    // Load legal entities and auto-select based on alcohol content
+    apiFetch("/legal-entities").then(r => r.json()).then(d => {
+      const entities: LegalEntity[] = d.legalEntities || [];
+      setLegalEntities(entities);
+      if (entities.length > 0) {
+        // Auto-select: alcohol order → entity with handles_alcohol=true, otherwise → is_default or first
+        const alcoholEntity  = entities.find(e => e.handles_alcohol);
+        const defaultEntity  = entities.find(e => e.is_default) || entities[0];
+        const autoSelected   = hasAlcohol && alcoholEntity ? alcoholEntity : defaultEntity;
+        setSelectedEntityId(autoSelected?.id ?? null);
+      }
+    }).catch(() => {});
   }, []);
 
   const calcDiscountAmt = () => {
@@ -319,6 +337,7 @@ function PaymentDialog({ order, onPaid, onClose }: {
         tipAmount: tipAmt,
         tipPct,
         discountLabel: selectedDiscount?.name || null,
+        legalEntityId: selectedEntityId || undefined,
       };
       if (isMixed) {
         body.payments = mixedPayments
@@ -353,6 +372,33 @@ function PaymentDialog({ order, onPaid, onClose }: {
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+
+          {/* ── Legal entity selector ──────────────────────── */}
+          {legalEntities.length > 1 && (
+            <div className="bg-white/5 rounded-xl px-3 py-2.5 space-y-1.5">
+              <p className="text-xs text-white/40 flex items-center gap-1">
+                <Building2 className="w-3 h-3" /> Юридична особа
+                {hasAlcohol && <span className="ml-auto text-amber-400 text-[10px]">🍺 авто-вибір за алкоголем</span>}
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                {legalEntities.map(e => (
+                  <button key={e.id}
+                    onClick={() => setSelectedEntityId(e.id)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                      selectedEntityId === e.id
+                        ? "bg-indigo-500/25 border-indigo-400/50 text-indigo-200"
+                        : "bg-white/4 border-white/10 text-white/50 hover:bg-white/8"
+                    }`}>
+                    <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                      e.type === "tov" ? "bg-blue-500/30 text-blue-300" : "bg-emerald-500/30 text-emerald-300"
+                    }`}>{e.type.toUpperCase()}</span>
+                    {e.short_name || e.name}
+                    {e.handles_alcohol && <span className="text-amber-400">🍺</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* ── Excise notice ──────────────────────────────── */}
           {exciseTotal > 0 && (
