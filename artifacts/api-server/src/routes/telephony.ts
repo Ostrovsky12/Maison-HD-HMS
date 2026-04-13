@@ -243,7 +243,7 @@ router.post("/calls/:id/summarize", requireAuth, async (req: any, res) => {
     const notesText = call.notes || "Нотатки відсутні";
     const completion = await openai.chat.completions.create({
       model: "gpt-5-nano",
-      max_tokens: 1024,
+      max_completion_tokens: 1024,
       messages: [{
         role: "system",
         content: `Ти асистент call-центру готелю. Аналізуй нотатки дзвінків та генеруй структуровані підсумки.
@@ -288,7 +288,7 @@ router.post("/ai/suggest-script", requireAuth, async (req: any, res) => {
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-5-nano",
-      max_tokens: 1024,
+      max_completion_tokens: 1024,
       messages: [{
         role: "system",
         content: "Ти досвідчений тренер для операторів готельного call-центру. Генеруй чіткі, ввічливі та ефективні скрипти розмов українською мовою."
@@ -617,7 +617,7 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
         try {
           const completion = await openai.chat.completions.create({
             model: "gpt-5-nano",
-            max_tokens: 512,
+            max_completion_tokens: 512,
             messages: [{
               role: "system",
               content: `Ти асистент call-центру готелю. Відповідай в JSON: {"summary":"...","sentiment":"positive|neutral|negative","actionItems":["..."]}`

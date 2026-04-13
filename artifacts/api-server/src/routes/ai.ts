@@ -77,8 +77,8 @@ ${context ? `Додатковий контекст: ${context}` : ""}
 Складіть короткий, ввічливий і корисний текст відповіді для гостя.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 512,
+      model: "gpt-5.2",
+      max_completion_tokens: 512,
       messages: [
         { role: "system", content: systemPrompt },
         ...chatHistory,
@@ -133,8 +133,8 @@ router.post("/sales-suggest", requireAuth, async (req: any, res) => {
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 1024,
+      model: "gpt-5.2",
+      max_completion_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -197,8 +197,8 @@ VIP: ${guest.vipStatus ? "Так" : "Ні"}
 ${guest.notes ? `Нотатки: ${guest.notes}` : ""}`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 1024,
+      model: "gpt-5.2",
+      max_completion_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -258,8 +258,8 @@ router.get("/admin-tips", requireAuth, async (req: any, res) => {
 Відкритих повідомлень: ${(openInbox.rows[0] as any)?.cnt || 0}`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 1024,
+      model: "gpt-5.2",
+      max_completion_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -322,8 +322,8 @@ router.get("/owner-insights", requireAuth, async (req: any, res) => {
 Зайнятих номерів сьогодні: ${occ?.occupied || 0} з ${occ?.total_units || 0}`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 1500,
+      model: "gpt-5.2",
+      max_completion_tokens: 1500,
       messages: [
         {
           role: "system",
@@ -423,8 +423,8 @@ router.post("/knowledge/search", requireAuth, async (req: any, res) => {
     const articlesContext = articles.map((a: any) => `[${a.category}] ${a.title}: ${a.content}`).join("\n\n");
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 1024,
+      model: "gpt-5.2",
+      max_completion_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -453,8 +453,8 @@ router.post("/route-task", requireAuth, async (req: any, res) => {
     const { taskDescription, urgency } = req.body;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 512,
+      model: "gpt-5.2",
+      max_completion_tokens: 512,
       messages: [
         {
           role: "system",
@@ -504,8 +504,8 @@ router.post("/copilot", requireAuth, async (req: any, res) => {
 Завжди давай практичні, конкретні відповіді.`;
 
     const stream = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 8192,
+      model: "gpt-5.2",
+      max_completion_tokens: 8192,
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },

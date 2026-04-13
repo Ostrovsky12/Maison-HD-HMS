@@ -398,7 +398,7 @@ router.post("/receipts/:id/confirm", async (req, res) => {
 // ─── AI Invoice Scanner ────────────────────────────────────────────────────
 router.post("/receipts/ai-scan", async (req, res) => {
   try {
-    const { text, image_base64 } = req.body;
+    const { text, image_base64, image_mime } = req.body;
     if (!text && !image_base64) return res.status(400).json({ error: "text or image_base64 required" });
 
     const orgId = org(req);
@@ -418,8 +418,9 @@ router.post("/receipts/ai-scan", async (req, res) => {
 
     let userContent: any;
     if (image_base64) {
+      const mimeType = image_mime || "image/jpeg";
       userContent = [
-        { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image_base64}` } },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${image_base64}` } },
         { type: "text", text: "Розпізнай цю накладну (видаткову накладну, товарно-транспортну накладну або рахунок-фактуру) і витягни всі дані." }
       ];
     } else {
@@ -459,8 +460,8 @@ ${ingredientsList || "список порожній"}
 - "supplier_id": id постачальника або null`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 2000,
+      model: "gpt-5.2",
+      max_completion_tokens: 2000,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent }
@@ -538,8 +539,8 @@ router.post("/receipts/ai-voice-receipt", async (req, res) => {
 Знайди збіги ingredient_id і supplier_id де можливо. Одиниці: кг/г/л/мл/шт/пляш/упак/пор/пач.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 2000,
+      model: "gpt-5.2",
+      max_completion_tokens: 2000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
     const raw = completion.choices[0].message.content || "";
@@ -591,8 +592,8 @@ router.post("/ai-voice-writeoff", async (req, res) => {
 Знайди ingredient_id де можливо.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 1000,
+      model: "gpt-5.2",
+      max_completion_tokens: 1000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
     const raw = completion.choices[0].message.content || "";
@@ -908,8 +909,8 @@ router.post("/ai/classify-alcohol", async (req, res) => {
     if (!name) return res.status(400).json({ error: "name required" });
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 500,
+      model: "gpt-5.2",
+      max_completion_tokens: 500,
       messages: [
         {
           role: "system",

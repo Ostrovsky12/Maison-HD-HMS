@@ -195,12 +195,12 @@ ${websiteHint}
 Ціни мають бути в гривнях (UAH), реалістичними для українського ринку.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5.2",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
     });
 
     let extracted: any[] = [];
@@ -304,12 +304,12 @@ ${existingNames.length > 0 ? `Вже відстежуються (виключи 
 [{"name":"...","websiteUrl":"https://...","starRating":3,"roomType":"Котедж","notes":"...","confidence":"high"}]`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5.2",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 3000,
+      max_completion_tokens: 3000,
     });
 
     const raw = (completion.choices[0]?.message?.content || "").trim();
@@ -486,12 +486,12 @@ ${rateTable || "Даних немає"}
 Відповідай українською мовою. Будь конкретним — вказуй конкретні відсотки, суми, дати. Уникай загальних фраз.`;
 
     const stream = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5.2",
       messages: [
         { role: "system", content: "Ти — провідний Revenue Manager для готельного бізнесу. Даєш конкретні, дієві рекомендації з числами." },
         { role: "user", content: prompt },
       ],
-      max_tokens: 4096,
+      max_completion_tokens: 4096,
       stream: true,
     });
 

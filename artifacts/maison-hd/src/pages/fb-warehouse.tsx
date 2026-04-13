@@ -824,9 +824,11 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
   const [supplierId, setSupplierId] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [imageMime, setImageMime] = useState<string>("image/jpeg");
   const handleImageSelect = async (file: File) => {
     setImageFile(file);
     setInputText("");
+    setImageMime(file.type || "image/jpeg");
     // Конвертуємо в base64 одразу при виборі
     const b64 = await new Promise<string>((res) => {
       const reader = new FileReader();
@@ -844,7 +846,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
       let body: any = {};
       let endpoint = "/receipts/ai-scan";
       if (imageBase64) {
-        body = { image_base64: imageBase64 };
+        body = { image_base64: imageBase64, image_mime: imageMime };
       } else if (inputMode === "voice") {
         body = { text: voiceTranscript };
         endpoint = "/receipts/ai-voice-receipt";
