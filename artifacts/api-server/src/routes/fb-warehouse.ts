@@ -459,7 +459,7 @@ ${ingredientsList || "список порожній"}
 - "supplier_id": id постачальника або null`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4o",
       max_completion_tokens: 2000,
       messages: [
         { role: "system", content: systemPrompt },
@@ -538,7 +538,7 @@ router.post("/receipts/ai-voice-receipt", async (req, res) => {
 Знайди збіги ingredient_id і supplier_id де можливо. Одиниці: кг/г/л/мл/шт/пляш/упак/пор/пач.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4o",
       max_completion_tokens: 2000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
@@ -591,7 +591,7 @@ router.post("/ai-voice-writeoff", async (req, res) => {
 Знайди ingredient_id де можливо.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4o",
       max_completion_tokens: 1000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
