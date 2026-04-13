@@ -605,18 +605,21 @@ router.patch("/order-items/:id", requireAuth, async (req: any, res) => {
 // CASHBOX SESSION — POS Каса
 // ══════════════════════════════════════════════════════════════════════════════
 
-// GET current open session
+// GET current open session(s)
 router.get("/cashbox/session", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const db_ = (db as any).$client;
     const r = await db_.query(
-      `SELECT cs.*, u.name AS cashier_name FROM cashbox_sessions cs
+      `SELECT cs.*, u.name AS cashier_name,
+              le.name AS entity_name, le.short_name AS entity_short_name, le.type AS entity_type
+       FROM cashbox_sessions cs
        LEFT JOIN users u ON u.id = cs.cashier_id
+       LEFT JOIN legal_entities le ON le.id = cs.legal_entity_id
        WHERE cs.organization_id = $1 AND cs.status = 'open'
-       ORDER BY cs.opened_at DESC LIMIT 1`, [orgId]
+       ORDER BY cs.opened_at ASC`, [orgId]
     );
-    res.json({ session: r.rows[0] || null });
+    res.json({ sessions: r.rows, session: r.rows[0] || null });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -626,20 +629,24 @@ router.post("/cashbox/session", requireAuth, async (req: any, res) => {
     const orgId = getOrg(req);
     if (!checkRole(req, res, CASHIER_ROLES)) return;
     const cashierId = req.user?.userId;
-    const { openingBalance = 0, cashboxName = "Каса 1" } = req.body;
+    const { openingBalance = 0, cashboxName = "Каса 1", legalEntityId = null } = req.body;
     const db_ = (db as any).$client;
-    // Check if already open
+    // Check if already open for this legal entity (NULL-safe)
     const existing = await db_.query(
-      `SELECT id FROM cashbox_sessions WHERE organization_id = $1 AND status = 'open' LIMIT 1`, [orgId]
+      `SELECT id FROM cashbox_sessions
+       WHERE organization_id = $1 AND status = 'open'
+         AND legal_entity_id IS NOT DISTINCT FROM $2 LIMIT 1`,
+      [orgId, legalEntityId]
     );
     if (existing.rows.length) {
-      res.status(409).json({ error: "Зміна вже відкрита", sessionId: existing.rows[0].id });
+      res.status(409).json({ error: "Зміна для цієї юридичної особи вже відкрита", sessionId: existing.rows[0].id });
       return;
     }
     const r = await db_.query(
-      `INSERT INTO cashbox_sessions (organization_id, cashier_id, cashbox_name, opening_balance, expected_balance, cash_in, cash_out, status)
-       VALUES ($1, $2, $3, $4, $4, 0, 0, 'open') RETURNING *`,
-      [orgId, cashierId, cashboxName, Number(openingBalance)]
+      `INSERT INTO cashbox_sessions
+         (organization_id, cashier_id, cashbox_name, opening_balance, expected_balance, cash_in, cash_out, status, legal_entity_id)
+       VALUES ($1, $2, $3, $4, $4, 0, 0, 'open', $5) RETURNING *`,
+      [orgId, cashierId, cashboxName, Number(openingBalance), legalEntityId]
     );
     res.status(201).json({ session: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -782,18 +789,24 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
     }
 
     // Update cashbox session — only cash portions count
+    // Filter by legal_entity_id so cash goes to the right session (ТОВ / ФОП)
+    const cashboxEntityId = legalEntityId || null;
     if (isMixed) {
       const cashEntry = payments.find((p: any) => p.method === "cash");
       if (cashEntry) {
         await db_.query(
-          `UPDATE cashbox_sessions SET cash_in = cash_in + $1, expected_balance = expected_balance + $1 WHERE organization_id = $2 AND status = 'open'`,
-          [Number(cashEntry.amount), orgId]
+          `UPDATE cashbox_sessions SET cash_in = cash_in + $1, expected_balance = expected_balance + $1
+           WHERE organization_id = $2 AND status = 'open'
+             AND legal_entity_id IS NOT DISTINCT FROM $3`,
+          [Number(cashEntry.amount), orgId, cashboxEntityId]
         );
       }
     } else if (effectiveMethod === "cash") {
       await db_.query(
-        `UPDATE cashbox_sessions SET cash_in = cash_in + $1, expected_balance = expected_balance + $1 WHERE organization_id = $2 AND status = 'open'`,
-        [resolvedPaidAmount, orgId]
+        `UPDATE cashbox_sessions SET cash_in = cash_in + $1, expected_balance = expected_balance + $1
+         WHERE organization_id = $2 AND status = 'open'
+           AND legal_entity_id IS NOT DISTINCT FROM $3`,
+        [resolvedPaidAmount, orgId, cashboxEntityId]
       );
     }
 

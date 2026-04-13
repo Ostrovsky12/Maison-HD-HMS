@@ -29,13 +29,13 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
   });
 
 // ── Types ────────────────────────────────────────────────────────────────────
-type Session = { id: number; cashbox_name: string; opening_balance: number; expected_balance: number; cash_in: number; opened_at: string; cashier_name?: string };
+type Session = { id: number; cashbox_name: string; opening_balance: number; expected_balance: number; cash_in: number; opened_at: string; cashier_name?: string; legal_entity_id?: number | null; entity_name?: string; entity_short_name?: string; entity_type?: string };
 type Table   = { id: number; table_number: string; section: string; capacity: number; status: string; current_order_id?: number };
 type Category = { id: number; name: string; icon?: string; sort_order: number };
 type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean; excise_per_unit?: number };
 type OrderItem = { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string; is_alcohol?: boolean; excise_per_unit?: number };
 type Order = { id: number; table_id?: number; order_type: string; guest_name?: string; status: string; total_amount: number; items?: OrderItem[] };
-type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean };
+type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean; handles_alcohol?: boolean };
 
 const TIP_OPTIONS = [
   { label: "Без чайових", pct: 0 },
@@ -85,21 +85,30 @@ const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   housekeeping:{ label: "Покоївка",    color: "text-rose-300 bg-rose-500/15"     },
 };
 
-function SessionBanner({ session, myRole, onOpen, onClose }: {
-  session: Session | null; myRole: string; onOpen: () => void; onClose: () => void;
+function SessionBanner({ session, myRole, entity, showRoleBadge, onOpen, onClose }: {
+  session: Session | null; myRole: string; entity?: LegalEntity | null;
+  showRoleBadge?: boolean; onOpen: () => void; onClose: () => void;
 }) {
   const canManageCashbox = CASHIER_ROLES_POS.includes(myRole);
   const roleInfo = ROLE_LABELS[myRole] || { label: myRole, color: "text-white/50 bg-white/5" };
+  const entityLabel = entity ? (entity.short_name || entity.name) : null;
+  const entityTypeBadge = entity ? (
+    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold mr-1 ${entity.type === "tov" ? "bg-blue-500/30 text-blue-300" : "bg-emerald-500/30 text-emerald-300"}`}>
+      {entity.type.toUpperCase()}
+    </span>
+  ) : null;
 
   if (!session) {
     return (
       <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
         <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-        <span className="text-sm text-amber-300 flex-1">Зміна не відкрита. Щоб приймати замовлення, відкрийте зміну.</span>
-        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${roleInfo.color}`}>{roleInfo.label}</span>
+        <span className="text-sm text-amber-300 flex-1">
+          {entityLabel ? <>{entityTypeBadge}{entityLabel} — зміна не відкрита</> : "Зміна не відкрита. Щоб приймати замовлення, відкрийте зміну."}
+        </span>
+        {showRoleBadge && <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${roleInfo.color}`}>{roleInfo.label}</span>}
         {canManageCashbox ? (
           <Button size="sm" onClick={onOpen} className="bg-amber-500 hover:bg-amber-600 text-white shrink-0">
-            <LogIn className="w-3.5 h-3.5 mr-1.5" /> Відкрити зміну
+            <LogIn className="w-3.5 h-3.5 mr-1.5" /> Відкрити
           </Button>
         ) : (
           <span className="text-xs text-amber-500/60 shrink-0">Тільки касир може відкрити зміну</span>
@@ -110,12 +119,14 @@ function SessionBanner({ session, myRole, onOpen, onClose }: {
   return (
     <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5">
       <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-      <span className="text-sm font-medium text-emerald-300 shrink-0">{session.cashbox_name}</span>
+      <span className="text-sm font-medium text-emerald-300 shrink-0 flex items-center">
+        {entityTypeBadge}{entityLabel || session.cashbox_name}
+      </span>
       <span className="text-xs text-emerald-400/70 hidden sm:block">
         {format(new Date(session.opened_at), "HH:mm", { locale: uk })}
         {session.cashier_name && ` · ${session.cashier_name}`}
       </span>
-      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${roleInfo.color}`}>{roleInfo.label}</span>
+      {showRoleBadge && <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${roleInfo.color}`}>{roleInfo.label}</span>}
       <span className="text-xs text-emerald-400/70 ml-auto">
         Каса: <span className="font-semibold text-emerald-300">{fmt(session.expected_balance)}</span>
       </span>
@@ -708,9 +719,14 @@ function SplitDialog({ order, orderItems, onSplit, onClose }: {
 }
 
 // ── Open Session Dialog ───────────────────────────────────────────────────────
-function OpenSessionDialog({ onOpened, onClose }: { onOpened: (s: Session) => void; onClose: () => void }) {
+function OpenSessionDialog({ legalEntity, onOpened, onClose }: {
+  legalEntity: LegalEntity | null; onOpened: (s: Session) => void; onClose: () => void;
+}) {
+  const defaultName = legalEntity
+    ? (legalEntity.type === "tov" ? "Каса ТОВ" : `Каса ${legalEntity.type.toUpperCase()}`)
+    : "Каса 1";
   const [balance, setBalance] = useState("0");
-  const [name, setName]       = useState("Каса 1");
+  const [name, setName]       = useState(defaultName);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -719,7 +735,11 @@ function OpenSessionDialog({ onOpened, onClose }: { onOpened: (s: Session) => vo
     try {
       const r = await apiFetch("/fb/cashbox/session", {
         method: "POST",
-        body: JSON.stringify({ openingBalance: Number(balance), cashboxName: name }),
+        body: JSON.stringify({
+          openingBalance: Number(balance),
+          cashboxName: name,
+          legalEntityId: legalEntity?.id ?? null,
+        }),
       });
       const d = await r.json();
       if (!r.ok) { toast({ title: "Помилка", description: d.error, variant: "destructive" }); return; }
@@ -733,6 +753,11 @@ function OpenSessionDialog({ onOpened, onClose }: { onOpened: (s: Session) => vo
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <LogIn className="w-4 h-4 text-emerald-300" /> Відкрити зміну
+            {legalEntity && (
+              <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${legalEntity.type === "tov" ? "bg-blue-500/30 text-blue-300" : "bg-emerald-500/30 text-emerald-300"}`}>
+                {legalEntity.type.toUpperCase()} — {legalEntity.short_name || legalEntity.name}
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
@@ -821,10 +846,11 @@ export default function FbPosPage() {
   const { toast } = useToast();
 
   // Data
-  const [session, setSession]       = useState<Session | null>(null);
-  const [tables, setTables]         = useState<Table[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [menuItems, setMenuItems]   = useState<MenuItem[]>([]);
+  const [sessions, setSessions]         = useState<Session[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
+  const [tables, setTables]             = useState<Table[]>([]);
+  const [categories, setCategories]     = useState<Category[]>([]);
+  const [menuItems, setMenuItems]       = useState<MenuItem[]>([]);
 
   // UI state
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
@@ -844,22 +870,29 @@ export default function FbPosPage() {
   const myRole = getMyRole();
 
   // Dialogs
-  const [showOpenSession, setShowOpenSession]   = useState(false);
-  const [showCloseSession, setShowCloseSession] = useState(false);
-  const [showPayment, setShowPayment]           = useState(false);
-  const [showSplit, setShowSplit]               = useState(false);
-  const [loading, setLoading]                   = useState(false);
-  const [tab, setTab]                           = useState<"tables" | "menu">("tables");
+  const [openForEntity, setOpenForEntity]   = useState<LegalEntity | null | undefined>(undefined); // undefined=closed
+  const [closingSession, setClosingSession] = useState<Session | null>(null);
+  const [showPayment, setShowPayment]       = useState(false);
+  const [showSplit, setShowSplit]           = useState(false);
+  const [loading, setLoading]               = useState(false);
+  const [tab, setTab]                       = useState<"tables" | "menu">("tables");
+
+  // Derived
+  const canOperate = sessions.length > 0;
+  // single-entity mode: keep backward-compat ref
+  const session = sessions[0] || null;
 
   // ── Load data ──────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
-    const [s, t, c, m] = await Promise.all([
+    const [s, le, t, c, m] = await Promise.all([
       apiFetch("/fb/cashbox/session").then(r => r.json()),
+      apiFetch("/legal-entities").then(r => r.json()),
       apiFetch("/fb/tables").then(r => r.json()),
       apiFetch("/fb/categories").then(r => r.json()),
       apiFetch("/fb/items").then(r => r.json()),
     ]);
-    setSession(s.session || null);
+    setSessions(s.sessions || (s.session ? [s.session] : []));
+    setLegalEntities(le.legalEntities || []);
     setTables(t.tables || []);
     setCategories(c.categories || []);
     setMenuItems(m.items || []);
@@ -893,7 +926,7 @@ export default function FbPosPage() {
 
   // ── Add item to order ──────────────────────────────────────────────────────
   const addItem = (item: MenuItem) => {
-    if (!session) { toast({ title: "Зміна не відкрита", variant: "destructive" }); return; }
+    if (!canOperate) { toast({ title: "Зміна не відкрита", variant: "destructive" }); return; }
     setOrderItems(prev => {
       const existing = prev.find(i => i.item_id === item.id);
       if (existing) {
@@ -1014,12 +1047,28 @@ export default function FbPosPage() {
               <RefreshCw className="w-3.5 h-3.5" />
             </Button>
           </div>
-          <SessionBanner
-            session={session}
-            myRole={myRole}
-            onOpen={() => setShowOpenSession(true)}
-            onClose={() => setShowCloseSession(true)}
-          />
+          {legalEntities.length > 1 ? (
+            <div className="space-y-2">
+              {legalEntities.map((e, idx) => {
+                const s = sessions.find(s => s.legal_entity_id === e.id) || null;
+                return (
+                  <SessionBanner key={e.id}
+                    session={s} myRole={myRole} entity={e}
+                    showRoleBadge={idx === 0}
+                    onOpen={() => setOpenForEntity(e)}
+                    onClose={() => setClosingSession(s)}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <SessionBanner
+              session={sessions[0] || null} myRole={myRole}
+              entity={legalEntities[0] || null} showRoleBadge
+              onOpen={() => setOpenForEntity(legalEntities[0] || null)}
+              onClose={() => setClosingSession(sessions[0] || null)}
+            />
+          )}
         </div>
 
         {/* ── Main Area ── */}
@@ -1229,17 +1278,21 @@ export default function FbPosPage() {
       </div>
 
       {/* ── Dialogs ── */}
-      {showOpenSession && (
+      {openForEntity !== undefined && (
         <OpenSessionDialog
-          onOpened={s => { setSession(s); setShowOpenSession(false); }}
-          onClose={() => setShowOpenSession(false)}
+          legalEntity={openForEntity}
+          onOpened={s => {
+            setSessions(prev => [...prev.filter(x => x.legal_entity_id !== s.legal_entity_id), s]);
+            setOpenForEntity(undefined);
+          }}
+          onClose={() => setOpenForEntity(undefined)}
         />
       )}
-      {showCloseSession && session && (
+      {closingSession && (
         <CloseSessionDialog
-          session={session}
-          onClosed={() => { setSession(null); setShowCloseSession(false); load(); }}
-          onClose={() => setShowCloseSession(false)}
+          session={closingSession}
+          onClosed={() => { setSessions(prev => prev.filter(s => s.id !== closingSession.id)); setClosingSession(null); load(); }}
+          onClose={() => setClosingSession(null)}
         />
       )}
       {showPayment && currentOrder && (
