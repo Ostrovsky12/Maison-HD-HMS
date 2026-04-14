@@ -821,6 +821,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
   const [scanning, setScanning] = useState(false);
   const [parsed, setParsed] = useState<any>(null);
   const [newCount, setNewCount] = useState(0);
+  const currentNewCount = parsed ? (parsed.items || []).filter((i: any) => i.is_new_ingredient).length : newCount;
   const [supplierId, setSupplierId] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -856,8 +857,19 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
       const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify(body) });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Помилка AI");
-      setParsed(j.parsed);
-      setNewCount(j.new_ingredients_count || 0);
+      // Auto-link high-confidence (≥80%) suggestions
+      const autoLinkedParsed = {
+        ...j.parsed,
+        items: (j.parsed?.items || []).map((item: any) => {
+          if (item.is_new_ingredient && item.suggested_ingredient_id) {
+            return { ...item, ingredient_id: item.suggested_ingredient_id,
+              is_new_ingredient: false, match_confidence: (item.suggestions?.[0]?.score || 80), suggestions: [] };
+          }
+          return item;
+        })
+      };
+      setParsed(autoLinkedParsed);
+      setNewCount((autoLinkedParsed.items || []).filter((i: any) => i.is_new_ingredient).length);
       if (j.parsed?.supplier_id) setSupplierId(j.parsed.supplier_id.toString());
       setStep("reviewing");
     } catch (e: any) {
@@ -909,7 +921,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
         })
       });
 
-      toast({ title: `Накладну збережено! ${newCount > 0 ? `${newCount} нових інгредієнтів додано автоматично.` : ""}` });
+      toast({ title: `Накладну збережено! ${currentNewCount > 0 ? `${currentNewCount} нових інгредієнтів додано.` : ""}` });
       onBack();
     } catch (e: any) {
       toast({ title: e.message, variant: "destructive" });
@@ -920,7 +932,19 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
   const updateItem = (idx: number, field: string, value: any) => {
     setParsed((p: any) => ({
       ...p,
-      items: p.items.map((item: any, i: number) => i === idx ? { ...item, [field]: value } : item)
+      items: p.items.map((item: any, i: number) => {
+        if (i !== idx) return item;
+        if (field === "__link") {
+          // Link to existing ingredient
+          return { ...item, ingredient_id: value.id, is_new_ingredient: false,
+            match_confidence: value.score, suggestions: [] };
+        }
+        if (field === "__unlink") {
+          // Unlink — mark as new again
+          return { ...item, ingredient_id: null, is_new_ingredient: true, match_confidence: 0 };
+        }
+        return { ...item, [field]: value };
+      })
     }));
   };
 
@@ -1057,9 +1081,9 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
           <h2 className="font-bold text-gray-900">Перевірте результат AI-розпізнавання</h2>
           <p className="text-xs text-gray-500">Відредагуйте якщо потрібно, потім збережіть</p>
         </div>
-        {newCount > 0 && (
+        {currentNewCount > 0 && (
           <Badge className="ml-auto bg-amber-100 text-amber-700 border-amber-200 text-xs" variant="outline">
-            {newCount} нових інгредієнтів буде додано
+            {currentNewCount} нових інгредієнтів буде додано
           </Badge>
         )}
       </div>
@@ -1154,11 +1178,35 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
                       {((item.quantity || 0) * (item.price_per_unit || 0)).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴
                     </td>
                     <td className="px-3 py-2 text-right text-gray-500 text-xs">{item.vat_rate || 20}%</td>
-                    <td className="px-3 py-2 text-center">
-                      {item.is_new_ingredient
-                        ? <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200" variant="outline">новий</Badge>
-                        : <span className="text-[10px] text-green-600 flex items-center gap-0.5 justify-center"><Check size={10} /> знайдено ({item.match_confidence || 0}%)</span>
-                      }
+                    <td className="px-3 py-2 text-center min-w-[110px]">
+                      {item.is_new_ingredient ? (
+                        <div className="space-y-1">
+                          <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200" variant="outline">⚡ новий</Badge>
+                          {(item.suggestions || []).length > 0 && (
+                            <div>
+                              <div className="text-[9px] text-gray-400 mb-0.5">Схоже на:</div>
+                              {(item.suggestions as any[]).slice(0, 3).map((s: any) => (
+                                <button key={s.id}
+                                  onClick={() => updateItem(idx, "__link", s)}
+                                  className="block w-full text-left text-[10px] px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-100 mb-0.5 leading-tight"
+                                  title={`Прив'язати до "${s.name}" (${s.score}%)`}
+                                >
+                                  {s.score}% · {s.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5">
+                          <span className="text-[10px] text-green-600 flex items-center gap-0.5 justify-center"><Check size={10} /> знайдено</span>
+                          <span className="text-[10px] text-gray-400">({item.match_confidence || 0}%)</span>
+                          <button onClick={() => updateItem(idx, "__unlink", null)}
+                            className="text-[9px] text-gray-300 hover:text-red-400 block w-full">
+                            ✕ відв'язати
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1177,13 +1225,13 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
         </div>
       </Card>
 
-      {newCount > 0 && (
+      {currentNewCount > 0 && (
         <Card className="shadow-none border bg-amber-50 border-amber-100">
           <CardContent className="p-3 flex gap-2 items-center">
             <Sparkles size={15} className="text-amber-600 shrink-0" />
             <p className="text-sm text-amber-700">
-              <strong>{newCount} нових інгредієнтів</strong> будуть автоматично додані до вашої бази складу.
-              Ви зможете відредагувати їх категорію та мінімальний запас пізніше у вкладці "Інгредієнти".
+              <strong>{currentNewCount} нових інгредієнтів</strong> будуть додані до бази складу при збереженні.
+              Або прив{"'"}яжіть їх до існуючих — натисніть на підказку в колонці Статус.
             </p>
           </CardContent>
         </Card>

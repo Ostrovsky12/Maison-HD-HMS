@@ -334,6 +334,7 @@ router.put("/receipts/:id/items", async (req, res) => {
     }> };
 
     await db.execute(sql`DELETE FROM fb_stock_receipt_items WHERE receipt_id = ${receiptId}`);
+    const orgId = org(req);
     let total = 0;
     let vat = 0;
     for (const item of items || []) {
@@ -344,11 +345,23 @@ router.put("/receipts/:id/items", async (req, res) => {
       const vatAmount = totalPrice * vatRate / (100 + vatRate);
       total += totalPrice;
       vat += vatAmount;
+
+      // Create new ingredient on save (not during scan)
+      let ingredientId = item.ingredient_id || null;
+      if (!ingredientId && item.is_new_ingredient) {
+        const created = await db.execute(sql`
+          INSERT INTO fb_ingredients (organization_id, name, unit, cost_per_unit)
+          VALUES (${orgId}, ${item.name}, ${item.unit || "кг"}, ${item.price_per_unit || 0})
+          RETURNING id
+        `);
+        ingredientId = (created.rows[0] as any)?.id || null;
+      }
+
       await db.execute(sql`
         INSERT INTO fb_stock_receipt_items
           (receipt_id, ingredient_id, name, quantity, unit, receipt_unit, conversion_factor,
            price_per_unit, total_price, vat_rate, vat_amount, is_new_ingredient, match_confidence)
-        VALUES (${receiptId}, ${item.ingredient_id || null}, ${item.name}, ${item.quantity},
+        VALUES (${receiptId}, ${ingredientId}, ${item.name}, ${item.quantity},
                 ${item.unit}, ${rcptUnit}, ${conv},
                 ${item.price_per_unit}, ${totalPrice}, ${vatRate}, ${vatAmount},
                 ${item.is_new_ingredient || false}, ${item.match_confidence ?? null})
@@ -394,6 +407,35 @@ router.post("/receipts/:id/confirm", async (req, res) => {
     res.json({ success: true, summary });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
+
+// ─── Fuzzy ingredient matching helper ────────────────────────────────────────
+function ingredientFuzzyScore(name1: string, name2: string): number {
+  const normalize = (s: string) =>
+    s.toLowerCase()
+      .replace(/[^а-яёіїєa-z0-9\s]/gi, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 1);
+  const w1 = normalize(name1);
+  const w2 = normalize(name2);
+  if (!w1.length || !w2.length) return 0;
+  let matches = 0;
+  for (const a of w1) {
+    for (const b of w2) {
+      if (a === b) { matches++; break; }
+      const pfxLen = Math.min(4, Math.min(a.length, b.length));
+      if (pfxLen >= 3 && a.slice(0, pfxLen) === b.slice(0, pfxLen)) { matches++; break; }
+    }
+  }
+  return Math.round((matches / Math.max(w1.length, w2.length)) * 100);
+}
+
+function findSimilarIngredients(name: string, existing: any[], topN = 4, minScore = 35) {
+  return existing
+    .map(i => ({ id: i.id, name: i.name, unit: i.unit, score: ingredientFuzzyScore(name, i.name) }))
+    .filter(i => i.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topN);
+}
 
 // ─── AI Invoice Scanner ────────────────────────────────────────────────────
 router.post("/receipts/ai-scan", async (req, res) => {
@@ -477,18 +519,24 @@ ${ingredientsList || "список порожній"}
       return res.status(422).json({ error: "AI не зміг розпізнати документ", raw });
     }
 
-    // Auto-create new ingredients from unmatched items
+    // Server-side fuzzy matching + suggestions (do NOT auto-create here — creation happens on save)
     const processedItems = [];
     for (const item of parsed.items || []) {
-      if (item.is_new_ingredient || !item.ingredient_id) {
-        const created = await db.execute(sql`
-          INSERT INTO fb_ingredients (organization_id, name, unit, cost_per_unit)
-          VALUES (${orgId}, ${item.name}, ${item.unit || "кг"}, ${item.price_per_unit || 0})
-          RETURNING id, name
-        `);
-        item.ingredient_id = (created.rows[0] as any).id;
+      const isNew = item.is_new_ingredient || !item.ingredient_id;
+      if (isNew) {
+        item.ingredient_id = null;
         item.is_new_ingredient = true;
         item.match_confidence = 0;
+        // Find similar existing ingredients for the user to choose from
+        const suggestions = findSimilarIngredients(item.name, existingIngredients);
+        item.suggestions = suggestions;
+        // If top suggestion is very confident (≥80%), pre-select it but mark as "suggested"
+        if (suggestions.length > 0 && suggestions[0].score >= 80) {
+          item.suggested_ingredient_id = suggestions[0].id;
+          item.suggested_ingredient_name = suggestions[0].name;
+        }
+      } else {
+        item.suggestions = [];
       }
       processedItems.push(item);
     }
