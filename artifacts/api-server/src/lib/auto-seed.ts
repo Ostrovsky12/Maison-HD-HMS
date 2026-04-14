@@ -63,13 +63,13 @@ export async function autoSeedIfEmpty() {
       },
     ]);
 
-    // Property: Котеджний комплекс ДОГОДА (с. Шешори)
+    // Property: Котеджний комплекс ДОГОДА (с. Дзвінкове, Київська обл.)
     const [dogodaProp] = await db.insert(propertiesTable).values({
       organizationId: dogodaOrg.id,
       name: "Котеджний комплекс ДОГОДА",
       type: "house",
-      description: "Котеджний комплекс у с. Шешори, Косівський р-н, Івано-Франківська обл.",
-      address: "с. Шешори, Косівський р-н, Івано-Франківська обл.",
+      description: "Котеджний комплекс у с. Дзвінкове, Київська обл., 08620",
+      address: "с. Дзвінкове, Київська обл., 08620",
     }).returning();
 
     // 12 cottages matching Servio structure

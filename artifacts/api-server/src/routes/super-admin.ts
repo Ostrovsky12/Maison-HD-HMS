@@ -428,12 +428,12 @@ router.post("/provision-dogoda", async (_req, res) => {
       propId = existProp.rows[0].id;
       // Update property details
       await q(`UPDATE properties SET name=$1, type='house', address=$2, is_active=true WHERE id=$3`,
-        ["Котеджний комплекс ДОГОДА", "с. Шешори, Косівський р-н, Івано-Франківська обл.", propId]);
+        ["Котеджний комплекс ДОГОДА", "с. Дзвінкове, Київська обл., 08620", propId]);
     } else {
       const newProp = await q(
         `INSERT INTO properties (organization_id, name, type, description, address, is_active)
          VALUES ($1, $2, 'house', $3, $4, true) RETURNING id`,
-        [orgId, "Котеджний комплекс ДОГОДА", "Котеджний комплекс у с. Шешори, Косівський р-н, Івано-Франківська обл.", "с. Шешори, Косівський р-н, Івано-Франківська обл."]
+        [orgId, "Котеджний комплекс ДОГОДА", "Котеджний комплекс у с. Дзвінкове, Київська обл., 08620", "с. Дзвінкове, Київська обл., 08620"]
       );
       propId = newProp.rows[0].id;
     }

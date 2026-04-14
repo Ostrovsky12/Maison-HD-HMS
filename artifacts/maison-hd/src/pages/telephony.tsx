@@ -348,7 +348,7 @@ export default function TelephonyPage() {
     try {
       const res = await fetch(`${API}/ai/suggest-script`, {
         method: "POST", headers: h(),
-        body: JSON.stringify({ scenario: aiScenario, context: "готель ДОГОДА, Карпати" }),
+        body: JSON.stringify({ scenario: aiScenario, context: "Котеджний комплекс ДОГОДА, с. Дзвінкове, Київська обл." }),
       });
       const data = await res.json();
       setScriptForm(f => ({ ...f, content: data.script || "", scenario: "general" }));

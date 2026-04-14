@@ -533,7 +533,7 @@ export default function TvDisplayPage() {
                 <span className="text-5xl">ℹ️</span>
                 <div>
                   <h2 className="text-4xl font-bold">Інформація</h2>
-                  <p className="text-blue-300">{hotel?.name || "Dogoda Resort"} · {hotel?.address || "Карпати, Україна"}</p>
+                  <p className="text-blue-300">{hotel?.name || "Dogoda Resort"} · {hotel?.address || "Київська обл., Україна"}</p>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4 flex-1">
@@ -630,7 +630,7 @@ export default function TvDisplayPage() {
 
       {/* ── FOOTER ── */}
       <footer className="relative z-10 flex items-center justify-between px-10 py-3 border-t border-white/10 text-blue-400 text-sm">
-        <span>{hotel?.name || "Dogoda Resort"} · {hotel?.address || "Карпати"}</span>
+        <span>{hotel?.name || "Dogoda Resort"} · {hotel?.address || "Київська обл., Україна"}</span>
         <span className="flex items-center gap-2">
           {SLIDES.map((s, i) => (
             <span key={s} className={`text-xs ${i === slide ? "text-amber-400 font-medium" : "opacity-40"}`}>

@@ -277,31 +277,31 @@ router.post("/suggest-competitors", requireAuth, async (req: any, res) => {
     const propAddress = prop?.address || org?.address || "";
     const propType = (prop as any)?.type || "hotel";
 
-    // Extract region/city from address for better context
-    const regionHint = propAddress
-      ? `Адреса: ${propAddress}.`
-      : "";
-
     const systemPrompt = `Ти — досвідчений аналітик готельного ринку України. 
 Твоє завдання — запропонувати конкурентів для моніторингу цін.
 ЗАВЖДИ повертай рівно 6 об'єктів у вигляді JSON масиву. 
 Без жодних пояснень, без markdown, тільки чистий JSON масив.`;
 
     const userPrompt = `Готель для аналізу: "${propName}"
-${regionHint}
+Адреса: ${propAddress || "Україна"}
 Тип об'єкту: ${propType}
 ${existingNames.length > 0 ? `Вже відстежуються (виключи їх): ${existingNames.join(", ")}` : ""}
 
-Запропонуй 6 конкурентів — готелі, котеджні комплекси або бази відпочинку схожого типу та цінової категорії, що знаходяться в тому ж регіоні (Карпати, та ж область або сусідня область в межах 100 км).
+ВАЖЛИВО: Шукай конкурентів ВИКЛЮЧНО в радіусі 30-50 км від вказаної адреси. 
+НЕ шукай в інших областях або регіонах, якщо адреса чітко вказана.
+Якщо адреса — Київська область, шукай тільки у Київській та суміжних районах (Бориспільський, Броварський, Обухівський, Фастівський, Білоцерківський райони).
+Якщо адреса — Карпати/Івано-Франківська/Закарпатська обл., шукай в тих регіонах.
+Дотримуйся географії ТОЧНО — це критично для точності аналізу.
 
-Якщо це котеджний або заміський комплекс — шукай аналогічні заміські об'єкти.
-Якщо це SPA-готель — шукай SPA та wellness об'єкти.
-Якщо це бюджетний об'єкт — шукай аналоги в тій же ціновій категорії.
+Тип конкурентів:
+- Якщо котеджний або заміський комплекс — шукай аналогічні заміські об'єкти поруч
+- Якщо SPA-готель — шукай SPA та wellness об'єкти
+- Якщо бюджетний об'єкт — шукай аналоги в тій же ціновій категорії
 
-Реальні відомі об'єкти мають перевагу, але якщо не знаєш точних — використай типові назви що відповідають регіону.
+Реальні відомі об'єкти мають перевагу. Вказуй посилання тільки якщо впевнений у їх актуальності.
 
 Поверни ТІЛЬКИ JSON масив (без \`\`\`json, без пояснень):
-[{"name":"...","websiteUrl":"https://...","starRating":3,"roomType":"Котедж","notes":"...","confidence":"high"}]`;
+[{"name":"...","websiteUrl":"https://...","starRating":3,"roomType":"Котедж","notes":"де знаходиться і чому конкурент","confidence":"high"}]`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-5.2",
@@ -659,20 +659,36 @@ router.get("/dashboard", requireAuth, async (req: any, res) => {
 
     if (!avgOurPrice) {
       const fromDate = from || new Date().toISOString().split("T")[0];
+      const toDate = to || new Date(Date.now() + 13 * 86400000).toISOString().split("T")[0];
       const props = await db.select().from(propertiesTable).where(eq(propertiesTable.organizationId, orgId));
       if (props.length) {
+        const propIds = props.map(p => p.id);
         const tariffs = await db.select().from(ratesTable)
           .where(and(
             eq(ratesTable.isStopSale, false),
-            eq(ratesTable.propertyId, props[0].id),
+            inArray(ratesTable.propertyId, propIds),
           ));
-        const matching = tariffs.filter(t => {
-          const df = t.dateFrom || "2020-01-01";
-          const dt = t.dateTo || "2099-12-31";
-          return fromDate >= df && fromDate <= dt;
-        });
-        if (matching.length) {
-          avgOurPrice = matching.reduce((s, t) => s + parseFloat(String(t.pricePerNight)), 0) / matching.length;
+        // Build daily prices across the date range and average them
+        const dailyPrices: number[] = [];
+        const d = new Date(fromDate + "T00:00:00");
+        const end = new Date(toDate + "T00:00:00");
+        while (d <= end) {
+          const dateStr = d.toISOString().split("T")[0];
+          const matching = tariffs.filter(t => {
+            const df = t.dateFrom || "2020-01-01";
+            const dt = t.dateTo || "2099-12-31";
+            return dateStr >= df && dateStr <= dt;
+          });
+          if (matching.length) {
+            // Use the highest-priority (most specific) tariff — prefer one with explicit dates
+            const withDates = matching.filter(t => t.dateFrom);
+            const best = withDates.length ? withDates[0] : matching[0];
+            dailyPrices.push(parseFloat(String(best.pricePerNight)));
+          }
+          d.setDate(d.getDate() + 1);
+        }
+        if (dailyPrices.length) {
+          avgOurPrice = dailyPrices.reduce((s, p) => s + p, 0) / dailyPrices.length;
         }
       }
     }
