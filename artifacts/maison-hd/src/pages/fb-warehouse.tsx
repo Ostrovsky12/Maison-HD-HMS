@@ -631,23 +631,44 @@ function SuppliersTab({ toast }: { toast: any }) {
 // TAB: RECEIPTS (Накладні)
 // ═══════════════════════════════════════════════════════════════════
 
+const PAYMENT_LABELS: Record<string, string> = { unpaid: "Неоплачена", cash: "Готівкова", bank: "Безготівкова" };
+const PAYMENT_COLORS: Record<string, string> = {
+  unpaid: "bg-red-100 text-red-700 border-red-200",
+  cash: "bg-green-100 text-green-700 border-green-200",
+  bank: "bg-blue-100 text-blue-700 border-blue-200",
+};
+
 type ReceiptView = "list" | "new" | "detail" | "ai";
 
 function ReceiptsTab({ toast }: { toast: any }) {
   const [view, setView] = useState<ReceiptView>("list");
   const [receipts, setReceipts] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any>(null);
 
+  // Filters
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [filterSupplier, setFilterSupplier] = useState("_all");
+  const [filterPayment, setFilterPayment] = useState("_all");
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [rr, sr] = await Promise.all([apiFetch("/receipts"), apiFetch("/suppliers")]);
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    if (filterSupplier !== "_all") params.set("supplier_id", filterSupplier);
+    if (filterPayment !== "_all") params.set("payment_type", filterPayment);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const [rr, sr] = await Promise.all([apiFetch(`/receipts${qs}`), apiFetch("/suppliers")]);
     const [rj, sj] = await Promise.all([rr.json(), sr.json()]);
     setReceipts(rj.receipts || []);
+    setSummary(rj.summary || null);
     setSuppliers(sj.suppliers || []);
     setLoading(false);
-  }, []);
+  }, [dateFrom, dateTo, filterSupplier, filterPayment]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -682,7 +703,23 @@ function ReceiptsTab({ toast }: { toast: any }) {
           <h2 className="font-bold text-gray-900">Накладна {selected.receipt?.receipt_no || `#${selected.receipt?.id}`}</h2>
           <div className="text-xs text-gray-500">{selected.receipt?.receipt_date} · {selected.receipt?.supplier_name || "Без постачальника"}</div>
         </div>
-        <span className={`ml-auto px-2 py-0.5 rounded-full text-xs border ${STATUS_COLORS[selected.receipt?.status]}`}>{STATUS_UA[selected.receipt?.status]}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <Select value={selected.receipt?.payment_type || "unpaid"} onValueChange={async v => {
+            await apiFetch(`/receipts/${selected.receipt.id}`, { method: "PATCH", body: JSON.stringify({ payment_type: v }) });
+            setSelected((s: any) => ({ ...s, receipt: { ...s.receipt, payment_type: v } }));
+            load();
+          }}>
+            <SelectTrigger className={`h-7 text-xs border rounded-full px-2.5 py-0 ${PAYMENT_COLORS[selected.receipt?.payment_type || "unpaid"]}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unpaid">Неоплачена</SelectItem>
+              <SelectItem value="cash">Готівкова</SelectItem>
+              <SelectItem value="bank">Безготівкова</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className={`px-2 py-0.5 rounded-full text-xs border ${STATUS_COLORS[selected.receipt?.status]}`}>{STATUS_UA[selected.receipt?.status]}</span>
+        </div>
       </div>
 
       <Card className="shadow-none border overflow-hidden">
@@ -742,7 +779,7 @@ function ReceiptsTab({ toast }: { toast: any }) {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex gap-2 justify-end">
         <Button variant="outline" onClick={() => setView("ai")} size="sm" className="gap-1.5 border-violet-200 text-violet-700 hover:bg-violet-50">
           <Sparkles size={15} /> AI-сканування накладної
@@ -752,15 +789,81 @@ function ReceiptsTab({ toast }: { toast: any }) {
         </Button>
       </div>
 
+      {summary && parseFloat(summary.total_unpaid) > 0 && (
+        <Card className="shadow-none border border-red-200 bg-red-50">
+          <CardContent className="p-3">
+            <div className="flex flex-wrap gap-4 items-center">
+              <div>
+                <div className="text-xs text-red-500 font-medium">Загальна заборгованість</div>
+                <div className="text-xl font-bold text-red-700">{parseFloat(summary.total_unpaid).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</div>
+                <div className="text-xs text-red-400">{summary.count_unpaid} неоплачених накладних</div>
+              </div>
+              <div className="flex gap-3 ml-auto text-sm">
+                <div className="text-center">
+                  <div className="text-xs text-gray-500">Готівка</div>
+                  <div className="font-semibold text-green-700">{parseFloat(summary.total_cash || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-gray-500">Безготівка</div>
+                  <div className="font-semibold text-blue-700">{parseFloat(summary.total_bank || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="shadow-none border">
+        <CardContent className="p-3">
+          <div className="flex flex-wrap gap-2 items-end">
+            <div>
+              <div className="text-xs text-gray-500 mb-1">Дата від</div>
+              <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-8 text-sm w-36" />
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1">до</div>
+              <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-8 text-sm w-36" />
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1">Постачальник</div>
+              <Select value={filterSupplier} onValueChange={setFilterSupplier}>
+                <SelectTrigger className="h-8 text-sm w-44"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">Всі постачальники</SelectItem>
+                  {suppliers.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1">Оплата</div>
+              <Select value={filterPayment} onValueChange={setFilterPayment}>
+                <SelectTrigger className="h-8 text-sm w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">Всі</SelectItem>
+                  <SelectItem value="unpaid">Неоплачені</SelectItem>
+                  <SelectItem value="cash">Готівкові</SelectItem>
+                  <SelectItem value="bank">Безготівкові</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {(dateFrom || dateTo || filterSupplier !== "_all" || filterPayment !== "_all") && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-gray-400" onClick={() => { setDateFrom(""); setDateTo(""); setFilterSupplier("_all"); setFilterPayment("_all"); }}>
+                ✕ Скинути
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {loading ? (
         <div className="text-center py-12 text-gray-400"><Loader2 className="animate-spin inline" size={22} /></div>
       ) : receipts.length === 0 ? (
         <Card className="shadow-none border">
           <CardContent className="py-12 text-center text-gray-400">
             <FileText size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="mb-4">Немає накладних. Створіть першу або використайте AI-сканування!</p>
+            <p className="mb-4">Накладних не знайдено. Змініть фільтри або створіть нову!</p>
             <Button onClick={() => setView("ai")} variant="outline" size="sm" className="gap-1.5">
-              <Sparkles size={14} /> Спробувати AI-сканування
+              <Sparkles size={14} /> AI-сканування
             </Button>
           </CardContent>
         </Card>
@@ -774,7 +877,7 @@ function ReceiptsTab({ toast }: { toast: any }) {
                   <th className="text-left px-4 py-2.5 font-medium text-gray-600">Дата</th>
                   <th className="text-left px-4 py-2.5 font-medium text-gray-600">Постачальник</th>
                   <th className="text-right px-4 py-2.5 font-medium text-gray-600">Сума</th>
-                  <th className="text-right px-4 py-2.5 font-medium text-gray-600">Позицій</th>
+                  <th className="text-center px-4 py-2.5 font-medium text-gray-600">Оплата</th>
                   <th className="text-center px-4 py-2.5 font-medium text-gray-600">Статус</th>
                   <th className="px-4 py-2.5"></th>
                 </tr>
@@ -793,7 +896,11 @@ function ReceiptsTab({ toast }: { toast: any }) {
                     <td className="px-4 py-3 text-gray-600">{r.receipt_date}</td>
                     <td className="px-4 py-3 text-gray-600">{r.supplier_name || "—"}</td>
                     <td className="px-4 py-3 text-right font-medium">{parseFloat(r.total_amount || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴</td>
-                    <td className="px-4 py-3 text-right text-gray-500">{r.item_count}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-xs border ${PAYMENT_COLORS[r.payment_type || "unpaid"]}`}>
+                        {PAYMENT_LABELS[r.payment_type || "unpaid"]}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`px-2 py-0.5 rounded-full text-xs border ${STATUS_COLORS[r.status]}`}>{STATUS_UA[r.status]}</span>
                     </td>
@@ -823,6 +930,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
   const [newCount, setNewCount] = useState(0);
   const currentNewCount = parsed ? (parsed.items || []).filter((i: any) => i.is_new_ingredient).length : newCount;
   const [supplierId, setSupplierId] = useState<string>("");
+  const [aiPaymentType, setAiPaymentType] = useState<string>("unpaid");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [imageMime, setImageMime] = useState<string>("image/jpeg");
@@ -902,6 +1010,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
           supplier_id: finalSupplierId,
           receipt_no: parsed.receipt_no,
           receipt_date: parsed.receipt_date,
+          payment_type: aiPaymentType,
           notes: inputMode === "voice"
             ? "Імпортовано через голосовий ввід (AI)"
             : imageBase64 ? "Імпортовано через AI-сканування (фото)" : "Імпортовано через AI-сканування",
@@ -1097,7 +1206,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
             <div><Label className="text-xs">Дата</Label>
               <Input type="date" value={parsed.receipt_date || ""} onChange={e => setParsed((p: any) => ({ ...p, receipt_date: e.target.value }))} className="h-8 text-sm" />
             </div>
-            <div className="col-span-2">
+            <div>
               <div className="flex items-center gap-1.5 mb-1">
                 <Label className="text-xs">Постачальник</Label>
                 {!supplierId && parsed.supplier_name && (
@@ -1116,6 +1225,17 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
                 <SelectContent>
                   <SelectItem value="_none">{parsed.supplier_name ? `⚡ ${parsed.supplier_name} (новий)` : "— Без постачальника —"}</SelectItem>
                   {suppliers.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Розрахунок</Label>
+              <Select value={aiPaymentType} onValueChange={setAiPaymentType}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unpaid">Неоплачена</SelectItem>
+                  <SelectItem value="cash">Готівкова</SelectItem>
+                  <SelectItem value="bank">Безготівкова</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1259,7 +1379,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
 const EMPTY_RECEIPT_LINE = { ingredient_id: "", name: "", quantity: 1, receipt_unit: "кг", unit: "кг", conversion_factor: 1, price_per_unit: 0, vat_rate: 20 };
 
 function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: () => void; toast: any }) {
-  const [form, setForm] = useState({ supplier_id: "", receipt_no: "", receipt_date: new Date().toISOString().split("T")[0], notes: "" });
+  const [form, setForm] = useState({ supplier_id: "", receipt_no: "", receipt_date: new Date().toISOString().split("T")[0], notes: "", payment_type: "unpaid" });
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [lines, setLines] = useState<any[]>([{ ...EMPTY_RECEIPT_LINE }]);
   const [saving, setSaving] = useState(false);
@@ -1316,13 +1436,24 @@ function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack
         <CardContent className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
           <div><Label className="text-xs">Номер накладної</Label><Input value={form.receipt_no} onChange={e => setForm(f => ({ ...f, receipt_no: e.target.value }))} placeholder="№ 123" className="h-8 text-sm" /></div>
           <div><Label className="text-xs">Дата</Label><Input type="date" value={form.receipt_date} onChange={e => setForm(f => ({ ...f, receipt_date: e.target.value }))} className="h-8 text-sm" /></div>
-          <div className="col-span-2">
+          <div>
             <Label className="text-xs">Постачальник</Label>
             <Select value={form.supplier_id || "_none"} onValueChange={v => setForm(f => ({ ...f, supplier_id: v === "_none" ? "" : v }))}>
               <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Виберіть..." /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="_none">Без постачальника</SelectItem>
                 {suppliers.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Розрахунок</Label>
+            <Select value={form.payment_type} onValueChange={v => setForm(f => ({ ...f, payment_type: v }))}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unpaid">Неоплачена</SelectItem>
+                <SelectItem value="cash">Готівкова</SelectItem>
+                <SelectItem value="bank">Безготівкова</SelectItem>
               </SelectContent>
             </Select>
           </div>

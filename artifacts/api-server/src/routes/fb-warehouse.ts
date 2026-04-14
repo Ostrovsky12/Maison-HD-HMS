@@ -249,9 +249,13 @@ router.put("/recipes/:id/items", async (req, res) => {
 
 router.get("/receipts", async (req, res) => {
   try {
-    const { status, supplier_id } = req.query;
+    const { status, supplier_id, payment_type, date_from, date_to } = req.query;
     const statusVal = status || null;
     const supplierVal = supplier_id ? parseInt(supplier_id as string) : null;
+    const paymentVal = payment_type || null;
+    const dateFromVal = date_from || null;
+    const dateToVal = date_to || null;
+
     const result = await db.execute(sql`
       SELECT sr.*, s.name AS supplier_name,
         COUNT(sri.id) AS item_count
@@ -261,10 +265,24 @@ router.get("/receipts", async (req, res) => {
       WHERE sr.organization_id = ${org(req)}
         AND (${statusVal}::text IS NULL OR sr.status = ${statusVal})
         AND (${supplierVal}::int IS NULL OR sr.supplier_id = ${supplierVal})
+        AND (${paymentVal}::text IS NULL OR sr.payment_type = ${paymentVal})
+        AND (${dateFromVal}::date IS NULL OR sr.receipt_date >= ${dateFromVal}::date)
+        AND (${dateToVal}::date IS NULL OR sr.receipt_date <= ${dateToVal}::date)
       GROUP BY sr.id, s.name
       ORDER BY sr.receipt_date DESC, sr.created_at DESC
     `);
-    res.json({ receipts: result.rows });
+
+    const debtResult = await db.execute(sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN payment_type = 'unpaid' THEN total_amount ELSE 0 END), 0) AS total_unpaid,
+        COALESCE(SUM(CASE WHEN payment_type = 'cash' THEN total_amount ELSE 0 END), 0) AS total_cash,
+        COALESCE(SUM(CASE WHEN payment_type = 'bank' THEN total_amount ELSE 0 END), 0) AS total_bank,
+        COUNT(CASE WHEN payment_type = 'unpaid' THEN 1 END) AS count_unpaid
+      FROM fb_stock_receipts
+      WHERE organization_id = ${org(req)} AND status != 'cancelled'
+    `);
+
+    res.json({ receipts: result.rows, summary: debtResult.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -292,11 +310,11 @@ router.get("/receipts/:id", async (req, res) => {
 
 router.post("/receipts", async (req, res) => {
   try {
-    const { supplier_id, receipt_no, receipt_date, notes, invoice_image } = req.body;
+    const { supplier_id, receipt_no, receipt_date, notes, invoice_image, payment_type } = req.body;
     const r = await db.execute(sql`
-      INSERT INTO fb_stock_receipts (organization_id, supplier_id, receipt_no, receipt_date, notes, invoice_image, created_by)
-      VALUES (${org(req)}, ${supplier_id || null}, ${receipt_no || null}, ${receipt_date || new Date().toISOString().split("T")[0]}, ${notes || null}, ${invoice_image || null}, ${uid(req)})
-      RETURNING id, organization_id, supplier_id, receipt_no, receipt_date, notes, status, total_amount, created_at
+      INSERT INTO fb_stock_receipts (organization_id, supplier_id, receipt_no, receipt_date, notes, invoice_image, created_by, payment_type)
+      VALUES (${org(req)}, ${supplier_id || null}, ${receipt_no || null}, ${receipt_date || new Date().toISOString().split("T")[0]}, ${notes || null}, ${invoice_image || null}, ${uid(req)}, ${payment_type || "unpaid"})
+      RETURNING id, organization_id, supplier_id, receipt_no, receipt_date, notes, status, total_amount, payment_type, created_at
     `);
     res.json({ receipt: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -304,7 +322,7 @@ router.post("/receipts", async (req, res) => {
 
 router.patch("/receipts/:id", async (req, res) => {
   try {
-    const { supplier_id, receipt_no, receipt_date, notes, status } = req.body;
+    const { supplier_id, receipt_no, receipt_date, notes, status, payment_type } = req.body;
     const r = await db.execute(sql`
       UPDATE fb_stock_receipts SET
         supplier_id = COALESCE(${supplier_id ?? null}, supplier_id),
@@ -312,6 +330,7 @@ router.patch("/receipts/:id", async (req, res) => {
         receipt_date = COALESCE(${receipt_date || null}::date, receipt_date),
         notes = COALESCE(${notes || null}, notes),
         status = COALESCE(${status || null}, status),
+        payment_type = COALESCE(${payment_type || null}, payment_type),
         updated_at = NOW()
       WHERE id = ${parseInt(req.params.id)} AND organization_id = ${org(req)}
       RETURNING *
