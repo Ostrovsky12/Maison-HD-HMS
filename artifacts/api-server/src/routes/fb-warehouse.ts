@@ -181,11 +181,16 @@ router.get("/recipes/:id", async (req, res) => {
 
 router.post("/recipes", async (req, res) => {
   try {
-    const { menu_item_id, name, yield_quantity, yield_unit, prep_time_min, cook_time_min, technology, notes } = req.body;
+    const { menu_item_id, name, yield_quantity, yield_unit, prep_time_min, cook_time_min, technology, notes,
+      nutrition_proteins, nutrition_fats, nutrition_carbs, nutrition_calories, markup_pct, storage_temp, storage_days, allergens, card_number } = req.body;
     if (!name) return res.status(400).json({ error: "name required" });
     const r = await db.execute(sql`
-      INSERT INTO fb_recipe_cards (organization_id, menu_item_id, name, yield_quantity, yield_unit, prep_time_min, cook_time_min, technology, notes)
-      VALUES (${org(req)}, ${menu_item_id || null}, ${name}, ${yield_quantity || 1}, ${yield_unit || "пор"}, ${prep_time_min || 15}, ${cook_time_min || 15}, ${technology || null}, ${notes || null})
+      INSERT INTO fb_recipe_cards (organization_id, menu_item_id, name, yield_quantity, yield_unit, prep_time_min, cook_time_min, technology, notes,
+        nutrition_proteins, nutrition_fats, nutrition_carbs, nutrition_calories, markup_pct, storage_temp, storage_days, allergens, card_number)
+      VALUES (${org(req)}, ${menu_item_id || null}, ${name}, ${yield_quantity || 1}, ${yield_unit || "пор"},
+        ${prep_time_min || 15}, ${cook_time_min || 15}, ${technology || null}, ${notes || null},
+        ${nutrition_proteins ?? null}, ${nutrition_fats ?? null}, ${nutrition_carbs ?? null}, ${nutrition_calories ?? null},
+        ${markup_pct ?? 200}, ${storage_temp || null}, ${storage_days ?? null}, ${allergens || null}, ${card_number || null})
       RETURNING *
     `);
     res.json({ recipe: r.rows[0] });
@@ -194,7 +199,8 @@ router.post("/recipes", async (req, res) => {
 
 router.patch("/recipes/:id", async (req, res) => {
   try {
-    const { menu_item_id, name, yield_quantity, yield_unit, prep_time_min, cook_time_min, technology, notes } = req.body;
+    const { menu_item_id, name, yield_quantity, yield_unit, prep_time_min, cook_time_min, technology, notes,
+      nutrition_proteins, nutrition_fats, nutrition_carbs, nutrition_calories, markup_pct, storage_temp, storage_days, allergens, card_number } = req.body;
     const r = await db.execute(sql`
       UPDATE fb_recipe_cards SET
         menu_item_id = COALESCE(${menu_item_id ?? null}, menu_item_id),
@@ -205,6 +211,15 @@ router.patch("/recipes/:id", async (req, res) => {
         cook_time_min = COALESCE(${cook_time_min ?? null}, cook_time_min),
         technology = COALESCE(${technology || null}, technology),
         notes = COALESCE(${notes || null}, notes),
+        nutrition_proteins = COALESCE(${nutrition_proteins ?? null}, nutrition_proteins),
+        nutrition_fats = COALESCE(${nutrition_fats ?? null}, nutrition_fats),
+        nutrition_carbs = COALESCE(${nutrition_carbs ?? null}, nutrition_carbs),
+        nutrition_calories = COALESCE(${nutrition_calories ?? null}, nutrition_calories),
+        markup_pct = COALESCE(${markup_pct ?? null}, markup_pct),
+        storage_temp = COALESCE(${storage_temp || null}, storage_temp),
+        storage_days = COALESCE(${storage_days ?? null}, storage_days),
+        allergens = COALESCE(${allergens || null}, allergens),
+        card_number = COALESCE(${card_number || null}, card_number),
         updated_at = NOW()
       WHERE id = ${parseInt(req.params.id)} AND organization_id = ${org(req)}
       RETURNING *

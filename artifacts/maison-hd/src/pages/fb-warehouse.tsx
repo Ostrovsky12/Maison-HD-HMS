@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
   Package, Truck, FileText, BookOpen, Trash2, Plus, Edit2, Search,
@@ -16,7 +17,7 @@ import {
   Building2, Phone, Mail, MapPin, Calculator, Beef, Wine, Info,
   ShoppingCart, ClipboardList, Warehouse, TrendingUp, TrendingDown,
   DollarSign, PieChart as PieChartIcon, Activity,
-  Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, Utensils, Users, FlaskConical, Clock, Zap,
+  Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, Utensils, Users, FlaskConical, Clock, Zap, Printer,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -1603,6 +1604,301 @@ function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack
 // TAB: RECIPE CARDS (Технологічні карти)
 // ═══════════════════════════════════════════════════════════════════
 
+// ── Print Dialog: Технологічна + Калькуляційна карта ──────────────
+
+function RecipePrintDialog({ open, onClose, recipe, items, orgName }: { open: boolean; onClose: () => void; recipe: any; items: any[]; orgName: string }) {
+  const [tab, setTab] = useState<"tech" | "calc">("tech");
+
+  const totalCost = items.reduce((s: number, i: any) => s + parseFloat(i.net_quantity || 0) * parseFloat(i.cost_per_unit || 0), 0);
+  const markupPct = parseFloat(recipe?.markup_pct || 200);
+  const sellingPrice = recipe?.menu_item_price ? parseFloat(recipe.menu_item_price) : totalCost * (1 + markupPct / 100);
+
+  const handlePrint = () => {
+    const style = document.createElement("style");
+    style.id = "__print_recipe_style";
+    style.textContent = `
+      @media print {
+        body > * { display: none !important; }
+        body > #print-recipe-root { display: block !important; }
+        #print-recipe-root { position: fixed; inset: 0; background: white; z-index: 99999; overflow: auto; }
+      }
+    `;
+    document.head.appendChild(style);
+    const el = document.getElementById("print-recipe-content");
+    const root = document.createElement("div");
+    root.id = "print-recipe-root";
+    root.innerHTML = el?.innerHTML || "";
+    document.body.appendChild(root);
+    window.print();
+    document.body.removeChild(root);
+    document.head.removeChild(style);
+  };
+
+  const today = new Date().toLocaleDateString("uk-UA");
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl max-h-[92vh] flex flex-col p-0">
+        <DialogHeader className="px-5 pt-4 pb-3 border-b flex-row items-center justify-between">
+          <DialogTitle className="flex items-center gap-2"><Printer size={16} /> Друкована форма</DialogTitle>
+          <Button onClick={handlePrint} size="sm" className="bg-gray-900 hover:bg-gray-700 text-white gap-1.5">
+            <Printer size={14} /> Друкувати
+          </Button>
+        </DialogHeader>
+
+        <Tabs value={tab} onValueChange={v => setTab(v as any)} className="flex-1 flex flex-col overflow-hidden">
+          <TabsList className="mx-5 mt-3 w-fit">
+            <TabsTrigger value="tech">Технологічна карта (ДП-8)</TabsTrigger>
+            <TabsTrigger value="calc">Калькуляційна карта (ОП-1)</TabsTrigger>
+          </TabsList>
+
+          <div className="flex-1 overflow-y-auto px-5 pb-5">
+            <div id="print-recipe-content">
+              {tab === "tech" && (
+                <div className="mt-4 font-serif text-[13px] text-gray-900 bg-white">
+                  {/* Header */}
+                  <div className="text-center mb-4">
+                    <div className="font-semibold text-base uppercase tracking-wide">{orgName}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Технологічна карта № {recipe?.card_number || recipe?.id}</div>
+                    <div className="text-xs text-gray-500">Дата затвердження: {today}</div>
+                  </div>
+
+                  {/* Title */}
+                  <div className="border-t-2 border-b-2 border-gray-800 py-2 text-center mb-4">
+                    <div className="text-base font-bold uppercase tracking-wider">ТЕХНОЛОГІЧНА КАРТА</div>
+                    <div className="text-sm font-semibold mt-0.5">«{recipe?.name}»</div>
+                    {recipe?.menu_item_name && <div className="text-xs text-gray-500 mt-0.5">Страва: {recipe.menu_item_name}</div>}
+                  </div>
+
+                  {/* Yield/Time info */}
+                  <div className="grid grid-cols-3 gap-4 mb-4 text-xs">
+                    <div className="border p-2 text-center">
+                      <div className="text-gray-500 uppercase text-[10px] tracking-wide">Вихід (1 порція)</div>
+                      <div className="font-bold text-sm mt-0.5">{recipe?.yield_quantity} {recipe?.yield_unit}</div>
+                    </div>
+                    <div className="border p-2 text-center">
+                      <div className="text-gray-500 uppercase text-[10px] tracking-wide">Час підготовки</div>
+                      <div className="font-bold text-sm mt-0.5">{recipe?.prep_time_min || 0} хв</div>
+                    </div>
+                    <div className="border p-2 text-center">
+                      <div className="text-gray-500 uppercase text-[10px] tracking-wide">Час приготування</div>
+                      <div className="font-bold text-sm mt-0.5">{recipe?.cook_time_min || 0} хв</div>
+                    </div>
+                  </div>
+
+                  {/* Ingredients table */}
+                  <table className="w-full border-collapse mb-4 text-xs">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="border border-gray-400 px-2 py-1.5 text-left font-semibold" rowSpan={2}>Найменування продуктів</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-center font-semibold" colSpan={2}>На 1 порцію</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-center font-semibold" rowSpan={2}>Од. виміру</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-center font-semibold" rowSpan={2}>% відходів</th>
+                      </tr>
+                      <tr className="bg-gray-100">
+                        <th className="border border-gray-400 px-2 py-1 text-center font-semibold">Брутто</th>
+                        <th className="border border-gray-400 px-2 py-1 text-center font-semibold">Нетто</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item: any, idx: number) => (
+                        <tr key={idx} className={idx % 2 === 1 ? "bg-gray-50" : ""}>
+                          <td className="border border-gray-400 px-2 py-1.5">{item.ingredient_name}</td>
+                          <td className="border border-gray-400 px-2 py-1.5 text-center">{parseFloat(item.gross_quantity).toLocaleString("uk-UA", { maximumFractionDigits: 3 })}</td>
+                          <td className="border border-gray-400 px-2 py-1.5 text-center font-medium">{parseFloat(item.net_quantity).toLocaleString("uk-UA", { maximumFractionDigits: 3 })}</td>
+                          <td className="border border-gray-400 px-2 py-1.5 text-center">{item.unit}</td>
+                          <td className="border border-gray-400 px-2 py-1.5 text-center">{item.loss_pct || 0}%</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-gray-100 font-semibold">
+                        <td className="border border-gray-400 px-2 py-1.5">Вихід готової страви</td>
+                        <td className="border border-gray-400 px-2 py-1.5 text-center" colSpan={2}>{recipe?.yield_quantity} {recipe?.yield_unit}</td>
+                        <td className="border border-gray-400 px-2 py-1.5" colSpan={2}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  {/* Nutrition table */}
+                  {(recipe?.nutrition_proteins || recipe?.nutrition_fats || recipe?.nutrition_carbs || recipe?.nutrition_calories) && (
+                    <div className="mb-4">
+                      <div className="font-semibold text-xs mb-1 uppercase tracking-wide">Харчова цінність (на 100 г)</div>
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="border border-gray-400 px-2 py-1 text-center">Білки, г</th>
+                            <th className="border border-gray-400 px-2 py-1 text-center">Жири, г</th>
+                            <th className="border border-gray-400 px-2 py-1 text-center">Вуглеводи, г</th>
+                            <th className="border border-gray-400 px-2 py-1 text-center">Енергетична цінність, ккал</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className="border border-gray-400 px-2 py-1.5 text-center">{recipe.nutrition_proteins ?? "—"}</td>
+                            <td className="border border-gray-400 px-2 py-1.5 text-center">{recipe.nutrition_fats ?? "—"}</td>
+                            <td className="border border-gray-400 px-2 py-1.5 text-center">{recipe.nutrition_carbs ?? "—"}</td>
+                            <td className="border border-gray-400 px-2 py-1.5 text-center">{recipe.nutrition_calories ?? "—"}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Technology */}
+                  {recipe?.technology && (
+                    <div className="mb-4">
+                      <div className="font-semibold text-xs mb-1 uppercase tracking-wide border-b border-gray-300 pb-1">Технологія приготування</div>
+                      <div className="text-xs leading-relaxed whitespace-pre-wrap pl-2">{recipe.technology}</div>
+                    </div>
+                  )}
+
+                  {/* Storage + Allergens */}
+                  {(recipe?.storage_temp || recipe?.storage_days || recipe?.allergens) && (
+                    <div className="mb-4 text-xs grid grid-cols-2 gap-3">
+                      {(recipe?.storage_temp || recipe?.storage_days) && (
+                        <div>
+                          <div className="font-semibold uppercase tracking-wide text-[10px] mb-0.5">Умови зберігання</div>
+                          <div>{recipe.storage_temp && `Температура: ${recipe.storage_temp}`}</div>
+                          <div>{recipe.storage_days && `Термін придатності: ${recipe.storage_days} діб`}</div>
+                        </div>
+                      )}
+                      {recipe?.allergens && (
+                        <div>
+                          <div className="font-semibold uppercase tracking-wide text-[10px] mb-0.5">Алергени</div>
+                          <div>{recipe.allergens}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Signatures */}
+                  <div className="mt-6 pt-4 border-t border-gray-300 grid grid-cols-3 gap-6 text-xs">
+                    <div>
+                      <div className="font-semibold mb-4">Розробив:</div>
+                      <div className="border-b border-gray-400 mb-0.5"></div>
+                      <div className="text-gray-500">(підпис, прізвище)</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold mb-4">Завідувач виробництва:</div>
+                      <div className="border-b border-gray-400 mb-0.5"></div>
+                      <div className="text-gray-500">(підпис, прізвище)</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold mb-4">Затвердив:</div>
+                      <div className="border-b border-gray-400 mb-0.5"></div>
+                      <div className="text-gray-500">(підпис, прізвище)</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {tab === "calc" && (
+                <div className="mt-4 font-serif text-[13px] text-gray-900 bg-white">
+                  {/* Header */}
+                  <div className="text-center mb-4">
+                    <div className="font-semibold text-base uppercase tracking-wide">{orgName}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Калькуляційна картка № {recipe?.card_number || recipe?.id}</div>
+                  </div>
+
+                  <div className="border-t-2 border-b-2 border-gray-800 py-2 text-center mb-4">
+                    <div className="text-base font-bold uppercase tracking-wider">КАЛЬКУЛЯЦІЙНА КАРТКА (форма ОП-1)</div>
+                    <div className="text-sm font-semibold mt-0.5">«{recipe?.name}»</div>
+                  </div>
+
+                  <div className="text-xs mb-3 flex justify-between">
+                    <span>Дата складання: {today}</span>
+                    <span>Вихід: {recipe?.yield_quantity} {recipe?.yield_unit}</span>
+                  </div>
+
+                  {/* Main calc table */}
+                  <table className="w-full border-collapse mb-4 text-xs">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="border border-gray-400 px-2 py-1.5 text-left font-semibold w-8">№</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-left font-semibold">Найменування сировини</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-center font-semibold">Од. вим.</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-center font-semibold">К-сть на 100 пор.</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-center font-semibold">Ціна (грн)</th>
+                        <th className="border border-gray-400 px-2 py-1.5 text-center font-semibold">Сума (грн)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item: any, idx: number) => {
+                        const netQty100 = parseFloat(item.net_quantity) * 100;
+                        const cpUnit = parseFloat(item.cost_per_unit || 0);
+                        const amount = netQty100 * cpUnit;
+                        return (
+                          <tr key={idx} className={idx % 2 === 1 ? "bg-gray-50" : ""}>
+                            <td className="border border-gray-400 px-2 py-1.5 text-center">{idx + 1}</td>
+                            <td className="border border-gray-400 px-2 py-1.5">{item.ingredient_name}</td>
+                            <td className="border border-gray-400 px-2 py-1.5 text-center">{item.unit}</td>
+                            <td className="border border-gray-400 px-2 py-1.5 text-center">{netQty100.toLocaleString("uk-UA", { maximumFractionDigits: 3 })}</td>
+                            <td className="border border-gray-400 px-2 py-1.5 text-right">{cpUnit.toLocaleString("uk-UA", { minimumFractionDigits: 2 })}</td>
+                            <td className="border border-gray-400 px-2 py-1.5 text-right font-medium">{amount.toLocaleString("uk-UA", { minimumFractionDigits: 2 })}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-100 font-semibold">
+                        <td className="border border-gray-400 px-2 py-1.5" colSpan={5} align="right">Загальна вартість сировинного набору на 100 порцій:</td>
+                        <td className="border border-gray-400 px-2 py-1.5 text-right">{(totalCost * 100).toLocaleString("uk-UA", { minimumFractionDigits: 2 })}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+
+                  {/* Calculation summary */}
+                  <div className="border border-gray-400 text-xs">
+                    <div className="grid grid-cols-2 border-b border-gray-400">
+                      <div className="px-3 py-1.5 border-r border-gray-400 font-semibold">Вартість сировини на 1 порцію</div>
+                      <div className="px-3 py-1.5 text-right font-bold">{totalCost.toLocaleString("uk-UA", { minimumFractionDigits: 2 })} грн</div>
+                    </div>
+                    <div className="grid grid-cols-2 border-b border-gray-400">
+                      <div className="px-3 py-1.5 border-r border-gray-400">Націнка, %</div>
+                      <div className="px-3 py-1.5 text-right">{markupPct.toLocaleString("uk-UA", { maximumFractionDigits: 0 })} %</div>
+                    </div>
+                    <div className="grid grid-cols-2 border-b border-gray-400">
+                      <div className="px-3 py-1.5 border-r border-gray-400">Сума націнки</div>
+                      <div className="px-3 py-1.5 text-right">{(totalCost * markupPct / 100).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} грн</div>
+                    </div>
+                    <div className="grid grid-cols-2 bg-gray-100">
+                      <div className="px-3 py-2 border-r border-gray-400 font-bold uppercase tracking-wide">Продажна ціна 1 порції</div>
+                      <div className="px-3 py-2 text-right font-bold text-base">{sellingPrice.toLocaleString("uk-UA", { minimumFractionDigits: 2 })} грн</div>
+                    </div>
+                  </div>
+
+                  {/* Vield info */}
+                  <div className="text-xs mt-2 mb-4 text-gray-500">
+                    Вихід 1 порції: {recipe?.yield_quantity} {recipe?.yield_unit} · Дата розрахунку: {today}
+                  </div>
+
+                  {/* Signatures */}
+                  <div className="mt-6 pt-4 border-t border-gray-300 grid grid-cols-3 gap-6 text-xs">
+                    <div>
+                      <div className="font-semibold mb-4">Завідувач виробництва:</div>
+                      <div className="border-b border-gray-400 mb-0.5"></div>
+                      <div className="text-gray-500">(підпис, прізвище)</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold mb-4">Бухгалтер-калькулятор:</div>
+                      <div className="border-b border-gray-400 mb-0.5"></div>
+                      <div className="text-gray-500">(підпис, прізвище)</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold mb-4">Керівник:</div>
+                      <div className="border-b border-gray-400 mb-0.5"></div>
+                      <div className="text-gray-500">(підпис, прізвище)</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RecipesTab({ toast }: { toast: any }) {
   const [recipes, setRecipes] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
@@ -1610,15 +1906,23 @@ function RecipesTab({ toast }: { toast: any }) {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any>(null);
   const [editModal, setEditModal] = useState<any>(null);
+  const [printOpen, setPrintOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [orgName, setOrgName] = useState("Заклад громадського харчування");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [rr, ir, ingr] = await Promise.all([apiFetch("/recipes"), apiFbFetch("/items"), apiFetch("/ingredients")]);
-    const [rj, ij, ingj] = await Promise.all([rr.json(), ir.json(), ingr.json()]);
+    const [rr, ir, ingr, pr] = await Promise.all([
+      apiFetch("/recipes"), apiFbFetch("/items"), apiFetch("/ingredients"),
+      fetch(`${API_BASE}/properties`, { headers: { Authorization: `Bearer ${localStorage.getItem("hms_token")}` } }),
+    ]);
+    const [rj, ij, ingj, pj] = await Promise.all([rr.json(), ir.json(), ingr.json(), pr.json()]);
     setRecipes(rj.recipes || []);
     setItems(ij.items || []);
     setIngredients(ingj.ingredients || []);
+    const props = Array.isArray(pj) ? pj : (pj.properties || []);
+    if (props[0]?.name) setOrgName(props[0].name);
     setLoading(false);
   }, []);
 
@@ -1630,7 +1934,22 @@ function RecipesTab({ toast }: { toast: any }) {
     setSelected(j);
   };
 
-  const openNew = () => setEditModal({ name: "", menu_item_id: "", yield_quantity: 1, yield_unit: "пор", prep_time_min: 15, cook_time_min: 15, technology: "", notes: "", _lines: [] });
+  const openNew = () => setEditModal({ name: "", menu_item_id: "", yield_quantity: 1, yield_unit: "пор", prep_time_min: 15, cook_time_min: 15, technology: "", notes: "", markup_pct: 200, card_number: "", nutrition_proteins: "", nutrition_fats: "", nutrition_carbs: "", nutrition_calories: "", storage_temp: "", storage_days: "", allergens: "", _lines: [] });
+
+  const openEdit = (r: any, recipeItems: any[]) => setEditModal({
+    ...r,
+    menu_item_id: r.menu_item_id?.toString() || "",
+    markup_pct: r.markup_pct ?? 200,
+    nutrition_proteins: r.nutrition_proteins ?? "",
+    nutrition_fats: r.nutrition_fats ?? "",
+    nutrition_carbs: r.nutrition_carbs ?? "",
+    nutrition_calories: r.nutrition_calories ?? "",
+    storage_temp: r.storage_temp ?? "",
+    storage_days: r.storage_days ?? "",
+    allergens: r.allergens ?? "",
+    card_number: r.card_number ?? "",
+    _lines: recipeItems.map((i: any) => ({ ...i, ingredient_id: i.ingredient_id?.toString() })),
+  });
 
   const save = async () => {
     if (!editModal?.name) return toast({ title: "Вкажіть назву", variant: "destructive" });
@@ -1686,17 +2005,28 @@ function RecipesTab({ toast }: { toast: any }) {
 
   if (selected) return (
     <div className="max-w-2xl mx-auto space-y-4">
+      {printOpen && <RecipePrintDialog open={printOpen} onClose={() => setPrintOpen(false)} recipe={selected.recipe} items={selected.items || []} orgName={orgName} />}
+
       <div className="flex items-center gap-3">
         <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={18} /></button>
         <div>
           <h2 className="font-bold text-gray-900">{selected.recipe?.name}</h2>
           {selected.recipe?.menu_item_name && <p className="text-xs text-gray-500">Страва: {selected.recipe.menu_item_name} ({parseFloat(selected.recipe.menu_item_price || 0).toLocaleString("uk-UA")} ₴)</p>}
+          {selected.recipe?.card_number && <p className="text-xs text-gray-400">Картка №{selected.recipe.card_number}</p>}
         </div>
-        {selected.recipe?.margin_pct && (
-          <Badge className="ml-auto bg-green-100 text-green-700 border-green-200" variant="outline">
-            Маржа: {selected.recipe.margin_pct}%
-          </Badge>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {selected.recipe?.margin_pct && (
+            <Badge className="bg-green-100 text-green-700 border-green-200" variant="outline">
+              Маржа: {selected.recipe.margin_pct}%
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openEdit(selected.recipe, selected.items || [])}>
+            <Edit2 size={13} /> Редагувати
+          </Button>
+          <Button size="sm" className="gap-1.5 bg-gray-900 hover:bg-gray-700 text-white" onClick={() => setPrintOpen(true)}>
+            <Printer size={13} /> Друкувати
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -1757,6 +2087,57 @@ function RecipesTab({ toast }: { toast: any }) {
           <CardHeader className="px-4 py-2 border-b bg-gray-50"><CardTitle className="text-xs font-medium text-gray-600">Технологія приготування</CardTitle></CardHeader>
           <CardContent className="p-4 text-sm text-gray-700 whitespace-pre-wrap">{selected.recipe.technology}</CardContent>
         </Card>
+      )}
+
+      {(selected.recipe?.nutrition_proteins || selected.recipe?.nutrition_fats || selected.recipe?.nutrition_carbs || selected.recipe?.nutrition_calories) && (
+        <Card className="shadow-none border">
+          <CardHeader className="px-4 py-2 border-b bg-gray-50"><CardTitle className="text-xs font-medium text-gray-600">Харчова цінність (на 100 г)</CardTitle></CardHeader>
+          <CardContent className="p-4">
+            <div className="grid grid-cols-4 gap-3 text-center text-sm">
+              {[
+                { label: "Білки", value: selected.recipe.nutrition_proteins, unit: "г" },
+                { label: "Жири", value: selected.recipe.nutrition_fats, unit: "г" },
+                { label: "Вуглеводи", value: selected.recipe.nutrition_carbs, unit: "г" },
+                { label: "Калорії", value: selected.recipe.nutrition_calories, unit: "ккал" },
+              ].map(n => n.value != null && (
+                <div key={n.label}>
+                  <div className="text-xs text-gray-500">{n.label}</div>
+                  <div className="font-bold text-gray-900">{n.value} <span className="text-xs font-normal text-gray-400">{n.unit}</span></div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {(selected.recipe?.storage_temp || selected.recipe?.storage_days || selected.recipe?.allergens || selected.recipe?.markup_pct) && (
+        <div className="grid grid-cols-2 gap-3">
+          {(selected.recipe?.storage_temp || selected.recipe?.storage_days) && (
+            <Card className="shadow-none border">
+              <CardContent className="p-3">
+                <div className="text-xs text-gray-500 mb-1">Умови зберігання</div>
+                {selected.recipe.storage_temp && <div className="text-sm">{selected.recipe.storage_temp}</div>}
+                {selected.recipe.storage_days && <div className="text-sm text-gray-600">Термін: {selected.recipe.storage_days} діб</div>}
+              </CardContent>
+            </Card>
+          )}
+          {selected.recipe?.allergens && (
+            <Card className="shadow-none border border-amber-100 bg-amber-50">
+              <CardContent className="p-3">
+                <div className="text-xs text-amber-600 font-medium mb-1">⚠ Алергени</div>
+                <div className="text-sm text-amber-800">{selected.recipe.allergens}</div>
+              </CardContent>
+            </Card>
+          )}
+          {selected.recipe?.markup_pct && (
+            <Card className="shadow-none border">
+              <CardContent className="p-3">
+                <div className="text-xs text-gray-500 mb-1">Торгова націнка</div>
+                <div className="font-bold text-gray-900">{selected.recipe.markup_pct}%</div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1883,6 +2264,33 @@ function RecipesTab({ toast }: { toast: any }) {
 
               <div><Label>Технологія приготування</Label><Textarea value={editModal.technology || ""} onChange={e => setEditModal((m: any) => ({ ...m, technology: e.target.value }))} rows={3} placeholder="Опишіть технологію приготування..." /></div>
               <div><Label>Примітки</Label><Textarea value={editModal.notes || ""} onChange={e => setEditModal((m: any) => ({ ...m, notes: e.target.value }))} rows={2} /></div>
+
+              <details className="border rounded-lg">
+                <summary className="px-3 py-2 cursor-pointer text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg select-none">
+                  Додаткові відомості (харчова цінність, зберігання, алергени)
+                </summary>
+                <div className="p-3 space-y-3">
+                  <div>
+                    <Label className="text-xs text-gray-500 mb-1 block">Номер картки</Label>
+                    <Input value={editModal.card_number || ""} onChange={e => setEditModal((m: any) => ({ ...m, card_number: e.target.value }))} placeholder="ТК-001" className="h-8 text-sm w-32" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500 mb-1 block">Харчова цінність на 100 г</Label>
+                    <div className="grid grid-cols-4 gap-2">
+                      <div><Label className="text-xs">Білки (г)</Label><Input type="number" min="0" step="0.1" value={editModal.nutrition_proteins || ""} onChange={e => setEditModal((m: any) => ({ ...m, nutrition_proteins: e.target.value }))} className="h-8 text-sm" /></div>
+                      <div><Label className="text-xs">Жири (г)</Label><Input type="number" min="0" step="0.1" value={editModal.nutrition_fats || ""} onChange={e => setEditModal((m: any) => ({ ...m, nutrition_fats: e.target.value }))} className="h-8 text-sm" /></div>
+                      <div><Label className="text-xs">Вуглеводи (г)</Label><Input type="number" min="0" step="0.1" value={editModal.nutrition_carbs || ""} onChange={e => setEditModal((m: any) => ({ ...m, nutrition_carbs: e.target.value }))} className="h-8 text-sm" /></div>
+                      <div><Label className="text-xs">Калорії (ккал)</Label><Input type="number" min="0" step="1" value={editModal.nutrition_calories || ""} onChange={e => setEditModal((m: any) => ({ ...m, nutrition_calories: e.target.value }))} className="h-8 text-sm" /></div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div><Label className="text-xs">Умови зберігання</Label><Input value={editModal.storage_temp || ""} onChange={e => setEditModal((m: any) => ({ ...m, storage_temp: e.target.value }))} placeholder="+2°С до +6°С" className="h-8 text-sm" /></div>
+                    <div><Label className="text-xs">Термін (діб)</Label><Input type="number" min="1" value={editModal.storage_days || ""} onChange={e => setEditModal((m: any) => ({ ...m, storage_days: e.target.value }))} className="h-8 text-sm" /></div>
+                    <div><Label className="text-xs">Торгова націнка %</Label><Input type="number" min="0" value={editModal.markup_pct ?? 200} onChange={e => setEditModal((m: any) => ({ ...m, markup_pct: parseFloat(e.target.value) || 200 }))} className="h-8 text-sm" /></div>
+                  </div>
+                  <div><Label className="text-xs">Алергени</Label><Input value={editModal.allergens || ""} onChange={e => setEditModal((m: any) => ({ ...m, allergens: e.target.value }))} placeholder="Глютен, молоко, яйця..." className="h-8 text-sm" /></div>
+                </div>
+              </details>
             </div>
           )}
           <DialogFooter>
