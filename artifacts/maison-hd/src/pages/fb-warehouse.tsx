@@ -919,13 +919,114 @@ function ReceiptsTab({ toast }: { toast: any }) {
 
 // ── AI Scan View ──────────────────────────────────────────────────
 
+// ── Inline picker для прив'язки інгредієнту у AI-скані ───────────────────────
+function IngredientPicker({ value, isNew, suggestions, allIngredients, onChange }: {
+  value: number | null;
+  isNew: boolean;
+  suggestions: any[];
+  allIngredients: any[];
+  onChange: (ing: any | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const current = value ? allIngredients.find((i: any) => i.id === value) : null;
+  const displayList = search.length >= 1
+    ? allIngredients.filter((i: any) => i.name.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
+    : suggestions.length > 0
+      ? allIngredients.filter((i: any) => suggestions.some((s: any) => s.id === i.id)).slice(0, 8)
+      : allIngredients.slice(0, 8);
+
+  return (
+    <div className="relative" ref={ref}>
+      {isNew ? (
+        <button
+          onClick={() => { setSearch(""); setOpen(v => !v); }}
+          className="text-left w-full group"
+        >
+          <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-medium flex items-center gap-1 w-full">
+            ⚡ Новий&nbsp;
+            <span className="text-amber-500 underline group-hover:text-amber-700">Обрати</span>
+          </span>
+          {suggestions.length > 0 && !open && (
+            <div className="text-[9px] text-gray-400 mt-0.5">Схоже: {suggestions.slice(0, 2).map((s: any) => s.name).join(", ")}</div>
+          )}
+        </button>
+      ) : (
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[10px] text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5 max-w-[120px] truncate" title={current?.name}>
+            ✓ {current?.name || `ID:${value}`}
+          </span>
+          <button onClick={() => { setSearch(""); setOpen(v => !v); }} className="text-[10px] text-gray-400 hover:text-violet-600 underline">
+            змінити
+          </button>
+        </div>
+      )}
+
+      {open && (
+        <div className="absolute z-50 bg-white border border-gray-200 shadow-xl rounded-lg p-2 w-64 top-full left-0 mt-1">
+          <input
+            autoFocus
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Пошук інгредієнту..."
+            className="w-full text-xs border rounded px-2 py-1 mb-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+          />
+          <div className="max-h-48 overflow-y-auto space-y-0.5">
+            <button
+              onClick={() => { onChange(null); setOpen(false); setSearch(""); }}
+              className="w-full text-left text-[11px] px-2 py-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 border border-dashed border-gray-200"
+            >
+              — Позначити як новий інгредієнт
+            </button>
+            {!search && suggestions.length > 0 && (
+              <div className="text-[9px] text-gray-400 px-1 pt-1 pb-0.5">Схожі збіги:</div>
+            )}
+            {displayList.map((ing: any) => {
+              const isSuggested = suggestions.some((s: any) => s.id === ing.id);
+              const suggScore = isSuggested ? suggestions.find((s: any) => s.id === ing.id)?.score : null;
+              return (
+                <button
+                  key={ing.id}
+                  onClick={() => { onChange(ing); setOpen(false); setSearch(""); }}
+                  className={`w-full text-left text-[11px] px-2 py-1.5 rounded flex items-center justify-between gap-1 ${
+                    ing.id === value ? "bg-green-50 text-green-700 border border-green-200" :
+                    isSuggested ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "hover:bg-gray-50 text-gray-700"
+                  }`}
+                >
+                  <span className="truncate">{ing.name}</span>
+                  <span className="shrink-0 text-[9px] text-gray-400">{ing.unit}{suggScore ? ` · ${suggScore}%` : ""}</span>
+                </button>
+              );
+            })}
+            {displayList.length === 0 && (
+              <div className="text-[11px] text-gray-400 px-2 py-2 text-center">Нічого не знайдено</div>
+            )}
+            {!search && (
+              <div className="text-[9px] text-gray-400 px-1 pt-1 border-t mt-1">Введіть назву для пошуку серед {allIngredients.length} інгредієнтів</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: () => void; toast: any }) {
   const [step, setStep] = useState<"input" | "reviewing" | "saving">("input");
   const [inputMode, setInputMode] = useState<"text" | "voice">("text");
   const [inputText, setInputText] = useState("");
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null); // збережемо для вкладення
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [parsed, setParsed] = useState<any>(null);
   const [newCount, setNewCount] = useState(0);
@@ -933,6 +1034,10 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
   const [supplierId, setSupplierId] = useState<string>("");
   const [aiPaymentType, setAiPaymentType] = useState<string>("unpaid");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [allIngredients, setAllIngredients] = useState<any[]>([]);
+  useEffect(() => {
+    apiFetch("/ingredients").then(r => r.json()).then(j => setAllIngredients(j.ingredients || [])).catch(() => {});
+  }, []);
 
   const [imageMime, setImageMime] = useState<string>("image/jpeg");
   const handleImageSelect = async (file: File) => {
@@ -1045,9 +1150,9 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
       items: p.items.map((item: any, i: number) => {
         if (i !== idx) return item;
         if (field === "__link") {
-          // Link to existing ingredient
           return { ...item, ingredient_id: value.id, is_new_ingredient: false,
-            match_confidence: value.score, suggestions: [] };
+            match_confidence: value.score, suggestions: [],
+            ...(value.unit ? { unit: value.unit } : {}) };
         }
         if (field === "__unlink") {
           // Unlink — mark as new again
@@ -1259,7 +1364,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
                 <th className="text-right px-3 py-2 font-medium text-gray-600">Ціна/од.</th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600">Сума</th>
                 <th className="text-right px-3 py-2 font-medium text-gray-600">ПДВ</th>
-                <th className="text-center px-3 py-2 font-medium text-gray-600">Статус</th>
+                <th className="px-3 py-2 font-medium text-gray-600">Прив'язка до складу</th>
               </tr>
             </thead>
             <tbody>
@@ -1304,35 +1409,17 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
                       {((item.quantity || 0) * (item.price_per_unit || 0)).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴
                     </td>
                     <td className="px-3 py-2 text-right text-gray-500 text-xs">{item.vat_rate || 20}%</td>
-                    <td className="px-3 py-2 text-center min-w-[110px]">
-                      {item.is_new_ingredient ? (
-                        <div className="space-y-1">
-                          <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200" variant="outline">⚡ новий</Badge>
-                          {(item.suggestions || []).length > 0 && (
-                            <div>
-                              <div className="text-[9px] text-gray-400 mb-0.5">Схоже на:</div>
-                              {(item.suggestions as any[]).slice(0, 3).map((s: any) => (
-                                <button key={s.id}
-                                  onClick={() => updateItem(idx, "__link", s)}
-                                  className="block w-full text-left text-[10px] px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-100 mb-0.5 leading-tight"
-                                  title={`Прив'язати до "${s.name}" (${s.score}%)`}
-                                >
-                                  {s.score}% · {s.name}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="space-y-0.5">
-                          <span className="text-[10px] text-green-600 flex items-center gap-0.5 justify-center"><Check size={10} /> знайдено</span>
-                          <span className="text-[10px] text-gray-400">({item.match_confidence || 0}%)</span>
-                          <button onClick={() => updateItem(idx, "__unlink", null)}
-                            className="text-[9px] text-gray-300 hover:text-red-400 block w-full">
-                            ✕ відв'язати
-                          </button>
-                        </div>
-                      )}
+                    <td className="px-3 py-2 min-w-[150px]">
+                      <IngredientPicker
+                        value={item.ingredient_id}
+                        isNew={!!item.is_new_ingredient}
+                        suggestions={item.suggestions || []}
+                        allIngredients={allIngredients}
+                        onChange={(ing) => {
+                          if (ing) updateItem(idx, "__link", { id: ing.id, name: ing.name, unit: ing.unit, score: 99 });
+                          else updateItem(idx, "__unlink", null);
+                        }}
+                      />
                     </td>
                   </tr>
                 );
