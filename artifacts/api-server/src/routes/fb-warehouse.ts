@@ -654,6 +654,93 @@ router.post("/receipts/ai-voice-receipt", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── AI голосовий парсинг: ТЕХНОЛОГІЧНА КАРТА з голосу ─────────────────────
+router.post("/recipes/ai-voice-recipe", async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: "text required" });
+  try {
+    const orgId = org(req);
+    const existingIngredients = (await db.execute(sql`
+      SELECT id, name, unit, cost_per_unit FROM fb_ingredients WHERE organization_id = ${orgId} AND is_active = true ORDER BY name
+    `)).rows as any[];
+    const ingredientsList = existingIngredients.map((i: any) => `${i.id}|${i.name}|${i.unit}`).join("\n");
+
+    const systemPrompt = `Ти система голосового створення технологічних карт для ресторану в Україні.
+Текст отримано через голосовий ввід (можуть бути помилки розпізнавання мови). Витягни дані про страву та поверни ТІЛЬКИ валідний JSON:
+{
+  "name": "назва страви",
+  "yield_quantity": число,
+  "yield_unit": "пор|кг|г|л|шт",
+  "prep_time_min": число,
+  "cook_time_min": число,
+  "technology": "технологія приготування або null",
+  "notes": "примітки або null",
+  "items": [
+    {
+      "ingredient_id": число або null,
+      "name": "назва інгредієнту",
+      "gross_quantity": число,
+      "net_quantity": число,
+      "unit": "кг|г|л|мл|шт|пор|пач|упак",
+      "loss_pct": число від 0 до 100
+    }
+  ]
+}
+Правила:
+- yield_unit: "пор" якщо не вказано
+- prep_time_min: час підготовки/нарізки (якщо не вказано — 15)
+- cook_time_min: час термічної обробки (якщо не вказано — 30)
+- gross_quantity: вага з урахуванням відходів (якщо loss_pct=0, то gross=net)
+- net_quantity: чиста вага після обробки
+- loss_pct: % відходів (цибуля ~10%, картопля ~25%, риба ~40%, зелень ~5%, стандарт ~0)
+- Одиниці: г/кг (тверді), мл/л (рідкі), шт (штучні)
+- Якщо вказано "200 грам" → gross_quantity=0.200, unit="кг"
+- Якщо вказано "200г" або "200 г" → gross_quantity=0.200, unit="кг"
+- Якщо вказано "2 штуки" → gross_quantity=2, unit="шт"
+Інгредієнти бази (id|name|unit):\n${ingredientsList || "—"}
+Зіставляй ingredient_id де можливо (нечутливо до регістру, часткове співпадіння назви).`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5.2",
+      max_completion_tokens: 2000,
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
+    });
+    const raw = completion.choices[0].message.content || "";
+    let parsed: any;
+    try { const m = raw.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : raw); }
+    catch { return res.status(422).json({ error: "Не вдалося розпізнати — спробуйте ще раз", raw }); }
+
+    // Enrich items with ingredient data (fuzzy match if no id)
+    const enrichedItems = (parsed.items || []).map((item: any) => {
+      let ing = item.ingredient_id
+        ? existingIngredients.find((i: any) => i.id === item.ingredient_id)
+        : null;
+      if (!ing && item.name) {
+        const nameLower = (item.name || "").toLowerCase();
+        ing = existingIngredients.find((i: any) =>
+          i.name.toLowerCase().includes(nameLower.slice(0, 5)) ||
+          nameLower.includes(i.name.toLowerCase().slice(0, 5))
+        );
+      }
+      const gross = parseFloat(item.gross_quantity) || 0;
+      const lossPct = parseFloat(item.loss_pct) || 0;
+      const net = item.net_quantity ? parseFloat(item.net_quantity) : +(gross * (1 - lossPct / 100)).toFixed(4);
+      return {
+        ingredient_id: (ing?.id || item.ingredient_id || "").toString(),
+        name: item.name || ing?.name || "",
+        gross_quantity: gross,
+        net_quantity: net,
+        unit: item.unit || ing?.unit || "кг",
+        loss_pct: lossPct,
+        cost_per_unit: ing?.cost_per_unit || 0,
+        is_new_ingredient: !ing,
+      };
+    });
+
+    res.json({ parsed: { ...parsed, items: enrichedItems } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── AI голосовий парсинг: СПИСАННЯ з голосу ────────────────────────────────
 router.post("/ai-voice-writeoff", async (req, res) => {
   const { text } = req.body;

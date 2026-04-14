@@ -1908,6 +1908,9 @@ function RecipesTab({ toast }: { toast: any }) {
   const [editModal, setEditModal] = useState<any>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [voiceModal, setVoiceModal] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceParsing, setVoiceParsing] = useState(false);
 
   const [orgName, setOrgName] = useState("Заклад громадського харчування");
 
@@ -1934,7 +1937,53 @@ function RecipesTab({ toast }: { toast: any }) {
     setSelected(j);
   };
 
-  const openNew = () => setEditModal({ name: "", menu_item_id: "", yield_quantity: 1, yield_unit: "пор", prep_time_min: 15, cook_time_min: 15, technology: "", notes: "", markup_pct: 200, card_number: "", nutrition_proteins: "", nutrition_fats: "", nutrition_carbs: "", nutrition_calories: "", storage_temp: "", storage_days: "", allergens: "", _lines: [] });
+  const openNew = (prefill?: any) => setEditModal(prefill ?? { name: "", menu_item_id: "", yield_quantity: 1, yield_unit: "пор", prep_time_min: 15, cook_time_min: 15, technology: "", notes: "", markup_pct: 200, card_number: "", nutrition_proteins: "", nutrition_fats: "", nutrition_carbs: "", nutrition_calories: "", storage_temp: "", storage_days: "", allergens: "", _lines: [] });
+
+  const parseVoiceRecipe = async () => {
+    if (!voiceTranscript.trim()) return;
+    setVoiceParsing(true);
+    try {
+      const r = await apiFetch("/recipes/ai-voice-recipe", { method: "POST", body: JSON.stringify({ text: voiceTranscript }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      const p = j.parsed;
+      openNew({
+        name: p.name || "",
+        menu_item_id: "",
+        yield_quantity: p.yield_quantity || 1,
+        yield_unit: p.yield_unit || "пор",
+        prep_time_min: p.prep_time_min || 15,
+        cook_time_min: p.cook_time_min || 30,
+        technology: p.technology || "",
+        notes: p.notes ? `${p.notes}\n[Голосовий ввід: "${voiceTranscript.slice(0, 60)}${voiceTranscript.length > 60 ? "..." : ""}"]` : `[Голосовий ввід: "${voiceTranscript.slice(0, 80)}${voiceTranscript.length > 80 ? "..." : ""}"]`,
+        markup_pct: 200,
+        card_number: "",
+        nutrition_proteins: "",
+        nutrition_fats: "",
+        nutrition_carbs: "",
+        nutrition_calories: "",
+        storage_temp: "",
+        storage_days: "",
+        allergens: "",
+        _lines: (p.items || []).map((item: any) => ({
+          ingredient_id: item.ingredient_id?.toString() || "",
+          gross_quantity: item.gross_quantity || 0,
+          net_quantity: item.net_quantity || 0,
+          unit: item.unit || "кг",
+          loss_pct: item.loss_pct || 0,
+          _name: item.name || "",
+          _is_new: item.is_new_ingredient || false,
+        })),
+      });
+      setVoiceModal(false);
+      setVoiceTranscript("");
+      toast({ title: "AI розпізнав тех. карту — перевірте та збережіть" });
+    } catch (e: any) {
+      toast({ title: e.message || "Помилка розпізнавання", variant: "destructive" });
+    } finally {
+      setVoiceParsing(false);
+    }
+  };
 
   const openEdit = (r: any, recipeItems: any[]) => setEditModal({
     ...r,
@@ -2144,8 +2193,11 @@ function RecipesTab({ toast }: { toast: any }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={openNew} size="sm" className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
+      <div className="flex items-center gap-2 justify-end">
+        <Button onClick={() => { setVoiceTranscript(""); setVoiceModal(true); }} size="sm" variant="outline" className="gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50">
+          <Mic size={14} /> Голосова тех. карта
+        </Button>
+        <Button onClick={() => openNew()} size="sm" className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
           <Plus size={15} /> Нова тех. карта
         </Button>
       </div>
@@ -2297,6 +2349,61 @@ function RecipesTab({ toast }: { toast: any }) {
             <Button variant="outline" onClick={() => setEditModal(null)}>Скасувати</Button>
             <Button onClick={save} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white">
               {saving ? <Loader2 size={16} className="animate-spin" /> : "Зберегти"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Голосовий ввід тех. карти ── */}
+      <Dialog open={voiceModal} onOpenChange={v => { if (!v) setVoiceModal(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Mic size={16} className="text-blue-600" /> Голосовий ввід тех. карти</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-700 space-y-1">
+              <p className="font-medium">Приклад що сказати:</p>
+              <p className="italic opacity-80">"Тех. карта Борщ Прасолів. Вихід 350 грам. Буряк 200 грам, капуста 150 грам, картопля 120 грам, цибуля 80 грам, морква 60 грам, томатна паста 40 грам. Технологія: буряк відварити окремо, капусту нашаткувати, зварити разом 40 хвилин."</p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <VoiceMicButton
+                onTranscript={t => setVoiceTranscript(t)}
+                onEnd={t => setVoiceTranscript(t)}
+                size={18}
+                className="shrink-0"
+              />
+              <div className="flex-1">
+                <p className="text-xs text-gray-500 mb-1">Натисніть мікрофон і диктуйте тех. карту</p>
+                {voiceTranscript ? (
+                  <div className="flex items-start gap-2 bg-gray-50 border rounded p-2">
+                    <p className="text-sm text-gray-700 flex-1 italic">"{voiceTranscript}"</p>
+                    <button className="text-xs text-gray-400 hover:text-red-500 shrink-0" onClick={() => setVoiceTranscript("")}>✕</button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">Очікую голосовий ввід...</p>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t pt-3">
+              <p className="text-xs text-gray-500 mb-2">Або введіть текст вручну:</p>
+              <textarea
+                className="w-full h-20 text-sm border rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-300"
+                placeholder="Назва страви, інгредієнти, кількості, технологія..."
+                value={voiceTranscript}
+                onChange={e => setVoiceTranscript(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setVoiceModal(false)}>Скасувати</Button>
+            <Button
+              onClick={parseVoiceRecipe}
+              disabled={voiceParsing || !voiceTranscript.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+            >
+              {voiceParsing ? <><Loader2 size={14} className="animate-spin" /> Розпізнаю...</> : <><Sparkles size={14} /> Розпізнати AI</>}
             </Button>
           </DialogFooter>
         </DialogContent>
