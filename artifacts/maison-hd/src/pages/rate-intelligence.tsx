@@ -135,6 +135,10 @@ export default function RateIntelligencePage() {
   // AI: fetching prices per competitor
   const [fetchingPrices, setFetchingPrices] = useState<Record<number, boolean>>({});
 
+  // Delete competitor confirmation
+  const [deleteCompId, setDeleteCompId] = useState<number | null>(null);
+  const [deletingComp, setDeletingComp] = useState(false);
+
   // AI: suggest competitors
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -182,13 +186,22 @@ export default function RateIntelligencePage() {
     setSavingComp(false);
   }
 
-  async function handleDeleteComp(id: number) {
-    if (!confirm("Видалити конкурента?")) return;
+  function handleDeleteComp(id: number) {
+    setDeleteCompId(id);
+  }
+
+  async function confirmDeleteComp() {
+    if (!deleteCompId) return;
+    setDeletingComp(true);
     try {
-      await fetch(`${API}/competitors/${id}`, { method: "DELETE", headers: hdrs() });
+      await fetch(`${API}/competitors/${deleteCompId}`, { method: "DELETE", headers: hdrs() });
       toast({ title: "Конкурента видалено" });
+      setDeleteCompId(null);
       load();
-    } catch { toast({ title: "Помилка", variant: "destructive" }); }
+    } catch {
+      toast({ title: "Помилка видалення", variant: "destructive" });
+    }
+    setDeletingComp(false);
   }
 
   // ── Save manual rate ───────────────────────────────────────────────────────
@@ -507,27 +520,39 @@ export default function RateIntelligencePage() {
                       return (
                         <TableRow key={comp.id} className={fetchingPrices[comp.id] ? "opacity-60 animate-pulse" : ""}>
                           <TableCell>
-                            <div className="font-medium text-sm">{comp.name}</div>
-                            <StarRating stars={comp.starRating || 3} />
-                            {comp.websiteUrl && (
-                              <a href={comp.websiteUrl} target="_blank" rel="noopener noreferrer"
-                                className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 mt-0.5">
-                                <Globe size={9} /> Сайт
-                              </a>
-                            )}
-                            {!hasAnyData && (
-                              <button
-                                className="mt-1 text-[10px] text-purple-600 hover:underline flex items-center gap-0.5"
-                                onClick={() => handleAiFetchPrices(comp)}
-                                disabled={fetchingPrices[comp.id]}
+                            <div className="flex items-start justify-between gap-1 group">
+                              <div className="min-w-0">
+                                <div className="font-medium text-sm">{comp.name}</div>
+                                <StarRating stars={comp.starRating || 3} />
+                                {comp.websiteUrl && (
+                                  <a href={comp.websiteUrl} target="_blank" rel="noopener noreferrer"
+                                    className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 mt-0.5">
+                                    <Globe size={9} /> Сайт
+                                  </a>
+                                )}
+                                {!hasAnyData && (
+                                  <button
+                                    className="mt-1 text-[10px] text-purple-600 hover:underline flex items-center gap-0.5"
+                                    onClick={() => handleAiFetchPrices(comp)}
+                                    disabled={fetchingPrices[comp.id]}
+                                  >
+                                    {fetchingPrices[comp.id]
+                                      ? <Loader2 size={9} className="animate-spin" />
+                                      : <Bot size={9} />
+                                    }
+                                    {fetchingPrices[comp.id] ? "Завантаження..." : "Завантажити ціни AI"}
+                                  </button>
+                                )}
+                              </div>
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-6 w-6 p-0 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                onClick={() => handleDeleteComp(comp.id)}
+                                title="Видалити конкурента"
                               >
-                                {fetchingPrices[comp.id]
-                                  ? <Loader2 size={9} className="animate-spin" />
-                                  : <Bot size={9} />
-                                }
-                                {fetchingPrices[comp.id] ? "Завантаження..." : "Завантажити ціни AI"}
-                              </button>
-                            )}
+                                <Trash2 size={11} />
+                              </Button>
+                            </div>
                           </TableCell>
                           {dates.map(d => {
                             const price = compData[d];
@@ -859,6 +884,31 @@ export default function RateIntelligencePage() {
             <Button variant="outline" onClick={() => setCompModal(false)}>Скасувати</Button>
             <Button onClick={handleSaveComp} disabled={savingComp || !compForm.name}>
               {savingComp ? "Зберігаємо..." : "Зберегти"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete competitor confirmation ────────────────────────────────── */}
+      <Dialog open={deleteCompId !== null} onOpenChange={open => { if (!open) setDeleteCompId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 size={18} /> Видалити конкурента?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            Конкурента {competitors.find(c => c.id === deleteCompId)?.name && (
+              <strong>«{competitors.find(c => c.id === deleteCompId)?.name}»</strong>
+            )} та всі його тарифи будуть видалені безповоротно.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteCompId(null)} disabled={deletingComp}>
+              Скасувати
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteComp} disabled={deletingComp}>
+              {deletingComp ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Trash2 size={14} className="mr-1" />}
+              Видалити
             </Button>
           </DialogFooter>
         </DialogContent>
