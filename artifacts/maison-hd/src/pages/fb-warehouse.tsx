@@ -1371,8 +1371,19 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
               {(parsed.items || []).map((item: any, idx: number) => {
                 const conv = item.conversion_factor || 1;
                 return (
-                  <tr key={idx} className={`border-b ${item.is_new_ingredient ? "bg-amber-50" : ""}`}>
+                  <tr key={idx} className={`border-b ${item.item_type === "product" ? "bg-orange-50/50" : item.is_new_ingredient ? "bg-amber-50" : ""}`}>
                     <td className="px-3 py-2">
+                      {/* Тип: інгредієнт чи товар */}
+                      <div className="flex gap-0.5 mb-1">
+                        <button
+                          onClick={() => updateItem(idx, "item_type", "ingredient")}
+                          className={`text-[9px] px-1.5 py-0.5 rounded-l border transition-colors ${item.item_type !== "product" ? "bg-violet-600 text-white border-violet-600" : "bg-white text-gray-400 border-gray-200 hover:border-violet-300"}`}
+                        >🔬 Інгредієнт</button>
+                        <button
+                          onClick={() => updateItem(idx, "item_type", "product")}
+                          className={`text-[9px] px-1.5 py-0.5 rounded-r border transition-colors ${item.item_type === "product" ? "bg-orange-500 text-white border-orange-500" : "bg-white text-gray-400 border-gray-200 hover:border-orange-300"}`}
+                        >📦 Товар</button>
+                      </div>
                       <Input value={item.name} onChange={e => updateItem(idx, "name", e.target.value)} className="h-7 text-xs border-0 bg-transparent p-0 focus:bg-white focus:border focus:px-2 transition-all" />
                       {item.pack_info && (
                         <div className="flex items-center gap-1 mt-0.5">
@@ -1469,7 +1480,7 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
 
 // ── New Receipt (Manual) ──────────────────────────────────────────
 
-const EMPTY_RECEIPT_LINE = { ingredient_id: "", name: "", quantity: 1, receipt_unit: "кг", unit: "кг", conversion_factor: 1, price_per_unit: 0, vat_rate: 20 };
+const EMPTY_RECEIPT_LINE = { ingredient_id: "", name: "", quantity: 1, receipt_unit: "кг", unit: "кг", conversion_factor: 1, price_per_unit: 0, vat_rate: 20, item_type: "ingredient" };
 
 function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: () => void; toast: any }) {
   const [form, setForm] = useState({ supplier_id: "", receipt_no: "", receipt_date: new Date().toISOString().split("T")[0], notes: "", payment_type: "unpaid" });
@@ -1593,21 +1604,42 @@ function NewReceiptView({ suppliers, onBack, toast }: { suppliers: any[]; onBack
                 const costPerBase = conv !== 1 && line.price_per_unit ? line.price_per_unit / conv : null;
                 const hasConversion = conv !== 1 || line.receipt_unit !== line.unit;
                 return (
-                  <tr key={idx} className={`border-b ${hasConversion ? "bg-amber-50/30" : ""}`}>
+                  <tr key={idx} className={`border-b ${line.item_type === "product" ? "bg-orange-50/40" : hasConversion ? "bg-amber-50/30" : ""}`}>
                     <td className="px-3 py-2">
-                      <Select value={line.ingredient_id || "_none"} onValueChange={v => updateLine(idx, "ingredient_id", v === "_none" ? "" : v)}>
-                        <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Виберіть або вручну..." /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="_none">Вільний ввід</SelectItem>
-                          {ingredients.map((i: any) => (
-                            <SelectItem key={i.id} value={i.id.toString()}>
-                              {i.name} <span className="text-gray-400">({i.current_stock} {i.unit})</span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {!line.ingredient_id && (
-                        <Input value={line.name} onChange={e => updateLine(idx, "name", e.target.value)} placeholder="Назва товару..." className="mt-1 h-7 text-xs" />
+                      {/* Тип позиції: інгредієнт або товар */}
+                      <div className="flex gap-0.5 mb-1.5">
+                        <button
+                          onClick={() => updateLine(idx, "item_type", "ingredient")}
+                          className={`text-[10px] px-2 py-0.5 rounded-l border transition-colors ${line.item_type !== "product" ? "bg-violet-600 text-white border-violet-600" : "bg-white text-gray-400 border-gray-200 hover:border-violet-300"}`}
+                        >
+                          🔬 Інгредієнт
+                        </button>
+                        <button
+                          onClick={() => updateLine(idx, "item_type", "product")}
+                          className={`text-[10px] px-2 py-0.5 rounded-r border transition-colors ${line.item_type === "product" ? "bg-orange-500 text-white border-orange-500" : "bg-white text-gray-400 border-gray-200 hover:border-orange-300"}`}
+                        >
+                          📦 Товар
+                        </button>
+                      </div>
+                      {line.item_type === "product" ? (
+                        <Input value={line.name} onChange={e => updateLine(idx, "name", e.target.value)} placeholder="Назва товару..." className="h-7 text-xs" />
+                      ) : (
+                        <>
+                          <Select value={line.ingredient_id || "_none"} onValueChange={v => updateLine(idx, "ingredient_id", v === "_none" ? "" : v)}>
+                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Виберіть або вручну..." /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="_none">Вільний ввід</SelectItem>
+                              {ingredients.map((i: any) => (
+                                <SelectItem key={i.id} value={i.id.toString()}>
+                                  {i.name} <span className="text-gray-400">({i.current_stock} {i.unit})</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {!line.ingredient_id && (
+                            <Input value={line.name} onChange={e => updateLine(idx, "name", e.target.value)} placeholder="Назва інгредієнту..." className="mt-1 h-7 text-xs" />
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="px-3 py-2">

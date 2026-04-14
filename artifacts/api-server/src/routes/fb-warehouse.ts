@@ -380,9 +380,11 @@ router.put("/receipts/:id/items", async (req, res) => {
       total += totalPrice;
       vat += vatAmount;
 
-      // Create new ingredient on save (not during scan)
+      const itemType = item.item_type === "product" ? "product" : "ingredient";
+
+      // Create new ingredient on save (only for ingredient-type items, not products)
       let ingredientId = item.ingredient_id || null;
-      if (!ingredientId && item.is_new_ingredient) {
+      if (itemType === "ingredient" && !ingredientId && item.is_new_ingredient) {
         const created = await db.execute(sql`
           INSERT INTO fb_ingredients (organization_id, name, unit, cost_per_unit)
           VALUES (${orgId}, ${item.name}, ${item.unit || "кг"}, ${item.price_per_unit || 0})
@@ -390,15 +392,18 @@ router.put("/receipts/:id/items", async (req, res) => {
         `);
         ingredientId = (created.rows[0] as any)?.id || null;
       }
+      // Products don't link to ingredients
+      if (itemType === "product") ingredientId = null;
 
       await db.execute(sql`
         INSERT INTO fb_stock_receipt_items
           (receipt_id, ingredient_id, name, quantity, unit, receipt_unit, conversion_factor,
-           price_per_unit, total_price, vat_rate, vat_amount, is_new_ingredient, match_confidence)
+           price_per_unit, total_price, vat_rate, vat_amount, is_new_ingredient, match_confidence, item_type)
         VALUES (${receiptId}, ${ingredientId}, ${item.name}, ${item.quantity},
                 ${item.unit}, ${rcptUnit}, ${conv},
                 ${item.price_per_unit}, ${totalPrice}, ${vatRate}, ${vatAmount},
-                ${item.is_new_ingredient || false}, ${item.match_confidence ?? null})
+                ${itemType === "ingredient" ? (item.is_new_ingredient || false) : false},
+                ${item.match_confidence ?? null}, ${itemType})
       `);
     }
     await db.execute(sql`UPDATE fb_stock_receipts SET total_amount = ${total}, vat_amount = ${vat}, updated_at = NOW() WHERE id = ${receiptId}`);
@@ -418,7 +423,7 @@ router.post("/receipts/:id/confirm", async (req, res) => {
 
     const summary: any[] = [];
     for (const item of items) {
-      if (!item.ingredient_id) continue;
+      if (!item.ingredient_id || item.item_type === "product") continue;
       // conversion_factor: скільки базових одиниць у 1 одиниці приходу
       // напр. 1 ящик = 24 шт → conv=24; 5 ящик → +120 шт; ціна/ящик÷24=собівартість/шт
       const conv = parseFloat(item.conversion_factor) > 0 ? parseFloat(item.conversion_factor) : 1;
@@ -519,7 +524,8 @@ router.post("/receipts/ai-scan", async (req, res) => {
       "price_per_unit": ціна за одиницю накладної (не за базову одиницю),
       "total_price": загальна сума,
       "vat_rate": ставка ПДВ у % (20 якщо не вказано, 0 для звільнених),
-      "pack_info": "опис упаковки якщо є, напр. '6×2л' або '10×900г', інакше null"
+      "pack_info": "опис упаковки якщо є, напр. '6×2л' або '10×900г', інакше null",
+      "item_type": "ingredient або product"
     }
   ]
 }
@@ -539,7 +545,12 @@ router.post("/receipts/ai-scan", async (req, res) => {
 - "БОРОШНО 2КГ" кількість 10 шт → quantity=20, unit="кг"
 - "ЯЙЦЕ" кількість 14 шт → quantity=14, unit="шт" (штучний продукт без об'єму)
 
-Правило: рідкі продукти (вода, молоко, сік, олія, кефір) → завжди в літрах; сипучі/тверді → в кг якщо є вага в назві; штучні (яйця, пляшки, контейнери) → в шт/пляш.
+Правило конвертації: рідкі продукти (вода, молоко, сік, олія, кефір) → завжди в літрах; сипучі/тверді → в кг якщо є вага в назві; штучні (яйця, пляшки, контейнери) → в шт/пляш.
+
+ВИЗНАЧЕННЯ ТИПУ (item_type):
+- "ingredient" — сировина для кухні: молоко, борошно, олія, м'ясо, овочі, фрукти, спеції, вода у великих обсягах, алкоголь для коктейлів (горілка, ром, лікер), сиропи, соуси. Все що йде у рецептури і списується частково.
+- "product" — готовий товар для продажу штучно: Cola 0.33л, пляшковий алкоголь у роздріб (вино 0.75л, пиво 0.5л), пакована вода для продажу (0.5л, 1л), готові снеки, цукерки, жуйки, контейнери, стакани. Все що продається "як є" без розбивки.
+Правило: якщо порційна упаковка ≤ 0.5л (напій) або ≤ 500г (їжа) — зазвичай товар. Якщо велика тара (1.25л, 1л, 5л, 10кг мішок) без пак. форми — зазвичай інгредієнт. При сумніві — ingredient.
 
 Знайди постачальника з цього списку (id|name):
 ${suppliersList || "список порожній"}
