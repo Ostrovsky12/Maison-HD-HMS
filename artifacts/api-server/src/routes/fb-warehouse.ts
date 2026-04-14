@@ -493,13 +493,19 @@ ${ingredientsList || "список порожній"}
       processedItems.push(item);
     }
 
-    // Find matched supplier
+    // Find matched supplier — bidirectional fuzzy + EDRPOU exact
     let matchedSupplierId = parsed.supplier_id || null;
     if (!matchedSupplierId && parsed.supplier_name) {
-      const match = existingSuppliers.find((s: any) =>
-        s.name.toLowerCase().includes(parsed.supplier_name?.toLowerCase()?.split(" ")[0] || "") ||
-        (parsed.supplier_edrpou && s.edrpou === parsed.supplier_edrpou)
-      );
+      const pName = parsed.supplier_name.toLowerCase().trim();
+      const match = existingSuppliers.find((s: any) => {
+        const sName = s.name.toLowerCase().trim();
+        return (
+          sName.includes(pName) ||
+          pName.includes(sName) ||
+          pName.split(" ").some((w: string) => w.length > 3 && sName.includes(w)) ||
+          (parsed.supplier_edrpou && s.edrpou === parsed.supplier_edrpou)
+        );
+      });
       if (match) matchedSupplierId = match.id;
     }
 

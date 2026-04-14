@@ -869,16 +869,31 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
     if (!parsed) return;
     setStep("saving");
     try {
+      // Якщо AI знайшов назву постачальника, але не підібрав ID — авто-створюємо
+      let finalSupplierId: number | null = supplierId ? parseInt(supplierId) : null;
+      if (!finalSupplierId && parsed.supplier_name && supplierId !== "_skip") {
+        try {
+          const sr = await apiFetch("/suppliers", {
+            method: "POST",
+            body: JSON.stringify({ name: parsed.supplier_name, edrpou: parsed.supplier_edrpou || null })
+          });
+          if (sr.ok) {
+            const { supplier } = await sr.json();
+            finalSupplierId = supplier.id;
+          }
+        } catch { /* ігноруємо якщо вже існує — буде null */ }
+      }
+
       const cr = await apiFetch("/receipts", {
         method: "POST",
         body: JSON.stringify({
-          supplier_id: supplierId ? parseInt(supplierId) : null,
+          supplier_id: finalSupplierId,
           receipt_no: parsed.receipt_no,
           receipt_date: parsed.receipt_date,
           notes: inputMode === "voice"
             ? "Імпортовано через голосовий ввід (AI)"
             : imageBase64 ? "Імпортовано через AI-сканування (фото)" : "Імпортовано через AI-сканування",
-          invoice_image: imageBase64 || null, // зберігаємо фото як вкладення
+          invoice_image: imageBase64 || null,
         })
       });
       const { receipt } = await cr.json();
@@ -1058,11 +1073,24 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
             <div><Label className="text-xs">Дата</Label>
               <Input type="date" value={parsed.receipt_date || ""} onChange={e => setParsed((p: any) => ({ ...p, receipt_date: e.target.value }))} className="h-8 text-sm" />
             </div>
-            <div className="col-span-2"><Label className="text-xs">Постачальник</Label>
+            <div className="col-span-2">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Label className="text-xs">Постачальник</Label>
+                {!supplierId && parsed.supplier_name && (
+                  <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-medium">
+                    ⚡ Буде створено автоматично
+                  </span>
+                )}
+                {supplierId && (
+                  <span className="text-[10px] bg-green-100 text-green-700 border border-green-200 rounded px-1.5 py-0.5 font-medium">
+                    ✓ В базі
+                  </span>
+                )}
+              </div>
               <Select value={supplierId || "_none"} onValueChange={v => setSupplierId(v === "_none" ? "" : v)}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Виберіть..." /></SelectTrigger>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Виберіть або залиште для авто-створення..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="_none">{parsed.supplier_name || "Невизначений постачальник"}</SelectItem>
+                  <SelectItem value="_none">{parsed.supplier_name ? `⚡ ${parsed.supplier_name} (новий)` : "— Без постачальника —"}</SelectItem>
                   {suppliers.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
