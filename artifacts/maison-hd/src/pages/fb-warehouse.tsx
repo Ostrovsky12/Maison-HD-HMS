@@ -1269,6 +1269,11 @@ function AiScanView({ suppliers, onBack, toast }: { suppliers: any[]; onBack: ()
                   <tr key={idx} className={`border-b ${item.is_new_ingredient ? "bg-amber-50" : ""}`}>
                     <td className="px-3 py-2">
                       <Input value={item.name} onChange={e => updateItem(idx, "name", e.target.value)} className="h-7 text-xs border-0 bg-transparent p-0 focus:bg-white focus:border focus:px-2 transition-all" />
+                      {item.pack_info && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 rounded px-1 py-0.5 font-medium">📦 {item.pack_info} → {item.quantity} {item.unit}</span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Input type="number" value={item.quantity} onChange={e => updateItem(idx, "quantity", parseFloat(e.target.value))} className="h-7 text-xs w-20 text-right" />
