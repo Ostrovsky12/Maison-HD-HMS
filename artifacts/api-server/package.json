@@ -11,6 +11,7 @@
     "seed:demo": "node_modules/.bin/tsx src/lib/demo-seed.ts"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.19.0",
     "@types/nodemailer": "^7.0.11",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
@@ -22,6 +23,7 @@
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
+    "google-auth-library": "^10.6.2",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^8.0.4",
     "openai": "^6.33.0",

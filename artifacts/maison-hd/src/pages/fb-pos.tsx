@@ -32,7 +32,7 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
 type Session = { id: number; cashbox_name: string; opening_balance: number; expected_balance: number; cash_in: number; opened_at: string; cashier_name?: string; legal_entity_id?: number | null; entity_name?: string; entity_short_name?: string; entity_type?: string };
 type Table   = { id: number; table_number: string; section: string; capacity: number; status: string; current_order_id?: number };
 type Category = { id: number; name: string; icon?: string; sort_order: number };
-type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean; excise_per_unit?: number };
+type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean; excise_per_unit?: number; image_url?: string };
 type OrderItem = { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string; is_alcohol?: boolean; excise_per_unit?: number };
 type Order = { id: number; table_id?: number; order_type: string; guest_name?: string; status: string; total_amount: number; items?: OrderItem[] };
 type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean; handles_alcohol?: boolean };
@@ -232,13 +232,19 @@ function MenuPanel({ categories, items, onAddItem }: {
           <button
             key={item.id}
             onClick={() => onAddItem(item)}
-            className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-white/4 hover:bg-white/8 border border-white/6 hover:border-white/12 transition-all group"
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl bg-white/4 hover:bg-white/8 border border-white/6 hover:border-white/12 transition-all group text-left"
           >
-            <div className="flex-1 text-left min-w-0">
+            {/* Thumbnail */}
+            <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white/8 flex items-center justify-center text-lg">
+              {item.image_url ? (
+                <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
+              ) : "🍽️"}
+            </div>
+            <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-white/85 truncate">{item.name}</p>
               {item.description && <p className="text-xs text-white/30 truncate">{item.description}</p>}
             </div>
-            <div className="flex items-center gap-2 shrink-0 ml-2">
+            <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-sm font-bold text-indigo-300">{fmt(item.price)}</span>
               <div className="w-6 h-6 rounded-full bg-indigo-500/20 group-hover:bg-indigo-500/40 flex items-center justify-center transition-colors">
                 <Plus className="w-3 h-3 text-indigo-300" />

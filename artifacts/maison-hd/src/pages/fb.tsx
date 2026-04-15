@@ -997,13 +997,31 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
     }
   };
 
-  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploading, setUploading] = useState(false);
+  const STORAGE_API = BASE.replace("/maison-hd", "") + "/api";
+
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast({ title: "Файл занадто великий", description: "Максимум 2 МБ", variant: "destructive" }); return; }
-    const reader = new FileReader();
-    reader.onload = ev => setForm((f: any) => ({ ...f, image_url: ev.target?.result as string }));
-    reader.readAsDataURL(file);
+    if (file.size > 8 * 1024 * 1024) { toast({ title: "Файл занадто великий", description: "Максимум 8 МБ", variant: "destructive" }); return; }
+    setUploading(true);
+    try {
+      const metaRes = await fetch(STORAGE_API + "/storage/uploads/request-url", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+      });
+      if (!metaRes.ok) throw new Error("Помилка отримання URL");
+      const meta = await metaRes.json();
+      await fetch(meta.uploadURL, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+      const imageUrl = STORAGE_API + meta.objectPath;
+      setForm((f: any) => ({ ...f, image_url: imageUrl }));
+      toast({ title: "✅ Фото завантажено" });
+    } catch {
+      toast({ title: "Помилка завантаження фото", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -1013,25 +1031,34 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
 
       {/* Image upload */}
       <div className="border rounded-lg p-3 space-y-2 bg-sky-50/60">
-        <Label className="text-sm font-medium text-sky-800">📸 Фото страви (для QR-меню)</Label>
-        <div className="flex gap-2 items-start">
-          {form.image_url && (
-            <div className="relative shrink-0">
-              <img src={form.image_url} alt="preview" className="w-16 h-16 object-cover rounded-lg border" />
-              <button type="button" onClick={() => setForm((f: any) => ({ ...f, image_url: "" }))} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs">×</button>
-            </div>
-          )}
+        <Label className="text-sm font-medium text-sky-800">📸 Фото страви</Label>
+        <div className="flex gap-3 items-start">
+          {/* Preview */}
+          <div className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-sky-200 bg-sky-100 flex items-center justify-center">
+            {form.image_url && !form.image_url.startsWith("data:") ? (
+              <>
+                <img src={form.image_url} alt="preview" className="w-full h-full object-cover" />
+                <button type="button" onClick={() => setForm((f: any) => ({ ...f, image_url: "" }))}
+                  className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow">×</button>
+              </>
+            ) : uploading ? (
+              <Loader2 className="w-5 h-5 animate-spin text-sky-500" />
+            ) : (
+              <span className="text-2xl">🍽️</span>
+            )}
+          </div>
           <div className="flex-1 space-y-1.5">
             <Input
-              placeholder="https://example.com/photo.jpg (або завантаж файл)"
+              placeholder="https://... або завантаж файл"
               value={form.image_url?.startsWith("data:") ? "" : (form.image_url || "")}
               onChange={e => setForm((f: any) => ({ ...f, image_url: e.target.value }))}
-              className="text-xs"
+              className="text-xs h-8"
             />
-            <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-white border border-sky-300 rounded-md text-sky-700 hover:bg-sky-50">
-              📁 Завантажити файл
-              <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+            <label className={`cursor-pointer inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border transition-colors ${uploading ? "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed" : "bg-white border-sky-300 text-sky-700 hover:bg-sky-50"}`}>
+              {uploading ? <><Loader2 className="w-3 h-3 animate-spin" /> Завантаження...</> : "📁 Завантажити файл"}
+              <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} disabled={uploading} />
             </label>
+            <p className="text-[10px] text-sky-600/70">Підтримує JPG, PNG, WebP · до 8 МБ</p>
           </div>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health.js";
+import storageRouter from "./storage.js";
 import authRouter from "./auth.js";
 import organizationsRouter from "./organizations.js";
 import propertiesRouter from "./properties.js";
@@ -130,5 +131,6 @@ router.use("/digital-keys", digitalKeysRouter);
 router.use("/sustainability", sustainabilityRouter);
 router.use("/telephony", telephonyRouter);
 router.use("/push", pushRouter);
+router.use("/", storageRouter);
 
 export default router;

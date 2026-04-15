@@ -1,12 +1,12 @@
 {
   "name": "Maison HD — Hotel Management",
   "short_name": "Maison HD",
-  "description": "Premium Hotel Management System",
+  "description": "Premium Hotel & Restaurant Management System",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0d0f1c",
-  "theme_color": "#0f172a",
-  "orientation": "portrait-primary",
+  "theme_color": "#4f46e5",
+  "orientation": "any",
   "icons": [
     {
       "src": "./favicon.svg",
@@ -15,6 +15,30 @@
       "purpose": "any maskable"
     }
   ],
+  "shortcuts": [
+    {
+      "name": "Станція офіціанта",
+      "short_name": "Офіціант",
+      "description": "Приймати замовлення біля столу",
+      "url": "/waiter",
+      "icons": [{ "src": "./favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "F&B Каса",
+      "short_name": "Каса",
+      "description": "Відкрити касу та приймати оплату",
+      "url": "/fb-pos",
+      "icons": [{ "src": "./favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Бронювання",
+      "short_name": "Броні",
+      "url": "/bookings",
+      "icons": [{ "src": "./favicon.svg", "sizes": "any" }]
+    }
+  ],
   "categories": ["business", "productivity"],
-  "lang": "uk"
+  "lang": "uk",
+  "dir": "ltr",
+  "prefer_related_applications": false
 }

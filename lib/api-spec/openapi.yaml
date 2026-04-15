@@ -43,6 +43,8 @@ tags:
     description: OTA channels & webhook integrations
   - name: analytics-advanced
     description: Advanced KPI, forecasting & analytics
+  - name: Storage
+    description: Object storage upload and serving endpoints.
 
 paths:
   /healthz:
@@ -2078,6 +2080,50 @@ paths:
               schema:
                 $ref: "#/components/schemas/AnalyticsSummary"
 
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /storage/objects/{objectPath}:
+    get:
+      tags: [Storage]
+      operationId: getStorageObject
+      summary: Serve an object entity
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object content.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2104,6 +2150,39 @@ components:
       required:
         - error
         - message
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        size:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          minLength: 1
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+        objectPath:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/UploadUrlRequest'
 
     SuccessResponse:
       type: object

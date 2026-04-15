@@ -27,7 +27,7 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Table    = { id: number; table_number: string; section: string; capacity: number; status: string; current_order_id?: number };
 type Category = { id: number; name: string; icon?: string; sort_order: number };
-type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean };
+type MenuItem = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean; image_url?: string };
 type OrderItem= { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string; is_alcohol?: boolean };
 type Order    = { id: number; table_id?: number; order_type: string; guest_name?: string; guest_count?: number; status: string; total_amount: number; items?: OrderItem[]; opened_at?: string };
 type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean; handles_alcohol?: boolean };
@@ -486,17 +486,30 @@ function MenuPanel({ categories, items, onAddItem, disabled }: {
             {filtered.map(item => (
               <button key={item.id} onClick={() => !disabled && onAddItem(item)}
                 disabled={disabled}
-                className={`text-left rounded-2xl bg-white/4 hover:bg-white/8 border border-white/6 hover:border-white/12 p-3 transition-all group ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}>
-                <div className="flex items-start justify-between gap-1 mb-1">
-                  <p className="text-xs font-medium text-white/85 leading-tight">{item.name}</p>
-                  <div className="w-5 h-5 rounded-full bg-indigo-500/20 group-hover:bg-indigo-500/40 flex items-center justify-center shrink-0 transition-colors mt-0.5">
-                    <Plus className="w-3 h-3 text-indigo-300" />
+                className={`text-left rounded-2xl bg-white/4 hover:bg-white/8 border border-white/6 hover:border-white/12 overflow-hidden transition-all group ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}>
+                {/* Photo */}
+                {item.image_url ? (
+                  <div className="w-full aspect-[4/3] overflow-hidden bg-white/5">
+                    <img src={item.image_url} alt={item.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                   </div>
-                </div>
-                {item.description && <p className="text-[10px] text-white/30 leading-tight mb-1.5 line-clamp-2">{item.description}</p>}
-                <div className="flex items-center gap-1">
-                  <span className="text-sm font-bold text-indigo-300">{fmt(item.price)}</span>
-                  {item.is_alcohol && <span className="text-[9px] text-rose-400/60">🍷</span>}
+                ) : (
+                  <div className="w-full aspect-[4/3] bg-white/5 flex items-center justify-center text-3xl">
+                    🍽️
+                  </div>
+                )}
+                {/* Info */}
+                <div className="p-2.5">
+                  <div className="flex items-start justify-between gap-1 mb-0.5">
+                    <p className="text-xs font-medium text-white/85 leading-tight flex-1">{item.name}</p>
+                    <div className="w-5 h-5 rounded-full bg-indigo-500/20 group-hover:bg-indigo-500/40 flex items-center justify-center shrink-0 transition-colors mt-0.5">
+                      <Plus className="w-3 h-3 text-indigo-300" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-bold text-indigo-300">{fmt(item.price)}</span>
+                    {item.is_alcohol && <span className="text-[9px] text-rose-400/60">🍷</span>}
+                  </div>
                 </div>
               </button>
             ))}
