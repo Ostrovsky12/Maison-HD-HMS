@@ -17,6 +17,56 @@ const STUN = {
 
 function tok() { return localStorage.getItem("hms_token") || ""; }
 
+// ── Ringtone via Web Audio API ─────────────────────────────────────────────────
+function useRingtone(active: boolean) {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!active) {
+      stopRef.current?.();
+      stopRef.current = null;
+      return;
+    }
+
+    const audioCtx = new AudioContext();
+    ctxRef.current = audioCtx;
+    let cancelled = false;
+
+    // Standard double-ring pattern: ring(0.4s) + gap(0.2s) + ring(0.4s) + pause(1.5s)
+    const playPattern = () => {
+      if (cancelled) return;
+
+      const ringBurst = (startTime: number, duration: number) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = 480;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.4, startTime + 0.02);
+        gain.gain.setValueAtTime(0.4, startTime + duration - 0.02);
+        gain.gain.linearRampToValueAtTime(0, startTime + duration);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+      };
+
+      const now = audioCtx.currentTime;
+      ringBurst(now, 0.4);
+      ringBurst(now + 0.6, 0.4);
+
+      // Schedule next pattern after total cycle (0.4 + 0.2 + 0.4 + 1.5 = 2.5s)
+      const id = setTimeout(playPattern, 2500);
+      stopRef.current = () => { cancelled = true; clearTimeout(id); audioCtx.close(); };
+    };
+
+    playPattern();
+
+    return () => { stopRef.current?.(); stopRef.current = null; };
+  }, [active]);
+}
+
 function getUserIdFromToken(): string | null {
   try {
     const t = tok();
@@ -313,6 +363,9 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     binotelHandlers.current.add(handler);
     return () => { binotelHandlers.current.delete(handler); };
   }, []);
+
+  // Play ringtone when someone is calling us
+  useRingtone(callState === "ringing");
 
   const ctx: TelephonyCtx = { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup, onBinotelEvent };
 
