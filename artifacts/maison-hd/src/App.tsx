@@ -72,6 +72,7 @@ import RateIntelligencePage from "@/pages/rate-intelligence";
 import DigitalKeysPage from "@/pages/digital-keys";
 import SustainabilityPage from "@/pages/sustainability";
 import TelephonyPage from "@/pages/telephony";
+import WaiterStationPage from "@/pages/waiter-station";
 import RatesPage from "@/pages/rates";
 import TechPage from "@/pages/tech";
 import LegalPage from "@/pages/legal";
@@ -161,6 +162,7 @@ function Router() {
       <Route path="/fb"><ProtectedRoute component={FbPage} /></Route>
       <Route path="/fb-warehouse"><ProtectedRoute component={FbWarehousePage} /></Route>
       <Route path="/fb-pos"><ProtectedRoute component={FbPosPage} /></Route>
+      <Route path="/waiter"><ProtectedRoute component={WaiterStationPage} /></Route>
       <Route path="/fb-costing"><ProtectedRoute component={FbCostingPage} /></Route>
       <Route path="/pos-settings"><ProtectedRoute component={PosSettingsPage} /></Route>
       <Route path="/fb-customers"><ProtectedRoute component={FbCustomersPage} /></Route>

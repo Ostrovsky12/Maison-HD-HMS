@@ -84,6 +84,7 @@ const NAV: NavSection[] = [
       { name: "SPA & Wellness",  path: "/spa",           icon: Waves,           roles: null,                                       moduleKey: "spa" },
       { name: "Events & Банкети",path: "/events",        icon: PartyPopper,     roles: null,                                       moduleKey: "events" },
       { name: "Ресторан & F&B",  path: "/fb",            icon: UtensilsCrossed, roles: null,                                       moduleKey: "fb" },
+      { name: "Станція офіціанта",path: "/waiter",       icon: ClipboardList,   roles: null,                                       moduleKey: "fb_pos" },
       { name: "F&B Склад",       path: "/fb-warehouse",  icon: Warehouse,       roles: null,                                       moduleKey: "fb_warehouse" },
       { name: "F&B Каса",        path: "/fb-pos",        icon: Coins,           roles: null,                                       moduleKey: "fb_pos" },
       { name: "F&B Костинг",     path: "/fb-costing",    icon: ChefHat,         roles: null,                                       moduleKey: "fb_analytics" },
