@@ -671,6 +671,7 @@ export default function WaiterStationPage() {
   const [orders,       setOrders]       = useState<Order[]>([]);
   const [legalEntities,setLegalEntities]= useState<LegalEntity[]>([]);
   const [loading,      setLoading]      = useState(true);
+  const [menuUpdatedAt,setMenuUpdatedAt]= useState<Date | null>(null);
 
   // Order state
   const [selectedTable, setSelectedTable]   = useState<Table | null>(null);
@@ -700,6 +701,7 @@ export default function WaiterStationPage() {
       setTables(t.tables || []);
       setCategories(c.categories || []);
       setMenuItems(m.items || []);
+      setMenuUpdatedAt(new Date());
       setOrders(o.orders || []);
       setLegalEntities(le.legalEntities || []);
     } catch { /* silent */ }
@@ -708,12 +710,27 @@ export default function WaiterStationPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh tables every 30s
+  // Auto-refresh tables+orders every 30s
   useEffect(() => {
     const interval = setInterval(() => {
       apiFetch("/fb/tables").then(r => r.json()).then(d => setTables(d.tables || [])).catch(() => {});
       apiFetch("/fb/orders?status=open").then(r => r.json()).then(d => setOrders(d.orders || [])).catch(() => {});
     }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Auto-refresh menu (categories + items) every 5 min — picks up name/photo edits from F&B mgmt
+  useEffect(() => {
+    const interval = setInterval(() => {
+      Promise.all([
+        apiFetch("/fb/categories").then(r => r.json()),
+        apiFetch("/fb/items").then(r => r.json()),
+      ]).then(([c, m]) => {
+        setCategories(c.categories || []);
+        setMenuItems(m.items || []);
+        setMenuUpdatedAt(new Date());
+      }).catch(() => {});
+    }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -880,7 +897,14 @@ export default function WaiterStationPage() {
 
           {/* Col 2: Menu */}
           <div className="flex-1 border-r border-white/6 overflow-hidden flex flex-col">
-            <p className="px-3 pt-3 pb-1 text-[10px] text-white/25 uppercase tracking-widest shrink-0">Меню</p>
+            <div className="flex items-center justify-between px-3 pt-3 pb-1 shrink-0">
+              <p className="text-[10px] text-white/25 uppercase tracking-widest">Меню</p>
+              {menuUpdatedAt && (
+                <span className="text-[9px] text-white/20">
+                  Оновлено {menuUpdatedAt.getHours().toString().padStart(2,"0")}:{menuUpdatedAt.getMinutes().toString().padStart(2,"0")}
+                </span>
+              )}
+            </div>
             <MenuPanel categories={categories} items={menuItems} onAddItem={addItem}
               disabled={!selectedTable} />
           </div>

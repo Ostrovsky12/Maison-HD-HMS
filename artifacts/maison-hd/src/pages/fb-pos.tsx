@@ -906,6 +906,20 @@ export default function FbPosPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-refresh menu every 5 min — picks up name/photo edits from F&B mgmt
+  useEffect(() => {
+    const interval = setInterval(() => {
+      Promise.all([
+        apiFetch("/fb/categories").then(r => r.json()),
+        apiFetch("/fb/items").then(r => r.json()),
+      ]).then(([c, m]) => {
+        setCategories(c.categories || []);
+        setMenuItems(m.items || []);
+      }).catch(() => {});
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ── Select table → load or init order ─────────────────────────────────────
   const selectTable = async (table: Table) => {
     setSelectedTable(table);
