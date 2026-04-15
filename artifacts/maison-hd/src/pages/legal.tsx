@@ -16,8 +16,8 @@ const DOCS = [
 
 const EFFECTIVE_DATE = "14 квітня 2026 року";
 const COMPANY = "Maison HD";
-const COMPANY_FULL = "ФОП [Прізвище Ім'я По-батькові] (надалі — «Оператор»)";
-const EMAIL = "legal@maisonhd.com";
+const COMPANY_FULL = "ФОП Головко Дмитро Олександрович, ІПН 3212211638 (надалі — «Оператор»)";
+const EMAIL = "golovkocbc@gmail.com";
 const SITE = "https://maisonhd.com";
 
 // ── Offer ────────────────────────────────────────────────────────────────────
