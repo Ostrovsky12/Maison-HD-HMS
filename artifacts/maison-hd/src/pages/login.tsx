@@ -152,8 +152,15 @@ export default function LoginPage() {
               </form>
             </Form>
           </CardContent>
-          <CardFooter className="flex justify-center border-t p-4 text-sm text-muted-foreground">
-            Захищено для сертифікованих партнерів
+          <CardFooter className="flex flex-col items-center gap-1.5 border-t p-4">
+            <p className="text-sm text-muted-foreground">Захищено для сертифікованих партнерів</p>
+            <div className="flex items-center gap-3 text-[11px] text-muted-foreground/70">
+              <a href="/legal/offer" className="hover:text-blue-600 hover:underline transition-colors">Оферта</a>
+              <span>·</span>
+              <a href="/legal/privacy" className="hover:text-blue-600 hover:underline transition-colors">Privacy Policy</a>
+              <span>·</span>
+              <a href="/legal/terms" className="hover:text-blue-600 hover:underline transition-colors">Terms of Service</a>
+            </div>
           </CardFooter>
         </Card>
       </div>

@@ -73,6 +73,7 @@ import SustainabilityPage from "@/pages/sustainability";
 import TelephonyPage from "@/pages/telephony";
 import RatesPage from "@/pages/rates";
 import TechPage from "@/pages/tech";
+import LegalPage from "@/pages/legal";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -199,6 +200,8 @@ function Router() {
       <Route path="/qr-menu/:orgSlug/:tableId" component={QrMenuPage} />
       <Route path="/qr-menu/:orgSlug" component={QrMenuPage} />
       <Route path="/tech"><ProtectedRoute component={TechPage} /></Route>
+      <Route path="/legal/:doc" component={LegalPage} />
+      <Route path="/legal" component={LegalPage} />
 
       <Route path="/" component={HomeRoute} />
 

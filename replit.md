@@ -21,6 +21,7 @@ The system is built as a pnpm monorepo using TypeScript. The frontend is develop
 - **Digital Key & Mobile Check-in:** Features for digital room access and pre-arrival guest registration.
 - **Sustainability & ESG:** Tracking and reporting of environmental and social metrics.
 - **Rate Intelligence:** AI-powered competitor rate analysis and pricing recommendations.
+- **Legal Pages** (`/legal/*`): Public pages (no auth required) with 5 legal documents: Публічна оферта/SaaS Agreement (`/legal/offer`), Privacy Policy (`/legal/privacy`), DPA/Угода про обробку даних (`/legal/dpa`), Terms of Service (`/legal/terms`), Політика зберігання даних (`/legal/data-policy`). Linked from the login page footer. Left sidebar navigation between docs. All texts in Ukrainian. Placeholder: `ФОП [Прізвище Ім'я По-батькові]` to be filled with real legal entity name.
 - **Upsell Engine:** Template-based offers delivered to guests with analytics.
 - **Staff Scheduling:** Calendar-based shift management for hotel staff.
 - **Loyalty Program:** Tier-based system for points earning, redemption, and transaction history.
