@@ -308,8 +308,8 @@ router.get("/owner-insights", requireAuth, async (req: any, res) => {
           COUNT(*) as total_units
           FROM units u
           JOIN properties p ON p.id = u.property_id
-          WHERE p.organization_id = ${orgId}
-          LEFT JOIN bookings b ON b.unit_id = u.id AND b.status IN ('confirmed', 'checked_in')`
+          LEFT JOIN bookings b ON b.unit_id = u.id AND b.status IN ('confirmed', 'checked_in')
+          WHERE p.organization_id = ${orgId}`
     );
 
     const rev = revenueData.rows[0] as any;
