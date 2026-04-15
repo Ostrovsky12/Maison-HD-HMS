@@ -226,6 +226,9 @@ export default function TelephonyPage() {
   const [settings, setSettings] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [newLine, setNewLine] = useState({ extension: "", label: "", department: "" });
+  const [savingLine, setSavingLine] = useState(false);
+  const [deletingLineId, setDeletingLineId] = useState<number | null>(null);
 
   // My user id from token
   const [myUserId] = useState(() => {
@@ -379,6 +382,32 @@ export default function TelephonyPage() {
       load();
     } catch { toast({ title: "Помилка", variant: "destructive" }); }
     setSavingSettings(false);
+  }
+
+  async function handleCreateLine() {
+    if (!newLine.extension.trim() || !newLine.label.trim()) {
+      toast({ title: "Вкажіть номер і назву лінії", variant: "destructive" }); return;
+    }
+    setSavingLine(true);
+    try {
+      const res = await fetch(`${API}/lines`, { method: "POST", headers: h(), body: JSON.stringify(newLine) });
+      if (!res.ok) throw new Error();
+      toast({ title: `Лінію ${newLine.extension} додано` });
+      setNewLine({ extension: "", label: "", department: "" });
+      load();
+    } catch { toast({ title: "Помилка збереження лінії", variant: "destructive" }); }
+    setSavingLine(false);
+  }
+
+  async function handleDeleteLine(id: number, ext: string) {
+    setDeletingLineId(id);
+    try {
+      const res = await fetch(`${API}/lines/${id}`, { method: "PATCH", headers: h(), body: JSON.stringify({ isActive: false }) });
+      if (!res.ok) throw new Error();
+      setLines(prev => prev.filter(l => l.id !== id));
+      toast({ title: `Лінію ${ext} видалено` });
+    } catch { toast({ title: "Помилка видалення", variant: "destructive" }); }
+    setDeletingLineId(null);
   }
 
   async function markVoicemailRead(id: number) {
@@ -1105,6 +1134,85 @@ export default function TelephonyPage() {
                     ) : (
                       <p className="text-sm text-muted-foreground">Увімкніть для налаштування інтеграції з вашою АТС Binotel</p>
                     )}
+                  </CardContent>
+                </Card>
+
+                {/* Lines management */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Users size={15} /> Внутрішні лінії (розширення)
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground">Налаштуйте розширення для WebRTC внутрішнього зв'язку між персоналом</p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Existing lines */}
+                    {lines.length > 0 && (
+                      <div className="space-y-1">
+                        {lines.map(line => (
+                          <div key={line.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-sm bg-gray-100 px-2 py-0.5 rounded">Ext. {line.extension}</span>
+                              <span className="text-sm font-medium">{line.label}</span>
+                              {line.department && <Badge variant="outline" className="text-xs">{line.department}</Badge>}
+                            </div>
+                            <Button
+                              size="icon" variant="ghost"
+                              className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                              disabled={deletingLineId === line.id}
+                              onClick={() => handleDeleteLine(line.id, line.extension)}
+                            >
+                              {deletingLineId === line.id
+                                ? <Loader2 size={13} className="animate-spin" />
+                                : <Trash2 size={13} />}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {lines.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-2">Ліній немає. Додайте першу нижче.</p>
+                    )}
+                    {/* Add new line form */}
+                    <div className="border-t pt-3 space-y-3">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Додати лінію</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Номер (Ext.)</Label>
+                          <Input
+                            placeholder="101"
+                            value={newLine.extension}
+                            onChange={e => setNewLine({ ...newLine, extension: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Назва</Label>
+                          <Input
+                            placeholder="Ресепшн"
+                            value={newLine.label}
+                            onChange={e => setNewLine({ ...newLine, label: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Відділ</Label>
+                          <Input
+                            placeholder="Front Office"
+                            value={newLine.department}
+                            onChange={e => setNewLine({ ...newLine, department: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <Button size="sm" onClick={handleCreateLine} disabled={savingLine}>
+                        {savingLine ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Plus size={13} className="mr-1" />}
+                        Додати лінію
+                      </Button>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-800 space-y-1">
+                      <p className="font-medium">Як користуватись:</p>
+                      <p>1. Додайте лінію для кожного співробітника (напр. 101 — Ресепшн, 102 — Адміністратор)</p>
+                      <p>2. Перейдіть на вкладку "Внутрішній зв'язок" — там побачите онлайн-статус персоналу</p>
+                      <p>3. Натисніть "Зателефонувати" — прямий P2P аудіо-дзвінок через браузер, без АТС</p>
+                    </div>
                   </CardContent>
                 </Card>
 
