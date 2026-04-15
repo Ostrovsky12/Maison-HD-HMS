@@ -682,7 +682,7 @@ function SalesTab() {
     try {
       const res = await apiFetch("/sales-suggest", {
         method: "POST",
-        body: JSON.stringify({ guestId: guestId ? parseInt(guestId) : undefined }),
+        body: JSON.stringify({ guestId: guestId && guestId !== "all" ? parseInt(guestId) : undefined }),
       });
       const data = await res.json();
       if (data.suggestions) setSuggestions(data.suggestions);
@@ -701,12 +701,12 @@ function SalesTab() {
           <div className="flex gap-3 items-end">
             <div className="flex-1 space-y-1.5">
               <Label>Гість (опційно)</Label>
-              <Select value={guestId} onValueChange={setGuestId}>
+              <Select value={guestId || "all"} onValueChange={v => setGuestId(v === "all" ? "" : v)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Усі гості / без конкретного" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Загальні рекомендації</SelectItem>
+                  <SelectItem value="all">Загальні рекомендації</SelectItem>
                   {guests.map((g: any) => (
                     <SelectItem key={g.id} value={String(g.id)}>
                       {g.firstName} {g.lastName} {g.vipStatus ? "⭐ VIP" : ""}
