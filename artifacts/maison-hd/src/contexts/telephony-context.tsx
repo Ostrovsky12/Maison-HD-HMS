@@ -17,9 +17,52 @@ const STUN = {
 
 function tok() { return localStorage.getItem("hms_token") || ""; }
 
+// ── Shared AudioContext — unlocked on first user gesture ───────────────────────
+let sharedAudioCtx: AudioContext | null = null;
+
+function getAudioCtx(): AudioContext {
+  if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+    sharedAudioCtx = new AudioContext();
+  }
+  return sharedAudioCtx;
+}
+
+// Unlock AudioContext on first user gesture (click / touch / keydown)
+// Must be called once at app startup — after this, audio plays without restriction.
+function useAudioUnlock() {
+  useEffect(() => {
+    const unlock = () => {
+      const ctx = getAudioCtx();
+      if (ctx.state === "suspended") {
+        ctx.resume().then(() => {
+          // Play a 0-volume silent buffer to fully unblock autoplay policy
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+        });
+      }
+      // Remove listeners after first gesture
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("touchstart", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
+
+    document.addEventListener("click", unlock);
+    document.addEventListener("touchstart", unlock);
+    document.addEventListener("keydown", unlock);
+
+    return () => {
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("touchstart", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
+  }, []);
+}
+
 // ── Ringtone via Web Audio API ─────────────────────────────────────────────────
 function useRingtone(active: boolean) {
-  const ctxRef = useRef<AudioContext | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -29,8 +72,9 @@ function useRingtone(active: boolean) {
       return;
     }
 
-    const audioCtx = new AudioContext();
-    ctxRef.current = audioCtx;
+    const audioCtx = getAudioCtx();
+    // Try to resume in case it was suspended (belt-and-suspenders)
+    if (audioCtx.state === "suspended") audioCtx.resume();
     let cancelled = false;
 
     // Standard double-ring pattern: ring(0.4s) + gap(0.2s) + ring(0.4s) + pause(1.5s)
@@ -56,9 +100,9 @@ function useRingtone(active: boolean) {
       ringBurst(now, 0.4);
       ringBurst(now + 0.6, 0.4);
 
-      // Schedule next pattern after total cycle (0.4 + 0.2 + 0.4 + 1.5 = 2.5s)
+      // Schedule next pattern (total cycle = 2.5s)
       const id = setTimeout(playPattern, 2500);
-      stopRef.current = () => { cancelled = true; clearTimeout(id); audioCtx.close(); };
+      stopRef.current = () => { cancelled = true; clearTimeout(id); };
     };
 
     playPattern();
@@ -363,6 +407,9 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     binotelHandlers.current.add(handler);
     return () => { binotelHandlers.current.delete(handler); };
   }, []);
+
+  // Unlock AudioContext on first user interaction (runs once for the whole app)
+  useAudioUnlock();
 
   // Play ringtone when someone is calling us
   useRingtone(callState === "ringing");
