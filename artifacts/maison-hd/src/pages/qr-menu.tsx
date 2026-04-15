@@ -14,7 +14,7 @@ const fmtMoney = (n: any) => parseFloat(n || 0).toLocaleString("uk-UA") + " ₴"
 type Item = {
   id: number; name: string; description?: string; price: string;
   cookMinutes?: number; isVegetarian?: boolean; isPopular?: boolean;
-  allergens?: string[]; tags?: string[]; image_url?: string;
+  allergens?: string[]; tags?: string[]; imageUrl?: string;
 };
 
 type Category = { id: number; name: string; emoji: string; items: Item[] };
@@ -451,67 +451,87 @@ export default function QrMenuPage() {
         )}
       </div>
 
-      {/* Menu Items */}
-      <div className="max-w-lg mx-auto px-4 pt-4 space-y-6">
+      {/* Menu Items — Choice-style 2-col grid */}
+      <div className="max-w-lg mx-auto px-3 pt-4 space-y-6 pb-4">
         {displayCategories.map(cat => (
           <div key={cat.id}>
             {(search || !activeCategory || displayCategories.length > 1) && (
-              <h2 className="font-bold text-stone-800 mb-3 flex items-center gap-2">
-                <span>{cat.emoji}</span>{cat.name}
+              <h2 className="font-bold text-stone-800 mb-3 flex items-center gap-2 px-1">
+                <span className="text-xl">{cat.emoji}</span>{cat.name}
               </h2>
             )}
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-3">
               {cat.items.map(item => {
                 const qty = cartQty(item.id);
                 return (
-                  <div key={item.id} className={`bg-white rounded-2xl border transition-all overflow-hidden ${qty > 0 ? "border-amber-300 shadow-sm" : "border-stone-100"}`}>
-                    {/* Item image — full width banner if present */}
-                    {item.image_url && (
-                      <div className="w-full h-36 bg-stone-100 overflow-hidden">
-                        <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      </div>
-                    )}
-                    <div className="p-4">
-                    <div className="flex gap-3">
-                      <div className="flex-1">
-                        <div className="flex items-start gap-2 mb-1">
-                          <h3 className="font-semibold text-stone-900 text-sm leading-tight">{item.name}</h3>
-                          <div className="flex gap-1 flex-wrap">
-                            {item.isVegetarian && <span title="Вегетаріанське"><Leaf className="w-3.5 h-3.5 text-emerald-500" /></span>}
-                            {item.isPopular && <span title="Популярне"><Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400" /></span>}
-                          </div>
+                  <div key={item.id}
+                    className={`bg-white rounded-2xl overflow-hidden shadow-sm transition-all ${qty > 0 ? "ring-2 ring-amber-400" : ""}`}>
+                    {/* Photo area — square aspect ratio */}
+                    <div className="relative w-full aspect-square bg-stone-100">
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.name}
+                          className="w-full h-full object-cover"
+                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <span className="text-4xl opacity-30">{cat.emoji}</span>
                         </div>
-                        {item.description && <p className="text-xs text-stone-500 mb-2 leading-relaxed">{item.description}</p>}
-                        <div className="flex items-center gap-3">
-                          <span className="font-bold text-amber-600">{fmtMoney(item.price)}</span>
-                          {item.cookMinutes && (
-                            <span className="flex items-center gap-1 text-xs text-stone-400">
-                              <Clock className="w-3 h-3" />{item.cookMinutes} хв
-                            </span>
-                          )}
-                        </div>
+                      )}
+                      {/* Badges top-left */}
+                      <div className="absolute top-2 left-2 flex flex-col gap-1">
+                        {item.isPopular && (
+                          <span className="bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                            <Star className="w-2.5 h-2.5 fill-white" /> Хіт
+                          </span>
+                        )}
+                        {item.isVegetarian && (
+                          <span className="bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                            <Leaf className="w-2.5 h-2.5" /> Veg
+                          </span>
+                        )}
                       </div>
-                      <div className="flex-shrink-0">
+                      {/* Add button — overlay bottom-right */}
+                      <div className="absolute bottom-2 right-2">
                         {qty === 0 ? (
                           <button
                             onClick={() => addToCart(item)}
-                            className="w-9 h-9 bg-amber-500 hover:bg-amber-600 text-white rounded-xl flex items-center justify-center shadow-sm"
+                            className="w-9 h-9 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-full flex items-center justify-center shadow-lg transition-all"
                           >
                             <Plus className="w-4 h-4" />
                           </button>
                         ) : (
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => removeFromCart(item.id)} className="w-8 h-8 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl flex items-center justify-center">
-                              <Minus className="w-3.5 h-3.5" />
+                          <div className="flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1">
+                            <button onClick={() => removeFromCart(item.id)}
+                              className="w-6 h-6 bg-stone-100 rounded-full flex items-center justify-center text-stone-700 active:scale-95">
+                              <Minus className="w-3 h-3" />
                             </button>
-                            <span className="w-5 text-center font-bold text-stone-800 text-sm">{qty}</span>
-                            <button onClick={() => addToCart(item)} className="w-8 h-8 bg-amber-500 hover:bg-amber-600 text-white rounded-xl flex items-center justify-center">
-                              <Plus className="w-3.5 h-3.5" />
+                            <span className="w-4 text-center font-bold text-stone-800 text-xs">{qty}</span>
+                            <button onClick={() => addToCart(item)}
+                              className="w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white active:scale-95">
+                              <Plus className="w-3 h-3" />
                             </button>
                           </div>
                         )}
                       </div>
                     </div>
+
+                    {/* Info */}
+                    <div className="p-2.5">
+                      <p className="font-semibold text-stone-900 text-sm leading-snug line-clamp-2 mb-1">{item.name}</p>
+                      {item.description && (
+                        <p className="text-[11px] text-stone-400 leading-relaxed line-clamp-2 mb-1.5">{item.description}</p>
+                      )}
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-amber-600 text-sm">{fmtMoney(item.price)}</span>
+                        {item.cookMinutes && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-stone-400">
+                            <Clock className="w-2.5 h-2.5" />{item.cookMinutes} хв
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

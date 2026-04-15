@@ -1014,7 +1014,7 @@ function MenuItemForm({ form, setForm, categories, legalEntities = [], ingredien
       if (!metaRes.ok) throw new Error("Помилка отримання URL");
       const meta = await metaRes.json();
       await fetch(meta.uploadURL, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-      const imageUrl = STORAGE_API + meta.objectPath;
+      const imageUrl = STORAGE_API + "/storage" + meta.objectPath;
       setForm((f: any) => ({ ...f, image_url: imageUrl }));
       toast({ title: "✅ Фото завантажено" });
     } catch {

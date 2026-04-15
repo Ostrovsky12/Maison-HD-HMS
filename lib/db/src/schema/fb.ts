@@ -32,6 +32,7 @@ export const fbItemsTable = pgTable("fb_items", {
   allergens: jsonb("allergens").$type<string[]>().default([]),
   tags: jsonb("tags").$type<string[]>().default([]),
   sortOrder: integer("sort_order").default(0),
+  imageUrl: text("image_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
