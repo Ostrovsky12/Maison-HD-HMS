@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useTelephony } from "@/contexts/telephony-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +31,6 @@ import { uk } from "date-fns/locale";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/telephony";
-const WS_BASE = window.location.origin.replace(/^https/, "wss").replace(/^http/, "ws").replace("/maison-hd", "");
 const tok = () => localStorage.getItem("hms_token") || "";
 const h = () => ({ Authorization: `Bearer ${tok()}`, "Content-Type": "application/json" });
 
@@ -74,147 +74,6 @@ const SCENARIO_LABELS: Record<string, string> = {
   upsell: "Продаж", confirmation: "Підтвердження", general: "Загальне",
 };
 
-// ── WebRTC hook ───────────────────────────────────────────────────────────────
-const STUN = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
-
-function useWebRTC(userId: string | null, onBinotelEvent?: (evt: any) => void) {
-  const ws = useRef<WebSocket | null>(null);
-  const pc = useRef<RTCPeerConnection | null>(null);
-  const localStream = useRef<MediaStream | null>(null);
-  const [online, setOnline] = useState<string[]>([]);
-  const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "active">("idle");
-  const [callPeer, setCallPeer] = useState<string | null>(null);
-  const [callTimer, setCallTimer] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const remoteAudio = useRef<HTMLAudioElement | null>(null);
-
-  const startTimer = () => {
-    setCallTimer(0);
-    timerRef.current = setInterval(() => setCallTimer(t => t + 1), 1000);
-  };
-  const stopTimer = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setCallTimer(0);
-  };
-
-  const cleanup = useCallback(() => {
-    pc.current?.close();
-    pc.current = null;
-    localStream.current?.getTracks().forEach(t => t.stop());
-    localStream.current = null;
-    setCallState("idle");
-    setCallPeer(null);
-    stopTimer();
-  }, []);
-
-  const send = useCallback((msg: object) => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify(msg));
-    }
-  }, []);
-
-  const createPC = useCallback(() => {
-    const p = new RTCPeerConnection(STUN);
-    p.onicecandidate = (e) => {
-      if (e.candidate && callPeer) {
-        send({ type: "ice-candidate", to: callPeer, candidate: e.candidate });
-      }
-    };
-    p.ontrack = (e) => {
-      if (remoteAudio.current) {
-        remoteAudio.current.srcObject = e.streams[0];
-        remoteAudio.current.play().catch(() => {});
-      }
-    };
-    p.onconnectionstatechange = () => {
-      if (["disconnected","failed","closed"].includes(p.connectionState)) cleanup();
-    };
-    return p;
-  }, [callPeer, send, cleanup]);
-
-  useEffect(() => {
-    if (!userId) return;
-    remoteAudio.current = new Audio();
-    const wsUrl = `${WS_BASE}/ws/telephony`;
-    const socket = new WebSocket(wsUrl);
-    ws.current = socket;
-
-    socket.onopen = () => send({ type: "register", userId });
-    socket.onmessage = async (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "registered") { setOnline(msg.peers || []); }
-      else if (msg.type === "peer-online") setOnline(p => [...new Set([...p, msg.userId])]);
-      else if (msg.type === "peer-offline") setOnline(p => p.filter(x => x !== msg.userId));
-      else if (msg.type === "binotel-incoming" || msg.type === "binotel-completed") {
-        onBinotelEvent?.(msg);
-      }
-      else if (msg.type === "call") {
-        setCallPeer(msg.from);
-        setCallState("ringing");
-      }
-      else if (msg.type === "hangup") { cleanup(); toast({ title: "Дзвінок завершено" }); }
-      else if (msg.type === "offer") {
-        pc.current = createPC();
-        await pc.current.setRemoteDescription(new RTCSessionDescription(msg.offer));
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        localStream.current = stream;
-        stream.getTracks().forEach(t => pc.current!.addTrack(t, stream));
-        const answer = await pc.current.createAnswer();
-        await pc.current.setLocalDescription(answer);
-        send({ type: "answer", to: msg.from, answer });
-        setCallPeer(msg.from);
-        setCallState("active");
-        startTimer();
-      }
-      else if (msg.type === "answer") {
-        await pc.current?.setRemoteDescription(new RTCSessionDescription(msg.answer));
-        setCallState("active");
-        startTimer();
-      }
-      else if (msg.type === "ice-candidate") {
-        if (msg.candidate) pc.current?.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(() => {});
-      }
-    };
-    socket.onclose = () => { setOnline([]); setCallState("idle"); };
-    return () => { socket.close(); cleanup(); };
-  }, [userId]);
-
-  const callPeerFn = useCallback(async (targetId: string) => {
-    if (callState !== "idle") return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStream.current = stream;
-      pc.current = createPC();
-      stream.getTracks().forEach(t => pc.current!.addTrack(t, stream));
-      const offer = await pc.current.createOffer();
-      await pc.current.setLocalDescription(offer);
-      setCallPeer(targetId);
-      setCallState("calling");
-      send({ type: "call", to: targetId });
-      send({ type: "offer", to: targetId, offer });
-    } catch {
-      toast({ title: "Не вдалося отримати доступ до мікрофону", variant: "destructive" });
-    }
-  }, [callState, createPC, send]);
-
-  const answerCall = useCallback(async () => {
-    if (!callPeer) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStream.current = stream;
-      setCallState("active");
-      startTimer();
-    } catch { toast({ title: "Не вдалося отримати доступ до мікрофону", variant: "destructive" }); }
-  }, [callPeer]);
-
-  const hangup = useCallback(() => {
-    if (callPeer) send({ type: "hangup", to: callPeer });
-    cleanup();
-  }, [callPeer, send, cleanup]);
-
-  return { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup };
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function TelephonyPage() {
   const [tab, setTab] = useState("dashboard");
@@ -230,34 +89,37 @@ export default function TelephonyPage() {
   const [savingLine, setSavingLine] = useState(false);
   const [deletingLineId, setDeletingLineId] = useState<number | null>(null);
 
-  // My user id from token
-  const [myUserId] = useState(() => {
+  // My user id from token (still needed for display in internal tab)
+  const myUserId = (() => {
     try {
-      const t = tok(); if (!t) return null;
+      const t = tok(); if (!t) return "anon";
       const payload = JSON.parse(atob(t.split(".")[1]));
       return String(payload.sub || payload.userId || payload.id || "anon");
     } catch { return "anon"; }
-  });
+  })();
 
   // Binotel incoming call state
   const [binotelCall, setBinotelCall] = useState<any>(null);
   const [webhookUrls, setWebhookUrls] = useState<any>(null);
 
-  const handleBinotelEvent = useCallback((evt: any) => {
-    if (evt.type === "binotel-incoming") {
-      setBinotelCall(evt);
-      toast({
-        title: `📞 Вхідний дзвінок від ${evt.callerName || evt.callerNumber}`,
-        description: evt.isGuest ? "Гість є в базі" : "Новий гість",
-      });
-    } else if (evt.type === "binotel-completed") {
-      setBinotelCall(null);
-      // Refresh call log
-      load();
-    }
-  }, []);
+  // Global WebRTC from context — active on ANY page of the app
+  const { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup, onBinotelEvent } = useTelephony();
 
-  const { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup } = useWebRTC(myUserId, handleBinotelEvent);
+  // Subscribe to Binotel events from global context
+  useEffect(() => {
+    return onBinotelEvent((evt: any) => {
+      if (evt.type === "binotel-incoming") {
+        setBinotelCall(evt);
+        toast({
+          title: `📞 Вхідний дзвінок від ${evt.callerName || evt.callerNumber}`,
+          description: evt.isGuest ? "Гість є в базі" : "Новий гість",
+        });
+      } else if (evt.type === "binotel-completed") {
+        setBinotelCall(null);
+        load();
+      }
+    });
+  }, [onBinotelEvent]);
 
   // Load webhook URLs for settings
   useEffect(() => {

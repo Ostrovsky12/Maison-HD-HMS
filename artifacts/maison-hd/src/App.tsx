@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useGetMe } from "@workspace/api-client-react";
 import { Loader2 } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
+import { TelephonyProvider } from "@/contexts/telephony-context";
 
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
@@ -220,11 +221,13 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <PushSubscriber />
-          <Router />
-        </WouterRouter>
-        <Toaster />
+        <TelephonyProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <PushSubscriber />
+            <Router />
+          </WouterRouter>
+          <Toaster />
+        </TelephonyProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
