@@ -23,7 +23,7 @@ import {
   MessageSquare, Settings, Layers, Radio, Signal, PhoneForwarded,
   User, Users, Zap, TrendingUp, ArrowDownLeft, ArrowUpRight,
   Smile, Meh, Frown, X, ChevronRight, Save, Sparkles, Copy, ExternalLink,
-  Link2, Building2,
+  Link2, Building2, Loader2,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
