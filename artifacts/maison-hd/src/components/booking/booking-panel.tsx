@@ -740,12 +740,12 @@ function TabPayments({ b }: { b: any }) {
 
 // ── Add Service Order Dialog + Tab: Services ───────────────────────────────
 function AddServiceDialog({
-  bookingId, type, onClose, onSaved,
-}: { bookingId: number; type: "spa" | "rental" | "service"; onClose: () => void; onSaved: () => void }) {
+  bookingId, type, onClose, onSaved, initialName, initialPrice,
+}: { bookingId: number; type: "spa" | "rental" | "service"; onClose: () => void; onSaved: () => void; initialName?: string; initialPrice?: string }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    serviceName: "", requestedTime: "", guestNotes: "", price: "", quantity: "1",
+    serviceName: initialName || "", requestedTime: "", guestNotes: "", price: initialPrice || "", quantity: "1",
   });
 
   const PRESETS: Record<string, { name: string; price: string }[]> = {
@@ -1279,12 +1279,14 @@ function TabComms({ b }: { b: any }) {
 
 // ── Tab: Upsell ────────────────────────────────────────────────────────────
 function TabUpsell({ b }: { b: any }) {
-  const actions = [
-    { icon: Waves,   label: "Записати на SPA",         sub: "Пакети від 350 UAH",     color: "from-cyan-50 to-blue-50 border-cyan-100",   btn: "text-cyan-700 bg-cyan-100 hover:bg-cyan-200" },
-    { icon: TrendingUp, label: "Апгрейд номера",       sub: "Є вільні кімнати вищого класу", color: "from-violet-50 to-indigo-50 border-violet-100", btn: "text-violet-700 bg-violet-100 hover:bg-violet-200" },
-    { icon: ShoppingBag, label: "Замовити сніданок",   sub: "Включити в рахунок",     color: "from-amber-50 to-yellow-50 border-amber-100", btn: "text-amber-700 bg-amber-100 hover:bg-amber-200" },
-    { icon: Bike,    label: "Прокат велосипеда",        sub: "700 UAH/день",           color: "from-emerald-50 to-green-50 border-emerald-100", btn: "text-emerald-700 bg-emerald-100 hover:bg-emerald-200" },
-    { icon: Zap,     label: "Пізній виїзд до 15:00",   sub: "Запропонувати за 300 UAH", color: "from-orange-50 to-red-50 border-orange-100", btn: "text-orange-700 bg-orange-100 hover:bg-orange-200" },
+  const [dialog, setDialog] = useState<{ type: "spa" | "rental" | "service"; name?: string; price?: string } | null>(null);
+
+  const actions: { icon: any; label: string; sub: string; color: string; btn: string; dialogType: "spa" | "rental" | "service"; name?: string; price?: string }[] = [
+    { icon: Waves,       label: "Записати на SPA",       sub: "Пакети від 350 UAH",            color: "from-cyan-50 to-blue-50 border-cyan-100",      btn: "text-cyan-700 bg-cyan-100 hover:bg-cyan-200",      dialogType: "spa" },
+    { icon: TrendingUp,  label: "Апгрейд номера",         sub: "Є вільні кімнати вищого класу",  color: "from-violet-50 to-indigo-50 border-violet-100", btn: "text-violet-700 bg-violet-100 hover:bg-violet-200", dialogType: "service", name: "Апгрейд номера" },
+    { icon: ShoppingBag, label: "Замовити сніданок",      sub: "Включити в рахунок",             color: "from-amber-50 to-yellow-50 border-amber-100",   btn: "text-amber-700 bg-amber-100 hover:bg-amber-200",   dialogType: "service", name: "Сніданок" },
+    { icon: Bike,        label: "Прокат велосипеда",       sub: "700 UAH/день",                  color: "from-emerald-50 to-green-50 border-emerald-100", btn: "text-emerald-700 bg-emerald-100 hover:bg-emerald-200", dialogType: "rental", name: "Прокат велосипеда (1 день)", price: "700" },
+    { icon: Zap,         label: "Пізній виїзд до 15:00",  sub: "Запропонувати за 300 UAH",       color: "from-orange-50 to-red-50 border-orange-100",    btn: "text-orange-700 bg-orange-100 hover:bg-orange-200", dialogType: "service", name: "Пізній виїзд до 15:00", price: "300" },
   ];
 
   return (
@@ -1299,11 +1301,25 @@ function TabUpsell({ b }: { b: any }) {
             <p className="text-sm font-semibold text-gray-800">{a.label}</p>
             <p className="text-xs text-gray-500">{a.sub}</p>
           </div>
-          <button className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-colors ${a.btn}`}>
+          <button
+            onClick={() => setDialog({ type: a.dialogType, name: a.name, price: a.price })}
+            className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-colors ${a.btn}`}
+          >
             Додати
           </button>
         </div>
       ))}
+
+      {dialog && (
+        <AddServiceDialog
+          bookingId={b.id}
+          type={dialog.type}
+          initialName={dialog.name}
+          initialPrice={dialog.price}
+          onClose={() => setDialog(null)}
+          onSaved={() => setDialog(null)}
+        />
+      )}
     </div>
   );
 }
