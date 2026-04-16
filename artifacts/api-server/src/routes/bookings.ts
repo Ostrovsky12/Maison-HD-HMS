@@ -859,7 +859,7 @@ router.post("/:bookingId/checkout", requireAuth, async (req, res) => {
     await db.update(guestsTable).set({
       totalNights: (guest.totalNights || 0) + nights,
       totalSpent: String(Number(guest.totalSpent || 0) + Number(booking.totalAmount || 0)),
-      lastVisit: new Date().toISOString().split("T")[0],
+      lastVisit: new Date(),
       updatedAt: new Date(),
     }).where(eq(guestsTable.id, guest.id)).catch(() => {});
   }

@@ -109,9 +109,10 @@ function TodayBar({ bookings }: { bookings: any[] }) {
 }
 
 // ── Booking Card ──────────────────────────────────────────────────────────────
-function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout }: {
+function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout, pendingActionId }: {
   booking: any; onClick: () => void; isSelected: boolean;
   onCheckin: (id: number) => void; onCheckout: (id: number) => void;
+  pendingActionId?: number | null;
 }) {
   const nights = differenceInDays(new Date(booking.checkOut), new Date(booking.checkIn));
   const today = todayStr();
@@ -174,25 +175,34 @@ function BookingCard({ booking, onClick, isSelected, onCheckin, onCheckout }: {
             {isArrivalToday && (
               <button
                 onClick={() => onCheckin(booking.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+                disabled={pendingActionId === booking.id}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
               >
-                <LogIn className="w-3 h-3" /> Заселити
+                {pendingActionId === booking.id
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <LogIn className="w-3 h-3" />} Заселити
               </button>
             )}
             {isDepartureToday && (
               <button
                 onClick={() => onCheckout(booking.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+                disabled={pendingActionId === booking.id}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
               >
-                <LogOut className="w-3 h-3" /> Виселити
+                {pendingActionId === booking.id
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <LogOut className="w-3 h-3" />} Виселити
               </button>
             )}
             {isOverdue && (
               <button
                 onClick={() => onCheckout(booking.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+                disabled={pendingActionId === booking.id}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
               >
-                <LogOut className="w-3 h-3" /> Виселити
+                {pendingActionId === booking.id
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <LogOut className="w-3 h-3" />} Виселити
               </button>
             )}
           </div>
@@ -236,6 +246,8 @@ export default function BookingsPage() {
   const { data: bookings, isLoading } = useListBookings(apiParams);
   const { data: properties } = useListProperties({});
 
+  const [pendingActionId, setPendingActionId] = useState<number | null>(null);
+
   const checkinM  = useCheckinBooking();
   const checkoutM = useCheckoutBooking();
   const cancelM   = useCancelBooking();
@@ -243,14 +255,39 @@ export default function BookingsPage() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: getListBookingsQueryKey() });
 
-  const handleCheckin  = (id: number) => checkinM.mutate({ bookingId: id }, {
-    onSuccess: () => { invalidate(); toast({ title: "✓ Check-in виконано" }); },
-    onError:   (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" }),
-  });
-  const handleCheckout = (id: number) => checkoutM.mutate({ bookingId: id }, {
-    onSuccess: () => { invalidate(); toast({ title: "✓ Check-out виконано" }); },
-    onError:   (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" }),
-  });
+  // Extract clean error text (strips "HTTP 400 Bad Request: " prefix)
+  const cleanError = (e: any): string => {
+    const msg: string = e?.message || e?.data?.error || "Помилка";
+    const colonIdx = msg.lastIndexOf(": ");
+    return colonIdx !== -1 ? msg.slice(colonIdx + 2) : msg;
+  };
+
+  const handleCheckin  = (id: number) => {
+    if (pendingActionId) return;
+    setPendingActionId(id);
+    checkinM.mutate({ bookingId: id }, {
+      onSuccess: () => { invalidate(); toast({ title: "✓ Заселено" }); },
+      onError:   (e: any) => toast({ title: cleanError(e), variant: "destructive" }),
+      onSettled: () => setPendingActionId(null),
+    });
+  };
+  const handleCheckout = (id: number) => {
+    if (pendingActionId) return;
+    setPendingActionId(id);
+    checkoutM.mutate({ bookingId: id }, {
+      onSuccess: () => { invalidate(); toast({ title: "✓ Виселено" }); },
+      onError: (e: any) => {
+        const msg = cleanError(e);
+        // If already checked out — just refresh silently
+        if (msg.includes("вже виселений") || msg.includes("already")) {
+          invalidate();
+        } else {
+          toast({ title: msg, variant: "destructive" });
+        }
+      },
+      onSettled: () => setPendingActionId(null),
+    });
+  };
   const handleCancel = (id: number) => {
     if (!window.confirm("Скасувати бронювання?")) return;
     cancelM.mutate({ bookingId: id, data: {} }, {
@@ -499,6 +536,7 @@ export default function BookingsPage() {
                   onClick={() => { setActiveIdx(i); openDrawer(b); }}
                   onCheckin={handleCheckin}
                   onCheckout={handleCheckout}
+                  pendingActionId={pendingActionId}
                 />
               ))}
             </div>
