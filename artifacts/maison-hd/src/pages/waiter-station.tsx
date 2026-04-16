@@ -23,11 +23,11 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
   });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Table       = { id: number; table_number: string; section: string; capacity: number; status: string; current_order_id?: number };
-type Category    = { id: number; name: string; icon?: string; sort_order: number };
+type Table       = { id: number; number: string; location: string; capacity: number; status: string; currentOrderId?: number };
+type Category    = { id: number; name: string; icon?: string; sortOrder: number };
 type MenuItem    = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean; image_url?: string; imageUrl?: string };
 type OrderItem   = { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string; is_alcohol?: boolean };
-type Order       = { id: number; table_id?: number; order_type: string; guest_name?: string; guest_count?: number; status: string; total_amount: number; items?: OrderItem[]; opened_at?: string };
+type Order       = { id: number; tableId?: number; orderType: string; guestName?: string; guestCount?: number; status: string; totalAmount: number; items?: OrderItem[]; openedAt?: string };
 type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean; handles_alcohol?: boolean };
 
 function fmt(n: number | string | undefined | null) { return `₴${Number(n || 0).toFixed(0)}`; }
@@ -81,8 +81,8 @@ function OpenTableDialog({ table, onConfirm, onClose }: {
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <Table2 className="w-4 h-4 text-indigo-400" />
-            Стіл #{table.table_number}
-            <span className="text-white/40 text-xs font-normal ml-1">· {table.section}</span>
+            Стіл #{table.number}
+            <span className="text-white/40 text-xs font-normal ml-1">· {table.location}</span>
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-5 py-2">
@@ -163,7 +163,7 @@ function PrecheckDialog({ order, items, onClose, onPay }: {
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <Receipt className="w-4 h-4 text-indigo-400" /> Предчек
-            <span className="text-white/40 text-xs font-normal ml-1">Стіл #{order.table_id}</span>
+            <span className="text-white/40 text-xs font-normal ml-1">Стіл #{order.tableId}</span>
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-1 max-h-72 overflow-y-auto">
@@ -551,10 +551,10 @@ function TablesView({ tables, orders, loading, onSelect }: {
   tables: Table[]; orders: Order[]; loading: boolean;
   onSelect: (t: Table) => void;
 }) {
-  const sections = [...new Set(tables.map(t => t.section))].sort();
+  const sections = [...new Set(tables.map(t => t.location))].sort();
   const [activeSection, setActiveSection] = useState<string>("all");
-  const visible  = activeSection === "all" ? tables : tables.filter(t => t.section === activeSection);
-  const orderMap = Object.fromEntries(orders.map(o => [o.table_id, o]));
+  const visible  = activeSection === "all" ? tables : tables.filter(t => t.location === activeSection);
+  const orderMap = Object.fromEntries(orders.map(o => [o.tableId, o]));
 
   return (
     <div className="flex flex-col h-full bg-[#12141f]">
@@ -608,18 +608,18 @@ function TablesView({ tables, orders, loading, onSelect }: {
                 <button key={table.id} onClick={() => onSelect(table)}
                   className={`relative text-left rounded-2xl border p-4 transition-all hover:brightness-110 active:scale-95 ${st.bg} ${st.border}`}>
                   <div className={`absolute top-3 right-3 w-2.5 h-2.5 rounded-full ${st.dot}`} />
-                  <p className="text-lg font-bold text-white mb-0.5">#{table.table_number}</p>
-                  <p className="text-[10px] text-white/35 mb-2">{table.section}</p>
+                  <p className="text-lg font-bold text-white mb-0.5">#{table.number}</p>
+                  <p className="text-[10px] text-white/35 mb-2">{table.location}</p>
                   {table.status === "occupied" && ord ? (
                     <>
                       <div className="flex items-center gap-1 mb-1">
                         <Users className="w-3 h-3 text-white/30" />
-                        <span className="text-xs text-white/45">{ord.guest_count || "?"} гостей</span>
+                        <span className="text-xs text-white/45">{ord.guestCount || "?"} гостей</span>
                       </div>
-                      <p className={`text-base font-bold ${st.text}`}>{fmt(ord.total_amount)}</p>
+                      <p className={`text-base font-bold ${st.text}`}>{fmt(ord.totalAmount)}</p>
                       <div className="flex items-center gap-1 mt-0.5">
                         <Clock className="w-2.5 h-2.5 text-white/20" />
-                        <span className="text-[10px] text-white/30">{elapsed(ord.opened_at)}</span>
+                        <span className="text-[10px] text-white/30">{elapsed(ord.openedAt)}</span>
                       </div>
                     </>
                   ) : (
@@ -661,17 +661,17 @@ function CheckPanel({ table, order, items, onChangeQty, onNoteItem, onPrecheck, 
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-white">Стіл #{table.table_number}</span>
-            <span className="text-[10px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full">{table.section}</span>
+            <span className="text-sm font-bold text-white">Стіл #{table.number}</span>
+            <span className="text-[10px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full">{table.location}</span>
           </div>
           {order && (
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-[10px] text-white/30">Чек #{order.id}</span>
-              {order.guest_count && (
-                <span className="text-[10px] text-white/25">· {order.guest_count} гостей</span>
+              {order.guestCount && (
+                <span className="text-[10px] text-white/25">· {order.guestCount} гостей</span>
               )}
-              {order.opened_at && (
-                <span className="text-[10px] text-white/20">· {elapsed(order.opened_at)}</span>
+              {order.openedAt && (
+                <span className="text-[10px] text-white/20">· {elapsed(order.openedAt)}</span>
               )}
             </div>
           )}
@@ -1031,7 +1031,7 @@ function MobileOrderPanel({ table, order, items, onChangeQty, onNoteItem, onPrec
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-2.5 border-b border-white/6 shrink-0">
-        <p className="text-sm font-bold text-white">Стіл #{table.table_number}</p>
+        <p className="text-sm font-bold text-white">Стіл #{table.number}</p>
         {order && <p className="text-[10px] text-white/30">Чек #{order.id}</p>}
       </div>
       {items.length > 0 && (
@@ -1181,9 +1181,9 @@ export default function WaiterStationPage() {
     }
     setSelectedTable(table);
     setMobileTab("order");
-    if (table.current_order_id) {
+    if (table.currentOrderId) {
       try {
-        const r = await apiFetch(`/fb/orders/${table.current_order_id}`).then(r => r.json());
+        const r = await apiFetch(`/fb/orders/${table.currentOrderId}`).then(r => r.json());
         if (r.order) {
           setCurrentOrder(r.order);
           setOrderItems((r.order.items || []).map((i: any) => ({
@@ -1208,12 +1208,12 @@ export default function WaiterStationPage() {
       if (!r.ok) throw new Error(d.error);
       setCurrentOrder(d.order);
       setOrderItems([]);
-      setSelectedTable({ ...openTableFor, status: "occupied", current_order_id: d.order.id });
+      setSelectedTable({ ...openTableFor, status: "occupied", currentOrderId: d.order.id });
       setTables(prev => prev.map(t => t.id === openTableFor.id
-        ? { ...t, status: "occupied", current_order_id: d.order.id } : t));
+        ? { ...t, status: "occupied", currentOrderId: d.order.id } : t));
       setOpenTableFor(null);
       setMobileTab("menu");
-      toast({ title: `Стіл #${openTableFor.table_number} відкрито · ${guestCount} гостей` });
+      toast({ title: `Стіл #${openTableFor.number} відкрито · ${guestCount} гостей` });
     } catch (e: any) {
       toast({ title: "Помилка", description: e.message, variant: "destructive" });
     }
