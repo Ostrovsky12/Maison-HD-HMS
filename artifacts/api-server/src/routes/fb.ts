@@ -218,6 +218,33 @@ router.get("/items", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Lookup item by УКЗЕД / excise code / barcode ────────────────────────────
+router.get("/items/lookup", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const code = (req.query.code as string || "").trim();
+    if (!code) return res.status(400).json({ error: "code is required" });
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `SELECT fi.*, fc.name AS "categoryName", fc.emoji AS "categoryEmoji",
+              fi.image_url AS "imageUrl"
+       FROM fb_items fi
+       LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+       WHERE fi.organization_id = $1
+         AND fi.is_available = true
+         AND (
+           fi.uktzed_code   = $2
+           OR fi.excise_code = $2
+           OR fi.excise_code ILIKE $3
+         )
+       LIMIT 1`,
+      [orgId, code, `%${code}%`]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Товар не знайдено за кодом" });
+    res.json({ item: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/items", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);

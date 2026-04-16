@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import {
   Plus, Minus, X, Search, RefreshCw, Users, Clock, Receipt,
   CreditCard, Banknote, ChevronRight, UtensilsCrossed, Loader2,
   Table2, FileText, Smartphone, StickyNote, CheckCircle2,
-  ArrowLeft, ChevronLeft,
+  ArrowLeft, ChevronLeft, ScanBarcode, Camera, Keyboard,
 } from "lucide-react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -335,6 +335,217 @@ function PaymentDialog({ order, items, legalEntities, onPaid, onClose }: {
   );
 }
 
+// ── Barcode Scanner Dialog ────────────────────────────────────────────────────
+function BarcodeScanDialog({ onFound, onClose }: {
+  onFound: (item: MenuItem) => void;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef    = useRef<number>(0);
+
+  const [mode,      setMode]      = useState<"camera" | "manual">("camera");
+  const [manualCode, setManualCode] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [camError,  setCamError]  = useState<string | null>(null);
+  const [lastCode,  setLastCode]  = useState<string | null>(null);
+  const [foundItem, setFoundItem] = useState<MenuItem | null>(null);
+
+  const hasBarcodeDetector = typeof window !== "undefined" && "BarcodeDetector" in window;
+
+  // ── Lookup by code ──────────────────────────────────────────────────────────
+  const lookupCode = useCallback(async (code: string) => {
+    const clean = code.trim();
+    if (!clean || clean === lastCode) return;
+    setLastCode(clean);
+    setSearching(true);
+    try {
+      const r = await apiFetch(`/fb/items/lookup?code=${encodeURIComponent(clean)}`);
+      const d = await r.json();
+      if (!r.ok) {
+        toast({ title: "Товар не знайдено", description: `Код: ${clean}`, variant: "destructive" });
+        setTimeout(() => setLastCode(null), 2000);
+        return;
+      }
+      setFoundItem(d.item);
+    } catch {
+      toast({ title: "Помилка пошуку", variant: "destructive" });
+    } finally { setSearching(false); }
+  }, [lastCode]);
+
+  // ── Camera scanning ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (mode !== "camera" || !hasBarcodeDetector) return;
+
+    let stopped = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        const detector = new (window as any).BarcodeDetector({
+          formats: ["ean_13", "ean_8", "code_128", "code_39", "itf", "upc_a", "upc_e", "qr_code"],
+        });
+
+        const detect = async () => {
+          if (stopped || !videoRef.current) return;
+          try {
+            const barcodes = await detector.detect(videoRef.current);
+            if (barcodes.length > 0) {
+              const code = barcodes[0].rawValue;
+              lookupCode(code);
+            }
+          } catch { /* frame not ready */ }
+          rafRef.current = requestAnimationFrame(detect);
+        };
+        rafRef.current = requestAnimationFrame(detect);
+      } catch (e: any) {
+        if (!stopped) setCamError(e.message || "Немає доступу до камери");
+      }
+    })();
+
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(rafRef.current);
+      streamRef.current?.getTracks().forEach(t => t.stop());
+    };
+  }, [mode, hasBarcodeDetector, lookupCode]);
+
+  // ── Confirm found item ──────────────────────────────────────────────────────
+  const confirmItem = () => {
+    if (!foundItem) return;
+    onFound(foundItem);
+    onClose();
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-md p-0 overflow-hidden">
+        <DialogHeader className="px-4 pt-4 pb-0">
+          <DialogTitle className="text-white flex items-center gap-2">
+            <ScanBarcode className="w-4 h-4 text-indigo-400" />
+            Сканування УКЗЕД / штрих-коду
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* Mode toggle */}
+        <div className="flex gap-1 px-4 pt-3">
+          <button onClick={() => { setMode("camera"); setLastCode(null); setFoundItem(null); }}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${mode === "camera" ? "bg-indigo-600 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
+            <Camera className="w-3.5 h-3.5" /> Камера
+          </button>
+          <button onClick={() => { setMode("manual"); setLastCode(null); setFoundItem(null); }}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${mode === "manual" ? "bg-indigo-600 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
+            <Keyboard className="w-3.5 h-3.5" /> Ввести вручну
+          </button>
+        </div>
+
+        <div className="px-4 py-3 space-y-3">
+          {/* Camera view */}
+          {mode === "camera" && (
+            <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+              {!hasBarcodeDetector ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/40 text-sm text-center px-4">
+                  <ScanBarcode className="w-8 h-8 mb-2 opacity-30" />
+                  <p>BarcodeDetector недоступний у цьому браузері</p>
+                  <p className="text-xs mt-1 text-white/25">Використайте Chrome або перейдіть до ручного введення</p>
+                </div>
+              ) : camError ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/40 text-sm text-center px-4">
+                  <Camera className="w-8 h-8 mb-2 opacity-30" />
+                  <p>{camError}</p>
+                  <button onClick={() => { setCamError(null); setMode("camera"); }}
+                    className="mt-2 px-3 py-1 bg-white/8 rounded-lg text-xs">Спробувати знову</button>
+                </div>
+              ) : (
+                <>
+                  <video ref={videoRef} muted playsInline className="w-full h-full object-cover" />
+                  {/* Scan zone overlay */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-3/4 h-20 relative">
+                      <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-indigo-400 rounded-tl" />
+                      <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-indigo-400 rounded-tr" />
+                      <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-indigo-400 rounded-bl" />
+                      <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-indigo-400 rounded-br" />
+                      <div className="absolute inset-x-0 top-1/2 h-0.5 bg-indigo-400/60 animate-pulse" />
+                    </div>
+                  </div>
+                  {searching && (
+                    <div className="absolute bottom-2 inset-x-0 flex justify-center">
+                      <div className="bg-black/60 rounded-full px-3 py-1 flex items-center gap-2 text-xs text-white">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Пошук...
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Manual input */}
+          {mode === "manual" && (
+            <div className="space-y-2">
+              <p className="text-xs text-white/40">Введіть код УКЗЕД або акцизний марки:</p>
+              <div className="flex gap-2">
+                <input
+                  value={manualCode}
+                  onChange={e => setManualCode(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") lookupCode(manualCode); }}
+                  placeholder="напр. 2203001000"
+                  autoFocus
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50 font-mono tracking-wider"
+                />
+                <button onClick={() => lookupCode(manualCode)} disabled={searching || !manualCode}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-xl transition-colors">
+                  {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-[10px] text-white/20">
+                Код УКЗЕД прив'язується до товару в меню F{"&"}B → Меню → картка товару
+              </p>
+            </div>
+          )}
+
+          {/* Found item preview */}
+          {foundItem && (
+            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 flex items-center gap-3">
+              {(foundItem.imageUrl || foundItem.image_url) ? (
+                <img src={foundItem.imageUrl || foundItem.image_url} alt={foundItem.name}
+                  className="w-14 h-14 rounded-lg object-cover shrink-0" />
+              ) : (
+                <div className="w-14 h-14 rounded-lg bg-white/8 flex items-center justify-center text-2xl shrink-0">🍷</div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{foundItem.name}</p>
+                <p className="text-xs text-emerald-300 font-bold">₴{Number(foundItem.price).toFixed(0)}</p>
+                {foundItem.uktzed_code && (
+                  <p className="text-[10px] text-white/30 font-mono mt-0.5">УКЗЕД: {foundItem.uktzed_code}</p>
+                )}
+              </div>
+              <button onClick={confirmItem}
+                className="shrink-0 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-semibold text-white flex items-center gap-1 transition-colors">
+                <Plus className="w-3.5 h-3.5" /> Додати
+              </button>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="px-4 pb-4">
+          <Button variant="ghost" onClick={onClose} className="text-white/50">Закрити</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Tables Full-Screen View ────────────────────────────────────────────────────
 function TablesView({ tables, orders, loading, onSelect }: {
   tables: Table[]; orders: Order[]; loading: boolean;
@@ -573,8 +784,9 @@ function CheckPanel({ table, order, items, onChangeQty, onNoteItem, onPrecheck, 
 }
 
 // ── POS Menu Panel (Right) ────────────────────────────────────────────────────
-function PosMenuPanel({ categories, items, onAddItem }: {
+function PosMenuPanel({ categories, items, onAddItem, onScan }: {
   categories: Category[]; items: MenuItem[]; onAddItem: (item: MenuItem) => void;
+  onScan: () => void;
 }) {
   const [catId,  setCatId]  = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -599,19 +811,27 @@ function PosMenuPanel({ categories, items, onAddItem }: {
 
   return (
     <div className="flex flex-col h-full bg-[#12141f]">
-      {/* Top bar: search + category breadcrumb */}
+      {/* Top bar: search + scan button */}
       <div className="px-3 pt-3 pb-2 shrink-0 space-y-2">
-        <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 h-9">
-          <Search className="w-3.5 h-3.5 text-white/25 shrink-0" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Пошук страви або напою..."
-            className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none"
-          />
-          {search && (
-            <button onClick={() => setSearch("")}>
-              <X className="w-3.5 h-3.5 text-white/30" />
-            </button>
-          )}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 h-9">
+            <Search className="w-3.5 h-3.5 text-white/25 shrink-0" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Пошук страви або напою..."
+              className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none"
+            />
+            {search && (
+              <button onClick={() => setSearch("")}>
+                <X className="w-3.5 h-3.5 text-white/30" />
+              </button>
+            )}
+          </div>
+          <button onClick={onScan}
+            title="Сканувати УКЗЕД / штрих-код"
+            className="h-9 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 flex items-center gap-1.5 text-indigo-300 transition-colors shrink-0">
+            <ScanBarcode className="w-4 h-4" />
+            <span className="text-xs font-medium hidden lg:inline">УКЗЕД</span>
+          </button>
         </div>
 
         {/* Category pills */}
@@ -711,8 +931,9 @@ function PosMenuPanel({ categories, items, onAddItem }: {
 }
 
 // ── Mobile: Menu Panel (standard, used in tab) ─────────────────────────────────
-function MobileMenuPanel({ categories, items, onAddItem, disabled }: {
-  categories: Category[]; items: MenuItem[]; onAddItem: (item: MenuItem) => void; disabled?: boolean;
+function MobileMenuPanel({ categories, items, onAddItem, disabled, onScan }: {
+  categories: Category[]; items: MenuItem[]; onAddItem: (item: MenuItem) => void;
+  disabled?: boolean; onScan?: () => void;
 }) {
   const [catId,  setCatId]  = useState<number | "all">("all");
   const [search, setSearch] = useState("");
@@ -726,11 +947,19 @@ function MobileMenuPanel({ categories, items, onAddItem, disabled }: {
   return (
     <div className="flex flex-col h-full">
       <div className="px-3 pt-3 pb-2 shrink-0">
-        <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 h-9">
-          <Search className="w-3.5 h-3.5 text-white/25 shrink-0" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Пошук..." className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none" />
-          {search && <button onClick={() => setSearch("")}><X className="w-3 h-3 text-white/30" /></button>}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 h-9">
+            <Search className="w-3.5 h-3.5 text-white/25 shrink-0" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Пошук..." className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none" />
+            {search && <button onClick={() => setSearch("")}><X className="w-3 h-3 text-white/30" /></button>}
+          </div>
+          {onScan && (
+            <button onClick={onScan}
+              className="h-9 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 flex items-center justify-center text-indigo-300 transition-colors shrink-0">
+              <ScanBarcode className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
       <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto scrollbar-none shrink-0">
@@ -896,6 +1125,7 @@ export default function WaiterStationPage() {
   const [noteItem,     setNoteItem]     = useState<OrderItem | null>(null);
   const [showPrecheck, setShowPrecheck] = useState(false);
   const [showPayment,  setShowPayment]  = useState(false);
+  const [showScanner,  setShowScanner]  = useState(false);
 
   const [mobileTab, setMobileTab] = useState<MobileTab>("tables");
 
@@ -1098,7 +1328,7 @@ export default function WaiterStationPage() {
                 />
               </div>
               <div className="flex-1 overflow-hidden flex flex-col">
-                <PosMenuPanel categories={categories} items={menuItems} onAddItem={addItem} />
+                <PosMenuPanel categories={categories} items={menuItems} onAddItem={addItem} onScan={() => setShowScanner(true)} />
               </div>
             </>
           ) : (
@@ -1116,7 +1346,8 @@ export default function WaiterStationPage() {
               <TablesView tables={tables} orders={orders} loading={loading} onSelect={handleSelectTable} />
             )}
             {mobileTab === "menu" && (
-              <MobileMenuPanel categories={categories} items={menuItems} onAddItem={addItem} disabled={!selectedTable} />
+              <MobileMenuPanel categories={categories} items={menuItems} onAddItem={addItem}
+                disabled={!selectedTable} onScan={() => setShowScanner(true)} />
             )}
             {mobileTab === "order" && (
               <MobileOrderPanel
@@ -1174,6 +1405,12 @@ export default function WaiterStationPage() {
       {showPayment && currentOrder && (
         <PaymentDialog order={currentOrder} items={orderItems} legalEntities={legalEntities}
           onPaid={afterPayment} onClose={() => setShowPayment(false)} />
+      )}
+      {showScanner && (
+        <BarcodeScanDialog
+          onFound={item => { addItem(item); }}
+          onClose={() => setShowScanner(false)}
+        />
       )}
     </AppLayout>
   );
