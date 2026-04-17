@@ -1,0 +1,353 @@
+Build a premium, modern, bilingual SaaS website for a hospitality software product called “Maison HD”.
+
+PROJECT GOAL
+Create a high-end, conversion-focused website for Maison HD — an AI-powered hospitality operating system.
+The result must feel like a real premium SaaS product, not a template or startup landing page.
+
+CRITICAL REQUIREMENT: BILINGUAL SUPPORT
+The website MUST support two languages:
+- English (default)
+- Ukrainian
+
+IMPLEMENTATION REQUIREMENTS:
+- Add a language switcher in the top navigation (EN / UA)
+- All content must exist in both languages
+- Use a clean translation structure (JSON or object-based)
+- Do NOT hardcode text directly in components
+- Make it easy to scale to more languages later
+
+Example structure:
+{
+  en: { ... },
+  ua: { ... }
+}
+
+Switching language must instantly update UI text across the site.
+
+---
+
+BRAND POSITIONING
+
+Maison HD is NOT just a PMS.
+It is an AI-powered operating system for hospitality businesses:
+- hotels
+- country resorts
+- boutique hotels
+- spa complexes
+
+Core value:
+Automates operations, increases revenue, centralizes data, reduces manual work.
+
+---
+
+TONE OF VOICE
+
+Premium, calm, intelligent, confident.
+No hype.
+No clichés.
+No startup buzzwords.
+
+Write like:
+- high-end SaaS
+- boutique hospitality brand
+- professional B2B system
+
+---
+
+DESIGN DIRECTION
+
+Style:
+- premium minimalism
+- calm luxury
+- editorial SaaS
+- high-end hospitality feel
+
+Avoid:
+- bright startup gradients
+- neon colors
+- cartoon icons
+- clutter
+
+Palette:
+- warm white / ivory background
+- charcoal / deep gray text
+- muted neutral tones
+- subtle accent (deep green / bronze / slate)
+
+Typography:
+- clean modern sans-serif
+- elegant spacing
+- strong hierarchy
+
+---
+
+TECH REQUIREMENTS
+
+- Use React (or Next.js if preferred)
+- Component-based architecture
+- Fully responsive
+- SEO-ready
+- Accessible
+- Clean file structure
+- Easy to maintain and edit
+
+---
+
+SITE STRUCTURE
+
+Create the following pages:
+
+1. HOME
+2. PRODUCT
+3. SOLUTIONS
+4. PRICING
+5. SECURITY
+6. DEMO / CONTACT
+7. PRIVACY POLICY
+8. TERMS OF USE
+9. FAQ
+
+---
+
+HOME PAGE STRUCTURE
+
+HERO
+EN:
+Go deeper than RevPAR.
+Maison HD is an AI-powered hospitality operating system.
+
+UA:
+Глибше, ніж просто RevPAR.
+Maison HD — це AI-система управління готельним бізнесом.
+
+Buttons:
+EN: Book a Demo / Explore Product  
+UA: Записатися на демо / Переглянути продукт
+
+---
+
+PROBLEM SECTION
+
+EN:
+Reception overload  
+Manual operations  
+Lost guest communication  
+Fragmented systems  
+No clear financial visibility  
+
+UA:
+Перевантажена рецепція  
+Ручні процеси  
+Втрачений контакт з гостем  
+Розрізнені системи  
+Відсутність фінансового контролю  
+
+---
+
+SOLUTION SECTION
+
+EN:
+Maison HD turns complexity into one intelligent system.
+
+UA:
+Maison HD перетворює хаос у єдину систему управління.
+
+---
+
+FEATURES BLOCK
+
+Modules:
+- Reservations & Front Desk
+- CRM
+- AI Sales
+- Finance
+- Housekeeping
+- Guest Experience
+- Analytics
+
+Provide content in both languages.
+
+---
+
+IMPACT SECTION
+
+EN:
+Less manual work  
+Better control  
+More direct revenue  
+
+UA:
+Менше ручної роботи  
+Повний контроль  
+Більше прямих продажів  
+
+---
+
+SOLUTIONS PAGE
+
+Segments:
+- Country Resorts / Заміські комплекси
+- Boutique Hotels / Бутик-готелі
+- SPA Complexes / SPA-комплекси
+- Apartment Hotels / Апарт-готелі
+
+Each with short description in both languages.
+
+---
+
+PRODUCT PAGE
+
+Modules:
+- Front Desk
+- CRM
+- AI Sales
+- Finance
+- Operations
+- Dashboard
+
+Each module:
+- title (EN + UA)
+- short paragraph
+- bullet list
+
+---
+
+PRICING PAGE
+
+3 tiers:
+- Start
+- Growth
+- Enterprise
+
+EN:
+Pricing is tailored to your property.
+
+UA:
+Вартість формується індивідуально під ваш об'єкт.
+
+CTA:
+Request Proposal / Отримати пропозицію
+
+---
+
+SECURITY PAGE
+
+Sections:
+- Access control
+- Data separation
+- Backup
+- Audit logs
+- Secure architecture
+
+IMPORTANT:
+Do NOT claim certifications.
+Use careful wording.
+
+---
+
+DEMO / CONTACT PAGE
+
+Form fields:
+- Name / Ім’я
+- Company / Компанія
+- Email
+- Phone
+- Message
+
+Buttons:
+Request Demo / Записатися на демо
+
+---
+
+PRIVACY POLICY
+
+Create realistic structure with placeholders:
+[Company Name]
+[Contact Email]
+
+Bilingual version.
+
+---
+
+TERMS OF USE
+
+Standard SaaS structure.
+Bilingual.
+
+---
+
+FAQ
+
+Example questions in both languages.
+
+---
+
+NAVIGATION
+
+Top menu:
+- Product / Продукт
+- Solutions / Для кого
+- Pricing / Ціни
+- Security / Безпека
+- FAQ
+- Demo / Демо
+
+Language switcher: EN / UA
+
+---
+
+FOOTER
+
+Include:
+- brand name
+- short description (EN + UA)
+- navigation links
+- email placeholder
+- legal links
+- copyright
+
+---
+
+UX DETAILS
+
+- smooth scrolling
+- subtle animations
+- clean sections
+- strong CTA repetition
+- premium spacing
+- mobile optimization
+
+---
+
+SEO
+
+Homepage title:
+Maison HD — AI Hospitality Operating System
+
+Meta description:
+Premium AI-powered system for hotels and hospitality.
+
+Add Open Graph tags.
+
+---
+
+IMPORTANT RULES
+
+- Do NOT generate fake testimonials
+- Do NOT add fake logos
+- Do NOT invent integrations
+- Use placeholder visuals instead
+- Keep everything editable
+- Make the design feel expensive and calm
+
+---
+
+DELIVERABLE
+
+Generate:
+- full website
+- all pages
+- all bilingual content
+- reusable components
+- translation system
+- production-ready structure
