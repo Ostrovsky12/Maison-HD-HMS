@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable, housekeepingTasksTable } from "@workspace/db/schema";
+import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable, housekeepingTasksTable, guestServiceOrdersTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, inArray, desc, sql, or, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
@@ -1280,19 +1280,103 @@ router.get("/:bookingId/invoice", requireAuth, async (req, res) => {
     const paid = Number(booking.paidAmount);
     const due = total - paid;
     const nights = Math.round((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / 86400000);
-    const pricePerNight = nights > 0 ? Math.round((total / nights) * 100) / 100 : total;
 
-    // Line items
-    const items = [
+    // ── Fetch tourist tax rate from property ────────────────────────────────
+    const propertyId = unit?.propertyId ?? null;
+    let touristTaxRate = 0;
+    if (propertyId) {
+      const [prop] = await db.select({ touristTaxRate: propertiesTable.touristTaxRate })
+        .from(propertiesTable).where(eq(propertiesTable.id, propertyId)).limit(1);
+      touristTaxRate = prop ? Number(prop.touristTaxRate || 0) : 0;
+    }
+    const adults = booking.adults || 1;
+    const touristTaxTotal = touristTaxRate > 0
+      ? Math.round(touristTaxRate * adults * nights * 100) / 100
+      : 0;
+
+    // ── Fetch booking addons (bookingAddonsTable) ───────────────────────────
+    const bookingAddons = await db.select({
+      qty: bookingAddonsTable.quantity,
+      addonId: bookingAddonsTable.addonId,
+      name: addonsTable.name,
+      unit: addonsTable.unit,
+      price: addonsTable.price,
+    })
+      .from(bookingAddonsTable)
+      .leftJoin(addonsTable, eq(bookingAddonsTable.addonId, addonsTable.id))
+      .where(eq(bookingAddonsTable.bookingId, bookingId));
+
+    const addonsTotal = bookingAddons.reduce((s, a) => s + Number(a.price || 0) * Number(a.qty || 1), 0);
+
+    // ── Fetch guest service orders ──────────────────────────────────────────
+    const serviceOrders = await db.select()
+      .from(guestServiceOrdersTable)
+      .where(eq(guestServiceOrdersTable.bookingId, bookingId));
+
+    const serviceOrdersTotal = serviceOrders.reduce((s, o) => s + Number(o.totalPrice || 0), 0);
+
+    // ── Accommodation base (strip addons, service orders, tourist tax) ──────
+    const accommodationTotal = Math.max(0,
+      Math.round((total - addonsTotal - serviceOrdersTotal - touristTaxTotal) * 100) / 100
+    );
+    const pricePerNight = nights > 0
+      ? Math.round((accommodationTotal / nights) * 100) / 100
+      : accommodationTotal;
+
+    // ── Build line items ────────────────────────────────────────────────────
+    const items: any[] = [
       {
-        description: `Послуга бронювання — ${unit?.name || `Номер ${booking.unitId}`}`,
+        description: `Послуга проживання — ${unit?.name || `Номер ${booking.unitId}`}`,
         detail: `${booking.checkIn} → ${booking.checkOut} · ${nights} ніч`,
         qty: nights,
         unit: "ніч",
         price: pricePerNight,
-        amount: total,
+        amount: accommodationTotal,
       },
     ];
+
+    // Addons
+    for (const a of bookingAddons) {
+      const qty = Number(a.qty || 1);
+      const price = Number(a.price || 0);
+      const amount = Math.round(qty * price * 100) / 100;
+      if (amount <= 0) continue;
+      items.push({
+        description: a.name || "Додаткова послуга",
+        qty,
+        unit: a.unit || "шт",
+        price,
+        amount,
+      });
+    }
+
+    // Guest service orders (SPA, minibar, room service…)
+    for (const o of serviceOrders) {
+      const qty = Number(o.quantity || 1);
+      const price = Number(o.pricePerUnit || 0);
+      const amount = Number(o.totalPrice || 0);
+      if (amount <= 0) continue;
+      items.push({
+        description: o.serviceName || "Замовлена послуга",
+        detail: o.serviceDescription || undefined,
+        qty,
+        unit: "шт",
+        price: price || Math.round((amount / qty) * 100) / 100,
+        amount,
+      });
+    }
+
+    // Tourist tax
+    if (touristTaxTotal > 0) {
+      items.push({
+        description: "Туристичний збір",
+        detail: `${touristTaxRate} ₴ × ${adults} гост. × ${nights} ніч`,
+        qty: adults * nights,
+        unit: "ос./ніч",
+        price: touristTaxRate,
+        amount: touristTaxTotal,
+      });
+    }
 
     // Generate invoice number: Р-YYYY-BKID
     const year = new Date().getFullYear();

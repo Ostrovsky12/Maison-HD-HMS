@@ -218,9 +218,12 @@ export function buildPrintHtml(inv: InvoiceData, buyer: InvoiceBuyer, items: Inv
 
   return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
 <title>Рахунок ${inv.invoiceNumber}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; background: #fff; padding: 24px 32px; max-width: 900px; margin: 0 auto; }
+  body { font-family: 'Noto Sans', Arial, 'Helvetica Neue', sans-serif; font-size: 12px; color: #111; background: #fff; padding: 24px 32px; max-width: 900px; margin: 0 auto; }
   .header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 24px; }
   .logo { max-height: 60px; max-width: 160px; object-fit: contain; }
   .title-block h1 { font-size: 22px; font-weight: 800; color: #1e3a5f; }
@@ -376,7 +379,9 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
     w.document.write(html);
     w.document.close();
     w.focus();
-    setTimeout(() => { w.print(); }, 400);
+    // Wait for Google Fonts to load before printing
+    w.onload = () => setTimeout(() => w.print(), 600);
+    setTimeout(() => { if (!w.closed) w.print(); }, 2500);
   };
 
   const updateItem = (i: number, field: keyof InvoiceItem, val: any) => {
