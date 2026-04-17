@@ -1,4 +1,5 @@
 import { useLocation } from "wouter";
+import { createPortal } from "react-dom";
 import { MaisonLogo } from "@/components/MaisonLogo";
 import {
   LayoutDashboard, CalendarDays, KeyRound, Users, BarChart3, Settings,
@@ -162,15 +163,61 @@ const NOTIF_LABELS: Record<string, string> = {
   cancellation: "Скасування", alert: "Увага", housekeeping: "Прибирання", report: "Звіт",
 };
 
+const NOTIF_NAV: Record<string, string> = {
+  booking_created: "/bookings", checkin: "/bookings", checkout: "/bookings",
+  cancellation: "/bookings", alert: "/bookings", housekeeping: "/housekeeping", report: "/analytics",
+};
+
 function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { data, refetch } = useListNotifications({ limit: 20 });
+  const [, navigate] = useLocation();
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const { data, refetch } = useListNotifications({ limit: 30 });
   const markAll = useMarkAllNotificationsRead();
   const markOne = useMarkNotificationRead();
   const notifications = data?.notifications || [];
   const unread = data?.unreadCount || 0;
 
+  // Toast state: [{id, title, message, type, bookingId}]
+  type Toast = { id: number; title: string; message: string; type: string; bookingId?: number | null };
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const getSeenIds = (): Set<number> =>
+    new Set(JSON.parse(sessionStorage.getItem("mhd_notif_seen") || "[]") as number[]);
+  const markSeen = (ids: number[]) => {
+    const prev = getSeenIds();
+    ids.forEach(id => prev.add(id));
+    sessionStorage.setItem("mhd_notif_seen", JSON.stringify([...prev]));
+  };
+
+  // Auto-poll every 15 seconds
+  useEffect(() => {
+    const interval = setInterval(() => refetch(), 15000);
+    return () => clearInterval(interval);
+  }, [refetch]);
+
+  // Show toasts for unseen notifications
+  useEffect(() => {
+    if (!notifications.length) return;
+    const seen = getSeenIds();
+    const fresh = notifications.filter((n: any) => !seen.has(n.id));
+    if (!fresh.length) return;
+    markSeen(fresh.map((n: any) => n.id));
+    fresh.slice(0, 3).forEach((n: any) => {
+      setToasts(prev => [...prev, { id: n.id, title: n.title, message: n.message, type: n.type, bookingId: n.bookingId }]);
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== n.id)), 5000);
+    });
+  }, [notifications]);
+
+  const dismissToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
+
+  const goToNotif = (type: string) => {
+    navigate(`~${BASE}${NOTIF_NAV[type] || "/dashboard"}`);
+    setOpen(false);
+  };
+
+  // Close dropdown on outside click
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
     if (open) document.addEventListener("mousedown", h);
@@ -178,67 +225,110 @@ function NotificationBell() {
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="relative w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-      >
-        <Bell className="w-4 h-4" />
-        {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
-            {unread > 9 ? "9+" : unread}
-          </span>
-        )}
-      </button>
+    <>
+      {/* Bell dropdown */}
+      <div ref={ref} className="relative">
+        <button
+          onClick={() => setOpen(!open)}
+          className="relative w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+        >
+          <Bell className="w-4 h-4" />
+          {unread > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
+        </button>
 
-      {open && (
-        <div className="absolute right-0 top-11 w-80 bg-white border border-gray-200 rounded-2xl shadow-xl z-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-            <span className="font-semibold text-sm text-gray-800">Сповіщення</span>
-            <div className="flex gap-1">
-              {unread > 0 && (
-                <button onClick={() => markAll.mutate(undefined, { onSuccess: () => refetch() })}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded-lg hover:bg-indigo-50 flex items-center gap-1">
-                  <CheckCheck className="w-3 h-3" /> Всі
-                </button>
-              )}
-              <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-          <div className="max-h-96 overflow-y-auto divide-y divide-gray-50">
-            {notifications.length === 0 ? (
-              <div className="py-10 text-center">
-                <Bell className="w-8 h-8 text-gray-200 mx-auto mb-2" />
-                <p className="text-sm text-gray-400">Немає сповіщень</p>
+        {open && (
+          <div className="absolute right-0 top-11 w-80 bg-white border border-gray-200 rounded-2xl shadow-xl z-50 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <div>
+                <span className="font-semibold text-sm text-gray-800">Сповіщення</span>
+                <p className="text-[10px] text-gray-400 mt-0.5">Поточна зміна</p>
               </div>
-            ) : notifications.map((n) => (
-              <div key={n.id}
-                className={`px-4 py-3 cursor-pointer hover:bg-gray-50/80 transition-colors ${!n.isRead ? "bg-indigo-50/40" : ""}`}
-                onClick={() => !n.isRead && markOne.mutate({ notificationId: n.id }, { onSuccess: () => refetch() })}
-              >
-                <div className="flex items-start gap-2.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${NOTIF_COLORS[n.type] || "bg-gray-100 text-gray-700"}`}>
-                        {NOTIF_LABELS[n.type] || n.type}
-                      </span>
-                      {!n.isRead && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0" />}
+              <div className="flex gap-1">
+                {unread > 0 && (
+                  <button onClick={() => markAll.mutate(undefined, { onSuccess: () => refetch() })}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded-lg hover:bg-indigo-50 flex items-center gap-1">
+                    <CheckCheck className="w-3 h-3" /> Всі
+                  </button>
+                )}
+                <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            <div className="max-h-96 overflow-y-auto divide-y divide-gray-50">
+              {notifications.length === 0 ? (
+                <div className="py-10 text-center">
+                  <Bell className="w-8 h-8 text-gray-200 mx-auto mb-2" />
+                  <p className="text-sm text-gray-400">Немає сповіщень за зміну</p>
+                </div>
+              ) : (notifications as any[]).map((n) => (
+                <div key={n.id}
+                  className={`px-4 py-3 cursor-pointer hover:bg-gray-50/80 transition-colors ${!n.isRead ? "bg-indigo-50/40" : ""}`}
+                  onClick={() => {
+                    if (!n.isRead) markOne.mutate({ notificationId: n.id }, { onSuccess: () => refetch() });
+                    goToNotif(n.type);
+                  }}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${NOTIF_COLORS[n.type] || "bg-gray-100 text-gray-700"}`}>
+                          {NOTIF_LABELS[n.type] || n.type}
+                        </span>
+                        {!n.isRead && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0" />}
+                      </div>
+                      <p className="text-sm font-medium leading-tight text-gray-800">{n.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5 leading-snug">{n.message}</p>
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true, locale: uk })}
+                      </p>
                     </div>
-                    <p className="text-sm font-medium leading-tight text-gray-800">{n.title}</p>
-                    <p className="text-xs text-gray-500 mt-0.5 leading-snug">{n.message}</p>
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true, locale: uk })}
-                    </p>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+
+      {/* Toast overlay — macOS style, bottom-right corner */}
+      {createPortal(
+        <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none">
+          {toasts.map(t => (
+            <div key={t.id}
+              className="pointer-events-auto w-80 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200/60 overflow-hidden notif-toast-in"
+            >
+              <div className="flex items-start gap-3 p-4 cursor-pointer"
+                onClick={() => { goToNotif(t.type); dismissToast(t.id); }}
+              >
+                <div className="shrink-0 w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center mt-0.5">
+                  <Bell className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${NOTIF_COLORS[t.type] || "bg-gray-100 text-gray-700"}`}>
+                      {NOTIF_LABELS[t.type] || t.type}
+                    </span>
+                    <button onClick={e => { e.stopPropagation(); dismissToast(t.id); }}
+                      className="text-gray-300 hover:text-gray-500 transition-colors ml-1">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900 leading-tight">{t.title}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 leading-snug line-clamp-2">{t.message}</p>
+                </div>
+              </div>
+              <div className="h-0.5 bg-gradient-to-r from-indigo-500 to-violet-500 notif-progress" />
+            </div>
+          ))}
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 

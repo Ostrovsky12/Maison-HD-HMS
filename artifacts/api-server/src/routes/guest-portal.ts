@@ -486,7 +486,10 @@ router.get("/service-orders", requireAuth, async (req: any, res) => {
 
     const unitMap = Object.fromEntries(unitRows.map(u => [u.id, u.name]));
 
-    const bookingRows = await db.select({ id: bookingsTable.id, unitId: bookingsTable.unitId, guestName: bookingsTable.guestName })
+    const bookingRows = await db.select({
+        id: bookingsTable.id, unitId: bookingsTable.unitId,
+        firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
+      })
       .from(bookingsTable).where(inArray(bookingsTable.unitId, uIds));
     const bIds = bookingRows.map(b => b.id);
     if (bIds.length === 0) return res.json([]);
@@ -502,10 +505,10 @@ router.get("/service-orders", requireAuth, async (req: any, res) => {
       .limit(limitN);
 
     const result = orders.map(o => {
-      const booking = bookingMap[o.bookingId];
+      const booking = o.bookingId != null ? bookingMap[o.bookingId] : null;
       return {
         ...o,
-        guestName: booking?.guestName || "—",
+        guestName: booking ? [booking.firstName, booking.lastName].filter(Boolean).join(" ") || "—" : "—",
         unitName: booking?.unitId ? unitMap[booking.unitId] || "—" : "—",
       };
     });

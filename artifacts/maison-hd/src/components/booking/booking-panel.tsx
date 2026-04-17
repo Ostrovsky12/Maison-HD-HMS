@@ -739,9 +739,188 @@ function TabPayments({ b }: { b: any }) {
 }
 
 // ── Add Service Order Dialog + Tab: Services ───────────────────────────────
+// ── SPA Booking Dialog (real services + slots) ──────────────────────────────
+const SPA_CATEGORY: Record<string, string> = {
+  massage: "Масаж", jacuzzi: "Джакузі", sauna: "Сауна", body: "Тіло", face: "Обличчя",
+};
+
+function SpaBookingDialog({ bookingId, guestName, onClose, onSaved }: {
+  bookingId: number; guestName: string; onClose: () => void; onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [step, setStep] = useState<"service" | "slot">("service");
+  const [services, setServices] = useState<any[]>([]);
+  const [loadingSvc, setLoadingSvc] = useState(true);
+  const [selected, setSelected] = useState<any>(null);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [slots, setSlots] = useState<any[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [chosenSlot, setChosenSlot] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch(`${API}/spa/services`).then(r => r.json())
+      .then(d => setServices(d.services || []))
+      .finally(() => setLoadingSvc(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setLoadingSlots(true);
+    setChosenSlot(null);
+    apiFetch(`${API}/spa/services/${selected.id}/slots?date=${date}`).then(r => r.json())
+      .then(d => setSlots(d.slots || []))
+      .finally(() => setLoadingSlots(false));
+  }, [selected, date]);
+
+  const save = async () => {
+    if (!selected || !chosenSlot) return;
+    setSaving(true);
+    try {
+      const r = await apiFetch(`${API}/spa/appointments`, {
+        method: "POST",
+        body: JSON.stringify({
+          serviceId: selected.id,
+          specialistId: chosenSlot.specialistId || null,
+          guestName: guestName || "Гість",
+          appointmentDate: date,
+          startTime: chosenSlot.time,
+          durationMinutes: selected.durationMinutes,
+          price: parseFloat(selected.price),
+          isHotelGuest: true,
+          bookingId,
+        }),
+      });
+      if (!r.ok) { const d = await r.json(); toast({ title: d.error || "Помилка", variant: "destructive" }); return; }
+      await apiFetch(`${API}/guest/service-orders`, {
+        method: "POST",
+        body: JSON.stringify({
+          bookingId, serviceName: `SPA — ${selected.name} (${date}, ${chosenSlot.time})`,
+          serviceType: "spa", quantity: 1,
+          price: parseFloat(selected.price), totalPrice: parseFloat(selected.price),
+          requestedTime: `${date} ${chosenSlot.time}`,
+        }),
+      });
+      toast({ title: "SPA-запис створено ✓" });
+      onSaved(); onClose();
+    } finally { setSaving(false); }
+  };
+
+  const slotsBySpecialist = slots.reduce((acc: Record<string, any[]>, s) => {
+    const k = s.specialistName || "Без спеціаліста";
+    if (!acc[k]) acc[k] = [];
+    acc[k].push(s);
+    return acc;
+  }, {});
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between p-5 pb-3 border-b border-gray-100 shrink-0">
+          <div>
+            <h2 className="font-bold text-gray-900">Записати на SPA</h2>
+            {selected && step === "slot" && (
+              <p className="text-xs text-gray-500 mt-0.5">{selected.name} · {selected.durationMinutes} хв · {Math.round(parseFloat(selected.price))} грн</p>
+            )}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-100 text-gray-400">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {step === "service" && (
+          <div className="overflow-y-auto flex-1 p-5 space-y-2">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Оберіть послугу</p>
+            {loadingSvc ? (
+              <div className="text-center py-8"><Loader2 className="w-6 h-6 animate-spin text-indigo-400 mx-auto" /></div>
+            ) : services.map(svc => (
+              <button key={svc.id}
+                onClick={() => { setSelected(svc); setStep("slot"); }}
+                className="w-full flex items-center justify-between p-3.5 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/30 transition-all text-left group"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-800">{svc.name}</span>
+                    {svc.tags?.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-semibold">{svc.tags[0]}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5 leading-snug">{svc.description}</p>
+                  <p className="text-xs text-gray-400 mt-1">{SPA_CATEGORY[svc.category] || svc.category} · {svc.durationMinutes} хв</p>
+                </div>
+                <div className="shrink-0 ml-3 text-right">
+                  <p className="text-base font-bold text-indigo-600">{Math.round(parseFloat(svc.price))}</p>
+                  <p className="text-[10px] text-gray-400">грн</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {step === "slot" && selected && (
+          <>
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+              <button onClick={() => { setStep("service"); setChosenSlot(null); }}
+                className="text-xs text-indigo-600 hover:underline font-semibold flex items-center gap-1">
+                ← Змінити послугу
+              </button>
+              <div>
+                <label className="text-xs font-semibold text-gray-500">Дата</label>
+                <input type="date" value={date} min={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setDate(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+              </div>
+              {loadingSlots ? (
+                <div className="text-center py-4"><Loader2 className="w-5 h-5 animate-spin text-indigo-400 mx-auto" /></div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Вільні слоти</p>
+                  {Object.entries(slotsBySpecialist).map(([specialist, specSlots]) => (
+                    <div key={specialist}>
+                      <p className="text-xs font-medium text-gray-500 mb-1.5">{specialist}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(specSlots as any[]).map((s, i) => s.available ? (
+                          <button key={i}
+                            onClick={() => setChosenSlot({ ...s })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                              chosenSlot?.time === s.time && chosenSlot?.specialistId === s.specialistId
+                                ? "bg-indigo-600 text-white shadow-sm scale-105"
+                                : "bg-gray-100 text-gray-700 hover:bg-indigo-100 hover:text-indigo-700"
+                            }`}
+                          >{s.time}</button>
+                        ) : (
+                          <button key={i} disabled
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-50 text-gray-300 line-through cursor-not-allowed"
+                          >{s.time}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {slots.filter((s: any) => s.available).length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-3">Немає вільних слотів на цю дату</p>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-100 shrink-0">
+              <button onClick={save} disabled={!chosenSlot || saving}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {chosenSlot ? `Записати о ${chosenSlot.time}` : "Оберіть слот"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function AddServiceDialog({
   bookingId, type, onClose, onSaved, initialName, initialPrice,
-}: { bookingId: number; type: "spa" | "rental" | "service"; onClose: () => void; onSaved: () => void; initialName?: string; initialPrice?: string }) {
+}: { bookingId: number; type: "rental" | "service"; onClose: () => void; onSaved: () => void; initialName?: string; initialPrice?: string }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -749,13 +928,6 @@ function AddServiceDialog({
   });
 
   const PRESETS: Record<string, { name: string; price: string }[]> = {
-    spa: [
-      { name: "SPA — масаж класичний (60 хв)", price: "800" },
-      { name: "SPA — масаж релакс (90 хв)", price: "1200" },
-      { name: "SPA — ароматерапія", price: "700" },
-      { name: "SPA — сауна (1 год)", price: "500" },
-      { name: "SPA — джакузі (30 хв)", price: "400" },
-    ],
     rental: [
       { name: "Прокат велосипеда (1 день)", price: "200" },
       { name: "Прокат самоката (1 день)", price: "150" },
@@ -771,7 +943,7 @@ function AddServiceDialog({
     ],
   };
 
-  const title = type === "spa" ? "Записати на SPA" : type === "rental" ? "Додати прокат" : "Додати послугу";
+  const title = type === "rental" ? "Додати прокат" : "Додати послугу";
 
   const save = async () => {
     if (!form.serviceName) { toast({ title: "Введіть назву послуги", variant: "destructive" }); return; }
@@ -882,7 +1054,8 @@ function TabServices({ b }: { b: any }) {
   const addonKeys = Object.entries(addons).filter(([, v]) => v).map(([k]) => k);
   const [orders, setOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
-  const [addDialog, setAddDialog] = useState<"spa" | "rental" | "service" | null>(null);
+  const [addDialog, setAddDialog] = useState<"rental" | "service" | null>(null);
+  const [spaDialog, setSpaDialog] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
 
   const ADDON_LABELS: Record<string, { label: string; icon: string }> = {
@@ -982,7 +1155,7 @@ function TabServices({ b }: { b: any }) {
       <div>
         <div className="flex items-center justify-between mb-2">
           <SectionLabel>SPA-записи</SectionLabel>
-          <button onClick={() => setAddDialog("spa")} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800 flex items-center gap-1">
+          <button onClick={() => setSpaDialog(true)} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800 flex items-center gap-1">
             <Plus className="w-3 h-3" />Записати
           </button>
         </div>
@@ -991,7 +1164,7 @@ function TabServices({ b }: { b: any }) {
             <div className="p-4 rounded-2xl border border-dashed border-gray-200 text-center">
               <Waves className="w-7 h-7 text-gray-200 mx-auto mb-2" />
               <p className="text-sm text-gray-400">Немає SPA-записів</p>
-              <button onClick={() => setAddDialog("spa")} className="mt-2 text-xs text-indigo-500 hover:underline font-semibold">+ Записати на SPA</button>
+              <button onClick={() => setSpaDialog(true)} className="mt-2 text-xs text-indigo-500 hover:underline font-semibold">+ Записати на SPA</button>
             </div>
           ) : (
             <div className="space-y-2">{spaOrders.map(o => <OrderCard key={o.id} o={o} />)}</div>
@@ -1033,6 +1206,9 @@ function TabServices({ b }: { b: any }) {
 
       {addDialog && (
         <AddServiceDialog bookingId={b.id} type={addDialog} onClose={() => setAddDialog(null)} onSaved={loadOrders} />
+      )}
+      {spaDialog && (
+        <SpaBookingDialog bookingId={b.id} guestName={[b.firstName, b.lastName].filter(Boolean).join(" ")} onClose={() => setSpaDialog(false)} onSaved={loadOrders} />
       )}
     </div>
   );
@@ -1279,10 +1455,11 @@ function TabComms({ b }: { b: any }) {
 
 // ── Tab: Upsell ────────────────────────────────────────────────────────────
 function TabUpsell({ b }: { b: any }) {
-  const [dialog, setDialog] = useState<{ type: "spa" | "rental" | "service"; name?: string; price?: string } | null>(null);
+  const [dialog, setDialog] = useState<{ type: "rental" | "service"; name?: string; price?: string } | null>(null);
+  const [spaDialog, setSpaDialog] = useState(false);
 
   const actions: { icon: any; label: string; sub: string; color: string; btn: string; dialogType: "spa" | "rental" | "service"; name?: string; price?: string }[] = [
-    { icon: Waves,       label: "Записати на SPA",       sub: "Пакети від 350 UAH",            color: "from-cyan-50 to-blue-50 border-cyan-100",      btn: "text-cyan-700 bg-cyan-100 hover:bg-cyan-200",      dialogType: "spa" },
+    { icon: Waves,       label: "Записати на SPA",       sub: "Масаж, джакузі, сауна — від 500 UAH", color: "from-cyan-50 to-blue-50 border-cyan-100",      btn: "text-cyan-700 bg-cyan-100 hover:bg-cyan-200",      dialogType: "spa" },
     { icon: TrendingUp,  label: "Апгрейд номера",         sub: "Є вільні кімнати вищого класу",  color: "from-violet-50 to-indigo-50 border-violet-100", btn: "text-violet-700 bg-violet-100 hover:bg-violet-200", dialogType: "service", name: "Апгрейд номера" },
     { icon: ShoppingBag, label: "Замовити сніданок",      sub: "Включити в рахунок",             color: "from-amber-50 to-yellow-50 border-amber-100",   btn: "text-amber-700 bg-amber-100 hover:bg-amber-200",   dialogType: "service", name: "Сніданок" },
     { icon: Bike,        label: "Прокат велосипеда",       sub: "700 UAH/день",                  color: "from-emerald-50 to-green-50 border-emerald-100", btn: "text-emerald-700 bg-emerald-100 hover:bg-emerald-200", dialogType: "rental", name: "Прокат велосипеда (1 день)", price: "700" },
@@ -1302,7 +1479,7 @@ function TabUpsell({ b }: { b: any }) {
             <p className="text-xs text-gray-500">{a.sub}</p>
           </div>
           <button
-            onClick={() => setDialog({ type: a.dialogType, name: a.name, price: a.price })}
+            onClick={() => a.dialogType === "spa" ? setSpaDialog(true) : setDialog({ type: a.dialogType, name: a.name, price: a.price })}
             className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-colors ${a.btn}`}
           >
             Додати
@@ -1318,6 +1495,14 @@ function TabUpsell({ b }: { b: any }) {
           initialPrice={dialog.price}
           onClose={() => setDialog(null)}
           onSaved={() => setDialog(null)}
+        />
+      )}
+      {spaDialog && (
+        <SpaBookingDialog
+          bookingId={b.id}
+          guestName={[b.firstName, b.lastName].filter(Boolean).join(" ")}
+          onClose={() => setSpaDialog(false)}
+          onSaved={() => setSpaDialog(false)}
         />
       )}
     </div>
