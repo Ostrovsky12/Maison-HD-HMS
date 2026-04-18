@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import {
-  rentalContractsTable, rentalPaymentsTable, rentalRequestsTable, unitsTable,
+  rentalContractsTable, rentalPaymentsTable, rentalRequestsTable, unitsTable, propertiesTable,
 } from "@workspace/db";
 import { eq, and, desc, asc, sql, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
@@ -16,11 +16,16 @@ async function seedDemoRentals(orgId: number) {
     .from(rentalContractsTable).where(eq(rentalContractsTable.organizationId, orgId)).limit(1);
   if (ex.length > 0) return;
 
-  // Get some unit IDs
+  // Get unit IDs belonging to this org
   const units = await db.select({ id: unitsTable.id, name: unitsTable.name })
-    .from(unitsTable).limit(8);
+    .from(unitsTable)
+    .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+    .where(eq(propertiesTable.organizationId, orgId))
+    .limit(8);
   if (units.length < 3) return;
 
+  // Use org-specific contract numbers to avoid UNIQUE constraint conflicts
+  const prefix = `РЕН-${orgId}`;
   const contracts = await db.insert(rentalContractsTable).values([
     {
       organizationId: orgId, unitId: units[0].id,
@@ -28,8 +33,8 @@ async function seedDemoRentals(orgId: number) {
       tenantEmail: "petro.mv@gmail.com", tenantPhone: "+380671234567",
       tenantPassport: "АА123456", startDate: "2026-01-01", endDate: "2026-12-31",
       monthlyRate: "8500", depositAmount: "17000", depositPaid: true,
-      status: "active" as any, contractNumber: "РЕН-2026-001",
-      notes: "Довгострокова оренда бунгало",
+      status: "active" as any, contractNumber: `${prefix}-2026-001`,
+      notes: "Довгострокова оренда котеджу",
     },
     {
       organizationId: orgId, unitId: units[1].id,
@@ -37,7 +42,7 @@ async function seedDemoRentals(orgId: number) {
       tenantEmail: "kovalenko.o@ukr.net", tenantPhone: "+380502345678",
       startDate: "2026-02-01", endDate: "2026-07-31",
       monthlyRate: "6000", depositAmount: "12000", depositPaid: true,
-      status: "active" as any, contractNumber: "РЕН-2026-002",
+      status: "active" as any, contractNumber: `${prefix}-2026-002`,
     },
     {
       organizationId: orgId, unitId: units[2].id,
@@ -45,7 +50,7 @@ async function seedDemoRentals(orgId: number) {
       tenantEmail: "taras.i@gmail.com", tenantPhone: "+380633456789",
       startDate: "2026-05-01", endDate: null,
       monthlyRate: "9200", depositAmount: "18400", depositPaid: false,
-      status: "upcoming" as any, contractNumber: "РЕН-2026-003",
+      status: "upcoming" as any, contractNumber: `${prefix}-2026-003`,
       notes: "Безстроковий договір",
     },
     {
@@ -54,7 +59,7 @@ async function seedDemoRentals(orgId: number) {
       tenantEmail: "bondar.n@yahoo.com", tenantPhone: "+380504567890",
       startDate: "2025-06-01", endDate: "2026-03-31",
       monthlyRate: "7500", depositAmount: "15000", depositPaid: true,
-      status: "ended" as any, contractNumber: "РЕН-2025-008",
+      status: "ended" as any, contractNumber: `${prefix}-2025-008`,
     },
   ]).returning();
 

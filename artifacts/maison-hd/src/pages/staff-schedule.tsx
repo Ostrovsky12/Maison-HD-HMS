@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -310,8 +310,8 @@ export default function StaffSchedulePage() {
 
               {/* Staff rows */}
               {staff.map(member => (
-                <>
-                  <div key={`label-${member.id}`} className="border-b border-r p-2 text-xs font-medium flex items-center gap-1">
+                <Fragment key={member.id}>
+                  <div className="border-b border-r p-2 text-xs font-medium flex items-center gap-1">
                     <div>
                       <div className="font-semibold truncate">{member.name}</div>
                       <Badge variant="outline" className="text-[9px] px-1 py-0">
@@ -335,7 +335,7 @@ export default function StaffSchedulePage() {
                       </div>
                     );
                   })}
-                </>
+                </Fragment>
               ))}
             </div>
           </div>
