@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { registerClient, unregisterClient, getOnlinePeers, sendToClient } from "./lib/ws-broadcaster.js";
+import { scheduleBackups } from "./lib/backup.js";
 
 const rawPort = process.env["PORT"];
 
@@ -196,6 +197,25 @@ async function ensureSchema() {
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
   `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id            BIGSERIAL PRIMARY KEY,
+      org_id        INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
+      user_id       INTEGER,
+      user_email    TEXT,
+      action        TEXT NOT NULL,
+      resource_type TEXT NOT NULL,
+      resource_id   TEXT,
+      meta          JSONB,
+      ip_address    TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created
+      ON audit_logs (org_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_resource
+      ON audit_logs (resource_type, resource_id);
+  `);
 }
 
 async function bootstrap() {
@@ -206,6 +226,9 @@ async function bootstrap() {
 
     await autoSeedIfEmpty();
     await syncSuperAdmin();
+
+    scheduleBackups();
+    logger.info("Backup scheduler started (daily at 02:00 UTC)");
   } catch (err) {
     logger.error({ err }, "Bootstrap error");
   }

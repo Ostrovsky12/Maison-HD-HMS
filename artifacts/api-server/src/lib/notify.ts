@@ -7,6 +7,7 @@ import nodemailer from "nodemailer";
 import { db } from "@workspace/db";
 import { tenantSettings } from "../db/schema/platform.js";
 import { eq, and } from "drizzle-orm";
+import { encrypt, decrypt } from "./encrypt.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,28 +58,55 @@ async function upsertSetting(orgId: number, key: string, value: any) {
     });
 }
 
+function encryptEmailCfg(cfg: EmailConfig): any {
+  return { ...cfg, pass: encrypt(cfg.pass) };
+}
+
+function decryptEmailCfg(raw: any): EmailConfig | null {
+  if (!raw) return null;
+  return { ...raw, pass: decrypt(raw.pass) ?? raw.pass };
+}
+
+function encryptTgCfg(cfg: TelegramConfig): any {
+  return { ...cfg, botToken: encrypt(cfg.botToken) };
+}
+
+function decryptTgCfg(raw: any): TelegramConfig | null {
+  if (!raw) return null;
+  return { ...raw, botToken: decrypt(raw.botToken) ?? raw.botToken };
+}
+
+function encryptSmsCfg(cfg: SmsConfig): any {
+  return { ...cfg, apiKey: encrypt(cfg.apiKey) };
+}
+
+function decryptSmsCfg(raw: any): SmsConfig | null {
+  if (!raw) return null;
+  return { ...raw, apiKey: decrypt(raw.apiKey) ?? raw.apiKey };
+}
+
 export async function getEmailConfig(orgId: number): Promise<EmailConfig | null> {
-  return getSetting(orgId, "email");
+  return decryptEmailCfg(await getSetting(orgId, "email"));
 }
 
 export async function getTelegramConfig(orgId: number): Promise<TelegramConfig | null> {
-  return getSetting(orgId, "telegram");
+  return decryptTgCfg(await getSetting(orgId, "telegram"));
 }
 
 export async function getSmsConfig(orgId: number): Promise<SmsConfig | null> {
-  return getSetting(orgId, "sms");
+  return decryptSmsCfg(await getSetting(orgId, "sms"));
 }
 
 export async function saveEmailConfig(orgId: number, cfg: EmailConfig) {
-  await upsertSetting(orgId, "email", cfg);
+  await upsertSetting(orgId, "email", encryptEmailCfg(cfg));
 }
 
 export async function saveTelegramConfig(orgId: number, cfg: TelegramConfig) {
-  await upsertSetting(orgId, "telegram", cfg);
+  await upsertSetting(orgId, "telegram", encryptTgCfg(cfg));
 }
 
 export async function saveSmsConfig(orgId: number, cfg: SmsConfig) {
-  await upsertSetting(orgId, "sms", cfg);
+  await upsertSetting(orgId, "sms", encryptSmsCfg(cfg));
 }
 
 // ─── Email sender ─────────────────────────────────────────────────────────────

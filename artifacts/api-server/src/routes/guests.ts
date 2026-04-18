@@ -3,6 +3,8 @@ import { db } from "@workspace/db";
 import { guestsTable, bookingsTable, unitsTable, propertiesTable } from "@workspace/db/schema";
 import { eq, and, ilike, or, sql, desc } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { encrypt, decrypt } from "../lib/encrypt.js";
+import { logAudit, auditFromReq } from "../lib/audit.js";
 
 const router = Router();
 
@@ -10,6 +12,7 @@ const formatGuest = (g: any) => ({
   ...g,
   ltv: Number(g.ltv),
   totalSpent: g.totalSpent ? Number(g.totalSpent) : 0,
+  passportNumber: decrypt(g.passportNumber) ?? g.passportNumber,
 });
 
 router.get("/", requireAuth, async (req, res) => {
@@ -28,7 +31,6 @@ router.get("/", requireAuth, async (req, res) => {
       ilike(guestsTable.lastName, `%${search}%`),
       ilike(guestsTable.email, `%${search}%`),
       ilike(guestsTable.phone, `%${search}%`),
-      ilike(guestsTable.passportNumber, `%${search}%`),
     )!);
   }
 
@@ -67,7 +69,7 @@ router.post("/", requireAuth, async (req, res) => {
     middleName: middleName || null,
     email,
     phone,
-    passportNumber: passportNumber || null,
+    passportNumber: passportNumber ? encrypt(passportNumber) : null,
     nationality: nationality || null,
     birthDate: birthDate || null,
     address: address || null,
@@ -79,11 +81,18 @@ router.post("/", requireAuth, async (req, res) => {
   res.status(201).json(formatGuest(guest));
 });
 
-// GET /api/guests/export — CSV export of all guests
+// GET /api/guests/export — CSV export
 router.get("/export", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const orgId = user.organizationId;
   if (!orgId) { res.status(400).json({ error: "No organization" }); return; }
+
+  await logAudit({
+    ...auditFromReq(req),
+    action: "export",
+    resourceType: "guest",
+    meta: { format: "csv" },
+  });
 
   const guests = await db
     .select({
@@ -139,7 +148,7 @@ router.get("/export", requireAuth, async (req, res) => {
     g.phone || "",
     g.email || "",
     g.nationality || "",
-    g.passportNumber || "",
+    decrypt(g.passportNumber) || "",
     g.bookingCount ?? 0,
     g.totalNights ?? 0,
     g.totalSpent ? Number(g.totalSpent).toFixed(0) : "0",
@@ -209,6 +218,15 @@ router.get("/:guestId", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden", message: "Access denied" });
     return;
   }
+
+  await logAudit({
+    ...auditFromReq(req),
+    action: "view_sensitive",
+    resourceType: "guest",
+    resourceId: String(guestId),
+    meta: { fields: ["passport_number", "birth_date", "address"] },
+  });
+
   const bookings = await db.select({
     id: bookingsTable.id,
     unitId: bookingsTable.unitId,
@@ -232,7 +250,6 @@ router.get("/:guestId", requireAuth, async (req, res) => {
     .where(eq(bookingsTable.guestId, guestId))
     .orderBy(desc(bookingsTable.checkIn));
 
-  // Recalculate live stats from actual bookings
   const completedBookings = bookings.filter(b => b.status !== "cancelled");
   const totalNightsCalc = completedBookings.reduce((acc, b) => {
     if (!b.checkIn || !b.checkOut) return acc;
@@ -282,13 +299,23 @@ router.put("/:guestId", requireAuth, async (req, res) => {
     loyaltyLevel, loyaltyPoints, totalNights, totalSpent, preferences, tags,
   } = req.body;
 
+  if (passportNumber !== undefined) {
+    await logAudit({
+      ...auditFromReq(req),
+      action: "update_sensitive",
+      resourceType: "guest",
+      resourceId: String(guestId),
+      meta: { fields: ["passport_number"] },
+    });
+  }
+
   const [guest] = await db.update(guestsTable).set({
     ...(firstName !== undefined && { firstName }),
     ...(lastName !== undefined && { lastName }),
     ...(middleName !== undefined && { middleName }),
     ...(email !== undefined && { email }),
     ...(phone !== undefined && { phone }),
-    ...(passportNumber !== undefined && { passportNumber }),
+    ...(passportNumber !== undefined && { passportNumber: passportNumber ? encrypt(passportNumber) : null }),
     ...(nationality !== undefined && { nationality }),
     ...(birthDate !== undefined && { birthDate }),
     ...(address !== undefined && { address }),
@@ -306,6 +333,53 @@ router.put("/:guestId", requireAuth, async (req, res) => {
     return;
   }
   res.json(formatGuest(guest));
+});
+
+// ── GDPR: Anonymize guest — right to be forgotten ─────────────────────────────
+router.post("/:guestId/anonymize", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const guestId = parseInt(req.params.guestId);
+
+  const [existing] = await db.select({ orgId: guestsTable.organizationId, firstName: guestsTable.firstName, lastName: guestsTable.lastName })
+    .from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1);
+
+  if (!existing) {
+    return res.status(404).json({ error: "Not Found" });
+  }
+  if (user.role !== "super_admin" && user.organizationId && existing.orgId !== user.organizationId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const [anonymized] = await db.update(guestsTable).set({
+    firstName: "Видалений",
+    lastName: "Гість",
+    middleName: null,
+    email: null,
+    phone: null,
+    passportNumber: null,
+    nationality: null,
+    birthDate: null,
+    address: null,
+    notes: "Персональні дані видалено (GDPR запит)",
+    updatedAt: new Date(),
+  } as any).where(eq(guestsTable.id, guestId)).returning();
+
+  await logAudit({
+    ...auditFromReq(req),
+    action: "anonymize",
+    resourceType: "guest",
+    resourceId: String(guestId),
+    meta: {
+      originalName: `${existing.firstName} ${existing.lastName}`,
+      reason: req.body.reason || "GDPR request",
+    },
+  });
+
+  res.json({
+    success: true,
+    message: "Персональні дані гостя успішно видалено відповідно до запиту GDPR",
+    guest: formatGuest(anonymized),
+  });
 });
 
 export default router;

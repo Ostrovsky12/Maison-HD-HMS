@@ -36,6 +36,14 @@ The system is built as a pnpm monorepo using TypeScript, with a React and Vite f
     - `station` and `legal_entity_id` columns for `fb_items`.
     - Role-based access control for features like Super Admin panel and POS cashier functions.
 
+## Security & Compliance
+- **AES-256-GCM encryption at rest** (`artifacts/api-server/src/lib/encrypt.ts`): Sensitive fields auto-encrypt on write with `enc:<iv>.<tag>.<data>` prefix. Covers: `liqpay_private_key`, `fondy_secret_key`, `checkbox_password` (legal_entities); `botToken`, email `pass`, SMS `apiKey` (tenant_settings via notify.ts); `passport_number` (guests).
+- **GDPR anonymize** (`POST /api/guests/:guestId/anonymize`): Wipes PII (name → "Видалений Гість", clears email/phone/passport/birthDate/address) with audit log.
+- **Audit logs table** (`audit_logs`): Indexed on (org_id, created_at) and (resource_type, resource_id). Actions: view_sensitive, update_sensitive, delete, anonymize, export, login, login_failed, view_keys, backup_created, backup_failed.
+- **Security API** (`GET /api/security/audit-logs`, `POST /api/security/backup`, `GET /api/security/backup/list`): Admin-only audit log viewer; super_admin manual backup trigger.
+- **Daily pg_dump backups**: Runs at 02:00 UTC, gzips dump, uploads to object storage at `backups/backup-{date}.sql.gz`, keeps last 30.
+- **ENCRYPTION_KEY**: 64-char hex env secret. `encrypt(null)` returns null; `decrypt` handles both `enc:` format and legacy plaintext (backwards-compatible).
+
 ## External Dependencies
 - **LiqPay:** Payment gateway for direct transactions.
 - **OpenAI gpt-5.2:** AI models for various intelligent features.

@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health.js";
 import storageRouter from "./storage.js";
+import securityRouter from "./security.js";
 import authRouter from "./auth.js";
 import organizationsRouter from "./organizations.js";
 import propertiesRouter from "./properties.js";
@@ -119,6 +120,7 @@ router.use("/accommodation", accommodationRouter);
 router.use("/console", consoleRouter);
 router.use("/payment-layer", paymentLayerRouter);
 router.use("/super-admin", superAdminRouter);
+router.use("/security", securityRouter);
 router.use("/reports", reportsRouter);
 router.use("/poster", posterRouter);
 router.use("/minibar", minibarRouter);

@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { checkboxSignin, ensureShiftOpen } from "../services/checkbox.js";
 import { encrypt, decrypt } from "../lib/encrypt.js";
+import { logAudit, auditFromReq } from "../lib/audit.js";
 
 const router = Router();
 const getOrg = (req: any): number => (req as any).user?.organizationId;
@@ -117,6 +118,22 @@ router.patch("/:id", requireAuth, async (req, res) => {
     const encPrivKey  = liqpayPrivateKey !== undefined ? encrypt(liqpayPrivateKey || null) : null;
     const encFondy    = fondySecretKey !== undefined   ? encrypt(fondySecretKey || null)   : null;
     const encCbkPwd   = checkboxPassword !== undefined ? encrypt(checkboxPassword || null)  : null;
+
+    const sensitiveChanged = liqpayPrivateKey !== undefined || fondySecretKey !== undefined || checkboxPassword !== undefined;
+    if (sensitiveChanged) {
+      const changed = [
+        liqpayPrivateKey !== undefined && "liqpay_private_key",
+        fondySecretKey !== undefined && "fondy_secret_key",
+        checkboxPassword !== undefined && "checkbox_password",
+      ].filter(Boolean);
+      await logAudit({
+        ...auditFromReq(req),
+        action: "update_sensitive",
+        resourceType: "legal_entity",
+        resourceId: String(id),
+        meta: { fields: changed },
+      });
+    }
     const r = await db_.query(`
       UPDATE legal_entities SET
         name              = COALESCE($1, name),
