@@ -173,9 +173,9 @@ router.post("/stream", requireAuth, async (req, res) => {
 
   try {
     const stream = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+      model: "gpt-4.1-mini",
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-      max_completion_tokens: 8192,
+      max_tokens: 2048,
       stream: true,
     });
 
@@ -215,9 +215,9 @@ router.post("/", requireAuth, async (req, res) => {
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+      model: "gpt-4.1-mini",
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-      max_completion_tokens: 8192,
+      max_tokens: 2048,
     });
 
     const choice = response.choices[0];
