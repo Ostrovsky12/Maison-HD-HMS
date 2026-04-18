@@ -202,19 +202,32 @@ function HotelTab() {
     },
   });
 
+  const { data: legalEntities = [] } = useQuery<any[]>({
+    queryKey: ["legal-entities"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/legal-entities`);
+      if (!r.ok) return [];
+      const d = await r.json();
+      return d.legalEntities || d || [];
+    },
+  });
+
+  const buildForm = (p: any) => ({
+    name: p.name || "",
+    address: p.address || "",
+    type: p.type || "hotel",
+    description: p.description || "",
+    checkInTime: p.check_in_time || "14:00",
+    checkOutTime: p.check_out_time || "12:00",
+    touristTaxRate: p.tourist_tax_rate != null ? parseFloat(p.tourist_tax_rate) : 0,
+    legalEntityId: p.legal_entity_id || null,
+  });
+
   useEffect(() => {
     if (properties.length > 0 && !propertyId) {
       const p = properties[0];
       setPropertyId(p.id);
-      setForm({
-        name: p.name || "",
-        address: p.address || "",
-        type: p.type || "hotel",
-        description: p.description || "",
-        checkInTime: p.check_in_time || "14:00",
-        checkOutTime: p.check_out_time || "12:00",
-        touristTaxRate: p.tourist_tax_rate != null ? parseFloat(p.tourist_tax_rate) : 0,
-      });
+      setForm(buildForm(p));
     }
   }, [properties]);
 
@@ -251,18 +264,7 @@ function HotelTab() {
           <Label>Об'єкт</Label>
           <Select value={String(propertyId)} onValueChange={v => {
             const p = properties.find(x => x.id === Number(v));
-            if (p) {
-              setPropertyId(p.id);
-              setForm({
-                name: p.name || "",
-                address: p.address || "",
-                type: p.type || "hotel",
-                description: p.description || "",
-                checkInTime: p.check_in_time || "14:00",
-                checkOutTime: p.check_out_time || "12:00",
-                touristTaxRate: p.tourist_tax_rate != null ? parseFloat(p.tourist_tax_rate) : 0,
-              });
-            }
+            if (p) { setPropertyId(p.id); setForm(buildForm(p)); }
           }}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -346,6 +348,33 @@ function HotelTab() {
           className="w-40"
         />
         <p className="text-xs text-muted-foreground">Наприклад: 5 — додається до суми рахунку автоматично</p>
+      </div>
+
+      {/* ── Legal Entity for this property ── */}
+      <div className="space-y-2 border-t pt-4">
+        <Label className="flex items-center gap-1.5">
+          Юридична особа об'єкту
+          <span className="text-xs font-normal text-muted-foreground">(для LiqPay та розрахунків)</span>
+        </Label>
+        <Select
+          value={form.legalEntityId ? String(form.legalEntityId) : "__none__"}
+          onValueChange={v => fv("legalEntityId", v === "__none__" ? null : parseInt(v))}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Оберіть юридичну особу..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— Без прив'язки (глобальна за замовч.) —</SelectItem>
+            {legalEntities.map((e: any) => (
+              <SelectItem key={e.id} value={String(e.id)}>
+                {e.name} {e.is_default ? "(за замовч.)" : ""} · {e.type === "fop" ? "ФОП" : e.type === "tov" ? "ТОВ" : e.type}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Виручка від проживання в цьому об'єкті піде на рахунок обраної юр. особи при розщепленні оплат
+        </p>
       </div>
 
       <div className="flex justify-end pt-2">

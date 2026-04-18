@@ -27,7 +27,7 @@ router.post("/", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Bad Request", message: "No organization" });
     return;
   }
-  const { name, description, price, unit, category, icon, timeSlots, sortOrder, propertyId, maxQuantity } = req.body;
+  const { name, description, price, unit, category, icon, timeSlots, sortOrder, propertyId, maxQuantity, legalEntityId } = req.body;
   const [addon] = await db.insert(addonsTable).values({
     organizationId: orgId,
     name,
@@ -40,7 +40,8 @@ router.post("/", requireAuth, async (req, res) => {
     sortOrder: sortOrder ?? 0,
     propertyId: propertyId || null,
     maxQuantity: maxQuantity || null,
-  }).returning();
+    legalEntityId: legalEntityId || null,
+  } as any).returning();
   res.status(201).json({ ...addon, price: Number(addon.price) });
 });
 
@@ -48,7 +49,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const orgId = user.organizationId;
   const id = parseInt(req.params.id);
-  const { name, description, price, unit, category, icon, timeSlots, sortOrder, propertyId, maxQuantity, isActive } = req.body;
+  const { name, description, price, unit, category, icon, timeSlots, sortOrder, propertyId, maxQuantity, isActive, legalEntityId } = req.body;
 
   const updates: Record<string, any> = { updatedAt: new Date() };
   if (name !== undefined) updates.name = name;
@@ -62,6 +63,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
   if (propertyId !== undefined) updates.propertyId = propertyId || null;
   if (maxQuantity !== undefined) updates.maxQuantity = maxQuantity || null;
   if (isActive !== undefined) updates.isActive = isActive;
+  if (legalEntityId !== undefined) (updates as any).legalEntityId = legalEntityId || null;
 
   const [addon] = await db.update(addonsTable)
     .set(updates)

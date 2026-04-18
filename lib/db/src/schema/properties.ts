@@ -2,6 +2,7 @@ import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, numeric, va
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./organizations";
+import { legalEntitiesTable } from "./legal-entities";
 
 export const propertyTypeEnum = pgEnum("property_type", ["hotel", "house", "spa", "pool", "bungalow", "villa", "apartment", "glamping", "camping", "other"]);
 
@@ -17,6 +18,7 @@ export const propertiesTable = pgTable("properties", {
   touristTaxRate: numeric("tourist_tax_rate", { precision: 5, scale: 2 }).default("0"),
   checkInTime: varchar("check_in_time", { length: 5 }).default("14:00"),
   checkOutTime: varchar("check_out_time", { length: 5 }).default("12:00"),
+  legalEntityId: integer("legal_entity_id").references(() => legalEntitiesTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

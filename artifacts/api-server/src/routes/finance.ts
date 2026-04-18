@@ -8,6 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import crypto from "crypto";
 import { encrypt, decrypt } from "../lib/encrypt.js";
+import { revenueByLegalEntity } from "../lib/split-billing.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -1131,6 +1132,19 @@ router.get("/controls/overview", async (req: any, res) => {
       isRestricted,
     });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Revenue by Legal Entity ──────────────────────────────────────────────────
+router.get("/by-entity", async (req: any, res) => {
+  try {
+    const orgId: number = req.user.organizationId;
+    const { from, to } = req.query;
+    const result = await revenueByLegalEntity(orgId, {
+      from: from as string | undefined,
+      to: to as string | undefined,
+    });
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

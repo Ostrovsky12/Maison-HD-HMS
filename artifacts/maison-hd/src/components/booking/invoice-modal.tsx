@@ -4,9 +4,10 @@ import { format } from "date-fns";
 import { uk } from "date-fns/locale";
 import {
   X, Printer, Edit3, Save, Plus, Trash2, ChevronDown, Building2,
-  FileText, Check, Send, MessageCircle, Phone, Link2, CheckCircle2,
+  FileText, Check, Send, MessageCircle, Phone, Link2, CheckCircle2, CreditCard,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { SplitBillingDialog } from "@/components/split-billing-dialog";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -368,6 +369,7 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   const [saving, setSaving] = useState(false);
   const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(null);
   const [showSendModal, setShowSendModal] = useState(false);
+  const [showSplitBilling, setShowSplitBilling] = useState(false);
 
   const total = items.reduce((s, it) => s + it.amount, 0);
   const due = total - (data.booking.paidAmount || 0);
@@ -505,12 +507,21 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
               </button>
             )}
             {savedInvoiceId && (
-              <button
-                onClick={() => setShowSendModal(true)}
-                className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors"
-              >
-                <Send className="w-3.5 h-3.5" /> Надіслати
-              </button>
+              <>
+                <button
+                  onClick={() => setShowSplitBilling(true)}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold transition-colors"
+                  title="Сформувати LiqPay посилання по юридичних особах"
+                >
+                  <CreditCard className="w-3.5 h-3.5" /> Оплата
+                </button>
+                <button
+                  onClick={() => setShowSendModal(true)}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors"
+                >
+                  <Send className="w-3.5 h-3.5" /> Надіслати
+                </button>
+              </>
             )}
             <button
               onClick={handlePrint}
@@ -842,6 +853,19 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
           total={total}
           guestName={buyer.name || data.booking.guestName || ""}
           onClose={() => setShowSendModal(false)}
+        />
+      )}
+
+      {/* ── Split Billing Dialog ─────────────────────────────────── */}
+      {showSplitBilling && savedInvoiceId && (
+        <SplitBillingDialog
+          invoiceId={savedInvoiceId}
+          invoiceNumber={data.invoiceNumber}
+          totalAmount={total}
+          guestName={buyer.name || data.booking.guestName || ""}
+          guestEmail={buyer.name ? undefined : undefined}
+          guestPhone={data.booking.phone}
+          onClose={() => setShowSplitBilling(false)}
         />
       )}
     </div>,

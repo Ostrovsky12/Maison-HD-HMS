@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { getProvider, classifyError } from "../lib/payment-provider.js";
+import { generateSplitPaymentLinks, getInvoiceSplits } from "../lib/split-billing.js";
 import crypto from "crypto";
 
 const router = Router();
@@ -589,6 +590,70 @@ router.get("/overview", async (req: any, res) => {
         mono:      { status: "placeholder", name: "Monobank",  note: "Потребує налаштування" },
       },
     });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── SPLIT BILLING ────────────────────────────────────────────────────────────
+router.post("/invoices/:invoiceId/splits", async (req: any, res) => {
+  try {
+    const orgId: number = req.user.organizationId;
+    const invoiceId = parseInt(req.params.invoiceId);
+    if (isNaN(invoiceId)) return res.status(400).json({ error: "Invalid invoiceId" });
+
+    const { guestName, guestEmail, guestPhone, currency, regenerate } = req.body;
+
+    const result = await generateSplitPaymentLinks({
+      invoiceId,
+      orgId,
+      guestName,
+      guestEmail,
+      guestPhone,
+      currency,
+      regenerate: Boolean(regenerate),
+    });
+
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/invoices/:invoiceId/splits", async (req: any, res) => {
+  try {
+    const orgId: number = req.user.organizationId;
+    const invoiceId = parseInt(req.params.invoiceId);
+    if (isNaN(invoiceId)) return res.status(400).json({ error: "Invalid invoiceId" });
+    const splits = await getInvoiceSplits(invoiceId, orgId);
+    res.json({ splits, isSplit: splits.length > 1 });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Mark a split as paid (webhook integration point)
+router.post("/invoices/:invoiceId/splits/:splitId/mark-paid", async (req: any, res) => {
+  try {
+    const db = DB().$client;
+    const orgId: number = req.user.organizationId;
+    const invoiceId = parseInt(req.params.invoiceId);
+    const splitId   = parseInt(req.params.splitId);
+    const { paidAmount, txId } = req.body;
+
+    const { rows: [split] } = await db.query(
+      `UPDATE invoice_splits SET status = 'paid', paid_amount = $1, liqpay_tx_id = $2, paid_at = NOW(), updated_at = NOW()
+       WHERE id = $3 AND invoice_id = $4 RETURNING *`,
+      [paidAmount || null, txId || null, splitId, invoiceId],
+    );
+
+    if (!split) return res.status(404).json({ error: "Split not found" });
+
+    // Check if all splits paid → update parent invoice
+    const { rows: allSplits } = await db.query(
+      `SELECT status FROM invoice_splits WHERE invoice_id = $1`, [invoiceId]);
+    const allPaid = allSplits.every((s: any) => s.status === "paid");
+    if (allPaid) {
+      await db.query(
+        `UPDATE invoices SET status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [invoiceId]);
+    }
+
+    res.json({ ok: true, split });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

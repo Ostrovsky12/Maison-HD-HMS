@@ -88,7 +88,7 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden", message: "Insufficient permissions" });
     return;
   }
-  const { name, address, type, description, sortOrder, touristTaxRate, checkInTime, checkOutTime } = req.body;
+  const { name, address, type, description, sortOrder, touristTaxRate, checkInTime, checkOutTime, legalEntityId } = req.body;
   // Use raw SQL for the update — handles property_type enum cast and all optional columns cleanly
   await db.execute(sql`
     UPDATE properties SET
@@ -100,6 +100,7 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
       ${touristTaxRate !== undefined ? sql`tourist_tax_rate = ${parseFloat(String(touristTaxRate))},` : sql``}
       ${checkInTime !== undefined ? sql`check_in_time = ${checkInTime},` : sql``}
       ${checkOutTime !== undefined ? sql`check_out_time = ${checkOutTime},` : sql``}
+      ${legalEntityId !== undefined ? sql`legal_entity_id = ${legalEntityId || null},` : sql``}
       updated_at = NOW()
     WHERE id = ${propertyId}
   `);

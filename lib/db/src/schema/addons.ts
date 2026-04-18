@@ -3,6 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./organizations";
 import { bookingsTable } from "./bookings";
+import { legalEntitiesTable } from "./legal-entities";
 
 export const addonsTable = pgTable("addons", {
   id: serial("id").primaryKey(),
@@ -18,6 +19,7 @@ export const addonsTable = pgTable("addons", {
   propertyId: integer("property_id"),
   maxQuantity: integer("max_quantity"),
   isActive: boolean("is_active").notNull().default(true),
+  legalEntityId: integer("legal_entity_id").references(() => legalEntitiesTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -1545,6 +1545,106 @@ function RefundsTab() {
   );
 }
 
+// ─── REVENUE BY ENTITY ───────────────────────────────────────────────────────
+function RevenueByEntitySection() {
+  const [from, setFrom] = useState(() => {
+    const d = new Date(); d.setDate(1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["finance", "by-entity", from, to],
+    queryFn: () => apiFetch(`by-entity?from=${from}&to=${to}`),
+    staleTime: 60_000,
+  });
+
+  const byEntity: any[] = data?.byEntity || [];
+  const summary: any = data?.summary || {};
+  const grandTotal = summary.totalAmount || 0;
+
+  const typeLabel = (type: string) => type === "tov" ? "ТОВ" : type === "fop" ? "ФОП" : type?.toUpperCase() || "";
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-indigo-600" />
+          <h3 className="font-semibold text-gray-900 text-sm">Виручка по юридичних особах</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+          <span className="text-xs text-gray-400">—</span>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+          <button onClick={() => refetch()} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">
+            <RefreshCw className="w-3.5 h-3.5 text-gray-400" />
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-indigo-500" /></div>
+      ) : byEntity.length === 0 ? (
+        <div className="text-center py-8 text-sm text-gray-400">Немає даних за обраний період</div>
+      ) : (
+        <>
+          {/* Summary bar */}
+          <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex flex-wrap gap-4 text-xs">
+            <div><span className="text-gray-400">Загально: </span><span className="font-bold text-gray-900">{fmtCur(grandTotal)}</span></div>
+            <div><span className="text-gray-400">Оплачено: </span><span className="font-bold text-emerald-700">{fmtCur(summary.paidAmount || 0)}</span></div>
+            <div><span className="text-gray-400">Залишок: </span><span className="font-bold text-amber-600">{fmtCur(summary.outstandingAmount || 0)}</span></div>
+            <div><span className="text-gray-400">Збирання: </span><span className="font-bold text-indigo-600">{summary.collectionRate || 0}%</span></div>
+          </div>
+
+          {/* Entity rows */}
+          <div className="divide-y divide-gray-100">
+            {byEntity.map((e: any) => {
+              const share = grandTotal > 0 ? (e.totalAmount / grandTotal) * 100 : 0;
+              return (
+                <div key={e.entityId} className="px-5 py-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Building2 className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <span className="font-semibold text-sm text-gray-900 truncate block">{e.entityName}</span>
+                        <span className="text-xs text-gray-400">{typeLabel(e.entityType)} · {e.invoiceCount} рахунків</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0 ml-4">
+                      <div className="font-bold text-gray-900 text-sm">{fmtCur(e.totalAmount)}</div>
+                      <div className="text-xs text-gray-400">{share.toFixed(1)}% від загального</div>
+                    </div>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-200 rounded-full relative">
+                        <div
+                          className="absolute inset-y-0 left-0 bg-indigo-600 rounded-full transition-all"
+                          style={{ width: `${e.collectionRate}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 text-xs flex-shrink-0">
+                      <span className="text-emerald-700 font-medium">{fmtCur(e.paidAmount)} оплачено</span>
+                      {e.outstandingAmount > 0 && (
+                        <span className="text-amber-600">{fmtCur(e.outstandingAmount)} залишок</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── LEGAL ENTITIES ───────────────────────────────────────────────────────────
 function LegalEntitiesTab() {
   const qc = useQueryClient();
@@ -1650,6 +1750,9 @@ function LegalEntitiesTab() {
           {!entities.length && <div className="col-span-2 text-center py-12 text-gray-400 text-sm">Ще немає юридичних осіб</div>}
         </div>
       )}
+
+      {/* ── Revenue by Legal Entity ─────────────────────────────────────── */}
+      <RevenueByEntitySection />
 
       {editEntity && (
         <Dialog open={!!editEntity} onOpenChange={() => setEditEntity(null)}>
