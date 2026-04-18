@@ -13,6 +13,27 @@ function genGuestCode(): string {
   return randomBytes(5).toString("hex").toUpperCase();
 }
 
+async function requireBookingOwnership(req: any, res: any, next: any) {
+  const user = req.user;
+  if (!user || user.role === "super_admin") { next(); return; }
+  const orgId = user.organizationId;
+  if (!orgId) { next(); return; }
+  const bookingId = parseInt(req.params.bookingId);
+  if (isNaN(bookingId)) { res.status(400).json({ error: "Invalid booking ID" }); return; }
+  const [row] = await db
+    .select({ propOrgId: propertiesTable.organizationId })
+    .from(bookingsTable)
+    .innerJoin(unitsTable, eq(unitsTable.id, bookingsTable.unitId))
+    .innerJoin(propertiesTable, eq(propertiesTable.id, unitsTable.propertyId))
+    .where(eq(bookingsTable.id, bookingId))
+    .limit(1);
+  if (!row || row.propOrgId !== orgId) {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+    return;
+  }
+  next();
+}
+
 const CALENDAR_COLORS = [
   "#4f86c6", "#e07b54", "#5cb85c", "#9b59b6",
   "#e67e22", "#16a085", "#c0392b", "#2980b9",
@@ -673,7 +694,7 @@ router.get("/check-draft", requireAuth, async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-router.get("/:bookingId", requireAuth, async (req, res) => {
+router.get("/:bookingId", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
   if (!booking) {
@@ -714,7 +735,7 @@ router.get("/:bookingId", requireAuth, async (req, res) => {
   });
 });
 
-router.put("/:bookingId", requireAuth, async (req, res) => {
+router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const {
     checkIn, checkOut, status, paymentStatus, source, totalAmount, notes,
@@ -770,7 +791,7 @@ router.put("/:bookingId", requireAuth, async (req, res) => {
   res.json({ ...booking, totalAmount: Number(booking.totalAmount), paidAmount: Number(booking.paidAmount) });
 });
 
-router.delete("/:bookingId", requireAuth, async (req, res) => {
+router.delete("/:bookingId", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const [booking] = await db.update(bookingsTable).set({ status: "cancelled", updatedAt: new Date() })
     .where(eq(bookingsTable.id, bookingId)).returning();
@@ -781,7 +802,7 @@ router.delete("/:bookingId", requireAuth, async (req, res) => {
   res.json({ success: true, message: "Booking cancelled" });
 });
 
-router.patch("/:bookingId/status", requireAuth, async (req, res) => {
+router.patch("/:bookingId/status", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const { status } = req.body;
   const [booking] = await db.update(bookingsTable).set({ status, updatedAt: new Date() })
@@ -794,7 +815,7 @@ router.patch("/:bookingId/status", requireAuth, async (req, res) => {
 });
 
 // POST /api/bookings/:bookingId/checkin — check in a guest
-router.post("/:bookingId/checkin", requireAuth, async (req, res) => {
+router.post("/:bookingId/checkin", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const user = (req as any).user;
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
@@ -833,7 +854,7 @@ router.post("/:bookingId/checkin", requireAuth, async (req, res) => {
 });
 
 // POST /api/bookings/:bookingId/checkout — check out a guest
-router.post("/:bookingId/checkout", requireAuth, async (req, res) => {
+router.post("/:bookingId/checkout", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const user = (req as any).user;
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
@@ -900,7 +921,7 @@ router.post("/:bookingId/checkout", requireAuth, async (req, res) => {
 });
 
 // POST /api/bookings/:bookingId/cancel — cancel a booking
-router.post("/:bookingId/cancel", requireAuth, async (req, res) => {
+router.post("/:bookingId/cancel", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const user = (req as any).user;
   const { reason } = req.body;
@@ -932,7 +953,7 @@ router.post("/:bookingId/cancel", requireAuth, async (req, res) => {
 });
 
 // GET /api/bookings/:bookingId/qr — generate QR code data URL for check-in
-router.get("/:bookingId/qr", requireAuth, async (req, res) => {
+router.get("/:bookingId/qr", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
   if (!booking) {
@@ -954,7 +975,7 @@ router.get("/:bookingId/qr", requireAuth, async (req, res) => {
 });
 
 // POST /api/bookings/:bookingId/liqpay — create a LiqPay payment link
-router.post("/:bookingId/liqpay", requireAuth, async (req, res) => {
+router.post("/:bookingId/liqpay", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
   if (!booking) {
@@ -1111,7 +1132,7 @@ router.post("/liqpay/callback", async (req, res) => {
 });
 
 // POST /api/bookings/:bookingId/payment-link
-router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
+router.post("/:bookingId/payment-link", requireAuth, requireBookingOwnership, async (req, res) => {
   try {
     const bookingId = parseInt(req.params.bookingId);
     const { legalEntityId } = req.body;
@@ -1184,7 +1205,7 @@ router.post("/:bookingId/payment-link", requireAuth, async (req, res) => {
 });
 
 // POST /api/bookings/:bookingId/invoice — save invoice to DB
-router.post("/:bookingId/invoice", requireAuth, async (req, res) => {
+router.post("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (req, res) => {
   try {
     const bookingId = parseInt(req.params.bookingId);
     const user = (req as any).user;
@@ -1236,7 +1257,7 @@ router.post("/:bookingId/invoice", requireAuth, async (req, res) => {
 });
 
 // GET /api/bookings/:bookingId/invoice
-router.get("/:bookingId/invoice", requireAuth, async (req, res) => {
+router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (req, res) => {
   try {
     const bookingId = parseInt(req.params.bookingId);
     const { legalEntityId } = req.query;

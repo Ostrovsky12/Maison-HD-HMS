@@ -6,6 +6,26 @@ import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
 
+async function resolvePropertyIds(user: any, propertyId: string | undefined, res: any): Promise<number[] | null> {
+  if (propertyId) {
+    const propId = parseInt(propertyId as string);
+    if (isNaN(propId)) { res.status(400).json({ error: "Invalid propertyId" }); return null; }
+    if (user.role !== "super_admin" && user.organizationId) {
+      const [prop] = await db.select({ id: propertiesTable.id })
+        .from(propertiesTable)
+        .where(and(eq(propertiesTable.id, propId), eq(propertiesTable.organizationId, user.organizationId)))
+        .limit(1);
+      if (!prop) { res.status(403).json({ error: "Forbidden", message: "Access denied" }); return null; }
+    }
+    return [propId];
+  } else if (user.role !== "super_admin" && user.organizationId) {
+    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    return props.map((p: any) => p.id);
+  }
+  return [];
+}
+
 router.get("/availability", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const { checkIn, checkOut, propertyId, category } = req.query;
@@ -28,14 +48,8 @@ router.get("/availability", requireAuth, async (req, res) => {
     return;
   }
 
-  let propIds: number[] = [];
-  if (propertyId) {
-    propIds = [parseInt(propertyId as string)];
-  } else if (user.role !== "super_admin" && user.organizationId) {
-    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, user.organizationId));
-    propIds = props.map(p => p.id);
-  }
+  const propIds = await resolvePropertyIds(user, propertyId as string | undefined, res);
+  if (propIds === null) return;
 
   const unitConditions: any[] = [];
   if (propIds.length > 0) unitConditions.push(inArray(unitsTable.propertyId, propIds));
@@ -93,14 +107,8 @@ router.get("/categories", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const { propertyId } = req.query;
 
-  let propIds: number[] = [];
-  if (propertyId) {
-    propIds = [parseInt(propertyId as string)];
-  } else if (user.role !== "super_admin" && user.organizationId) {
-    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, user.organizationId));
-    propIds = props.map(p => p.id);
-  }
+  const propIds = await resolvePropertyIds(user, propertyId as string | undefined, res);
+  if (propIds === null) return;
 
   const conditions: any[] = [eq(unitsTable.status, "active")];
   if (propIds.length > 0) conditions.push(inArray(unitsTable.propertyId, propIds));
@@ -131,14 +139,8 @@ router.get("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const { propertyId, category, status } = req.query;
 
-  let propIds: number[] = [];
-  if (propertyId) {
-    propIds = [parseInt(propertyId as string)];
-  } else if (user.role !== "super_admin" && user.organizationId) {
-    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, user.organizationId));
-    propIds = props.map(p => p.id);
-  }
+  const propIds = await resolvePropertyIds(user, propertyId as string | undefined, res);
+  if (propIds === null) return;
 
   let query = db.select().from(unitsTable);
   const conditions = [];
@@ -191,7 +193,18 @@ router.get("/:unitId", requireAuth, async (req, res) => {
 });
 
 router.put("/:unitId", requireAuth, async (req, res) => {
+  const user = (req as any).user;
   const unitId = parseInt(req.params.unitId);
+  if (user.role !== "super_admin" && user.organizationId) {
+    const [existing] = await db.select({ orgId: propertiesTable.organizationId })
+      .from(unitsTable)
+      .innerJoin(propertiesTable, eq(propertiesTable.id, unitsTable.propertyId))
+      .where(eq(unitsTable.id, unitId)).limit(1);
+    if (!existing || existing.orgId !== user.organizationId) {
+      res.status(403).json({ error: "Forbidden", message: "Access denied" });
+      return;
+    }
+  }
   const { name, category, capacity, maxCapacity, baseGuests, extraGuestPrice, status, floor, description, basePrice, hasView, hasBalcony, squareMeters, propertyId, sortOrder, isHidden, unitGroupId } = req.body;
   const [unit] = await db.update(unitsTable).set({
     ...(name !== undefined && { name }),

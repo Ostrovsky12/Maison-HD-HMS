@@ -198,10 +198,15 @@ router.get("/search", requireAuth, async (req, res) => {
 });
 
 router.get("/:guestId", requireAuth, async (req, res) => {
+  const user = (req as any).user;
   const guestId = parseInt(req.params.guestId);
   const [guest] = await db.select().from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1);
   if (!guest) {
     res.status(404).json({ error: "Not Found", message: "Guest not found" });
+    return;
+  }
+  if (user.role !== "super_admin" && user.organizationId && guest.organizationId !== user.organizationId) {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
     return;
   }
   const bookings = await db.select({
@@ -261,7 +266,16 @@ router.get("/:guestId", requireAuth, async (req, res) => {
 });
 
 router.put("/:guestId", requireAuth, async (req, res) => {
+  const user = (req as any).user;
   const guestId = parseInt(req.params.guestId);
+  if (user.role !== "super_admin" && user.organizationId) {
+    const [existing] = await db.select({ orgId: guestsTable.organizationId })
+      .from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1);
+    if (!existing || existing.orgId !== user.organizationId) {
+      res.status(403).json({ error: "Forbidden", message: "Access denied" });
+      return;
+    }
+  }
   const {
     firstName, lastName, middleName,
     email, phone, passportNumber, nationality, birthDate, address, notes,
