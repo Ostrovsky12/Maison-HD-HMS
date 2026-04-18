@@ -7,6 +7,7 @@ import { paymentsTable, bookingsTable, invoicesTable, legalEntitiesTable } from 
 import { eq, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import crypto from "crypto";
+import { encrypt, decrypt } from "../lib/encrypt.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -331,7 +332,7 @@ router.post("/liqpay/create-link", async (req: any, res) => {
         result_url: process.env.FRONTEND_URL || "", language: "uk",
       };
       dataStr = liqpayEncode(payObj);
-      sig = liqpaySign(dataStr, le.liqpay_private_key);
+      sig = liqpaySign(dataStr, decrypt(le.liqpay_private_key) || le.liqpay_private_key);
       checkoutUrl = `https://www.liqpay.ua/api/3/checkout?data=${encodeURIComponent(dataStr)}&signature=${encodeURIComponent(sig)}`;
     }
 
@@ -374,7 +375,7 @@ router.post("/liqpay/webhook", async (req: any, res) => {
     if (link.legal_entity_id) {
       const leRes = await db.execute(sql`SELECT * FROM legal_entities WHERE id = ${link.legal_entity_id}`);
       const le = leRes.rows[0] as any;
-      if (le?.liqpay_private_key && liqpaySign(data, le.liqpay_private_key) !== signature) {
+      if (le?.liqpay_private_key && liqpaySign(data, decrypt(le.liqpay_private_key) || le.liqpay_private_key) !== signature) {
         return res.status(403).send("Invalid signature");
       }
     }
@@ -975,7 +976,7 @@ router.post("/legal-entities", async (req: any, res) => {
     const { name, type = "fop", edrpou, iban, bank, mfo, ipn, vatNumber, isVatPayer = false, director, accountant, address, liqpayPublicKey, liqpayPrivateKey, fondyMerchantId, fondySecretKey } = req.body;
     const r = await db.execute(sql`
       INSERT INTO legal_entities (organization_id, name, type, edrpou, iban, bank, mfo, ipn, vat_number, is_vat_payer, director, accountant, address, liqpay_public_key, liqpay_private_key, fondy_merchant_id, fondy_secret_key, is_default, is_active, created_at, updated_at)
-      VALUES (${orgId}, ${name}, ${type}, ${edrpou ?? null}, ${iban ?? null}, ${bank ?? null}, ${mfo ?? null}, ${ipn ?? null}, ${vatNumber ?? null}, ${isVatPayer}, ${director ?? null}, ${accountant ?? null}, ${address ?? null}, ${liqpayPublicKey ?? null}, ${liqpayPrivateKey ?? null}, ${fondyMerchantId ?? null}, ${fondySecretKey ?? null}, FALSE, TRUE, NOW(), NOW())
+      VALUES (${orgId}, ${name}, ${type}, ${edrpou ?? null}, ${iban ?? null}, ${bank ?? null}, ${mfo ?? null}, ${ipn ?? null}, ${vatNumber ?? null}, ${isVatPayer}, ${director ?? null}, ${accountant ?? null}, ${address ?? null}, ${liqpayPublicKey ?? null}, ${encrypt(liqpayPrivateKey ?? null)}, ${fondyMerchantId ?? null}, ${encrypt(fondySecretKey ?? null)}, FALSE, TRUE, NOW(), NOW())
       RETURNING *
     `);
     res.json({ entity: r.rows[0] });
@@ -1003,7 +1004,7 @@ router.patch("/legal-entities/:id", async (req: any, res) => {
     if (accountant !== undefined) setClauses.push(sql`accountant = ${accountant}`);
     if (address !== undefined) setClauses.push(sql`address = ${address}`);
     if (liqpayPublicKey !== undefined) setClauses.push(sql`liqpay_public_key = ${liqpayPublicKey}`);
-    if (liqpayPrivateKey !== undefined) setClauses.push(sql`liqpay_private_key = ${liqpayPrivateKey}`);
+    if (liqpayPrivateKey !== undefined) setClauses.push(sql`liqpay_private_key = ${encrypt(liqpayPrivateKey)}`);
     if (isDefault !== undefined) {
       if (isDefault) await db.execute(sql`UPDATE legal_entities SET is_default = FALSE WHERE organization_id = ${orgId}`);
       setClauses.push(sql`is_default = ${isDefault}`);
