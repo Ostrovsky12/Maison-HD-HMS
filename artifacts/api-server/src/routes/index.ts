@@ -65,6 +65,7 @@ import sustainabilityRouter from "./sustainability.js";
 import telephonyRouter from "./telephony.js";
 import unitGroupsRouter from "./unit-groups.js";
 import { router as pushRouter } from "./push.js";
+import assistRouter from "./assist.js";
 
 const router: IRouter = Router();
 
@@ -133,6 +134,7 @@ router.use("/digital-keys", digitalKeysRouter);
 router.use("/sustainability", sustainabilityRouter);
 router.use("/telephony", telephonyRouter);
 router.use("/push", pushRouter);
+router.use("/assist", assistRouter);
 router.use("/", storageRouter);
 
 export default router;

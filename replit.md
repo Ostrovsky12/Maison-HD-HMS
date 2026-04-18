@@ -36,6 +36,10 @@ The system is built as a pnpm monorepo using TypeScript, with a React and Vite f
     - `station` and `legal_entity_id` columns for `fb_items`.
     - Role-based access control for features like Super Admin panel and POS cashier functions.
 
+## Recent Features
+- **Split Billing (invoice_splits):** Invoice items auto-routed to legal entity's LiqPay account. `invoice_splits` table stores per-entity splits. Engine in `artifacts/api-server/src/lib/split-billing.ts`. UI dialog in `artifacts/maison-hd/src/components/split-billing-dialog.tsx`.
+- **AI Help Assistant (HelpAssistant):** Floating "?" button (bottom-right) available on all authenticated pages. Calls `POST /api/assist/stream` (SSE streaming) powered by OpenAI `gpt-5-mini`. Comprehensive Ukrainian knowledge base covering all system sections. Component: `artifacts/maison-hd/src/components/help-assistant.tsx`.
+
 ## Security & Compliance
 - **AES-256-GCM encryption at rest** (`artifacts/api-server/src/lib/encrypt.ts`): Sensitive fields auto-encrypt on write with `enc:<iv>.<tag>.<data>` prefix. Covers: `liqpay_private_key`, `fondy_secret_key`, `checkbox_password` (legal_entities); `botToken`, email `pass`, SMS `apiKey` (tenant_settings via notify.ts); `passport_number` (guests).
 - **GDPR anonymize** (`POST /api/guests/:guestId/anonymize`): Wipes PII (name → "Видалений Гість", clears email/phone/passport/birthDate/address) with audit log.

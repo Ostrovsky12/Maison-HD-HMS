@@ -6,6 +6,7 @@ import { useGetMe } from "@workspace/api-client-react";
 import { Loader2 } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { TelephonyProvider } from "@/contexts/telephony-context";
+import { HelpAssistant } from "@/components/help-assistant";
 
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
@@ -221,6 +222,12 @@ function PushSubscriber() {
   return null;
 }
 
+function ConditionalHelp() {
+  const { data: user } = useGetMe();
+  if (!user) return null;
+  return <HelpAssistant />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -229,6 +236,7 @@ function App() {
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
             <PushSubscriber />
             <Router />
+            <ConditionalHelp />
           </WouterRouter>
           <Toaster />
         </TelephonyProvider>
