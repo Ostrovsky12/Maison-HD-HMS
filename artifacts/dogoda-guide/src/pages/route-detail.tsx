@@ -92,6 +92,16 @@ export default function RouteDetail() {
           </div>
         </div>
 
+        {(route as any).imageUrl && (
+          <div className="mx-6 mt-4 rounded-3xl overflow-hidden border border-border shadow-sm">
+            <img
+              src={(route as any).imageUrl}
+              alt={route.titleUa}
+              className="w-full object-cover max-h-64"
+            />
+          </div>
+        )}
+
         {polylinePositions.length > 1 && (
           <div className="h-64 mx-6 rounded-3xl overflow-hidden border border-border shadow-sm">
             <MapContainer center={center} zoom={15} zoomControl={false} className="w-full h-full z-0">

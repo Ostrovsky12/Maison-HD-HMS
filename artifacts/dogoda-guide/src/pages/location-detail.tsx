@@ -78,7 +78,7 @@ export default function LocationDetail() {
                 {location.gpsLat?.toFixed(5)}°N, {location.gpsLng?.toFixed(5)}°E
               </div>
               <a
-                href={`https://maps.google.com/maps?q=${location.gpsLat},${location.gpsLng}&navigate=yes`}
+                href={`https://www.google.com/maps/dir/?api=1&destination=${location.gpsLat},${location.gpsLng}&travelmode=walking`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-medium px-3 py-1.5 rounded-full hover:bg-primary/90 transition-colors"

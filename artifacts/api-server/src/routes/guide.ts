@@ -65,6 +65,7 @@ function mapRoute(r: any, points: any[] = []) {
     descriptionUa: r.description_ua,
     descriptionEn: r.description_en,
     tipsUa: r.tips_ua,
+    imageUrl: r.image_url,
     audioIntroUa: r.audio_intro_ua,
     verificationStatus: r.verification_status,
     isFeatured: r.is_featured,
@@ -436,21 +437,25 @@ async function seedGuideDataIfEmpty() {
         dur: 20, dist: 800, diff: "easy", mood: "Спокій і свіжість", season: "Весна–Осінь",
         desc: "Короткий ранковий маршрут від DOGODA до лісового джерела. Ліс вранці особливо тихий, повітря наповнене смолою і росою.",
         tips: "Беріть пляшку — воду з джерела можна набрати. Найкраще вирушати до 9 ранку.",
+        img: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&fit=crop&q=80",
         featured: true },
-      { titleUa: "Маршрут пам'яті — до монументу льотчику", titleEn: "Memorial Route to the Pilot Monument",
+      { titleUa: "Маршрут пам'яті — до могили льотчика", titleEn: "Memorial Route to the Pilot's Grave",
         dur: 40, dist: 1800, diff: "easy", mood: "Спокійна прогулянка з роздумами", season: "Цілий рік",
-        desc: "Неспішна прогулянка через ліс до меморіалу Другої світової. Маршрут проходить через найстаршу частину лісу.",
-        tips: "Зупиніться на хвилину мовчання біля монументу.",
+        desc: "Неспішна прогулянка через ліс до могили льотчика Андрія Ферчука. Маршрут проходить через найстаршу частину лісу.",
+        tips: "Зупиніться на хвилину мовчання.",
+        img: "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=800&fit=crop&q=80",
         featured: true },
       { titleUa: "Захід сонця над Ірпенем", titleEn: "Sunset over Irpin",
         dur: 35, dist: 1400, diff: "easy", mood: "Романтичний, споглядальний", season: "Квітень–Жовтень",
         desc: "Увечері цей маршрут веде на пагорб з видом на долину Ірпеня. Ідеальний для пар та самотніх мандрівників.",
         tips: "Виходьте за 20 хвилин до заходу сонця. Візьміть плед.",
+        img: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&fit=crop&q=80",
         featured: true },
       { titleUa: "Грибний обхід", titleEn: "Mushroom Round",
         dur: 75, dist: 3200, diff: "medium", mood: "Пригода збирача", season: "Серпень–Жовтень",
         desc: "Повний обхід грибних місць Дзвінківського лісу. Різноманіття мікроклімату для різних видів грибів.",
         tips: "Корзина обов'язкова. Не збирайте незнайомі гриби.",
+        img: "https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&fit=crop&q=80",
         featured: false },
     ];
 
@@ -459,10 +464,10 @@ async function seedGuideDataIfEmpty() {
       const r = await db.execute(sql`
         INSERT INTO guide_routes
           (title_ua, title_en, duration_minutes, distance_meters, difficulty,
-           mood_tag, seasonality, description_ua, tips_ua, is_featured, verification_status, is_active)
+           mood_tag, seasonality, description_ua, tips_ua, image_url, is_featured, verification_status, is_active)
         VALUES
           (${rt.titleUa}, ${rt.titleEn}, ${rt.dur}, ${rt.dist}, ${rt.diff},
-           ${rt.mood}, ${rt.season}, ${rt.desc}, ${rt.tips},
+           ${rt.mood}, ${rt.season}, ${rt.desc}, ${rt.tips}, ${rt.img},
            ${rt.featured}, 'approved', true)
         RETURNING id
       `);
