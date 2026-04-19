@@ -498,5 +498,35 @@ async function seedGuideDataIfEmpty() {
   }
 }
 
+// ─── POST /guide/admin/force-seed ────────────────────────────────────────────
+// Admin-only: wipe and re-seed all guide data. Requires super-admin password.
+router.post("/admin/force-seed", async (req, res) => {
+  const pw = req.headers["x-admin-password"] || req.body?.password;
+  if (!pw || pw !== process.env["SUPER_ADMIN_PASSWORD"]) {
+    res.status(401).json({ error: "Unauthorized" }); return;
+  }
+  try {
+    // Wipe existing guide data in dependency order
+    await db.execute(sql`DELETE FROM guide_route_points`);
+    await db.execute(sql`DELETE FROM guide_routes`);
+    await db.execute(sql`DELETE FROM guide_locations`);
+    await db.execute(sql`DELETE FROM guide_categories`);
+    // Re-seed
+    await seedGuideDataIfEmpty();
+    const cats = await db.execute(sql`SELECT COUNT(*) AS n FROM guide_categories`);
+    const locs = await db.execute(sql`SELECT COUNT(*) AS n FROM guide_locations`);
+    const routes = await db.execute(sql`SELECT COUNT(*) AS n FROM guide_routes`);
+    res.json({
+      ok: true,
+      categories: (cats.rows[0] as any).n,
+      locations: (locs.rows[0] as any).n,
+      routes: (routes.rows[0] as any).n,
+    });
+  } catch (err: any) {
+    console.error("[guide] force-seed error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export { seedGuideDataIfEmpty };
 export default router;

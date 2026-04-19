@@ -246,6 +246,7 @@ async function ensureSchema() {
       description_ua      TEXT,
       description_en      TEXT,
       tips_ua             TEXT,
+      image_url           TEXT,
       audio_intro_ua      TEXT,
       verification_status TEXT NOT NULL DEFAULT 'draft',
       is_featured         BOOLEAN NOT NULL DEFAULT false,
@@ -260,6 +261,14 @@ async function ensureSchema() {
       sort_order  INTEGER NOT NULL DEFAULT 0,
       note_ua     TEXT
     );
+  `);
+
+  // Migrate: add columns that may be missing from older schema versions
+  await db.execute(sql`
+    ALTER TABLE guide_categories ADD COLUMN IF NOT EXISTS description_ua TEXT;
+    ALTER TABLE guide_routes     ADD COLUMN IF NOT EXISTS image_url TEXT;
+    ALTER TABLE guide_locations  ADD COLUMN IF NOT EXISTS fact_ua TEXT;
+    ALTER TABLE guide_locations  ADD COLUMN IF NOT EXISTS image_url TEXT;
   `);
 
   try {
