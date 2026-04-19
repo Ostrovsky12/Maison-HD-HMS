@@ -54,7 +54,14 @@ export default function Home() {
           ) : homeData?.bestRouteNow ? (
             <Link href={`/routes/${homeData.bestRouteNow.id}`} className="block group">
               <Card className="overflow-hidden rounded-3xl border-border bg-card shadow-sm hover:shadow-md transition-all duration-300">
-                <div className="aspect-[2/1] bg-secondary relative">
+                <div className="aspect-[2/1] bg-secondary relative overflow-hidden">
+                  {(homeData.bestRouteNow as any).imageUrl && (
+                    <img
+                      src={(homeData.bestRouteNow as any).imageUrl}
+                      alt={homeData.bestRouteNow.titleUa}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  )}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent z-10" />
                   <div className="absolute bottom-4 left-4 right-4 z-20 space-y-2">
                     <Badge className="bg-white/20 hover:bg-white/20 backdrop-blur-md text-white border-none rounded-full font-medium">
