@@ -44,8 +44,8 @@ export default function RouteDetail() {
 
   const points = route.points ?? [];
   const polylinePositions = points
-    .filter(p => p.gpsLat && p.gpsLng)
-    .map(p => [p.gpsLat!, p.gpsLng!] as [number, number]);
+    .filter((p: any) => p.location?.gpsLat && p.location?.gpsLng)
+    .map((p: any) => [p.location.gpsLat, p.location.gpsLng] as [number, number]);
 
   const center: [number, number] = polylinePositions.length > 0
     ? polylinePositions[Math.floor(polylinePositions.length / 2)]
@@ -135,15 +135,17 @@ export default function RouteDetail() {
           {points.length > 0 && (
             <div className="space-y-3">
               <h2 className="text-lg font-serif text-foreground">Зупинки маршруту</h2>
-              {points.map((pt, i) => (
+              {points.map((pt: any, i) => (
                 <div key={i} className="flex gap-4 items-start">
                   <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
                     {i + 1}
                   </div>
                   <div className="flex-1 space-y-1">
-                    <h3 className="text-sm font-semibold text-foreground">{pt.titleUa || `Точка ${i + 1}`}</h3>
-                    {pt.noteUa && (
-                      <p className="text-xs text-muted-foreground leading-relaxed">{pt.noteUa}</p>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {pt.location?.titleUa || `Точка ${i + 1}`}
+                    </h3>
+                    {pt.location?.shortDescUa && (
+                      <p className="text-xs text-muted-foreground leading-relaxed">{pt.location.shortDescUa}</p>
                     )}
                   </div>
                 </div>

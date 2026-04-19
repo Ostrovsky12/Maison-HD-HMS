@@ -108,28 +108,28 @@ export default function LocationDetail() {
         )}
 
         <div className="px-6 py-6 space-y-5">
-          {location.descriptionUa && (
+          {(location as any).fullDescUa && (
             <Card className="rounded-2xl border-border shadow-none">
               <CardContent className="p-5">
                 <div className="flex gap-3 items-start">
                   <Info className="w-5 h-5 text-primary mt-0.5 shrink-0" />
                   <div>
                     <h2 className="text-sm font-semibold text-foreground mb-2">Опис</h2>
-                    <p className="text-sm text-muted-foreground leading-relaxed">{location.descriptionUa}</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{(location as any).fullDescUa}</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          {location.natureNoteUa && (
+          {(location as any).factUa && (
             <Card className="bg-primary/5 border-primary/20 rounded-2xl shadow-none">
               <CardContent className="p-5">
                 <div className="flex gap-3 items-start">
                   <Leaf className="w-5 h-5 text-primary mt-0.5 shrink-0" />
                   <div>
-                    <h3 className="text-sm font-semibold text-foreground mb-1">Природна особливість</h3>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{location.natureNoteUa}</p>
+                    <h3 className="text-sm font-semibold text-foreground mb-1">Цікавий факт</h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{(location as any).factUa}</p>
                   </div>
                 </div>
               </CardContent>

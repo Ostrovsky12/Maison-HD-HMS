@@ -64,6 +64,7 @@ function mapRoute(r: any, points: any[] = []) {
     seasonality: r.seasonality,
     descriptionUa: r.description_ua,
     descriptionEn: r.description_en,
+    tipsUa: r.tips_ua,
     audioIntroUa: r.audio_intro_ua,
     verificationStatus: r.verification_status,
     isFeatured: r.is_featured,
@@ -308,22 +309,176 @@ router.delete("/routes/:id", async (req, res) => {
 
 // ─── GET /guide/admin/stats ───────────────────────────────────────────────────
 router.get("/admin/stats", async (_req, res) => {
-  const rows = await db.execute(sql`
-    SELECT
-      (SELECT COUNT(*) FROM guide_locations WHERE is_active = true) AS total_locations,
-      (SELECT COUNT(*) FROM guide_routes WHERE is_active = true) AS total_routes,
-      (SELECT COUNT(*) FROM guide_categories) AS total_categories,
-      (SELECT COUNT(*) FROM guide_locations WHERE verification_status IN ('draft','under_review')) AS pending_review,
-      (SELECT COUNT(*) FROM guide_locations WHERE verification_status = 'approved') AS approved
-  `);
-  const r = rows.rows[0] as any;
+  const [counts, pts, recent] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        (SELECT COUNT(*) FROM guide_locations WHERE is_active = true) AS total_locations,
+        (SELECT COUNT(*) FROM guide_routes WHERE is_active = true) AS total_routes,
+        (SELECT COUNT(*) FROM guide_categories) AS total_categories,
+        (SELECT COUNT(*) FROM guide_locations WHERE verification_status IN ('draft','under_review')) AS pending_review
+    `),
+    db.execute(sql`SELECT COUNT(*) AS n FROM guide_route_points`),
+    db.execute(sql`
+      SELECT l.id, l.title_ua, l.short_desc_ua
+      FROM guide_locations l
+      WHERE l.is_active = true
+      ORDER BY l.id DESC LIMIT 5
+    `),
+  ]);
+  const r = counts.rows[0] as any;
+  const locationCount = parseInt(r.total_locations);
+  const routeCount = parseInt(r.total_routes);
+  const categoryCount = parseInt(r.total_categories);
+  const routePointCount = parseInt((pts.rows[0] as any).n);
+  const recentLocations = recent.rows.map((l: any) => ({
+    id: l.id, titleUa: l.title_ua, shortDescUa: l.short_desc_ua,
+  }));
   res.json({
-    totalLocations: parseInt(r.total_locations),
-    totalRoutes: parseInt(r.total_routes),
-    totalCategories: parseInt(r.total_categories),
+    locationCount, routeCount, categoryCount, routePointCount,
     pendingReview: parseInt(r.pending_review),
-    approved: parseInt(r.approved),
+    recentLocations,
   });
 });
+
+// ─── Auto-seed: run once if tables are empty ─────────────────────────────────
+async function seedGuideDataIfEmpty() {
+  try {
+    const check = await db.execute(sql`SELECT COUNT(*) AS n FROM guide_categories`);
+    const count = parseInt((check.rows[0] as any).n);
+    if (count > 0) return;
+
+    // Categories (parameterized to handle Ukrainian safely)
+    const catData = [
+      { nameUa: "Дерева",   nameEn: "Trees",     icon: "🌲", colorToken: "trees",     desc: "Вікові дерева та особливі екземпляри лісу" },
+      { nameUa: "Гриби",    nameEn: "Mushrooms", icon: "🍄", colorToken: "mushrooms", desc: "Їстівні та декоративні гриби" },
+      { nameUa: "Птахи",    nameEn: "Birds",      icon: "🦅", colorToken: "birds",     desc: "Птахи Дзвінкового та річки Ірпінь" },
+      { nameUa: "Вода",     nameEn: "Water",      icon: "💧", colorToken: "water",     desc: "Джерела, струмки та заплавні місця" },
+      { nameUa: "Пам'ятки", nameEn: "Monuments", icon: "🏛",  colorToken: "monuments", desc: "Історичні та культурні об'єкти" },
+      { nameUa: "Краєвиди", nameEn: "Views",      icon: "🌅", colorToken: "routes",    desc: "Мальовничі місця та панорами" },
+    ];
+    for (const c of catData) {
+      await db.execute(sql`
+        INSERT INTO guide_categories (name_ua, name_en, icon, color_token, description_ua)
+        VALUES (${c.nameUa}, ${c.nameEn}, ${c.icon}, ${c.colorToken}, ${c.desc})
+        ON CONFLICT DO NOTHING
+      `);
+    }
+
+    const cats = await db.execute(sql`SELECT id, color_token FROM guide_categories ORDER BY id`);
+    const catMap: Record<string, number> = {};
+    for (const c of cats.rows as any[]) catMap[c.color_token] = c.id;
+
+    // Locations (parameterized)
+    const locData = [
+      { slug: "lisove-dzherelo", titleUa: "Лісове джерело", titleEn: "Forest Spring",
+        catKey: "water", shortUa: "Природне джерело на схилі урочища",
+        fullUa: "Чисте природне джерело, що б'є з піщаного схилу соснового лісу. Вода холодна і приємна навіть влітку.",
+        lat: 50.5845, lng: 30.4410 },
+      { slug: "grybna-galyavyna", titleUa: "Грибна галявина", titleEn: "Mushroom Glade",
+        catKey: "mushrooms", shortUa: "Відоме місце для збору грибів у серпні–жовтні",
+        fullUa: "Невелика галявина оточена соснами та берізками — класичне місце для підберезників і маслюків.",
+        lat: 50.5862, lng: 30.4425 },
+      { slug: "vikova-sosna", titleUa: "Вікова сосна", titleEn: "Ancient Pine",
+        catKey: "trees", shortUa: "Сосна-велетень орієнтовно 120–150 років",
+        fullUa: "Одна з найстарших сосен Дзвінківського лісу. Діаметр стовбура близько 60 см, висота понад 30 м.",
+        lat: 50.5831, lng: 30.4405 },
+      { slug: "ptashynyy-bereh", titleUa: "Пташиний берег", titleEn: "Bird Shore",
+        catKey: "birds", shortUa: "Заплавна ділянка Ірпеня — ідеальна для спостереження за птахами",
+        fullUa: "Тихий берег річки Ірпінь, де гніздяться очеретянки, мартини та чаплі.",
+        lat: 50.5805, lng: 30.4385 },
+      { slug: "pamyatnyk-liotchyku", titleUa: "Пам'ятник льотчику", titleEn: "Pilot Monument",
+        catKey: "monuments", shortUa: "Меморіал Другої світової поруч із лісом",
+        fullUa: "Невеликий монумент у пам'ять про льотчика, що загинув поблизу Дзвінкового у 1943 році.",
+        lat: 50.5817, lng: 30.4462 },
+      { slug: "dub-velyeten", titleUa: "Дуб-велетень", titleEn: "Giant Oak",
+        catKey: "trees", shortUa: "Могутній дуб понад 200 років, охоронна зона",
+        fullUa: "Вражаючий дуб-велетень — один із найстаріших дерев Вишгородщини. Охороняється як ботанічна пам'ятка.",
+        lat: 50.5838, lng: 30.4398 },
+      { slug: "vyd-na-dolyny-irpenya", titleUa: "Вид на долину Ірпеня", titleEn: "Irpin Valley View",
+        catKey: "routes", shortUa: "Панорама заплавної долини з пагорба",
+        fullUa: "З пагорба на краю лісу відкривається широкий вид на заплаву Ірпеня. Особливо красиво на заході сонця.",
+        lat: 50.5798, lng: 30.4441 },
+    ];
+
+    const locIds: number[] = [];
+    for (const loc of locData) {
+      const r = await db.execute(sql`
+        INSERT INTO guide_locations
+          (slug, title_ua, title_en, category_id, short_desc_ua, full_desc_ua,
+           gps_lat, gps_lng, is_internal, verification_status, is_active)
+        VALUES
+          (${loc.slug}, ${loc.titleUa}, ${loc.titleEn}, ${catMap[loc.catKey]},
+           ${loc.shortUa}, ${loc.fullUa}, ${loc.lat}, ${loc.lng},
+           true, 'approved', true)
+        RETURNING id
+      `);
+      locIds.push((r.rows[0] as any).id);
+    }
+
+    // Routes (parameterized)
+    const routeData = [
+      { titleUa: "Ранковий маршрут до джерела", titleEn: "Morning Route to the Spring",
+        dur: 20, dist: 800, diff: "easy", mood: "Спокій і свіжість", season: "Весна–Осінь",
+        desc: "Короткий ранковий маршрут від DOGODA до лісового джерела. Ліс вранці особливо тихий, повітря наповнене смолою і росою.",
+        tips: "Беріть пляшку — воду з джерела можна набрати. Найкраще вирушати до 9 ранку.",
+        featured: true },
+      { titleUa: "Маршрут пам'яті — до монументу льотчику", titleEn: "Memorial Route to the Pilot Monument",
+        dur: 40, dist: 1800, diff: "easy", mood: "Спокійна прогулянка з роздумами", season: "Цілий рік",
+        desc: "Неспішна прогулянка через ліс до меморіалу Другої світової. Маршрут проходить через найстаршу частину лісу.",
+        tips: "Зупиніться на хвилину мовчання біля монументу.",
+        featured: true },
+      { titleUa: "Захід сонця над Ірпенем", titleEn: "Sunset over Irpin",
+        dur: 35, dist: 1400, diff: "easy", mood: "Романтичний, споглядальний", season: "Квітень–Жовтень",
+        desc: "Увечері цей маршрут веде на пагорб з видом на долину Ірпеня. Ідеальний для пар та самотніх мандрівників.",
+        tips: "Виходьте за 20 хвилин до заходу сонця. Візьміть плед.",
+        featured: true },
+      { titleUa: "Грибний обхід", titleEn: "Mushroom Round",
+        dur: 75, dist: 3200, diff: "medium", mood: "Пригода збирача", season: "Серпень–Жовтень",
+        desc: "Повний обхід грибних місць Дзвінківського лісу. Різноманіття мікроклімату для різних видів грибів.",
+        tips: "Корзина обов'язкова. Не збирайте незнайомі гриби.",
+        featured: false },
+    ];
+
+    const routeIds: number[] = [];
+    for (const rt of routeData) {
+      const r = await db.execute(sql`
+        INSERT INTO guide_routes
+          (title_ua, title_en, duration_minutes, distance_meters, difficulty,
+           mood_tag, seasonality, description_ua, tips_ua, is_featured, verification_status, is_active)
+        VALUES
+          (${rt.titleUa}, ${rt.titleEn}, ${rt.dur}, ${rt.dist}, ${rt.diff},
+           ${rt.mood}, ${rt.season}, ${rt.desc}, ${rt.tips},
+           ${rt.featured}, 'approved', true)
+        RETURNING id
+      `);
+      routeIds.push((r.rows[0] as any).id);
+    }
+
+    // Route points
+    if (locIds.length >= 7 && routeIds.length >= 4) {
+      const ptData = [
+        { ri: 0, pts: [0, 2, 6] },
+        { ri: 1, pts: [4, 5, 1] },
+        { ri: 2, pts: [3, 6] },
+        { ri: 3, pts: [1, 5, 2] },
+      ];
+      for (const { ri, pts } of ptData) {
+        for (let i = 0; i < pts.length; i++) {
+          await db.execute(sql`
+            INSERT INTO guide_route_points (route_id, location_id, sort_order)
+            VALUES (${routeIds[ri]}, ${locIds[pts[i]]}, ${i + 1})
+          `);
+        }
+      }
+    }
+
+    console.log("[guide] Auto-seeded default guide data successfully");
+  } catch (err) {
+    console.error("[guide] Auto-seed error:", err);
+  }
+}
+
+// Run seed on startup
+seedGuideDataIfEmpty();
 
 export default router;
