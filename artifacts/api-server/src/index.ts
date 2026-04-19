@@ -199,6 +199,69 @@ async function ensureSchema() {
   `);
 
   await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS guide_categories (
+      id           SERIAL PRIMARY KEY,
+      name_ua      TEXT NOT NULL,
+      name_en      TEXT,
+      icon         TEXT,
+      color_token  TEXT,
+      description_ua TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS guide_locations (
+      id                    SERIAL PRIMARY KEY,
+      slug                  TEXT UNIQUE NOT NULL,
+      title_ua              TEXT NOT NULL,
+      title_en              TEXT,
+      category_id           INTEGER REFERENCES guide_categories(id) ON DELETE SET NULL,
+      short_desc_ua         TEXT,
+      short_desc_en         TEXT,
+      full_desc_ua          TEXT,
+      full_desc_en          TEXT,
+      image_url             TEXT,
+      gps_lat               DOUBLE PRECISION,
+      gps_lng               DOUBLE PRECISION,
+      season                TEXT,
+      safety_note_ua        TEXT,
+      sensory_note_ua       TEXT,
+      fact_ua               TEXT,
+      audio_transcript_ua   TEXT,
+      is_internal           BOOLEAN NOT NULL DEFAULT true,
+      verification_status   TEXT NOT NULL DEFAULT 'draft',
+      is_active             BOOLEAN NOT NULL DEFAULT true,
+      created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS guide_routes (
+      id                  SERIAL PRIMARY KEY,
+      title_ua            TEXT NOT NULL,
+      title_en            TEXT,
+      duration_minutes    INTEGER NOT NULL DEFAULT 30,
+      distance_meters     INTEGER NOT NULL DEFAULT 1000,
+      difficulty          TEXT NOT NULL DEFAULT 'easy',
+      mood_tag            TEXT,
+      best_time_of_day    TEXT,
+      seasonality         TEXT,
+      description_ua      TEXT,
+      description_en      TEXT,
+      tips_ua             TEXT,
+      audio_intro_ua      TEXT,
+      verification_status TEXT NOT NULL DEFAULT 'draft',
+      is_featured         BOOLEAN NOT NULL DEFAULT false,
+      is_active           BOOLEAN NOT NULL DEFAULT true,
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS guide_route_points (
+      id          SERIAL PRIMARY KEY,
+      route_id    INTEGER NOT NULL REFERENCES guide_routes(id) ON DELETE CASCADE,
+      location_id INTEGER NOT NULL REFERENCES guide_locations(id) ON DELETE CASCADE,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      note_ua     TEXT
+    );
+  `);
+
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id            BIGSERIAL PRIMARY KEY,
       org_id        INTEGER REFERENCES organizations(id) ON DELETE SET NULL,

@@ -373,31 +373,38 @@ async function seedGuideDataIfEmpty() {
       { slug: "lisove-dzherelo", titleUa: "Лісове джерело", titleEn: "Forest Spring",
         catKey: "water", shortUa: "Природне джерело на схилі урочища",
         fullUa: "Чисте природне джерело, що б'є з піщаного схилу соснового лісу. Вода холодна і приємна навіть влітку.",
-        lat: 50.5845, lng: 30.4410 },
+        lat: 50.5845, lng: 30.4410,
+        imageUrl: "https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?w=800&fit=crop&q=80" },
       { slug: "grybna-galyavyna", titleUa: "Грибна галявина", titleEn: "Mushroom Glade",
         catKey: "mushrooms", shortUa: "Відоме місце для збору грибів у серпні–жовтні",
         fullUa: "Невелика галявина оточена соснами та берізками — класичне місце для підберезників і маслюків.",
-        lat: 50.5862, lng: 30.4425 },
+        lat: 50.5862, lng: 30.4425,
+        imageUrl: "https://images.unsplash.com/photo-1471086569966-db3eebc25a59?w=800&fit=crop&q=80" },
       { slug: "vikova-sosna", titleUa: "Вікова сосна", titleEn: "Ancient Pine",
         catKey: "trees", shortUa: "Сосна-велетень орієнтовно 120–150 років",
         fullUa: "Одна з найстарших сосен Дзвінківського лісу. Діаметр стовбура близько 60 см, висота понад 30 м.",
-        lat: 50.5831, lng: 30.4405 },
+        lat: 50.5831, lng: 30.4405,
+        imageUrl: "https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&fit=crop&q=80" },
       { slug: "ptashynyy-bereh", titleUa: "Пташиний берег", titleEn: "Bird Shore",
         catKey: "birds", shortUa: "Заплавна ділянка Ірпеня — ідеальна для спостереження за птахами",
         fullUa: "Тихий берег річки Ірпінь, де гніздяться очеретянки, мартини та чаплі.",
-        lat: 50.5805, lng: 30.4385 },
+        lat: 50.5805, lng: 30.4385,
+        imageUrl: "https://images.unsplash.com/photo-1549366021-9f761d450615?w=800&fit=crop&q=80" },
       { slug: "pamyatnyk-liotchyku", titleUa: "Пам'ятник льотчику", titleEn: "Pilot Monument",
         catKey: "monuments", shortUa: "Меморіал Другої світової поруч із лісом",
         fullUa: "Невеликий монумент у пам'ять про льотчика, що загинув поблизу Дзвінкового у 1943 році.",
-        lat: 50.5817, lng: 30.4462 },
+        lat: 50.5817, lng: 30.4462,
+        imageUrl: "https://images.unsplash.com/photo-1548199569-4e9e10ff0168?w=800&fit=crop&q=80" },
       { slug: "dub-velyeten", titleUa: "Дуб-велетень", titleEn: "Giant Oak",
         catKey: "trees", shortUa: "Могутній дуб понад 200 років, охоронна зона",
         fullUa: "Вражаючий дуб-велетень — один із найстаріших дерев Вишгородщини. Охороняється як ботанічна пам'ятка.",
-        lat: 50.5838, lng: 30.4398 },
+        lat: 50.5838, lng: 30.4398,
+        imageUrl: "https://images.unsplash.com/photo-1502082553048-f009c37129b9?w=800&fit=crop&q=80" },
       { slug: "vyd-na-dolyny-irpenya", titleUa: "Вид на долину Ірпеня", titleEn: "Irpin Valley View",
         catKey: "routes", shortUa: "Панорама заплавної долини з пагорба",
         fullUa: "З пагорба на краю лісу відкривається широкий вид на заплаву Ірпеня. Особливо красиво на заході сонця.",
-        lat: 50.5798, lng: 30.4441 },
+        lat: 50.5798, lng: 30.4441,
+        imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&fit=crop&q=80" },
     ];
 
     const locIds: number[] = [];
@@ -405,11 +412,11 @@ async function seedGuideDataIfEmpty() {
       const r = await db.execute(sql`
         INSERT INTO guide_locations
           (slug, title_ua, title_en, category_id, short_desc_ua, full_desc_ua,
-           gps_lat, gps_lng, is_internal, verification_status, is_active)
+           image_url, gps_lat, gps_lng, is_internal, verification_status, is_active)
         VALUES
           (${loc.slug}, ${loc.titleUa}, ${loc.titleEn}, ${catMap[loc.catKey]},
-           ${loc.shortUa}, ${loc.fullUa}, ${loc.lat}, ${loc.lng},
-           true, 'approved', true)
+           ${loc.shortUa}, ${loc.fullUa}, ${(loc as any).imageUrl ?? null},
+           ${loc.lat}, ${loc.lng}, true, 'approved', true)
         RETURNING id
       `);
       locIds.push((r.rows[0] as any).id);

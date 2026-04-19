@@ -36,7 +36,7 @@ export default function MapPage() {
   
   const [selectedCategory, setSelectedCategory] = useState<number | null>(initialCategory ? Number(initialCategory) : null);
   const [showFilters, setShowFilters] = useState(false);
-  const [setLocation] = useLocation();
+  const [, setLocation] = useLocation();
 
   const { data: locations, isLoading: isLocationsLoading } = useListGuideLocations(
     selectedCategory ? { categoryId: selectedCategory } : undefined
