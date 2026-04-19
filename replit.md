@@ -48,6 +48,15 @@ The system is built as a pnpm monorepo using TypeScript, with a React and Vite f
 - **Daily pg_dump backups**: Runs at 02:00 UTC, gzips dump, uploads to object storage at `backups/backup-{date}.sql.gz`, keeps last 30.
 - **ENCRYPTION_KEY**: 64-char hex env secret. `encrypt(null)` returns null; `decrypt` handles both `enc:` format and legacy plaintext (backwards-compatible).
 
+## DOGODA Гостьовий гід (artifacts/dogoda-guide)
+Standalone premium mobile-first nature guide and walking map for DOGODA guests in Дзвінкове (Kyiv Oblast). Bilingual UA/EN.
+- **Frontend**: React + Vite at `/dogoda-guide/`, mobile-first, forest green (#3d6b4f) palette, ivory background
+- **Pages**: Home (`/`), Map (`/map`, Leaflet + CircleMarkers), Routes (`/routes`, `/routes/:id`), Locations (`/locations/:id`), Nature (`/nature`), Admin (`/admin`, password: `dogoda2026`)
+- **Backend**: `/api/guide/*` routes in `artifacts/api-server/src/routes/guide.ts`, registered in `routes/index.ts`
+- **DB Tables**: `guide_categories`, `guide_locations`, `guide_routes`, `guide_route_points`
+- **Seeded**: 6 categories, 7 locations (Лісове джерело, Грибна галявина, Вікова сосна, etc.), 4 walking routes, 10 route points
+- **API**: 13 OpenAPI endpoints — home feed, categories, locations CRUD, routes CRUD, admin stats
+
 ## External Dependencies
 - **LiqPay:** Payment gateway for direct transactions.
 - **OpenAI gpt-5.2:** AI models for various intelligent features.

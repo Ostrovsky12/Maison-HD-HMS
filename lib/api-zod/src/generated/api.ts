@@ -2589,3 +2589,527 @@ export const RequestUploadUrlResponse = zod.object({
 export const GetStorageObjectParams = zod.object({
   objectPath: zod.coerce.string(),
 });
+
+/**
+ * @summary Home screen — featured content and best route now
+ */
+export const GetGuideHomeResponse = zod.object({
+  featuredRoutes: zod.array(
+    zod.object({
+      id: zod.number(),
+      titleUa: zod.string(),
+      titleEn: zod.string(),
+      durationMinutes: zod.number(),
+      distanceMeters: zod.number(),
+      difficulty: zod.string(),
+      moodTag: zod.string().nullish(),
+      bestTimeOfDay: zod.string().nullish(),
+      seasonality: zod.string().nullish(),
+      descriptionUa: zod.string().nullish(),
+      descriptionEn: zod.string().nullish(),
+      audioIntroUa: zod.string().nullish(),
+      verificationStatus: zod.string(),
+      isFeatured: zod.boolean(),
+      isActive: zod.boolean(),
+      points: zod.array(
+        zod.object({
+          id: zod.number(),
+          locationId: zod.number(),
+          sortOrder: zod.number(),
+          location: zod.object({
+            id: zod.number(),
+            slug: zod.string().optional(),
+            titleUa: zod.string(),
+            titleEn: zod.string(),
+            categoryId: zod.number().nullish(),
+            categoryNameUa: zod.string().nullish(),
+            categoryIcon: zod.string().nullish(),
+            shortDescUa: zod.string().nullish(),
+            shortDescEn: zod.string().nullish(),
+            fullDescUa: zod.string().nullish(),
+            fullDescEn: zod.string().nullish(),
+            imageUrl: zod.string().nullish(),
+            gpsLat: zod.number(),
+            gpsLng: zod.number(),
+            season: zod.string().nullish(),
+            safetyNoteUa: zod.string().nullish(),
+            sensoryNoteUa: zod.string().nullish(),
+            factUa: zod.string().nullish(),
+            audioTranscriptUa: zod.string().nullish(),
+            isInternal: zod.boolean(),
+            verificationStatus: zod.string(),
+            isActive: zod.boolean(),
+          }),
+        }),
+      ),
+    }),
+  ),
+  featuredLocations: zod.array(
+    zod.object({
+      id: zod.number(),
+      slug: zod.string().optional(),
+      titleUa: zod.string(),
+      titleEn: zod.string(),
+      categoryId: zod.number().nullish(),
+      categoryNameUa: zod.string().nullish(),
+      categoryIcon: zod.string().nullish(),
+      shortDescUa: zod.string().nullish(),
+      shortDescEn: zod.string().nullish(),
+      fullDescUa: zod.string().nullish(),
+      fullDescEn: zod.string().nullish(),
+      imageUrl: zod.string().nullish(),
+      gpsLat: zod.number(),
+      gpsLng: zod.number(),
+      season: zod.string().nullish(),
+      safetyNoteUa: zod.string().nullish(),
+      sensoryNoteUa: zod.string().nullish(),
+      factUa: zod.string().nullish(),
+      audioTranscriptUa: zod.string().nullish(),
+      isInternal: zod.boolean(),
+      verificationStatus: zod.string(),
+      isActive: zod.boolean(),
+    }),
+  ),
+  bestRouteNow: zod
+    .object({
+      id: zod.number(),
+      titleUa: zod.string(),
+      titleEn: zod.string(),
+      durationMinutes: zod.number(),
+      distanceMeters: zod.number(),
+      difficulty: zod.string(),
+      moodTag: zod.string().nullish(),
+      bestTimeOfDay: zod.string().nullish(),
+      seasonality: zod.string().nullish(),
+      descriptionUa: zod.string().nullish(),
+      descriptionEn: zod.string().nullish(),
+      audioIntroUa: zod.string().nullish(),
+      verificationStatus: zod.string(),
+      isFeatured: zod.boolean(),
+      isActive: zod.boolean(),
+      points: zod.array(
+        zod.object({
+          id: zod.number(),
+          locationId: zod.number(),
+          sortOrder: zod.number(),
+          location: zod.object({
+            id: zod.number(),
+            slug: zod.string().optional(),
+            titleUa: zod.string(),
+            titleEn: zod.string(),
+            categoryId: zod.number().nullish(),
+            categoryNameUa: zod.string().nullish(),
+            categoryIcon: zod.string().nullish(),
+            shortDescUa: zod.string().nullish(),
+            shortDescEn: zod.string().nullish(),
+            fullDescUa: zod.string().nullish(),
+            fullDescEn: zod.string().nullish(),
+            imageUrl: zod.string().nullish(),
+            gpsLat: zod.number(),
+            gpsLng: zod.number(),
+            season: zod.string().nullish(),
+            safetyNoteUa: zod.string().nullish(),
+            sensoryNoteUa: zod.string().nullish(),
+            factUa: zod.string().nullish(),
+            audioTranscriptUa: zod.string().nullish(),
+            isInternal: zod.boolean(),
+            verificationStatus: zod.string(),
+            isActive: zod.boolean(),
+          }),
+        }),
+      ),
+    })
+    .nullish(),
+  totalLocations: zod.number(),
+  totalRoutes: zod.number(),
+});
+
+/**
+ * @summary List all point categories
+ */
+export const ListGuideCategoriesResponseItem = zod.object({
+  id: zod.number(),
+  nameUa: zod.string(),
+  nameEn: zod.string(),
+  icon: zod.string(),
+  colorToken: zod.string().optional(),
+});
+export const ListGuideCategoriesResponse = zod.array(
+  ListGuideCategoriesResponseItem,
+);
+
+/**
+ * @summary List locations with optional category filter
+ */
+export const ListGuideLocationsQueryParams = zod.object({
+  categoryId: zod.coerce.number().optional(),
+  internal: zod.coerce.boolean().optional(),
+});
+
+export const ListGuideLocationsResponseItem = zod.object({
+  id: zod.number(),
+  slug: zod.string().optional(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  categoryId: zod.number().nullish(),
+  categoryNameUa: zod.string().nullish(),
+  categoryIcon: zod.string().nullish(),
+  shortDescUa: zod.string().nullish(),
+  shortDescEn: zod.string().nullish(),
+  fullDescUa: zod.string().nullish(),
+  fullDescEn: zod.string().nullish(),
+  imageUrl: zod.string().nullish(),
+  gpsLat: zod.number(),
+  gpsLng: zod.number(),
+  season: zod.string().nullish(),
+  safetyNoteUa: zod.string().nullish(),
+  sensoryNoteUa: zod.string().nullish(),
+  factUa: zod.string().nullish(),
+  audioTranscriptUa: zod.string().nullish(),
+  isInternal: zod.boolean(),
+  verificationStatus: zod.string(),
+  isActive: zod.boolean(),
+});
+export const ListGuideLocationsResponse = zod.array(
+  ListGuideLocationsResponseItem,
+);
+
+/**
+ * @summary Admin — create location
+ */
+export const CreateGuideLocationBody = zod.object({
+  slug: zod.string().optional(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  categoryId: zod.number().nullish(),
+  shortDescUa: zod.string().optional(),
+  shortDescEn: zod.string().optional(),
+  fullDescUa: zod.string().optional(),
+  fullDescEn: zod.string().optional(),
+  imageUrl: zod.string().nullish(),
+  gpsLat: zod.number(),
+  gpsLng: zod.number(),
+  season: zod.string().nullish(),
+  safetyNoteUa: zod.string().nullish(),
+  sensoryNoteUa: zod.string().nullish(),
+  factUa: zod.string().nullish(),
+  audioTranscriptUa: zod.string().nullish(),
+  isInternal: zod.boolean().optional(),
+  verificationStatus: zod.string().optional(),
+  isActive: zod.boolean().optional(),
+});
+
+/**
+ * @summary Get location detail
+ */
+export const GetGuideLocationParams = zod.object({
+  locationId: zod.coerce.number(),
+});
+
+export const GetGuideLocationResponse = zod.object({
+  id: zod.number(),
+  slug: zod.string().optional(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  categoryId: zod.number().nullish(),
+  categoryNameUa: zod.string().nullish(),
+  categoryIcon: zod.string().nullish(),
+  shortDescUa: zod.string().nullish(),
+  shortDescEn: zod.string().nullish(),
+  fullDescUa: zod.string().nullish(),
+  fullDescEn: zod.string().nullish(),
+  imageUrl: zod.string().nullish(),
+  gpsLat: zod.number(),
+  gpsLng: zod.number(),
+  season: zod.string().nullish(),
+  safetyNoteUa: zod.string().nullish(),
+  sensoryNoteUa: zod.string().nullish(),
+  factUa: zod.string().nullish(),
+  audioTranscriptUa: zod.string().nullish(),
+  isInternal: zod.boolean(),
+  verificationStatus: zod.string(),
+  isActive: zod.boolean(),
+});
+
+/**
+ * @summary Admin — update location
+ */
+export const UpdateGuideLocationParams = zod.object({
+  locationId: zod.coerce.number(),
+});
+
+export const UpdateGuideLocationBody = zod.object({
+  slug: zod.string().optional(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  categoryId: zod.number().nullish(),
+  shortDescUa: zod.string().optional(),
+  shortDescEn: zod.string().optional(),
+  fullDescUa: zod.string().optional(),
+  fullDescEn: zod.string().optional(),
+  imageUrl: zod.string().nullish(),
+  gpsLat: zod.number(),
+  gpsLng: zod.number(),
+  season: zod.string().nullish(),
+  safetyNoteUa: zod.string().nullish(),
+  sensoryNoteUa: zod.string().nullish(),
+  factUa: zod.string().nullish(),
+  audioTranscriptUa: zod.string().nullish(),
+  isInternal: zod.boolean().optional(),
+  verificationStatus: zod.string().optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateGuideLocationResponse = zod.object({
+  id: zod.number(),
+  slug: zod.string().optional(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  categoryId: zod.number().nullish(),
+  categoryNameUa: zod.string().nullish(),
+  categoryIcon: zod.string().nullish(),
+  shortDescUa: zod.string().nullish(),
+  shortDescEn: zod.string().nullish(),
+  fullDescUa: zod.string().nullish(),
+  fullDescEn: zod.string().nullish(),
+  imageUrl: zod.string().nullish(),
+  gpsLat: zod.number(),
+  gpsLng: zod.number(),
+  season: zod.string().nullish(),
+  safetyNoteUa: zod.string().nullish(),
+  sensoryNoteUa: zod.string().nullish(),
+  factUa: zod.string().nullish(),
+  audioTranscriptUa: zod.string().nullish(),
+  isInternal: zod.boolean(),
+  verificationStatus: zod.string(),
+  isActive: zod.boolean(),
+});
+
+/**
+ * @summary Admin — delete location
+ */
+export const DeleteGuideLocationParams = zod.object({
+  locationId: zod.coerce.number(),
+});
+
+/**
+ * @summary List curated walking routes
+ */
+export const ListGuideRoutesResponseItem = zod.object({
+  id: zod.number(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  durationMinutes: zod.number(),
+  distanceMeters: zod.number(),
+  difficulty: zod.string(),
+  moodTag: zod.string().nullish(),
+  bestTimeOfDay: zod.string().nullish(),
+  seasonality: zod.string().nullish(),
+  descriptionUa: zod.string().nullish(),
+  descriptionEn: zod.string().nullish(),
+  audioIntroUa: zod.string().nullish(),
+  verificationStatus: zod.string(),
+  isFeatured: zod.boolean(),
+  isActive: zod.boolean(),
+  points: zod.array(
+    zod.object({
+      id: zod.number(),
+      locationId: zod.number(),
+      sortOrder: zod.number(),
+      location: zod.object({
+        id: zod.number(),
+        slug: zod.string().optional(),
+        titleUa: zod.string(),
+        titleEn: zod.string(),
+        categoryId: zod.number().nullish(),
+        categoryNameUa: zod.string().nullish(),
+        categoryIcon: zod.string().nullish(),
+        shortDescUa: zod.string().nullish(),
+        shortDescEn: zod.string().nullish(),
+        fullDescUa: zod.string().nullish(),
+        fullDescEn: zod.string().nullish(),
+        imageUrl: zod.string().nullish(),
+        gpsLat: zod.number(),
+        gpsLng: zod.number(),
+        season: zod.string().nullish(),
+        safetyNoteUa: zod.string().nullish(),
+        sensoryNoteUa: zod.string().nullish(),
+        factUa: zod.string().nullish(),
+        audioTranscriptUa: zod.string().nullish(),
+        isInternal: zod.boolean(),
+        verificationStatus: zod.string(),
+        isActive: zod.boolean(),
+      }),
+    }),
+  ),
+});
+export const ListGuideRoutesResponse = zod.array(ListGuideRoutesResponseItem);
+
+/**
+ * @summary Admin — create route
+ */
+export const CreateGuideRouteBody = zod.object({
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  durationMinutes: zod.number(),
+  distanceMeters: zod.number(),
+  difficulty: zod.string(),
+  moodTag: zod.string().nullish(),
+  bestTimeOfDay: zod.string().nullish(),
+  seasonality: zod.string().nullish(),
+  descriptionUa: zod.string().nullish(),
+  descriptionEn: zod.string().nullish(),
+  audioIntroUa: zod.string().nullish(),
+  verificationStatus: zod.string().optional(),
+  isFeatured: zod.boolean().optional(),
+  isActive: zod.boolean().optional(),
+  pointIds: zod.array(zod.number()).optional(),
+});
+
+/**
+ * @summary Get route detail with ordered points
+ */
+export const GetGuideRouteParams = zod.object({
+  routeId: zod.coerce.number(),
+});
+
+export const GetGuideRouteResponse = zod.object({
+  id: zod.number(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  durationMinutes: zod.number(),
+  distanceMeters: zod.number(),
+  difficulty: zod.string(),
+  moodTag: zod.string().nullish(),
+  bestTimeOfDay: zod.string().nullish(),
+  seasonality: zod.string().nullish(),
+  descriptionUa: zod.string().nullish(),
+  descriptionEn: zod.string().nullish(),
+  audioIntroUa: zod.string().nullish(),
+  verificationStatus: zod.string(),
+  isFeatured: zod.boolean(),
+  isActive: zod.boolean(),
+  points: zod.array(
+    zod.object({
+      id: zod.number(),
+      locationId: zod.number(),
+      sortOrder: zod.number(),
+      location: zod.object({
+        id: zod.number(),
+        slug: zod.string().optional(),
+        titleUa: zod.string(),
+        titleEn: zod.string(),
+        categoryId: zod.number().nullish(),
+        categoryNameUa: zod.string().nullish(),
+        categoryIcon: zod.string().nullish(),
+        shortDescUa: zod.string().nullish(),
+        shortDescEn: zod.string().nullish(),
+        fullDescUa: zod.string().nullish(),
+        fullDescEn: zod.string().nullish(),
+        imageUrl: zod.string().nullish(),
+        gpsLat: zod.number(),
+        gpsLng: zod.number(),
+        season: zod.string().nullish(),
+        safetyNoteUa: zod.string().nullish(),
+        sensoryNoteUa: zod.string().nullish(),
+        factUa: zod.string().nullish(),
+        audioTranscriptUa: zod.string().nullish(),
+        isInternal: zod.boolean(),
+        verificationStatus: zod.string(),
+        isActive: zod.boolean(),
+      }),
+    }),
+  ),
+});
+
+/**
+ * @summary Admin — update route
+ */
+export const UpdateGuideRouteParams = zod.object({
+  routeId: zod.coerce.number(),
+});
+
+export const UpdateGuideRouteBody = zod.object({
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  durationMinutes: zod.number(),
+  distanceMeters: zod.number(),
+  difficulty: zod.string(),
+  moodTag: zod.string().nullish(),
+  bestTimeOfDay: zod.string().nullish(),
+  seasonality: zod.string().nullish(),
+  descriptionUa: zod.string().nullish(),
+  descriptionEn: zod.string().nullish(),
+  audioIntroUa: zod.string().nullish(),
+  verificationStatus: zod.string().optional(),
+  isFeatured: zod.boolean().optional(),
+  isActive: zod.boolean().optional(),
+  pointIds: zod.array(zod.number()).optional(),
+});
+
+export const UpdateGuideRouteResponse = zod.object({
+  id: zod.number(),
+  titleUa: zod.string(),
+  titleEn: zod.string(),
+  durationMinutes: zod.number(),
+  distanceMeters: zod.number(),
+  difficulty: zod.string(),
+  moodTag: zod.string().nullish(),
+  bestTimeOfDay: zod.string().nullish(),
+  seasonality: zod.string().nullish(),
+  descriptionUa: zod.string().nullish(),
+  descriptionEn: zod.string().nullish(),
+  audioIntroUa: zod.string().nullish(),
+  verificationStatus: zod.string(),
+  isFeatured: zod.boolean(),
+  isActive: zod.boolean(),
+  points: zod.array(
+    zod.object({
+      id: zod.number(),
+      locationId: zod.number(),
+      sortOrder: zod.number(),
+      location: zod.object({
+        id: zod.number(),
+        slug: zod.string().optional(),
+        titleUa: zod.string(),
+        titleEn: zod.string(),
+        categoryId: zod.number().nullish(),
+        categoryNameUa: zod.string().nullish(),
+        categoryIcon: zod.string().nullish(),
+        shortDescUa: zod.string().nullish(),
+        shortDescEn: zod.string().nullish(),
+        fullDescUa: zod.string().nullish(),
+        fullDescEn: zod.string().nullish(),
+        imageUrl: zod.string().nullish(),
+        gpsLat: zod.number(),
+        gpsLng: zod.number(),
+        season: zod.string().nullish(),
+        safetyNoteUa: zod.string().nullish(),
+        sensoryNoteUa: zod.string().nullish(),
+        factUa: zod.string().nullish(),
+        audioTranscriptUa: zod.string().nullish(),
+        isInternal: zod.boolean(),
+        verificationStatus: zod.string(),
+        isActive: zod.boolean(),
+      }),
+    }),
+  ),
+});
+
+/**
+ * @summary Admin — delete route
+ */
+export const DeleteGuideRouteParams = zod.object({
+  routeId: zod.coerce.number(),
+});
+
+/**
+ * @summary Admin dashboard stats
+ */
+export const GetGuideAdminStatsResponse = zod.object({
+  totalLocations: zod.number(),
+  totalRoutes: zod.number(),
+  totalCategories: zod.number(),
+  pendingReview: zod.number(),
+  approved: zod.number(),
+});

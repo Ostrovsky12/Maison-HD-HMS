@@ -1,0 +1,393 @@
+Build a premium mobile-first interactive walking map and audio guide web app for a countryside hospitality complex called DOGODA in Dzvinkove, Kyiv Oblast, Ukraine.
+
+Core concept:
+This is not just a map. It is a premium digital nature companion for guests staying at DOGODA.
+The emotional tone must feel calm, intelligent, immersive, elegant, quiet, and deeply connected to nature.
+
+Important location context:
+Use DOGODA as the starting point for route generation and nearby exploration:
+DOGODA, Berezova Street 4, Dzvinkove, Kyiv Oblast, Ukraine.
+
+The app should support:
+- internal territory walking
+- nearby nature exploration
+- local discovery around Dzvinkove
+- educational cards about trees, plants, mushrooms, landscapes, and local points of interest
+- premium audio guide mode
+- admin panel
+- bilingual support (Ukrainian / English)
+
+CRITICAL INTERNET RESEARCH REQUIREMENT:
+Inside the app architecture and seed logic, include a module or service layer that can ingest and manage externally researched places near Dzvinkove starting from DOGODA as the anchor point.
+
+The system must:
+1. Suggest nearby walking destinations, scenic points, quiet spots, horse-related locations, river valley viewpoints, forest edges, and other real-world attractions around Dzvinkove.
+2. Use publicly available internet information to propose these locations.
+3. Mark each discovered location with a confidence/status label:
+   - Verified from source
+   - Needs manual review
+   - AI-suggested draft
+4. Never invent “factual” attractions without marking them as unverified if source confidence is weak.
+5. Allow the admin to approve, edit, reject, or hide any AI-proposed route or attraction.
+6. Use DOGODA as the default route origin.
+7. Prioritize nature, silence, scenic atmosphere, soft recreation, and premium countryside experience over commercial tourist clutter.
+
+Known local context to reflect in UX and seed assumptions:
+- DOGODA is in Dzvinkove, Kyiv Oblast
+- the area is associated with forest landscapes
+- the Irpin river valley is nearby
+- Golden Horse equestrian club is nearby and may be used as a reference point if helpful
+- the product should explore and suggest meaningful nearby routes from DOGODA outward
+
+IMPORTANT SAFETY + TRUST RULE:
+Because local internet data may be incomplete, the app must separate:
+- confirmed local points
+- suggested points for human review
+The admin panel must make this easy to manage.
+
+Product positioning:
+DOGODA is a quiet retreat. The app must feel like a premium extension of the guest experience.
+Avoid the feeling of a tourist marketplace or chaotic travel portal.
+
+Design direction:
+- mobile-first
+- premium, editorial, elegant, calm
+- minimalist interface
+- soft earthy palette
+- forest green, muted beige, warm gray, dark natural brown, soft ivory
+- very clean typography
+- smooth transitions
+- immersive cards
+- refined microinteractions
+- no cartoonish visuals
+- no gamification that feels cheap
+- subtle luxury only
+
+Main feature set:
+
+1. Interactive map
+- Show DOGODA as the main starting point
+- Support two map modes:
+  a) stylized premium illustrated map mode
+  b) practical live map / coordinate mode
+- Show internal points and nearby routes
+- Support category filters:
+  - Trees
+  - Mushrooms
+  - Plants
+  - Scenic viewpoints
+  - Quiet places
+  - Forest edge
+  - River valley spots
+  - Photo spots
+  - Equestrian-related nearby locations
+  - Seasonal highlights
+  - Guest favorites
+  - Sunset spots
+
+2. Route builder
+- Include curated routes and AI-suggested routes
+- Route types:
+  - Quiet walk
+  - Forest breath route
+  - Sunset route
+  - Nature discovery route
+  - Morning reset route
+  - Slow romantic walk
+  - Audio-guided storytelling route
+  - Nearby Dzvinkove discovery route
+- Each route must show:
+  - title
+  - duration
+  - estimated walking distance
+  - difficulty
+  - emotional mood tag
+  - best time of day
+  - seasonality
+  - route points in order
+  - whether it is verified or draft
+- Include a smart route suggestion engine:
+  - “best route now”
+  - “best sunset route”
+  - “best short quiet route”
+  - “route for first-time guests”
+  - “route after breakfast”
+  - “route after spa”
+  - “route for couples”
+  - “route with educational stops”
+
+3. Audio guide
+Create a premium audio guide mode with:
+- narration per route
+- narration per point
+- autoplay next point option
+- manual play / pause
+- background audio support if possible
+- multilingual structure (UA / EN)
+- transcript text shown under the audio
+- admin can upload or replace audio files
+- support text-to-speech fallback if custom voice files are absent
+
+Audio guide content style:
+- calm
+- elegant
+- not overdramatic
+- reflective and emotionally warm
+- short segments, easy to listen to while walking
+- should feel like a refined private guide, not a museum lecture
+
+4. Point detail pages
+Each point should have:
+- title
+- category
+- hero image
+- short description
+- full description
+- interesting fact
+- seasonality
+- sensory note (for example: smell of pine, bird sounds, evening light)
+- nearby points
+- audio guide section
+- safety note if needed
+- “continue route” button
+- “save for later” button
+
+5. Nature knowledge layer
+Include educational cards for:
+- trees
+- plants
+- mushrooms
+- birds or animal traces if later needed
+Each educational card should support:
+- photo
+- short identification notes
+- when it can be seen
+- ecological value
+- guest-friendly facts
+- safety notes
+
+Mushroom safety requirement:
+All mushroom-related entries must clearly show:
+“This information is educational only. Do not collect or consume wild mushrooms without expert verification.”
+
+6. Nearby Dzvinkove discovery engine
+Build a structured module for nearby external discovery.
+
+This module should:
+- start with DOGODA as the origin point
+- support radius-based exploration
+- store externally discovered points in a separate reviewable dataset
+- allow manual distance/time estimates
+- allow grouping by:
+  - scenic
+  - nature
+  - local interest
+  - family friendly
+  - horse riding / equestrian
+  - quiet nearby places
+  - cultural nearby places
+- allow source links and source names to be stored
+- support manual moderation by admin
+
+If internet-discovered local attractions are sparse, the system should still suggest route concepts based on:
+- forest edges
+- natural viewpoints
+- calm local roads
+- river valley-oriented directions
+- surrounding landscape patterns
+but must mark them as “draft route concepts pending review”.
+
+7. Premium guest UX features
+Add premium features such as:
+- “Best route now” recommendation block
+- “Sunset in X minutes” contextual suggestion
+- weather-aware recommendation placeholder architecture
+- “Quiet mood” route filter
+- “Romantic mood” route filter
+- “Learn something on the way” route filter
+- “15 min / 30 min / 45 min / 60 min” time filters
+- saved favorite points
+- recently viewed points
+- QR-friendly launch
+- sticky bottom navigation
+- full-screen immersive point mode
+- elegant loading states
+- subtle ambient visuals
+- optional dark evening mode
+- typography-first content layout
+
+8. Admin panel
+Create a strong admin dashboard that can manage:
+- points
+- routes
+- categories
+- audio tracks
+- translations
+- source references
+- AI-suggested local attractions
+- review workflow for proposed places
+- route recommendation settings
+- home screen featured sections
+- seasonal content blocks
+- safety texts
+- contact/reception info
+
+Admin moderation workflow:
+Every AI-suggested nearby place or route must support statuses:
+- draft
+- under review
+- approved
+- hidden
+- archived
+
+9. AI assistant / smart content layer
+Include architecture for an internal AI helper that can:
+- suggest new routes based on approved points
+- generate short audio-guide drafts
+- generate translated text drafts
+- recommend seasonal route collections
+- propose “nearby Dzvinkove places” from structured input
+- never auto-publish without admin approval
+
+10. Language support
+Prepare full bilingual architecture:
+- Ukrainian default
+- English secondary
+All text fields should support both languages.
+
+11. Pages/screens
+Create:
+- Home
+- Interactive map
+- Routes list
+- Route detail
+- Point detail
+- Audio guide player
+- Nature guide
+- Nearby Dzvinkove discovery
+- Favorites
+- Safety page
+- About the area
+- Admin login
+- Admin dashboard
+- AI review queue for suggested local places and routes
+
+12. Data model
+Create tables such as:
+
+locations
+- id
+- slug
+- title_ua
+- title_en
+- category_id
+- short_description_ua
+- short_description_en
+- full_description_ua
+- full_description_en
+- image_url
+- x_coordinate
+- y_coordinate
+- gps_lat
+- gps_lng
+- season
+- safety_note_ua
+- safety_note_en
+- sensory_note_ua
+- sensory_note_en
+- is_internal_to_dogoda
+- source_type
+- source_name
+- source_url
+- verification_status
+- is_active
+
+categories
+- id
+- name_ua
+- name_en
+- icon
+- color_token
+
+routes
+- id
+- title_ua
+- title_en
+- duration_minutes
+- distance_meters
+- difficulty
+- mood_tag
+- best_time_of_day
+- description_ua
+- description_en
+- audio_intro_ua
+- audio_intro_en
+- verification_status
+- is_featured
+- is_active
+
+route_points
+- id
+- route_id
+- location_id
+- sort_order
+
+facts
+- id
+- location_id
+- fact_ua
+- fact_en
+
+audio_tracks
+- id
+- related_type
+- related_id
+- language
+- audio_url
+- transcript_ua
+- transcript_en
+- duration_seconds
+- is_tts_generated
+- is_active
+
+external_suggestions
+- id
+- title
+- category_guess
+- source_name
+- source_url
+- short_note
+- estimated_distance_km
+- estimated_duration_minutes
+- gps_lat
+- gps_lng
+- confidence_score
+- verification_status
+- admin_note
+
+settings
+- map_title
+- intro_text_ua
+- intro_text_en
+- emergency_contact
+- reception_phone
+- dogoda_origin_lat
+- dogoda_origin_lng
+- quiet_brand_note_ua
+- quiet_brand_note_en
+
+13. Seed content
+Generate initial premium seed content for:
+- at least 12 internal / semi-internal nature points
+- at least 4 curated routes
+- at least 6 educational nature cards
+- at least 5 externally suggested nearby Dzvinkove points or route ideas from DOGODA as origin
+- at least 3 audio guide sample texts
+- safety rules
+- home screen featured sections
+
+14. Seed route ideas
+Seed route examples:
+- Quiet Forest Intro Walk
+- Sunset Edge Walk
+- Nature Discovery

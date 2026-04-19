@@ -45,6 +45,8 @@ tags:
     description: Advanced KPI, forecasting & analytics
   - name: Storage
     description: Object storage upload and serving endpoints.
+  - name: guide
+    description: DOGODA Guest Nature Guide
 
 paths:
   /healthz:
@@ -2123,6 +2125,247 @@ paths:
               schema:
                 type: string
                 format: binary
+
+  # ── GUEST GUIDE ──────────────────────────────────────────────────────────────
+
+  /guide/home:
+    get:
+      operationId: getGuideHome
+      tags: [guide]
+      summary: Home screen — featured content and best route now
+      responses:
+        "200":
+          description: Home screen data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideHome"
+
+  /guide/categories:
+    get:
+      operationId: listGuideCategories
+      tags: [guide]
+      summary: List all point categories
+      responses:
+        "200":
+          description: Categories list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GuideCategory"
+
+  /guide/locations:
+    get:
+      operationId: listGuideLocations
+      tags: [guide]
+      summary: List locations with optional category filter
+      parameters:
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+        - name: internal
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Locations list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GuideLocation"
+    post:
+      operationId: createGuideLocation
+      tags: [guide]
+      summary: Admin — create location
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuideLocationBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideLocation"
+
+  /guide/locations/{locationId}:
+    get:
+      operationId: getGuideLocation
+      tags: [guide]
+      summary: Get location detail
+      parameters:
+        - name: locationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Location detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideLocation"
+    put:
+      operationId: updateGuideLocation
+      tags: [guide]
+      summary: Admin — update location
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: locationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuideLocationBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideLocation"
+    delete:
+      operationId: deleteGuideLocation
+      tags: [guide]
+      summary: Admin — delete location
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: locationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /guide/routes:
+    get:
+      operationId: listGuideRoutes
+      tags: [guide]
+      summary: List curated walking routes
+      responses:
+        "200":
+          description: Routes list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GuideRoute"
+    post:
+      operationId: createGuideRoute
+      tags: [guide]
+      summary: Admin — create route
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuideRouteBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideRoute"
+
+  /guide/routes/{routeId}:
+    get:
+      operationId: getGuideRoute
+      tags: [guide]
+      summary: Get route detail with ordered points
+      parameters:
+        - name: routeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideRoute"
+    put:
+      operationId: updateGuideRoute
+      tags: [guide]
+      summary: Admin — update route
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: routeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuideRouteBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideRoute"
+    delete:
+      operationId: deleteGuideRoute
+      tags: [guide]
+      summary: Admin — delete route
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: routeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /guide/admin/stats:
+    get:
+      operationId: getGuideAdminStats
+      tags: [guide]
+      summary: Admin dashboard stats
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideAdminStats"
+
 
 components:
   securitySchemes:
@@ -4420,3 +4663,266 @@ components:
         - period
         - summary
         - daily
+
+    GuideCategory:
+      type: object
+      properties:
+        id:
+          type: integer
+        nameUa:
+          type: string
+        nameEn:
+          type: string
+        icon:
+          type: string
+        colorToken:
+          type: string
+      required: [id, nameUa, nameEn, icon]
+
+    GuideLocation:
+      type: object
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+        titleUa:
+          type: string
+        titleEn:
+          type: string
+        categoryId:
+          type: integer
+          nullable: true
+        categoryNameUa:
+          type: string
+          nullable: true
+        categoryIcon:
+          type: string
+          nullable: true
+        shortDescUa:
+          type: string
+          nullable: true
+        shortDescEn:
+          type: string
+          nullable: true
+        fullDescUa:
+          type: string
+          nullable: true
+        fullDescEn:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        gpsLat:
+          type: number
+        gpsLng:
+          type: number
+        season:
+          type: string
+          nullable: true
+        safetyNoteUa:
+          type: string
+          nullable: true
+        sensoryNoteUa:
+          type: string
+          nullable: true
+        factUa:
+          type: string
+          nullable: true
+        audioTranscriptUa:
+          type: string
+          nullable: true
+        isInternal:
+          type: boolean
+        verificationStatus:
+          type: string
+        isActive:
+          type: boolean
+      required: [id, titleUa, titleEn, gpsLat, gpsLng, isInternal, isActive, verificationStatus]
+
+    GuideLocationBody:
+      type: object
+      properties:
+        slug:
+          type: string
+        titleUa:
+          type: string
+        titleEn:
+          type: string
+        categoryId:
+          type: integer
+          nullable: true
+        shortDescUa:
+          type: string
+        shortDescEn:
+          type: string
+        fullDescUa:
+          type: string
+        fullDescEn:
+          type: string
+        imageUrl:
+          type: string
+          nullable: true
+        gpsLat:
+          type: number
+        gpsLng:
+          type: number
+        season:
+          type: string
+          nullable: true
+        safetyNoteUa:
+          type: string
+          nullable: true
+        sensoryNoteUa:
+          type: string
+          nullable: true
+        factUa:
+          type: string
+          nullable: true
+        audioTranscriptUa:
+          type: string
+          nullable: true
+        isInternal:
+          type: boolean
+        verificationStatus:
+          type: string
+        isActive:
+          type: boolean
+      required: [titleUa, titleEn, gpsLat, gpsLng]
+
+    GuideRoutePoint:
+      type: object
+      properties:
+        id:
+          type: integer
+        locationId:
+          type: integer
+        sortOrder:
+          type: integer
+        location:
+          $ref: '#/components/schemas/GuideLocation'
+      required: [id, locationId, sortOrder, location]
+
+    GuideRoute:
+      type: object
+      properties:
+        id:
+          type: integer
+        titleUa:
+          type: string
+        titleEn:
+          type: string
+        durationMinutes:
+          type: integer
+        distanceMeters:
+          type: integer
+        difficulty:
+          type: string
+        moodTag:
+          type: string
+          nullable: true
+        bestTimeOfDay:
+          type: string
+          nullable: true
+        seasonality:
+          type: string
+          nullable: true
+        descriptionUa:
+          type: string
+          nullable: true
+        descriptionEn:
+          type: string
+          nullable: true
+        audioIntroUa:
+          type: string
+          nullable: true
+        verificationStatus:
+          type: string
+        isFeatured:
+          type: boolean
+        isActive:
+          type: boolean
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuideRoutePoint'
+      required: [id, titleUa, titleEn, durationMinutes, distanceMeters, difficulty, verificationStatus, isFeatured, isActive, points]
+
+    GuideRouteBody:
+      type: object
+      properties:
+        titleUa:
+          type: string
+        titleEn:
+          type: string
+        durationMinutes:
+          type: integer
+        distanceMeters:
+          type: integer
+        difficulty:
+          type: string
+        moodTag:
+          type: string
+          nullable: true
+        bestTimeOfDay:
+          type: string
+          nullable: true
+        seasonality:
+          type: string
+          nullable: true
+        descriptionUa:
+          type: string
+          nullable: true
+        descriptionEn:
+          type: string
+          nullable: true
+        audioIntroUa:
+          type: string
+          nullable: true
+        verificationStatus:
+          type: string
+        isFeatured:
+          type: boolean
+        isActive:
+          type: boolean
+        pointIds:
+          type: array
+          items:
+            type: integer
+      required: [titleUa, titleEn, durationMinutes, distanceMeters, difficulty]
+
+    GuideHome:
+      type: object
+      properties:
+        featuredRoutes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuideRoute'
+        featuredLocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuideLocation'
+        bestRouteNow:
+          $ref: '#/components/schemas/GuideRoute'
+          nullable: true
+        totalLocations:
+          type: integer
+        totalRoutes:
+          type: integer
+      required: [featuredRoutes, featuredLocations, totalLocations, totalRoutes]
+
+    GuideAdminStats:
+      type: object
+      properties:
+        totalLocations:
+          type: integer
+        totalRoutes:
+          type: integer
+        totalCategories:
+          type: integer
+        pendingReview:
+          type: integer
+        approved:
+          type: integer
+      required: [totalLocations, totalRoutes, totalCategories, pendingReview, approved]

@@ -57,6 +57,13 @@ import type {
   Guest,
   GuestDetail,
   GuestListResponse,
+  GuideAdminStats,
+  GuideCategory,
+  GuideHome,
+  GuideLocation,
+  GuideLocationBody,
+  GuideRoute,
+  GuideRouteBody,
   HealthStatus,
   HousekeepingDashboard,
   HousekeepingTask,
@@ -69,6 +76,7 @@ import type {
   ListBookingsParams,
   ListForecastsParams,
   ListGuestsParams,
+  ListGuideLocationsParams,
   ListHousekeepingTasksParams,
   ListIntegrationLogsParams,
   ListInvoicesParams,
@@ -8120,6 +8128,1093 @@ export function useGetStorageObject<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetStorageObjectQueryOptions(objectPath, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Home screen — featured content and best route now
+ */
+export const getGetGuideHomeUrl = () => {
+  return `/api/guide/home`;
+};
+
+export const getGuideHome = async (
+  options?: RequestInit,
+): Promise<GuideHome> => {
+  return customFetch<GuideHome>(getGetGuideHomeUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetGuideHomeQueryKey = () => {
+  return [`/api/guide/home`] as const;
+};
+
+export const getGetGuideHomeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getGuideHome>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideHome>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetGuideHomeQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getGuideHome>>> = ({
+    signal,
+  }) => getGuideHome({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideHome>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetGuideHomeQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getGuideHome>>
+>;
+export type GetGuideHomeQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Home screen — featured content and best route now
+ */
+
+export function useGetGuideHome<
+  TData = Awaited<ReturnType<typeof getGuideHome>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideHome>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetGuideHomeQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List all point categories
+ */
+export const getListGuideCategoriesUrl = () => {
+  return `/api/guide/categories`;
+};
+
+export const listGuideCategories = async (
+  options?: RequestInit,
+): Promise<GuideCategory[]> => {
+  return customFetch<GuideCategory[]>(getListGuideCategoriesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListGuideCategoriesQueryKey = () => {
+  return [`/api/guide/categories`] as const;
+};
+
+export const getListGuideCategoriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listGuideCategories>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listGuideCategories>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListGuideCategoriesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listGuideCategories>>
+  > = ({ signal }) => listGuideCategories({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listGuideCategories>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListGuideCategoriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listGuideCategories>>
+>;
+export type ListGuideCategoriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all point categories
+ */
+
+export function useListGuideCategories<
+  TData = Awaited<ReturnType<typeof listGuideCategories>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listGuideCategories>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListGuideCategoriesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List locations with optional category filter
+ */
+export const getListGuideLocationsUrl = (params?: ListGuideLocationsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/guide/locations?${stringifiedParams}`
+    : `/api/guide/locations`;
+};
+
+export const listGuideLocations = async (
+  params?: ListGuideLocationsParams,
+  options?: RequestInit,
+): Promise<GuideLocation[]> => {
+  return customFetch<GuideLocation[]>(getListGuideLocationsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListGuideLocationsQueryKey = (
+  params?: ListGuideLocationsParams,
+) => {
+  return [`/api/guide/locations`, ...(params ? [params] : [])] as const;
+};
+
+export const getListGuideLocationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listGuideLocations>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListGuideLocationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listGuideLocations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListGuideLocationsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listGuideLocations>>
+  > = ({ signal }) => listGuideLocations(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listGuideLocations>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListGuideLocationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listGuideLocations>>
+>;
+export type ListGuideLocationsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List locations with optional category filter
+ */
+
+export function useListGuideLocations<
+  TData = Awaited<ReturnType<typeof listGuideLocations>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListGuideLocationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listGuideLocations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListGuideLocationsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Admin — create location
+ */
+export const getCreateGuideLocationUrl = () => {
+  return `/api/guide/locations`;
+};
+
+export const createGuideLocation = async (
+  guideLocationBody: GuideLocationBody,
+  options?: RequestInit,
+): Promise<GuideLocation> => {
+  return customFetch<GuideLocation>(getCreateGuideLocationUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(guideLocationBody),
+  });
+};
+
+export const getCreateGuideLocationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createGuideLocation>>,
+    TError,
+    { data: BodyType<GuideLocationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createGuideLocation>>,
+  TError,
+  { data: BodyType<GuideLocationBody> },
+  TContext
+> => {
+  const mutationKey = ["createGuideLocation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createGuideLocation>>,
+    { data: BodyType<GuideLocationBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createGuideLocation(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateGuideLocationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createGuideLocation>>
+>;
+export type CreateGuideLocationMutationBody = BodyType<GuideLocationBody>;
+export type CreateGuideLocationMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Admin — create location
+ */
+export const useCreateGuideLocation = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createGuideLocation>>,
+    TError,
+    { data: BodyType<GuideLocationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createGuideLocation>>,
+  TError,
+  { data: BodyType<GuideLocationBody> },
+  TContext
+> => {
+  return useMutation(getCreateGuideLocationMutationOptions(options));
+};
+
+/**
+ * @summary Get location detail
+ */
+export const getGetGuideLocationUrl = (locationId: number) => {
+  return `/api/guide/locations/${locationId}`;
+};
+
+export const getGuideLocation = async (
+  locationId: number,
+  options?: RequestInit,
+): Promise<GuideLocation> => {
+  return customFetch<GuideLocation>(getGetGuideLocationUrl(locationId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetGuideLocationQueryKey = (locationId: number) => {
+  return [`/api/guide/locations/${locationId}`] as const;
+};
+
+export const getGetGuideLocationQueryOptions = <
+  TData = Awaited<ReturnType<typeof getGuideLocation>>,
+  TError = ErrorType<unknown>,
+>(
+  locationId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getGuideLocation>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetGuideLocationQueryKey(locationId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getGuideLocation>>
+  > = ({ signal }) =>
+    getGuideLocation(locationId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!locationId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideLocation>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetGuideLocationQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getGuideLocation>>
+>;
+export type GetGuideLocationQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get location detail
+ */
+
+export function useGetGuideLocation<
+  TData = Awaited<ReturnType<typeof getGuideLocation>>,
+  TError = ErrorType<unknown>,
+>(
+  locationId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getGuideLocation>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetGuideLocationQueryOptions(locationId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Admin — update location
+ */
+export const getUpdateGuideLocationUrl = (locationId: number) => {
+  return `/api/guide/locations/${locationId}`;
+};
+
+export const updateGuideLocation = async (
+  locationId: number,
+  guideLocationBody: GuideLocationBody,
+  options?: RequestInit,
+): Promise<GuideLocation> => {
+  return customFetch<GuideLocation>(getUpdateGuideLocationUrl(locationId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(guideLocationBody),
+  });
+};
+
+export const getUpdateGuideLocationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGuideLocation>>,
+    TError,
+    { locationId: number; data: BodyType<GuideLocationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateGuideLocation>>,
+  TError,
+  { locationId: number; data: BodyType<GuideLocationBody> },
+  TContext
+> => {
+  const mutationKey = ["updateGuideLocation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateGuideLocation>>,
+    { locationId: number; data: BodyType<GuideLocationBody> }
+  > = (props) => {
+    const { locationId, data } = props ?? {};
+
+    return updateGuideLocation(locationId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateGuideLocationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateGuideLocation>>
+>;
+export type UpdateGuideLocationMutationBody = BodyType<GuideLocationBody>;
+export type UpdateGuideLocationMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Admin — update location
+ */
+export const useUpdateGuideLocation = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGuideLocation>>,
+    TError,
+    { locationId: number; data: BodyType<GuideLocationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateGuideLocation>>,
+  TError,
+  { locationId: number; data: BodyType<GuideLocationBody> },
+  TContext
+> => {
+  return useMutation(getUpdateGuideLocationMutationOptions(options));
+};
+
+/**
+ * @summary Admin — delete location
+ */
+export const getDeleteGuideLocationUrl = (locationId: number) => {
+  return `/api/guide/locations/${locationId}`;
+};
+
+export const deleteGuideLocation = async (
+  locationId: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteGuideLocationUrl(locationId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteGuideLocationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteGuideLocation>>,
+    TError,
+    { locationId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteGuideLocation>>,
+  TError,
+  { locationId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteGuideLocation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteGuideLocation>>,
+    { locationId: number }
+  > = (props) => {
+    const { locationId } = props ?? {};
+
+    return deleteGuideLocation(locationId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteGuideLocationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteGuideLocation>>
+>;
+
+export type DeleteGuideLocationMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Admin — delete location
+ */
+export const useDeleteGuideLocation = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteGuideLocation>>,
+    TError,
+    { locationId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteGuideLocation>>,
+  TError,
+  { locationId: number },
+  TContext
+> => {
+  return useMutation(getDeleteGuideLocationMutationOptions(options));
+};
+
+/**
+ * @summary List curated walking routes
+ */
+export const getListGuideRoutesUrl = () => {
+  return `/api/guide/routes`;
+};
+
+export const listGuideRoutes = async (
+  options?: RequestInit,
+): Promise<GuideRoute[]> => {
+  return customFetch<GuideRoute[]>(getListGuideRoutesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListGuideRoutesQueryKey = () => {
+  return [`/api/guide/routes`] as const;
+};
+
+export const getListGuideRoutesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listGuideRoutes>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listGuideRoutes>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListGuideRoutesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listGuideRoutes>>> = ({
+    signal,
+  }) => listGuideRoutes({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listGuideRoutes>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListGuideRoutesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listGuideRoutes>>
+>;
+export type ListGuideRoutesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List curated walking routes
+ */
+
+export function useListGuideRoutes<
+  TData = Awaited<ReturnType<typeof listGuideRoutes>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listGuideRoutes>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListGuideRoutesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Admin — create route
+ */
+export const getCreateGuideRouteUrl = () => {
+  return `/api/guide/routes`;
+};
+
+export const createGuideRoute = async (
+  guideRouteBody: GuideRouteBody,
+  options?: RequestInit,
+): Promise<GuideRoute> => {
+  return customFetch<GuideRoute>(getCreateGuideRouteUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(guideRouteBody),
+  });
+};
+
+export const getCreateGuideRouteMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createGuideRoute>>,
+    TError,
+    { data: BodyType<GuideRouteBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createGuideRoute>>,
+  TError,
+  { data: BodyType<GuideRouteBody> },
+  TContext
+> => {
+  const mutationKey = ["createGuideRoute"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createGuideRoute>>,
+    { data: BodyType<GuideRouteBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createGuideRoute(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateGuideRouteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createGuideRoute>>
+>;
+export type CreateGuideRouteMutationBody = BodyType<GuideRouteBody>;
+export type CreateGuideRouteMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Admin — create route
+ */
+export const useCreateGuideRoute = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createGuideRoute>>,
+    TError,
+    { data: BodyType<GuideRouteBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createGuideRoute>>,
+  TError,
+  { data: BodyType<GuideRouteBody> },
+  TContext
+> => {
+  return useMutation(getCreateGuideRouteMutationOptions(options));
+};
+
+/**
+ * @summary Get route detail with ordered points
+ */
+export const getGetGuideRouteUrl = (routeId: number) => {
+  return `/api/guide/routes/${routeId}`;
+};
+
+export const getGuideRoute = async (
+  routeId: number,
+  options?: RequestInit,
+): Promise<GuideRoute> => {
+  return customFetch<GuideRoute>(getGetGuideRouteUrl(routeId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetGuideRouteQueryKey = (routeId: number) => {
+  return [`/api/guide/routes/${routeId}`] as const;
+};
+
+export const getGetGuideRouteQueryOptions = <
+  TData = Awaited<ReturnType<typeof getGuideRoute>>,
+  TError = ErrorType<unknown>,
+>(
+  routeId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getGuideRoute>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetGuideRouteQueryKey(routeId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getGuideRoute>>> = ({
+    signal,
+  }) => getGuideRoute(routeId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!routeId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideRoute>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetGuideRouteQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getGuideRoute>>
+>;
+export type GetGuideRouteQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get route detail with ordered points
+ */
+
+export function useGetGuideRoute<
+  TData = Awaited<ReturnType<typeof getGuideRoute>>,
+  TError = ErrorType<unknown>,
+>(
+  routeId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getGuideRoute>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetGuideRouteQueryOptions(routeId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Admin — update route
+ */
+export const getUpdateGuideRouteUrl = (routeId: number) => {
+  return `/api/guide/routes/${routeId}`;
+};
+
+export const updateGuideRoute = async (
+  routeId: number,
+  guideRouteBody: GuideRouteBody,
+  options?: RequestInit,
+): Promise<GuideRoute> => {
+  return customFetch<GuideRoute>(getUpdateGuideRouteUrl(routeId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(guideRouteBody),
+  });
+};
+
+export const getUpdateGuideRouteMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGuideRoute>>,
+    TError,
+    { routeId: number; data: BodyType<GuideRouteBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateGuideRoute>>,
+  TError,
+  { routeId: number; data: BodyType<GuideRouteBody> },
+  TContext
+> => {
+  const mutationKey = ["updateGuideRoute"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateGuideRoute>>,
+    { routeId: number; data: BodyType<GuideRouteBody> }
+  > = (props) => {
+    const { routeId, data } = props ?? {};
+
+    return updateGuideRoute(routeId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateGuideRouteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateGuideRoute>>
+>;
+export type UpdateGuideRouteMutationBody = BodyType<GuideRouteBody>;
+export type UpdateGuideRouteMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Admin — update route
+ */
+export const useUpdateGuideRoute = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGuideRoute>>,
+    TError,
+    { routeId: number; data: BodyType<GuideRouteBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateGuideRoute>>,
+  TError,
+  { routeId: number; data: BodyType<GuideRouteBody> },
+  TContext
+> => {
+  return useMutation(getUpdateGuideRouteMutationOptions(options));
+};
+
+/**
+ * @summary Admin — delete route
+ */
+export const getDeleteGuideRouteUrl = (routeId: number) => {
+  return `/api/guide/routes/${routeId}`;
+};
+
+export const deleteGuideRoute = async (
+  routeId: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteGuideRouteUrl(routeId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteGuideRouteMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteGuideRoute>>,
+    TError,
+    { routeId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteGuideRoute>>,
+  TError,
+  { routeId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteGuideRoute"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteGuideRoute>>,
+    { routeId: number }
+  > = (props) => {
+    const { routeId } = props ?? {};
+
+    return deleteGuideRoute(routeId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteGuideRouteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteGuideRoute>>
+>;
+
+export type DeleteGuideRouteMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Admin — delete route
+ */
+export const useDeleteGuideRoute = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteGuideRoute>>,
+    TError,
+    { routeId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteGuideRoute>>,
+  TError,
+  { routeId: number },
+  TContext
+> => {
+  return useMutation(getDeleteGuideRouteMutationOptions(options));
+};
+
+/**
+ * @summary Admin dashboard stats
+ */
+export const getGetGuideAdminStatsUrl = () => {
+  return `/api/guide/admin/stats`;
+};
+
+export const getGuideAdminStats = async (
+  options?: RequestInit,
+): Promise<GuideAdminStats> => {
+  return customFetch<GuideAdminStats>(getGetGuideAdminStatsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetGuideAdminStatsQueryKey = () => {
+  return [`/api/guide/admin/stats`] as const;
+};
+
+export const getGetGuideAdminStatsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getGuideAdminStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideAdminStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetGuideAdminStatsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getGuideAdminStats>>
+  > = ({ signal }) => getGuideAdminStats({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideAdminStats>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetGuideAdminStatsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getGuideAdminStats>>
+>;
+export type GetGuideAdminStatsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Admin dashboard stats
+ */
+
+export function useGetGuideAdminStats<
+  TData = Awaited<ReturnType<typeof getGuideAdminStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGuideAdminStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetGuideAdminStatsQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

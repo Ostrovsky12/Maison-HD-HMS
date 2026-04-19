@@ -1348,6 +1348,121 @@ export interface MonthlyReport {
   daily: KpiHistory[];
 }
 
+export interface GuideCategory {
+  id: number;
+  nameUa: string;
+  nameEn: string;
+  icon: string;
+  colorToken?: string;
+}
+
+export interface GuideLocation {
+  id: number;
+  slug?: string;
+  titleUa: string;
+  titleEn: string;
+  categoryId?: number | null;
+  categoryNameUa?: string | null;
+  categoryIcon?: string | null;
+  shortDescUa?: string | null;
+  shortDescEn?: string | null;
+  fullDescUa?: string | null;
+  fullDescEn?: string | null;
+  imageUrl?: string | null;
+  gpsLat: number;
+  gpsLng: number;
+  season?: string | null;
+  safetyNoteUa?: string | null;
+  sensoryNoteUa?: string | null;
+  factUa?: string | null;
+  audioTranscriptUa?: string | null;
+  isInternal: boolean;
+  verificationStatus: string;
+  isActive: boolean;
+}
+
+export interface GuideLocationBody {
+  slug?: string;
+  titleUa: string;
+  titleEn: string;
+  categoryId?: number | null;
+  shortDescUa?: string;
+  shortDescEn?: string;
+  fullDescUa?: string;
+  fullDescEn?: string;
+  imageUrl?: string | null;
+  gpsLat: number;
+  gpsLng: number;
+  season?: string | null;
+  safetyNoteUa?: string | null;
+  sensoryNoteUa?: string | null;
+  factUa?: string | null;
+  audioTranscriptUa?: string | null;
+  isInternal?: boolean;
+  verificationStatus?: string;
+  isActive?: boolean;
+}
+
+export interface GuideRoutePoint {
+  id: number;
+  locationId: number;
+  sortOrder: number;
+  location: GuideLocation;
+}
+
+export interface GuideRoute {
+  id: number;
+  titleUa: string;
+  titleEn: string;
+  durationMinutes: number;
+  distanceMeters: number;
+  difficulty: string;
+  moodTag?: string | null;
+  bestTimeOfDay?: string | null;
+  seasonality?: string | null;
+  descriptionUa?: string | null;
+  descriptionEn?: string | null;
+  audioIntroUa?: string | null;
+  verificationStatus: string;
+  isFeatured: boolean;
+  isActive: boolean;
+  points: GuideRoutePoint[];
+}
+
+export interface GuideRouteBody {
+  titleUa: string;
+  titleEn: string;
+  durationMinutes: number;
+  distanceMeters: number;
+  difficulty: string;
+  moodTag?: string | null;
+  bestTimeOfDay?: string | null;
+  seasonality?: string | null;
+  descriptionUa?: string | null;
+  descriptionEn?: string | null;
+  audioIntroUa?: string | null;
+  verificationStatus?: string;
+  isFeatured?: boolean;
+  isActive?: boolean;
+  pointIds?: number[];
+}
+
+export interface GuideHome {
+  featuredRoutes: GuideRoute[];
+  featuredLocations: GuideLocation[];
+  bestRouteNow?: GuideRoute | null;
+  totalLocations: number;
+  totalRoutes: number;
+}
+
+export interface GuideAdminStats {
+  totalLocations: number;
+  totalRoutes: number;
+  totalCategories: number;
+  pendingReview: number;
+  approved: number;
+}
+
 export type GetUnitsAvailabilityParams = {
   checkIn: string;
   checkOut: string;
@@ -1485,4 +1600,9 @@ export type ListIntegrationLogsParams = {
 export type GetMonthlyReportParams = {
   year?: number;
   month?: number;
+};
+
+export type ListGuideLocationsParams = {
+  categoryId?: number;
+  internal?: boolean;
 };

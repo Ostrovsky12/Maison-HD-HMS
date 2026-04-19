@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/dogoda-guide/"
+title = "DOGODA — Гостьовий гід"
+version = "1.0.0"
+id = "artifacts/dogoda-guide"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/dogoda-guide/" ]
+localPort = 20600
+
+[services.development]
+run = "pnpm --filter @workspace/dogoda-guide run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dogoda-guide", "run", "build" ]
+publicDir = "artifacts/dogoda-guide/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20600"
+BASE_PATH = "/dogoda-guide/"
