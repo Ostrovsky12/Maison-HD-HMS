@@ -4,7 +4,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, MapPin, Leaf, Info } from "lucide-react";
+import { ArrowLeft, MapPin, Leaf, Info, Navigation } from "lucide-react";
 import { MapContainer, TileLayer, CircleMarker, ZoomControl } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -72,9 +72,20 @@ export default function LocationDetail() {
           </div>
 
           {hasCoords && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <MapPin className="w-3.5 h-3.5" />
-              {location.gpsLat?.toFixed(5)}°N, {location.gpsLng?.toFixed(5)}°E
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <MapPin className="w-3.5 h-3.5" />
+                {location.gpsLat?.toFixed(5)}°N, {location.gpsLng?.toFixed(5)}°E
+              </div>
+              <a
+                href={`https://maps.google.com/maps?q=${location.gpsLat},${location.gpsLng}&navigate=yes`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-medium px-3 py-1.5 rounded-full hover:bg-primary/90 transition-colors"
+              >
+                <Navigation className="w-3.5 h-3.5" />
+                Маршрут
+              </a>
             </div>
           )}
         </div>
