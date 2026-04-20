@@ -49,7 +49,7 @@ export default function RouteDetail() {
 
   const center: [number, number] = polylinePositions.length > 0
     ? polylinePositions[Math.floor(polylinePositions.length / 2)]
-    : [50.5820, 30.4440];
+    : [50.2705, 30.0395];
 
   const diff = difficultyLabel[route.difficulty ?? "easy"];
 

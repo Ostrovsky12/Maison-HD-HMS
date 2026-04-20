@@ -15,6 +15,7 @@ const categoryColors: Record<string, string> = {
   water: "#2b7a78",
   monuments: "#8b5a2b",
   routes: "#7a6b8a",
+  activities: "#b5561b",
 };
 
 export default function LocationDetail() {

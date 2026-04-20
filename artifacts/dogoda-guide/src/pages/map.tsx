@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Leaf, Info, Filter, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const DOGODA_CENTER: [number, number] = [50.5820, 30.4440];
+const DOGODA_CENTER: [number, number] = [50.2705, 30.0395];
 
 const categoryColors: Record<string, string> = {
   trees: "#3d6b4f", // forest green
@@ -19,6 +19,7 @@ const categoryColors: Record<string, string> = {
   water: "#2b7a78", // teal
   monuments: "#8b5a2b", // warm brown
   routes: "#7a6b8a", // muted purple
+  activities: "#b5561b", // terracotta / horse chestnut
 };
 
 function MapController({ center }: { center: [number, number] }) {
