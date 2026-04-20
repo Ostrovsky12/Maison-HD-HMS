@@ -1056,7 +1056,12 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const { data: legalEntities } = useQuery<any[]>({
     queryKey: ["legal-entities"],
     enabled: open,
-    queryFn: () => authFetch(`${API}/legal-entities`).then(r => r.ok ? r.json() : []),
+    queryFn: async () => {
+      const r = await authFetch(`${API}/legal-entities`);
+      if (!r.ok) return [];
+      const d = await r.json();
+      return Array.isArray(d) ? d : (d.entities || []);
+    },
   });
 
   const { data: pricingPreview } = useQuery<any>({

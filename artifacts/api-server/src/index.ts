@@ -271,6 +271,15 @@ async function ensureSchema() {
     ALTER TABLE guide_locations  ADD COLUMN IF NOT EXISTS image_url TEXT;
   `);
 
+  // Migrate: expand name columns from VARCHAR(100) to TEXT to support long company names
+  await db.execute(sql`
+    ALTER TABLE bookings  ALTER COLUMN last_name   TYPE TEXT;
+    ALTER TABLE bookings  ALTER COLUMN first_name  TYPE TEXT;
+    ALTER TABLE bookings  ALTER COLUMN middle_name TYPE TEXT;
+    ALTER TABLE guests    ALTER COLUMN first_name  TYPE TEXT;
+    ALTER TABLE guests    ALTER COLUMN last_name   TYPE TEXT;
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (
