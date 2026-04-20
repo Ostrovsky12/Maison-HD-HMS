@@ -757,6 +757,7 @@ function SpaBookingDialog({ bookingId, guestName, onClose, onSaved }: {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [chosenSlot, setChosenSlot] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [manualTime, setManualTime] = useState("10:00");
 
   useEffect(() => {
     apiFetch(`${API}/spa/services`).then(r => r.json())
@@ -773,8 +774,11 @@ function SpaBookingDialog({ bookingId, guestName, onClose, onSaved }: {
       .finally(() => setLoadingSlots(false));
   }, [selected, date]);
 
+  const hasAvailableSlots = slots.filter((s: any) => s.available).length > 0;
+  const effectiveTime = chosenSlot?.time ?? (hasAvailableSlots ? null : manualTime);
+
   const save = async () => {
-    if (!selected || !chosenSlot) return;
+    if (!selected || !effectiveTime) return;
     setSaving(true);
     try {
       const r = await apiFetch(`${API}/spa/appointments`, {
@@ -784,7 +788,7 @@ function SpaBookingDialog({ bookingId, guestName, onClose, onSaved }: {
           specialistId: chosenSlot.specialistId || null,
           guestName: guestName || "Гість",
           appointmentDate: date,
-          startTime: chosenSlot.time,
+          startTime: effectiveTime,
           durationMinutes: selected.durationMinutes,
           price: parseFloat(selected.price),
           isHotelGuest: true,
@@ -795,10 +799,10 @@ function SpaBookingDialog({ bookingId, guestName, onClose, onSaved }: {
       await apiFetch(`${API}/guest/service-orders`, {
         method: "POST",
         body: JSON.stringify({
-          bookingId, serviceName: `SPA — ${selected.name} (${date}, ${chosenSlot.time})`,
+          bookingId, serviceName: `SPA — ${selected.name} (${date}, ${effectiveTime})`,
           serviceType: "spa", quantity: 1,
           price: parseFloat(selected.price), totalPrice: parseFloat(selected.price),
-          requestedTime: `${date} ${chosenSlot.time}`,
+          requestedTime: `${date} ${effectiveTime}`,
         }),
       });
       toast({ title: "SPA-запис створено ✓" });
@@ -897,17 +901,25 @@ function SpaBookingDialog({ bookingId, guestName, onClose, onSaved }: {
                       </div>
                     </div>
                   ))}
-                  {slots.filter((s: any) => s.available).length === 0 && (
-                    <p className="text-sm text-gray-400 text-center py-3">Немає вільних слотів на цю дату</p>
+                  {!hasAvailableSlots && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-600 font-medium">Автоматичних слотів немає — вкажіть час вручну:</p>
+                      <input
+                        type="time"
+                        value={manualTime}
+                        onChange={e => setManualTime(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/30 bg-amber-50"
+                      />
+                    </div>
                   )}
                 </div>
               )}
             </div>
             <div className="p-4 border-t border-gray-100 shrink-0">
-              <button onClick={save} disabled={!chosenSlot || saving}
+              <button onClick={save} disabled={!effectiveTime || saving}
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {chosenSlot ? `Записати о ${chosenSlot.time}` : "Оберіть слот"}
+                {effectiveTime ? `Записати о ${effectiveTime}` : "Оберіть слот"}
               </button>
             </div>
           </>

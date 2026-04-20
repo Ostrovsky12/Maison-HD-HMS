@@ -1268,6 +1268,11 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
     if (!booking) return res.status(404).json({ error: "Booking not found" });
 
     const [unit] = await db.select().from(unitsTable).where(eq(unitsTable.id, booking.unitId)).limit(1);
+    let unitPropertyType: string | null = null;
+    if (unit?.propertyId) {
+      const [prop] = await db.select({ type: propertiesTable.type }).from(propertiesTable).where(eq(propertiesTable.id, unit.propertyId)).limit(1);
+      unitPropertyType = prop?.type ?? null;
+    }
     let guestName = booking.lastName ? `${booking.lastName} ${booking.firstName || ""}`.trim() : null;
     if (!guestName && booking.guestId) {
       const [g] = await db.select({ firstName: guestsTable.firstName, lastName: guestsTable.lastName })
@@ -1345,16 +1350,23 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
       : accommodationTotal;
 
     // ── Build line items ────────────────────────────────────────────────────
-    const items: any[] = [
-      {
-        description: `Послуга проживання — ${unit?.name || `Номер ${booking.unitId}`}`,
+    const NON_ACCOMMODATION_TYPES = ["spa", "pool"];
+    const isAccommodation = !unitPropertyType || !NON_ACCOMMODATION_TYPES.includes(unitPropertyType);
+    const unitLabel = unit?.name || `Номер ${booking.unitId}`;
+    const accommodationLineDesc = isAccommodation
+      ? `Послуга проживання — ${unitLabel}`
+      : `Послуга — ${unitLabel}`;
+    const items: any[] = [];
+    if (accommodationTotal > 0 || nights > 0) {
+      items.push({
+        description: accommodationLineDesc,
         detail: `${booking.checkIn} → ${booking.checkOut} · ${nights} ніч`,
-        qty: nights,
-        unit: "ніч",
+        qty: nights || 1,
+        unit: isAccommodation ? "ніч" : "шт",
         price: pricePerNight,
         amount: accommodationTotal,
-      },
-    ];
+      });
+    }
 
     // Addons
     for (const a of bookingAddons) {
