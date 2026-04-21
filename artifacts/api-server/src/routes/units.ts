@@ -137,16 +137,17 @@ router.get("/categories", requireAuth, async (req, res) => {
 
 router.get("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
-  const { propertyId, category, status } = req.query;
+  const { propertyId, category, status, showHidden } = req.query;
 
   const propIds = await resolvePropertyIds(user, propertyId as string | undefined, res);
   if (propIds === null) return;
 
-  let query = db.select().from(unitsTable);
-  const conditions = [];
+  const conditions: any[] = [];
   if (propIds.length > 0) conditions.push(inArray(unitsTable.propertyId, propIds));
   if (category) conditions.push(eq(unitsTable.category, category as string));
   if (status) conditions.push(eq(unitsTable.status, status as any));
+  // By default exclude hidden units; pass ?showHidden=1 to include them (e.g. units management page)
+  if (showHidden !== "1") conditions.push(sql`COALESCE(${unitsTable.isHidden}, false) = false`);
 
   const units = conditions.length > 0
     ? await db.select().from(unitsTable).where(and(...conditions))

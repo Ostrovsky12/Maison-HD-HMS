@@ -572,7 +572,7 @@ export default function UnitsPage() {
 
   const loadUnits = useCallback(async () => {
     setLoading(true);
-    const r = await apiFetch("/units");
+    const r = await apiFetch("/units?showHidden=1");
     if (r.ok) { const d = await r.json(); setUnits(d); }
     setLoading(false);
   }, []);
@@ -656,6 +656,22 @@ export default function UnitsPage() {
     const isHidden = !unit.isHidden;
     const r = await apiFetch(`/units/${unit.id}`, { method: "PUT", body: JSON.stringify({ isHidden }) });
     if (r.ok) { loadUnits(); toast({ title: isHidden ? "Юніт приховано" : "Юніт показано" }); }
+  };
+
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    let failed = 0;
+    for (const id of ids) {
+      const r = await apiFetch(`/units/${id}`, { method: "DELETE" });
+      if (!r.ok) {
+        await apiFetch(`/units/${id}`, { method: "PUT", body: JSON.stringify({ status: "inactive" }) });
+        failed++;
+      }
+    }
+    toast({ title: failed > 0 ? `Видалено ${ids.length - failed}, деактивовано ${failed}` : `Видалено ${ids.length} юнітів` });
+    setSelectedIds(new Set()); setSelectMode(false); setBulkDeleteConfirm(false); loadUnits();
   };
 
   const handleBulkVisibility = async (hide: boolean) => {
@@ -970,11 +986,20 @@ export default function UnitsPage() {
             {selectMode && selectedIds.size > 0 && (
               <div className="flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5">
                 <span className="text-sm font-semibold text-violet-800">Обрано: {selectedIds.size}</span>
-                <div className="flex gap-2 ml-auto">
+                <div className="flex gap-2 ml-auto flex-wrap">
                   <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs border-violet-300 text-violet-700 hover:bg-violet-100" onClick={() => handleBulkVisibility(true)}><EyeOff className="h-3.5 w-3.5" />Приховати</Button>
                   <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs border-violet-300 text-violet-700 hover:bg-violet-100" onClick={() => handleBulkVisibility(false)}><Eye className="h-3.5 w-3.5" />Показати</Button>
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs border-red-300 text-red-600 hover:bg-red-50" onClick={() => setBulkDeleteConfirm(true)}><Trash2 className="h-3.5 w-3.5" />Видалити</Button>
                   <Button size="sm" variant="ghost" className="h-8 text-xs text-gray-500" onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}>Скасувати</Button>
                 </div>
+              </div>
+            )}
+            {/* Bulk delete confirmation */}
+            {bulkDeleteConfirm && (
+              <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                <span className="text-sm font-semibold text-red-800 flex-1">Видалити {selectedIds.size} юнітів? Цю дію неможливо скасувати.</span>
+                <Button size="sm" variant="outline" className="h-8 text-xs text-gray-500" onClick={() => setBulkDeleteConfirm(false)}>Скасувати</Button>
+                <Button size="sm" className="h-8 gap-1.5 text-xs bg-red-600 hover:bg-red-700 text-white" onClick={handleBulkDelete}><Trash2 className="h-3.5 w-3.5" />Так, видалити</Button>
               </div>
             )}
 
