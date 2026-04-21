@@ -9,7 +9,7 @@ import {
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble, Truck,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
   ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package, QrCode, Coins,
-  Smartphone, Leaf, Phone, Hammer, Warehouse, Printer,
+  Smartphone, Leaf, Phone, Hammer, Warehouse, Printer, CalendarRange,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +42,8 @@ const NAV: NavSection[] = [
     items: [
       { name: "Бронювання",  path: "/bookings",    icon: CalendarDays, roles: null },
       { name: "Шахматка",    path: "/chess",        icon: Grid3X3,      roles: null },
-      { name: "Тарифи",      path: "/rates",        icon: Tag,          roles: ["super_admin","owner","manager","reception"] },
+      { name: "Тарифи",           path: "/rates",            icon: Tag,           roles: ["super_admin","owner","manager","reception"] },
+      { name: "Ціновий календар", path: "/pricing-calendar", icon: CalendarRange, roles: ["super_admin","owner","manager"] },
       { name: "Номери",      path: "/units",        icon: KeyRound,     roles: null },
       { name: "Гості",       path: "/guests",       icon: Users,        roles: null },
       { name: "Бронювати онлайн", path: "/book",    icon: Sparkles,     roles: null },

@@ -67,6 +67,7 @@ import unitGroupsRouter from "./unit-groups.js";
 import { router as pushRouter } from "./push.js";
 import assistRouter from "./assist.js";
 import guideRouter from "./guide.js";
+import pricingRulesRouter from "./pricing-rules.js";
 
 const router: IRouter = Router();
 
@@ -137,6 +138,7 @@ router.use("/telephony", telephonyRouter);
 router.use("/push", pushRouter);
 router.use("/assist", assistRouter);
 router.use("/guide", guideRouter);
+router.use("/pricing-rules", pricingRulesRouter);
 router.use("/", storageRouter);
 
 export default router;

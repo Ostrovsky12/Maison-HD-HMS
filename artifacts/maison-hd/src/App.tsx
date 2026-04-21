@@ -61,6 +61,7 @@ import StaffConsolePage from "@/pages/staff-console";
 import MinibarPage from "@/pages/minibar";
 import MinibarGuestPage from "@/pages/minibar-guest";
 import PricingPage from "@/pages/pricing";
+import PricingCalendarPage from "@/pages/pricing-calendar";
 import PitchPage from "@/pages/pitch";
 import NightAuditPage from "@/pages/night-audit";
 import PackagesPage from "@/pages/packages";
@@ -192,6 +193,7 @@ function Router() {
       <Route path="/console"><ProtectedRoute component={StaffConsolePage} /></Route>
       <Route path="/tv/:roomCode" component={TvDisplayPage} />
       <Route path="/pricing"><ProtectedRoute component={PricingPage} /></Route>
+      <Route path="/pricing-calendar"><ProtectedRoute component={PricingCalendarPage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/night-audit"><ProtectedRoute component={NightAuditPage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/packages"><ProtectedRoute component={PackagesPage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/qr-ordering"><ProtectedRoute component={QrOrderingPage} /></Route>

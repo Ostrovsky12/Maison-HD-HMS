@@ -289,6 +289,29 @@ async function ensureSchema() {
     ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_child_price   NUMERIC(10, 2);
   `);
 
+  // Pricing calendar rules (rate calendar)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pricing_calendar_rules (
+      id                  SERIAL PRIMARY KEY,
+      org_id              INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+      name                VARCHAR(100) NOT NULL,
+      color               VARCHAR(7)   NOT NULL DEFAULT '#6366f1',
+      price_per_night     NUMERIC(10, 2) NOT NULL,
+      weekend_price       NUMERIC(10, 2),
+      min_nights          INTEGER NOT NULL DEFAULT 1,
+      min_nights_weekend  INTEGER NOT NULL DEFAULT 1,
+      apply_days          INTEGER[] NOT NULL DEFAULT '{0,1,2,3,4,5,6}',
+      date_from           DATE,
+      date_to             DATE,
+      unit_ids            INTEGER[] NOT NULL DEFAULT '{}',
+      is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_pricing_cal_rules_org ON pricing_calendar_rules (org_id)
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (
