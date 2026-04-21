@@ -64,6 +64,7 @@ interface BookingForm {
   totalAmount: number;
   source: string;
   extraUnits: ExtraUnit[];
+  spaChildTickets: number;
 }
 
 const STANDARD_ADDONS = [
@@ -118,7 +119,23 @@ const emptyForm = (unitId?: number, checkIn?: string, checkOut?: string): Bookin
   totalAmount: 0,
   source: "phone",
   extraUnits: [],
+  spaChildTickets: 0,
 });
+
+function generateSpaSlots(start: string, end: string, durationMins: number): { label: string; startTime: string; endTime: string }[] {
+  const slots: { label: string; startTime: string; endTime: string }[] = [];
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  let cur = sh * 60 + sm;
+  const endTotal = eh * 60 + em;
+  const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  while (cur + durationMins <= endTotal) {
+    const endT = cur + durationMins;
+    slots.push({ startTime: toTime(cur), endTime: toTime(endT), label: `${toTime(cur)} – ${toTime(endT)}` });
+    cur += durationMins;
+  }
+  return slots;
+}
 
 // ── Step config ────────────────────────────────────────────────────────────
 const STEPS = [
@@ -276,7 +293,14 @@ function ExtraUnitCard({ unit, idx, unitsData, nights, pricePerNight, onUpdate, 
 }
 
 // ── Step 1: Room + Dates ───────────────────────────────────────────────────
-function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict, setDraftConflict, qc }: any) {
+function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict, setDraftConflict, qc, selectedProperty }: any) {
+  const isSpa = selectedProperty?.type === "spa" || selectedProperty?.type === "pool";
+  const spaMode = selectedProperty?.spa_booking_mode || selectedProperty?.spaBookingMode || "allday";
+  const spaSlotDuration = parseInt(selectedProperty?.spa_slot_duration ?? selectedProperty?.spaSlotDuration ?? "180") || 180;
+  const spaSlotStart = selectedProperty?.spa_slot_start || selectedProperty?.spaSlotStart || "10:00";
+  const spaSlotEnd = selectedProperty?.spa_slot_end || selectedProperty?.spaSlotEnd || "19:00";
+  const spaSlots = isSpa && spaMode === "slot" ? generateSpaSlots(spaSlotStart, spaSlotEnd, spaSlotDuration) : [];
+  const selectedSlotLabel = spaSlots.find(s => s.startTime === form.checkinTime)?.label || null;
   const nights = form.checkIn && form.checkOut
     ? Math.max(0, differenceInCalendarDays(new Date(form.checkOut), new Date(form.checkIn)))
     : 0;
@@ -317,17 +341,49 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
         </div>
       </div>
 
-      {/* Time row */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label>Час заїзду</Label>
-          <Input type="time" value={form.checkinTime} onChange={e => f("checkinTime", e.target.value)} />
+      {/* Time row — SPA slot mode or standard time inputs */}
+      {isSpa && spaMode === "allday" ? (
+        <div className="flex items-center gap-3 p-3 bg-sky-50 border border-sky-100 rounded-xl text-sm text-sky-700">
+          <span className="text-xl">☀️</span>
+          <span className="font-semibold">Режим: Весь день</span>
+          <span className="text-sky-400 text-xs ml-auto">Без прив'язки до часу</span>
         </div>
+      ) : isSpa && spaMode === "slot" ? (
         <div>
-          <Label>Час виїзду</Label>
-          <Input type="time" value={form.checkoutTime} onChange={e => f("checkoutTime", e.target.value)} />
+          <Label>Оберіть слот</Label>
+          {spaSlots.length === 0 ? (
+            <p className="text-xs text-gray-400 mt-1">Слоти не налаштовані — перевірте налаштування об'єкта</p>
+          ) : (
+            <div className="flex flex-wrap gap-2 mt-1">
+              {spaSlots.map(sl => (
+                <button
+                  key={sl.startTime}
+                  type="button"
+                  onClick={() => { f("checkinTime", sl.startTime); f("checkoutTime", sl.endTime); }}
+                  className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
+                    form.checkinTime === sl.startTime
+                      ? "border-violet-500 bg-violet-50 text-violet-800"
+                      : "border-gray-200 text-gray-600 hover:border-violet-300 hover:bg-violet-50/50"
+                  }`}
+                >
+                  {sl.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Час заїзду</Label>
+            <Input type="time" value={form.checkinTime} onChange={e => f("checkinTime", e.target.value)} />
+          </div>
+          <div>
+            <Label>Час виїзду</Label>
+            <Input type="time" value={form.checkoutTime} onChange={e => f("checkoutTime", e.target.value)} />
+          </div>
+        </div>
+      )}
 
       {/* Nights badge */}
       {nights > 0 && (
@@ -499,8 +555,11 @@ function StepGuest({ form, f }: any) {
 }
 
 // ── Step 3: Details / Addons ──────────────────────────────────────────────
-function StepDetails({ form, f, addonPriceMap, nights }: any) {
+function StepDetails({ form, f, addonPriceMap, nights, selectedProperty }: any) {
   const [showDiscount, setShowDiscount] = useState(false);
+  const isSpa = selectedProperty?.type === "spa" || selectedProperty?.type === "pool";
+  const spaChildPrice = Number(selectedProperty?.spa_child_price ?? selectedProperty?.spaChildPrice ?? 0);
+  const childTotal = (form.spaChildTickets || 0) * spaChildPrice;
 
   return (
     <div className="space-y-6">
@@ -511,9 +570,26 @@ function StepDetails({ form, f, addonPriceMap, nights }: any) {
           <Stepper value={form.adults}         onChange={v => f("adults", v)}         min={1} label="Дорослі" />
           <Stepper value={form.childrenOver6}  onChange={v => f("childrenOver6", v)}        label="Діти 6–12 років" />
           <Stepper value={form.childrenUnder6} onChange={v => f("childrenUnder6", v)}        label="Діти до 6 років" />
-          <Stepper value={form.extraBeds}      onChange={v => f("extraBeds", v)}             label="Додаткові місця" sub="Нарахується за стандартною ставкою" />
+          {!isSpa && (
+            <Stepper value={form.extraBeds} onChange={v => f("extraBeds", v)} label="Додаткові місця" sub="Нарахується за стандартною ставкою" />
+          )}
         </div>
       </div>
+
+      {/* SPA Children Tickets */}
+      {isSpa && spaChildPrice > 0 && (
+        <div>
+          <Label>Дитячі квитки</Label>
+          <div className="bg-amber-50 rounded-2xl border border-amber-100 px-4">
+            <Stepper
+              value={form.spaChildTickets || 0}
+              onChange={v => f("spaChildTickets", v)}
+              label="Дитячий квиток"
+              sub={`${spaChildPrice} ₴/квиток${childTotal > 0 ? ` · разом ${childTotal} ₴` : ""}`}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Addons */}
       <div>
@@ -999,6 +1075,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         totalAmount: Number(booking.totalAmount || 0),
         source: booking.source || "direct",
         extraUnits: [],
+        spaChildTickets: 0,
       };
     }
     return emptyForm(unitId, initCheckIn, initCheckOut);
@@ -1119,26 +1196,35 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const addonCost = STANDARD_ADDONS.reduce((s, { key }) => {
     return form.selectedAddons[key] ? s + (addonPriceMap[key] || 0) * nights : s;
   }, 0);
+  const spaChildPrice = Number(selectedProperty?.spa_child_price ?? selectedProperty?.spaChildPrice ?? 0);
+  const childTicketTotal = (form.spaChildTickets || 0) * spaChildPrice;
   const discount = form.discountValue > 0
     ? form.discountType === "percent" ? (base + extraUnitsTotal + addonCost) * form.discountValue / 100 : form.discountValue
     : 0;
-  const totalAmount = Math.max(0, Math.round((base + extraUnitsTotal + addonCost - discount + touristTax) * 100) / 100);
+  const totalAmount = Math.max(0, Math.round((base + extraUnitsTotal + addonCost - discount + touristTax + childTicketTotal) * 100) / 100);
 
   // Sync totalAmount into form for save
   useEffect(() => {
     if (totalAmount !== form.totalAmount) f("totalAmount", totalAmount);
   }, [totalAmount]);
 
+  const isSpaProperty = selectedProperty?.type === "spa" || selectedProperty?.type === "pool";
+
   // Validate per step
   const canGoNext = () => {
-    if (step === 0) return !!form.unitId && !!form.checkIn && !!form.checkOut && nights >= 1;
+    if (step === 0) {
+      const hasUnit = !!form.unitId && !!form.checkIn && !!form.checkOut;
+      if (isSpaProperty) return hasUnit; // SPA: same-day OK (nights can be 0)
+      return hasUnit && nights >= 1;
+    }
     if (step === 1) return true; // guest info optional
     return true;
   };
 
   const handleSave = async (status: "confirmed" | "pending", paymentMethod?: string, extra?: { payOnArrival?: boolean; partialAmount?: number }): Promise<any> => {
     if (!form.unitId) { toast({ title: "Виберіть номер", variant: "destructive" }); return null; }
-    if (!form.checkIn || !form.checkOut || nights < 1) { toast({ title: "Вкажіть коректні дати", variant: "destructive" }); return null; }
+    if (!form.checkIn || !form.checkOut) { toast({ title: "Вкажіть коректні дати", variant: "destructive" }); return null; }
+    if (!isSpaProperty && nights < 1) { toast({ title: "Вкажіть коректні дати", variant: "destructive" }); return null; }
 
     const activeExtraUnits = (form.extraUnits || []).filter((u: ExtraUnit) => !!u.unitId);
     const isGroupBooking = !isEdit && activeExtraUnits.length > 0;
@@ -1210,6 +1296,22 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
       const r      = await authFetch(url, { method, body: JSON.stringify(body) });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Помилка"); }
       saved = await r.json();
+
+      // Create service_order for SPA children tickets (new bookings only)
+      if (!isEdit && (form.spaChildTickets || 0) > 0 && spaChildPrice > 0) {
+        await authFetch(`${API}/guest/service-orders`, {
+          method: "POST",
+          body: JSON.stringify({
+            bookingId: saved.id,
+            serviceName: `Дитячий квиток × ${form.spaChildTickets}`,
+            serviceType: "spa",
+            quantity: form.spaChildTickets,
+            price: spaChildPrice,
+            totalPrice: Math.round(form.spaChildTickets * spaChildPrice * 100) / 100,
+          }),
+        });
+      }
+
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["calendar"] });
       const payLabels: Record<string, string> = {
@@ -1310,13 +1412,13 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         {/* ── Content ── */}
         <div className="flex-1 overflow-y-auto px-6 py-6">
           {step === 0 && (
-            <StepRoom form={form} f={f} unitsData={unitsData} ratesData={ratesData} pricingPreview={pricingPreview} draftConflict={draftConflict} setDraftConflict={setDraftConflict} qc={qc} />
+            <StepRoom form={form} f={f} unitsData={unitsData} ratesData={ratesData} pricingPreview={pricingPreview} draftConflict={draftConflict} setDraftConflict={setDraftConflict} qc={qc} selectedProperty={selectedProperty} />
           )}
           {step === 1 && (
             <StepGuest form={form} f={f} />
           )}
           {step === 2 && (
-            <StepDetails form={form} f={f} addonPriceMap={addonPriceMap} nights={nights} />
+            <StepDetails form={form} f={f} addonPriceMap={addonPriceMap} nights={nights} selectedProperty={selectedProperty} />
           )}
           {step === 3 && (
             <StepPayment

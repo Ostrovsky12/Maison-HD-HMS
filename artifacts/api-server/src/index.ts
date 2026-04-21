@@ -280,6 +280,15 @@ async function ensureSchema() {
     ALTER TABLE guests    ALTER COLUMN last_name   TYPE TEXT;
   `);
 
+  // Migrate: add SPA/Pool booking settings to properties
+  await db.execute(sql`
+    ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_booking_mode  VARCHAR(20)     DEFAULT 'allday';
+    ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_slot_duration INTEGER         DEFAULT 180;
+    ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_slot_start    VARCHAR(5)      DEFAULT '10:00';
+    ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_slot_end      VARCHAR(5)      DEFAULT '19:00';
+    ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_child_price   NUMERIC(10, 2);
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (

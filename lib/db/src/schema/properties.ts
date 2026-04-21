@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, numeric, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, numeric, varchar, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./organizations";
@@ -19,6 +19,12 @@ export const propertiesTable = pgTable("properties", {
   checkInTime: varchar("check_in_time", { length: 5 }).default("14:00"),
   checkOutTime: varchar("check_out_time", { length: 5 }).default("12:00"),
   legalEntityId: integer("legal_entity_id").references(() => legalEntitiesTable.id),
+  // SPA / Pool booking settings
+  spaBookingMode: varchar("spa_booking_mode", { length: 20 }).default("allday"),
+  spaSlotDuration: integer("spa_slot_duration").default(180),
+  spaSlotStart: varchar("spa_slot_start", { length: 5 }).default("10:00"),
+  spaSlotEnd: varchar("spa_slot_end", { length: 5 }).default("19:00"),
+  spaChildPrice: numeric("spa_child_price", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

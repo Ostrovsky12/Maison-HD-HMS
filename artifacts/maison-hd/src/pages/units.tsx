@@ -296,13 +296,32 @@ function PropertyModal({ property, onClose, onSaved }: { property?: any; onClose
     address: property?.address || "",
     description: property?.description || "",
     touristTaxRate: String(property?.tourist_tax_rate ?? property?.touristTaxRate ?? "0"),
+    spaBookingMode: property?.spa_booking_mode || property?.spaBookingMode || "allday",
+    spaSlotDuration: String(property?.spa_slot_duration ?? property?.spaSlotDuration ?? "180"),
+    spaSlotStart: property?.spa_slot_start || property?.spaSlotStart || "10:00",
+    spaSlotEnd: property?.spa_slot_end || property?.spaSlotEnd || "19:00",
+    spaChildPrice: String(property?.spa_child_price ?? property?.spaChildPrice ?? ""),
   });
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
+  const isSpa = form.type === "spa" || form.type === "pool";
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast({ title: "Вкажіть назву об'єкта", variant: "destructive" }); return; }
     setSaving(true);
-    const body = { name: form.name.trim(), type: form.type, address: form.address || null, description: form.description || null, touristTaxRate: parseFloat(form.touristTaxRate) || 0 };
+    const body: any = {
+      name: form.name.trim(),
+      type: form.type,
+      address: form.address || null,
+      description: form.description || null,
+      touristTaxRate: parseFloat(form.touristTaxRate) || 0,
+    };
+    if (isSpa) {
+      body.spaBookingMode = form.spaBookingMode;
+      body.spaSlotDuration = parseInt(form.spaSlotDuration) || 180;
+      body.spaSlotStart = form.spaSlotStart || "10:00";
+      body.spaSlotEnd = form.spaSlotEnd || "19:00";
+      body.spaChildPrice = form.spaChildPrice !== "" ? parseFloat(form.spaChildPrice) : null;
+    }
     const r = isEdit
       ? await apiFetch(`/properties/${property.id}`, { method: "PATCH", body: JSON.stringify(body) })
       : await apiFetch("/properties", { method: "POST", body: JSON.stringify(body) });
@@ -314,12 +333,12 @@ function PropertyModal({ property, onClose, onSaved }: { property?: any; onClose
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h2 className="text-lg font-bold">{isEdit ? `Редагувати: ${property.name}` : "Новий об'єкт"}</h2>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="h-5 w-5 text-gray-500" /></button>
         </div>
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
           <div>
             <label className="text-xs font-semibold text-gray-600 mb-1 block">Назва об'єкта *</label>
             <Input value={form.name} onChange={e => set("name", e.target.value)} placeholder="Котеджний комплекс..." autoFocus />
@@ -347,6 +366,78 @@ function PropertyModal({ property, onClose, onSaved }: { property?: any; onClose
               placeholder="Опишіть об'єкт..."
               className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-400" />
           </div>
+
+          {/* SPA / Pool specific settings */}
+          {isSpa && (
+            <div className="border-t pt-4 space-y-4">
+              <p className="text-xs font-bold text-violet-700 uppercase tracking-wide">Налаштування SPA / Басейн</p>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-600 mb-2 block">Режим бронювання</label>
+                <div className="flex gap-2">
+                  {[
+                    { v: "slot", label: "Слот (фіксований час)", icon: "⏱" },
+                    { v: "allday", label: "Весь день", icon: "☀️" },
+                  ].map(opt => (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => set("spaBookingMode", opt.v)}
+                      className={`flex-1 flex flex-col items-center gap-1 py-3 px-4 rounded-xl border-2 text-sm font-semibold transition-all ${
+                        form.spaBookingMode === opt.v
+                          ? "border-violet-500 bg-violet-50 text-violet-800"
+                          : "border-gray-200 text-gray-500 hover:border-gray-300"
+                      }`}
+                    >
+                      <span className="text-xl">{opt.icon}</span>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {form.spaBookingMode === "slot" && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-600 mb-1 block">Початок (з)</label>
+                      <Input type="time" value={form.spaSlotStart} onChange={e => set("spaSlotStart", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-600 mb-1 block">Кінець (до)</label>
+                      <Input type="time" value={form.spaSlotEnd} onChange={e => set("spaSlotEnd", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-600 mb-1 block">Тривалість (хв)</label>
+                      <Input type="number" min="30" step="30" value={form.spaSlotDuration}
+                        onChange={e => set("spaSlotDuration", e.target.value)} placeholder="180" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    {(() => {
+                      const dur = parseInt(form.spaSlotDuration) || 180;
+                      const [sh, sm] = (form.spaSlotStart || "10:00").split(":").map(Number);
+                      const [eh, em] = (form.spaSlotEnd || "19:00").split(":").map(Number);
+                      const totalMins = (eh * 60 + em) - (sh * 60 + sm);
+                      const count = Math.floor(totalMins / dur);
+                      const durH = Math.floor(dur / 60);
+                      const durM = dur % 60;
+                      const durLabel = durH > 0 ? `${durH} год${durM > 0 ? ` ${durM} хв` : ""}` : `${durM} хв`;
+                      return count > 0 ? `${count} слотів по ${durLabel} на день` : "Перевірте час роботи та тривалість";
+                    })()}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-semibold text-gray-600 mb-1 block">Дитячий квиток (₴)</label>
+                <Input type="number" min="0" value={form.spaChildPrice}
+                  onChange={e => set("spaChildPrice", e.target.value)}
+                  placeholder="0 — якщо безкоштовно" />
+                <p className="text-xs text-gray-400 mt-1">Ціна одного дитячого квитка. Додається до суми бронювання.</p>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex gap-3 px-6 py-4 border-t bg-gray-50">
           <Button variant="outline" onClick={onClose} className="flex-1">Скасувати</Button>

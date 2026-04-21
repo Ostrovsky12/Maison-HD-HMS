@@ -88,7 +88,8 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden", message: "Insufficient permissions" });
     return;
   }
-  const { name, address, type, description, sortOrder, touristTaxRate, checkInTime, checkOutTime, legalEntityId } = req.body;
+  const { name, address, type, description, sortOrder, touristTaxRate, checkInTime, checkOutTime, legalEntityId,
+          spaBookingMode, spaSlotDuration, spaSlotStart, spaSlotEnd, spaChildPrice } = req.body;
   // Use raw SQL for the update — handles property_type enum cast and all optional columns cleanly
   await db.execute(sql`
     UPDATE properties SET
@@ -101,6 +102,11 @@ router.patch("/:propertyId", requireAuth, async (req, res) => {
       ${checkInTime !== undefined ? sql`check_in_time = ${checkInTime},` : sql``}
       ${checkOutTime !== undefined ? sql`check_out_time = ${checkOutTime},` : sql``}
       ${legalEntityId !== undefined ? sql`legal_entity_id = ${legalEntityId || null},` : sql``}
+      ${spaBookingMode !== undefined ? sql`spa_booking_mode = ${spaBookingMode},` : sql``}
+      ${spaSlotDuration !== undefined ? sql`spa_slot_duration = ${parseInt(String(spaSlotDuration))},` : sql``}
+      ${spaSlotStart !== undefined ? sql`spa_slot_start = ${spaSlotStart},` : sql``}
+      ${spaSlotEnd !== undefined ? sql`spa_slot_end = ${spaSlotEnd},` : sql``}
+      ${spaChildPrice !== undefined ? sql`spa_child_price = ${spaChildPrice !== null && spaChildPrice !== "" ? parseFloat(String(spaChildPrice)) : null},` : sql``}
       updated_at = NOW()
     WHERE id = ${propertyId}
   `);
