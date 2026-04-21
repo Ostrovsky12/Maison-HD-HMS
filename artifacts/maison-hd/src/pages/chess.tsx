@@ -192,22 +192,41 @@ export default function ChessPage() {
     return m;
   }, [bookings]);
 
-  // Group units by property, sorted by propertySortOrder then unitSortOrder
-  type Row = { type: "group"; label: string; propId: number; propType?: string } | { type: "unit"; unit: any };
+  // Group units: property header → subgroup header → units (matching номерний фонд)
+  type Row =
+    | { type: "group";    label: string; propId: number }
+    | { type: "subgroup"; label: string; propId: number; groupId: number | null }
+    | { type: "unit";     unit: any };
+
   const rows = useMemo<Row[]>(() => {
     const res: Row[] = [];
-    // Sort: first by propertySortOrder, then by unitSortOrder, then name
+    // Units are already sorted by the API: propertySortOrder → groupSortOrder → unitSortOrder → name
     const sorted = [...filteredUnits].sort((a, b) => {
       if (a.propertySortOrder !== b.propertySortOrder) return (a.propertySortOrder ?? 0) - (b.propertySortOrder ?? 0);
       if (a.propertyId !== b.propertyId) return a.propertyId - b.propertyId;
+      if ((a.unitGroupSortOrder ?? 9999) !== (b.unitGroupSortOrder ?? 9999)) return (a.unitGroupSortOrder ?? 9999) - (b.unitGroupSortOrder ?? 9999);
+      if ((a.unitGroupId ?? 999999) !== (b.unitGroupId ?? 999999)) return (a.unitGroupId ?? 999999) - (b.unitGroupId ?? 999999);
       if (a.unitSortOrder !== b.unitSortOrder) return (a.unitSortOrder ?? 0) - (b.unitSortOrder ?? 0);
       return a.name.localeCompare(b.name);
     });
-    const seen = new Set<number>();
+
+    const seenProps   = new Set<number>();
+    // key: `${propId}:${groupId ?? "null"}`
+    const seenGroups  = new Set<string>();
+
     sorted.forEach(u => {
-      if (!seen.has(u.propertyId)) {
-        seen.add(u.propertyId);
-        res.push({ type: "group", label: u.propertyName || "Без групи", propId: u.propertyId });
+      // Property header
+      if (!seenProps.has(u.propertyId)) {
+        seenProps.add(u.propertyId);
+        res.push({ type: "group", label: u.propertyName || "Без назви", propId: u.propertyId });
+      }
+      // Subgroup header (only when the unit belongs to a named group)
+      if (u.unitGroupId != null) {
+        const gKey = `${u.propertyId}:${u.unitGroupId}`;
+        if (!seenGroups.has(gKey)) {
+          seenGroups.add(gKey);
+          res.push({ type: "subgroup", label: u.unitGroupName || "Група", propId: u.propertyId, groupId: u.unitGroupId });
+        }
       }
       res.push({ type: "unit", unit: u });
     });
@@ -526,8 +545,15 @@ export default function ChessPage() {
               {rows.map((row, i) => {
                 if (row.type === "group") {
                   return (
-                    <div key={i} className="flex items-center px-2 bg-gray-50 border-b border-gray-200" style={{ height: CAT_H }}>
-                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider truncate">{row.label}</span>
+                    <div key={i} className="flex items-center px-2 bg-gray-100 border-b border-gray-200" style={{ height: CAT_H }}>
+                      <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wider truncate">{row.label}</span>
+                    </div>
+                  );
+                }
+                if (row.type === "subgroup") {
+                  return (
+                    <div key={i} className="flex items-center gap-1 px-3 bg-gray-50 border-b border-gray-200" style={{ height: CAT_H }}>
+                      <span className="text-[9px] font-semibold text-indigo-500 uppercase tracking-wide truncate">▸ {row.label}</span>
                     </div>
                   );
                 }
@@ -579,10 +605,15 @@ export default function ChessPage() {
                 {rows.map((row, ri) => {
                   if (row.type === "group") {
                     return (
-                      <div key={ri} className="flex bg-gray-50 border-b border-gray-200 sticky left-0" style={{ height: CAT_H }}>
-                        <div style={{ width: totalW }} className="flex items-center px-2">
-                          {/* Month markers in group row */}
-                        </div>
+                      <div key={ri} className="flex bg-gray-100 border-b border-gray-200" style={{ height: CAT_H, width: totalW }}>
+                        <div className="flex items-center px-2 w-full" />
+                      </div>
+                    );
+                  }
+                  if (row.type === "subgroup") {
+                    return (
+                      <div key={ri} className="flex bg-gray-50 border-b border-gray-200" style={{ height: CAT_H, width: totalW }}>
+                        <div className="flex items-center px-2 w-full" />
                       </div>
                     );
                   }

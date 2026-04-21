@@ -449,8 +449,22 @@ router.get("/calendar", requireAuth, async (req, res) => {
 
   const unitRows = await db.execute<any>(
     unitConditions.length > 0
-      ? sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units WHERE ${and(...unitConditions)} AND COALESCE(is_hidden, false) = false ORDER BY COALESCE(sort_order, 0), name`
-      : sql`SELECT *, COALESCE(sort_order, 0) as unit_sort_order FROM units WHERE COALESCE(is_hidden, false) = false ORDER BY COALESCE(sort_order, 0), name`
+      ? sql`SELECT u.*, COALESCE(u.sort_order, 0) as unit_sort_order,
+              ug.id   as ug_id,
+              ug.name as ug_name,
+              COALESCE(ug.sort_order, 0) as ug_sort_order
+            FROM units u
+            LEFT JOIN unit_groups ug ON ug.id = u.unit_group_id
+            WHERE ${and(...unitConditions)} AND COALESCE(u.is_hidden, false) = false
+            ORDER BY COALESCE(ug.sort_order, 9999), COALESCE(u.sort_order, 0), u.name`
+      : sql`SELECT u.*, COALESCE(u.sort_order, 0) as unit_sort_order,
+              ug.id   as ug_id,
+              ug.name as ug_name,
+              COALESCE(ug.sort_order, 0) as ug_sort_order
+            FROM units u
+            LEFT JOIN unit_groups ug ON ug.id = u.unit_group_id
+            WHERE COALESCE(u.is_hidden, false) = false
+            ORDER BY COALESCE(ug.sort_order, 9999), COALESCE(u.sort_order, 0), u.name`
   );
 
   const units = unitRows.rows.map((u: any) => ({
@@ -461,17 +475,22 @@ router.get("/calendar", requireAuth, async (req, res) => {
     propertyName: propNameMap.get(u.property_id) || "",
     propertySortOrder: propSortMap.get(u.property_id) ?? 0,
     unitSortOrder: u.unit_sort_order ?? 0,
+    unitGroupId: u.ug_id ?? null,
+    unitGroupName: u.ug_name ?? null,
+    unitGroupSortOrder: u.ug_sort_order ?? 9999,
     hasView: u.has_view ?? false,
     hasBalcony: u.has_balcony ?? false,
     squareMeters: u.square_meters ? Number(u.square_meters) : null,
     maxCapacity: u.max_capacity ?? null,
-  })).sort((a: any, b: any) =>
-    a.propertySortOrder !== b.propertySortOrder
-      ? a.propertySortOrder - b.propertySortOrder
-      : a.unitSortOrder !== b.unitSortOrder
-      ? a.unitSortOrder - b.unitSortOrder
-      : a.name.localeCompare(b.name)
-  );
+  })).sort((a: any, b: any) => {
+    if (a.propertySortOrder !== b.propertySortOrder) return a.propertySortOrder - b.propertySortOrder;
+    if (a.propertyId !== b.propertyId) return a.propertyId - b.propertyId;
+    // within a property: ungrouped units go LAST (9999), grouped units sorted by group sort_order
+    if (a.unitGroupSortOrder !== b.unitGroupSortOrder) return a.unitGroupSortOrder - b.unitGroupSortOrder;
+    if (a.unitGroupId !== b.unitGroupId) return (a.unitGroupId ?? 999999) - (b.unitGroupId ?? 999999);
+    if (a.unitSortOrder !== b.unitSortOrder) return a.unitSortOrder - b.unitSortOrder;
+    return a.name.localeCompare(b.name);
+  });
 
   const unitIds = units.map((u: any) => u.id);
   if (unitIds.length === 0) {
