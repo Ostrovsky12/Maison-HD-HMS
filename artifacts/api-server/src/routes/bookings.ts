@@ -1356,6 +1356,30 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
     const accommodationLineDesc = isAccommodation
       ? `Послуга проживання — ${unitLabel}`
       : `Послуга — ${unitLabel}`;
+
+    // Compute discount amount for accommodation line
+    const discountValue = Number(booking.discountValue || 0);
+    const discountType  = booking.discountType || null;
+    let accommodationDiscount = 0;
+    let pricePerNightPreDiscount = pricePerNight;
+    if (discountValue > 0 && discountType) {
+      if (discountType === "percent") {
+        // total was reduced by discountValue %; reverse to get pre-discount accommodation
+        const preDiscount = accommodationTotal / (1 - discountValue / 100);
+        accommodationDiscount = Math.round((preDiscount - accommodationTotal) * 100) / 100;
+        pricePerNightPreDiscount = nights > 0
+          ? Math.round((preDiscount / nights) * 100) / 100
+          : preDiscount;
+      } else {
+        // flat amount discount
+        accommodationDiscount = Math.round(discountValue * 100) / 100;
+        const preDiscount = accommodationTotal + accommodationDiscount;
+        pricePerNightPreDiscount = nights > 0
+          ? Math.round((preDiscount / nights) * 100) / 100
+          : preDiscount;
+      }
+    }
+
     const items: any[] = [];
     if (accommodationTotal > 0 || nights > 0) {
       items.push({
@@ -1363,7 +1387,8 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
         detail: `${booking.checkIn} → ${booking.checkOut} · ${nights} ніч`,
         qty: nights || 1,
         unit: isAccommodation ? "ніч" : "шт",
-        price: pricePerNight,
+        price: pricePerNightPreDiscount,
+        discount: accommodationDiscount > 0 ? accommodationDiscount : undefined,
         amount: accommodationTotal,
       });
     }
