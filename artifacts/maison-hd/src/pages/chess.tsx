@@ -279,7 +279,12 @@ export default function ChessPage() {
   // ── Booking on a unit for a date ──
   const getBookingAt = (unitId: number, date: string): any | null => {
     const list = bookingMap.get(unitId) || [];
-    return list.find(b => b.checkIn <= date && b.checkOut > date) || null;
+    return list.find(b =>
+      // multi-day: spans the date
+      (b.checkIn <= date && b.checkOut > date) ||
+      // same-day SPA/slot: checkIn === checkOut === date
+      (b.checkIn === date && b.checkOut === date)
+    ) || null;
   };
 
   const getBlockAt = (unitId: number, date: string): any | null => {
@@ -501,13 +506,27 @@ export default function ChessPage() {
                 <div className="px-3 py-2.5 space-y-1.5">
                   {/* Guest */}
                   <p className="text-sm font-semibold text-gray-800 truncate">{bk.guestName || "—"}</p>
-                  {/* Dates */}
+                  {/* Dates / time */}
+                  {(bk.checkIn === bk.checkOut || bk.nights === 0) ? (
+                    <div className="space-y-0.5 text-xs text-gray-500">
+                      <div className="font-medium text-gray-700">{fmt(bk.checkIn)}</div>
+                      {bk.checkinTime && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-indigo-500 font-semibold tabular-nums">
+                            {bk.checkinTime} – {bk.checkoutTime || "—"}
+                          </span>
+                          <span className="ml-auto bg-indigo-50 text-indigo-600 text-[9px] font-bold px-1.5 py-0.5 rounded-full">SPA / slot</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
                   <div className="flex items-center gap-1 text-xs text-gray-500">
                     <span>{fmt(bk.checkIn)}</span>
                     <span className="text-gray-300">→</span>
                     <span>{fmt(bk.checkOut)}</span>
                     <span className="ml-auto text-gray-400">{bk.nights}н</span>
                   </div>
+                  )}
                   {/* Amount */}
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-gray-500">Сума</span>
@@ -653,21 +672,79 @@ export default function ChessPage() {
 
                       {/* Booking blocks rendered as absolute positioned bars */}
                       {unitBookings.map(b => {
+                        const endDateStr = ds(addDays(dp(startDate), days));
+                        const isSameDay = b.checkIn === b.checkOut || b.nights === 0;
+                        const status = getStatusFromBooking(b);
+                        const def = STATUS_DEF[status] || STATUS_DEF.confirmed;
+                        const paid = overlay === "payment";
+                        const paymentBg = paid ? (b.paymentStatus === "paid" ? "bg-emerald-500" : b.paymentStatus === "partial" ? "bg-orange-400" : "bg-red-400") : "";
+
+                        // ── Same-day (SPA/джакузі/басейн) ──────────────────
+                        if (isSameDay) {
+                          const dateIdx = dates.indexOf(b.checkIn);
+                          if (dateIdx === -1) return null;
+
+                          // Time-based sub-cell positioning
+                          const parseHHMM = (t: string | null) => {
+                            if (!t) return null;
+                            const [h, m] = t.split(":").map(Number);
+                            return (h + m / 60) / 24; // 0–1 fraction of day
+                          };
+                          const tIn  = parseHHMM(b.checkinTime);
+                          const tOut = parseHHMM(b.checkoutTime);
+                          const hasValidTime = tIn !== null && tOut !== null && tOut > tIn;
+
+                          const cellLeft = dateIdx * dayW;
+                          const barLeft = hasValidTime
+                            ? cellLeft + Math.round(dayW * tIn!) + 1
+                            : cellLeft + 2;
+                          const barRight = hasValidTime
+                            ? cellLeft + Math.round(dayW * tOut!) - 1
+                            : cellLeft + dayW - 2;
+                          const barWidth = Math.max(4, barRight - barLeft);
+
+                          return (
+                            <div key={b.id}
+                              className={`absolute rounded-md border cursor-pointer select-none overflow-hidden flex items-center transition-all hover:brightness-90 hover:shadow-md z-10
+                                ${paid ? paymentBg + " text-white border-transparent" : `${def.bg} ${def.text} ${def.border}`}
+                                ${b.status === "cancelled" ? "opacity-50" : ""}`}
+                              style={{ left: barLeft, width: barWidth, top: 2, bottom: 2 }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); setDetailBk(b); setHoveredBk(null); }}
+                              onMouseEnter={(e) => setHoveredBk({ bk: b, x: e.clientX, y: e.clientY })}
+                              onMouseMove={(e) => setHoveredBk(h => h ? { ...h, x: e.clientX, y: e.clientY } : null)}
+                              onMouseLeave={() => setHoveredBk(null)}
+                            >
+                              {barWidth > 20 && (
+                                <div className="flex flex-col justify-center px-1.5 min-w-0 w-full leading-tight">
+                                  {barWidth > 36 && b.checkinTime && (
+                                    <span className="text-[9px] opacity-80 font-medium tabular-nums">
+                                      {b.checkinTime}–{b.checkoutTime}
+                                    </span>
+                                  )}
+                                  {barWidth > 48 && (
+                                    <span className="text-[10px] font-bold truncate">
+                                      {b.guestName?.split(" ")[0] || "—"}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        // ── Multi-day bookings ───────────────────────────────
                         const bStart = b.checkIn > startDate ? b.checkIn : startDate;
-                        const endDate = ds(addDays(dp(startDate), days));
-                        const bEnd = b.checkOut < endDate ? b.checkOut : endDate;
+                        const bEnd = b.checkOut < endDateStr ? b.checkOut : endDateStr;
                         if (bStart >= bEnd) return null;
                         const startIdx = dates.indexOf(bStart);
                         const endIdx = dates.indexOf(bEnd);
                         if (startIdx === -1) return null;
                         const w = (endIdx === -1 ? dates.length : endIdx) - startIdx;
                         if (w <= 0) return null;
-                        const status = getStatusFromBooking(b);
-                        const def = STATUS_DEF[status] || STATUS_DEF.confirmed;
+
                         const isOverflow = b.checkIn < startDate;
-                        const isUnderflow = b.checkOut > endDate;
-                        const paid = overlay === "payment";
-                        const paymentBg = paid ? (b.paymentStatus === "paid" ? "bg-emerald-500" : b.paymentStatus === "partial" ? "bg-orange-400" : "bg-red-400") : "";
+                        const isUnderflow = b.checkOut > endDateStr;
 
                         // Split-cell positioning: check-in = right 40%, check-out = left 40%
                         const barLeft = isOverflow
