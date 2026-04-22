@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Printer, Plus, Pencil, Trash2, Wifi, WifiOff, CheckCircle2,
   Loader2, Settings, AlertTriangle, X, Check, Tag, Percent, Bot, Save, FlaskConical,
+  Search, Radio, ChevronDown, ChevronUp, PlugZap,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -71,6 +72,14 @@ function PrintersTab() {
   const [form, setForm] = useState<any>(EMPTY_FORM);
   const fv = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }));
 
+  // WiFi discovery state
+  const [wifiOpen, setWifiOpen] = useState(false);
+  const [subnet, setSubnet] = useState("192.168.1");
+  const [scanning, setScanning] = useState(false);
+  const [scanResults, setScanResults] = useState<{ ip: string; port: number }[] | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [addedIps, setAddedIps] = useState<Set<string>>(new Set());
+
   const { data, isLoading } = useQuery({
     queryKey: ["pos-printers"],
     queryFn: async () => {
@@ -128,6 +137,28 @@ function PrintersTab() {
     setShowForm(true);
   };
 
+  const runScan = async () => {
+    if (!subnet.trim()) return;
+    setScanning(true); setScanResults(null); setScanError(null); setAddedIps(new Set());
+    try {
+      const r = await apiFetch(`/printers/scan?subnet=${encodeURIComponent(subnet.trim())}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Помилка сканування");
+      setScanResults(d.found || []);
+    } catch (e: any) {
+      setScanError(e.message);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const quickAdd = (ip: string, port: number) => {
+    setEditId(null);
+    setForm({ ...EMPTY_FORM, ipAddress: ip, port: String(port), name: `Принтер ${ip}` });
+    setAddedIps(prev => new Set([...prev, ip]));
+    setShowForm(true);
+  };
+
   return (
     <>
       <div className="flex items-center justify-between mb-4">
@@ -135,6 +166,116 @@ function PrintersTab() {
         <Button onClick={() => { setShowForm(true); setEditId(null); setForm(EMPTY_FORM); }} className="bg-indigo-600 hover:bg-indigo-700 gap-1.5">
           <Plus className="w-4 h-4" /> Додати принтер
         </Button>
+      </div>
+
+      {/* ── WiFi discovery panel ── */}
+      <div className="border rounded-xl mb-4 overflow-hidden">
+        <button
+          className="w-full flex items-center gap-3 px-4 py-3 bg-indigo-50 hover:bg-indigo-100 transition-colors text-left"
+          onClick={() => { setWifiOpen(v => !v); setScanResults(null); setScanError(null); }}
+        >
+          <Radio className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span className="text-sm font-semibold text-indigo-800 flex-1">Знайти WiFi принтери</span>
+          <span className="text-xs text-indigo-500 mr-1">Автоматичний пошук у локальній мережі</span>
+          {wifiOpen ? <ChevronUp className="w-4 h-4 text-indigo-500" /> : <ChevronDown className="w-4 h-4 text-indigo-500" />}
+        </button>
+
+        {wifiOpen && (
+          <div className="p-4 bg-white border-t border-indigo-100 space-y-4">
+            {/* Subnet input + scan button */}
+            <div className="flex gap-2 items-end">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs text-gray-500">Підмережа (перші 3 октети)</Label>
+                <div className="flex items-center gap-1">
+                  <Input
+                    value={subnet}
+                    onChange={e => setSubnet(e.target.value.replace(/[^\d.]/g, ""))}
+                    placeholder="192.168.1"
+                    className="font-mono text-sm"
+                    disabled={scanning}
+                  />
+                  <span className="text-sm text-gray-400 font-mono shrink-0">.1–254</span>
+                </div>
+              </div>
+              <Button
+                onClick={runScan}
+                disabled={scanning || !subnet.trim()}
+                className="bg-indigo-600 hover:bg-indigo-700 gap-1.5 shrink-0"
+              >
+                {scanning
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Сканування…</>
+                  : <><Search className="w-4 h-4" /> Сканувати</>}
+              </Button>
+            </div>
+
+            {/* Scanning animation */}
+            {scanning && (
+              <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-4 py-5 flex flex-col items-center gap-3">
+                <div className="relative">
+                  <Radio className="w-8 h-8 text-indigo-500" />
+                  <span className="absolute inset-0 rounded-full border-2 border-indigo-400 animate-ping opacity-50" />
+                </div>
+                <p className="text-sm text-indigo-700 font-medium">Сканую {subnet}.1–254 · порт 9100…</p>
+                <p className="text-xs text-indigo-400">Це займе ~10–15 секунд</p>
+              </div>
+            )}
+
+            {/* Error */}
+            {scanError && !scanning && (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-red-700">{scanError}</p>
+              </div>
+            )}
+
+            {/* Results */}
+            {scanResults !== null && !scanning && (
+              <div>
+                {scanResults.length === 0 ? (
+                  <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-5 text-center">
+                    <WifiOff className="w-7 h-7 mx-auto text-gray-300 mb-2" />
+                    <p className="text-sm text-gray-500 font-medium">Принтерів не знайдено</p>
+                    <p className="text-xs text-gray-400 mt-1">Перевірте підмережу або переконайтесь, що принтер увімкнено</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                      Знайдено {scanResults.length} пристрій{scanResults.length === 1 ? "" : scanResults.length < 5 ? "и" : "ів"}
+                    </p>
+                    {scanResults.map(({ ip, port }) => (
+                      <div key={ip} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 bg-emerald-100 rounded-lg flex items-center justify-center">
+                            <PlugZap className="w-4 h-4 text-emerald-600" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800 font-mono">{ip}</p>
+                            <p className="text-xs text-gray-500">Порт {port} · ESC/POS</p>
+                          </div>
+                        </div>
+                        {addedIps.has(ip) ? (
+                          <Badge className="text-xs bg-emerald-100 text-emerald-700 border-emerald-200 gap-1">
+                            <Check className="w-3 h-3" /> Додається
+                          </Badge>
+                        ) : (
+                          <Button size="sm" className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 gap-1"
+                            onClick={() => quickAdd(ip, port)}>
+                            <Plus className="w-3 h-3" /> Додати
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Hint */}
+            <p className="text-xs text-gray-400">
+              Сканується порт <strong>9100</strong> (стандарт ESC/POS). Принтери Epson TM-T88, BIXOLON SRP-350, Star TSP та інші.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">

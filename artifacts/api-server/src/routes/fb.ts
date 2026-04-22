@@ -1135,6 +1135,52 @@ router.get("/printers", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── WiFi printer discovery: scan subnet for open port 9100 ──
+router.get("/printers/scan", requireAuth, async (req: any, res) => {
+  try {
+    const subnet = ((req.query.subnet as string) || "192.168.1").trim();
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(subnet)) {
+      return res.status(400).json({ error: "Невірний формат підмережі. Використовуйте формат: 192.168.1" });
+    }
+
+    const net = await import("net");
+    const PORTS = [9100, 9101]; // thermal printer ports
+    const TIMEOUT_MS = 400;
+    const CONCURRENCY = 40;
+
+    const probeIp = (ip: string): Promise<{ ip: string; port: number } | null> =>
+      new Promise(resolve => {
+        let resolved = false;
+        const tryPort = (port: number) => new Promise<boolean>(portResolve => {
+          const socket = new (net as any).Socket();
+          socket.setTimeout(TIMEOUT_MS);
+          socket.on("connect", () => { socket.destroy(); portResolve(true); });
+          socket.on("timeout", () => { socket.destroy(); portResolve(false); });
+          socket.on("error", () => { socket.destroy(); portResolve(false); });
+          socket.connect(port, ip);
+        });
+
+        Promise.all(PORTS.map(tryPort)).then(results => {
+          if (resolved) return;
+          resolved = true;
+          const idx = results.findIndex(Boolean);
+          resolve(idx >= 0 ? { ip, port: PORTS[idx] } : null);
+        });
+      });
+
+    const ips = Array.from({ length: 254 }, (_, i) => `${subnet}.${i + 1}`);
+    const found: { ip: string; port: number }[] = [];
+
+    for (let i = 0; i < ips.length; i += CONCURRENCY) {
+      const batch = ips.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map(probeIp));
+      results.filter(Boolean).forEach(r => found.push(r!));
+    }
+
+    res.json({ found, subnet, scanned: ips.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/printers", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
