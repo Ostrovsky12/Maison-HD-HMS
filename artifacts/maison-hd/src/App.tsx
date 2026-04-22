@@ -79,6 +79,7 @@ import DeliveryPage from "@/pages/delivery";
 import RatesPage from "@/pages/rates";
 import TechPage from "@/pages/tech";
 import LegalPage from "@/pages/legal";
+import PublicInvoicePage from "@/pages/public-invoice";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -159,6 +160,7 @@ function Router() {
       <Route path="/migration"><ProtectedRoute component={MigrationPage} roles={["super_admin", "owner", "manager"]} /></Route>
       <Route path="/demo" component={DemoPage} />
       <Route path="/guest/:code" component={GuestPortalPage} />
+      <Route path="/invoice/:token" component={PublicInvoicePage} />
       <Route path="/inbox"><ProtectedRoute component={InboxPage} /></Route>
       <Route path="/spa"><ProtectedRoute component={SpaPage} /></Route>
       <Route path="/events"><ProtectedRoute component={EventsPage} /></Route>

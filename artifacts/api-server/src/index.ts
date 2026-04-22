@@ -280,6 +280,11 @@ async function ensureSchema() {
     ALTER TABLE guests    ALTER COLUMN last_name   TYPE TEXT;
   `);
 
+  // Migrate: public token for shareable invoice links
+  await db.execute(sql`
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS public_token TEXT UNIQUE;
+  `);
+
   // Migrate: add SPA/Pool booking settings to properties
   await db.execute(sql`
     ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_booking_mode  VARCHAR(20)     DEFAULT 'allday';

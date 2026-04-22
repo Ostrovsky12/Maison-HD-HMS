@@ -889,12 +889,13 @@ function SendInvoiceModal({ invoiceId, invoiceNumber, total, guestName, onClose 
   const [recipient, setRecipient] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
 
   const uah = (n: number) => new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", minimumFractionDigits: 2 }).format(n);
   const defaultMessage = `Рахунок № ${invoiceNumber} на суму ${uah(total)}.\nОтримувач: ${guestName}`;
 
   const handleSend = async () => {
-    if (!recipient.trim()) {
+    if (channel !== "link" && !recipient.trim()) {
       toast({ title: "Вкажіть отримувача", variant: "destructive" });
       return;
     }
@@ -910,8 +911,12 @@ function SendInvoiceModal({ invoiceId, invoiceNumber, total, guestName, onClose 
         throw new Error(data.message || data.error || "send failed");
       }
       setSent(true);
-      toast({ title: "✅ Надіслано!", description: `Рахунок відправлено через ${channel === "telegram" ? "Telegram" : channel === "sms" ? "SMS" : "посилання"}` });
-      setTimeout(onClose, 1500);
+      if (data.invoiceUrl) setInvoiceUrl(data.invoiceUrl);
+      if (channel === "telegram") {
+        toast({ title: "✅ Надіслано через Telegram!", description: "Гість отримав посилання на рахунок." });
+      } else {
+        toast({ title: "✅ Посилання готове", description: "Скопіюйте посилання та надішліть гостю." });
+      }
     } catch (e: any) {
       toast({ title: "Помилка надсилання", description: e.message, variant: "destructive" });
     } finally {
@@ -920,9 +925,9 @@ function SendInvoiceModal({ invoiceId, invoiceNumber, total, guestName, onClose 
   };
 
   const channels = [
-    { id: "telegram" as const, label: "Telegram", icon: MessageCircle, hint: "Username або @ім'я" },
-    { id: "sms" as const, label: "SMS", icon: Phone, hint: "+380XXXXXXXXX" },
-    { id: "link" as const, label: "Посилання", icon: Link2, hint: "Email отримувача" },
+    { id: "telegram" as const, label: "Telegram", icon: MessageCircle, hint: "@username гостя" },
+    { id: "link" as const, label: "Скопіювати лінк", icon: Link2, hint: "Посилання для гостя" },
+    { id: "sms" as const, label: "SMS", icon: Phone, hint: "+380XXXXXXXXX (незабаром)" },
   ];
 
   return (
@@ -945,10 +950,28 @@ function SendInvoiceModal({ invoiceId, invoiceNumber, total, guestName, onClose 
 
         <div className="p-6 space-y-5">
           {sent ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <CheckCircle2 className="w-14 h-14 text-emerald-500" />
-              <div className="text-lg font-bold text-gray-900">Надіслано!</div>
-              <div className="text-sm text-gray-500">Рахунок відправлено отримувачу</div>
+            <div className="flex flex-col items-center gap-4 py-4">
+              <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+              <div className="text-lg font-bold text-gray-900">
+                {channel === "telegram" ? "Надіслано через Telegram!" : "Посилання готове!"}
+              </div>
+              {invoiceUrl && (
+                <div className="w-full space-y-2">
+                  <p className="text-xs text-center text-gray-500">Посилання на рахунок для гостя:</p>
+                  <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl">
+                    <Link2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    <span className="text-xs text-gray-700 font-mono truncate flex-1">{invoiceUrl}</span>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(invoiceUrl); toast({ title: "Скопійовано!" }); }}
+                      className="shrink-0 text-xs text-indigo-600 font-semibold hover:text-indigo-800"
+                    >
+                      Копіювати
+                    </button>
+                  </div>
+                  <p className="text-xs text-center text-gray-400">Гість бачить рахунок без входу в систему · може роздрукувати як PDF</p>
+                </div>
+              )}
+              <button onClick={onClose} className="mt-2 text-sm text-gray-400 hover:text-gray-600">Закрити</button>
             </div>
           ) : (
             <>
@@ -971,23 +994,32 @@ function SendInvoiceModal({ invoiceId, invoiceNumber, total, guestName, onClose 
               </div>
 
               {/* Recipient */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  {channels.find(c => c.id === channel)?.hint || "Отримувач"}
-                </label>
-                <input
-                  type="text"
-                  value={recipient}
-                  onChange={e => setRecipient(e.target.value)}
-                  placeholder={channels.find(c => c.id === channel)?.hint}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+              {channel !== "link" && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    {channels.find(c => c.id === channel)?.hint || "Отримувач"}
+                  </label>
+                  <input
+                    type="text"
+                    value={recipient}
+                    onChange={e => setRecipient(e.target.value)}
+                    placeholder={channels.find(c => c.id === channel)?.hint}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
 
               {/* Message preview */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Повідомлення</label>
-                <div className="bg-gray-50 rounded-xl px-4 py-3 text-xs text-gray-600 whitespace-pre-wrap">{defaultMessage}</div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  {channel === "link" ? "Що отримає гість" : "Що отримає гість (Telegram)"}
+                </label>
+                <div className="bg-gray-50 rounded-xl px-4 py-3 text-xs text-gray-600 space-y-1">
+                  <p className="whitespace-pre-wrap">{channel === "telegram"
+                    ? `🧾 Рахунок № ${invoiceNumber}\n${guestName ? `👤 ${guestName}\n` : ""}💰 До сплати: ${uah(total)}\n\n👉 [Переглянути рахунок] ← посилання`
+                    : `Посилання на рахунок, яке можна відкрити в браузері, переглянути всі деталі та роздрукувати як PDF.`
+                  }</p>
+                </div>
               </div>
 
               <div className="flex gap-2 pt-1">
