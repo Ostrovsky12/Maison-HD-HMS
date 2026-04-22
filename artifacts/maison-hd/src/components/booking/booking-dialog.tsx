@@ -39,6 +39,7 @@ interface ExtraUnit {
   adults: number;
   childrenUnder6: number;
   childrenOver6: number;
+  customPrice?: number;    // total price for this unit (user-editable or auto-fetched)
 }
 
 interface BookingForm {
@@ -217,16 +218,37 @@ function Stepper({ value, onChange, min = 0, max = 20, label, sub }: {
 }
 
 // ── Extra Unit Card ─────────────────────────────────────────────────────────
-function ExtraUnitCard({ unit, idx, unitsData, nights, pricePerNight, onUpdate, onRemove }: {
+function ExtraUnitCard({ unit, idx, unitsData, nights, checkIn, checkOut, onUpdate, onRemove }: {
   unit: ExtraUnit;
   idx: number;
   unitsData: any[];
   nights: number;
-  pricePerNight: number;
+  checkIn: string;
+  checkOut: string;
   onUpdate: (key: string, field: keyof ExtraUnit, val: any) => void;
   onRemove: (key: string) => void;
 }) {
-  const unitTotal = pricePerNight > 0 ? pricePerNight * nights : 0;
+  const [loadingPrice, setLoadingPrice] = useState(false);
+
+  // Auto-fetch pricing when unit is selected
+  useEffect(() => {
+    if (!unit.unitId || !checkIn || !checkOut) return;
+    setLoadingPrice(true);
+    fetch(`${API}/bookings/pricing-preview?unitId=${unit.unitId}&checkIn=${checkIn}&checkOut=${checkOut}`, {
+      headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json" },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.totalAmount != null) {
+          onUpdate(unit._key, "customPrice", Number(data.totalAmount));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingPrice(false));
+  }, [unit.unitId, checkIn, checkOut]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const price = unit.customPrice ?? 0;
+
   return (
     <div className="border border-indigo-100 bg-indigo-50/40 rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -283,11 +305,26 @@ function ExtraUnitCard({ unit, idx, unitsData, nights, pricePerNight, onUpdate, 
           </div>
         ))}
       </div>
-      {unitTotal > 0 && nights > 0 && (
-        <div className="text-right text-xs text-indigo-500 font-medium">
-          {fmt(pricePerNight)}/ніч × {nights} = <span className="font-black text-indigo-700">{fmt(unitTotal)}</span>
+      {/* Price row */}
+      <div className="flex items-center gap-2 pt-1">
+        <span className="text-xs text-indigo-500 font-medium shrink-0">Сума:</span>
+        <div className="relative flex-1">
+          {loadingPrice && <Loader2 className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 animate-spin text-indigo-400" />}
+          <input
+            type="number"
+            min="0"
+            step="50"
+            value={price || ""}
+            onChange={e => onUpdate(unit._key, "customPrice", Number(e.target.value) || 0)}
+            placeholder="Вкажіть вартість..."
+            className={`w-full h-8 ${loadingPrice ? "pl-7" : "pl-3"} pr-3 bg-white border border-indigo-200 rounded-lg text-sm font-semibold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400`}
+          />
         </div>
-      )}
+        <span className="text-xs text-indigo-400 font-medium shrink-0">₴</span>
+        {price > 0 && (
+          <span className="text-xs font-black text-indigo-700 shrink-0">{fmt(price)}</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -400,17 +437,21 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
           </div>
           {(() => {
             const selRate = form.rateId ? ratesData?.find((r: any) => r.id === form.rateId) : null;
-            const pricePerNight = selRate ? Number(selRate.pricePerNight) : (pricingPreview?.totalAmount > 0 && nights > 0 ? Math.round(pricingPreview.totalAmount / nights) : 0);
             const mainTotal = selRate ? Number(selRate.pricePerNight) * nights : (pricingPreview?.totalAmount || 0);
-            const extraTotal = (form.extraUnits || []).filter((u: ExtraUnit) => u.unitId).length * pricePerNight * nights;
+            // Extra units: sum their own customPrices
+            const extraTotal = (form.extraUnits || [])
+              .filter((u: ExtraUnit) => !!u.unitId)
+              .reduce((s: number, u: ExtraUnit) => s + (u.customPrice || 0), 0);
             const displayTotal = mainTotal + extraTotal;
-            const displayPerNight = nights > 0 && (1 + (form.extraUnits || []).filter((u: ExtraUnit) => u.unitId).length) > 0
-              ? Math.round(displayTotal / nights)
-              : 0;
+            const totalUnits = 1 + (form.extraUnits || []).filter((u: ExtraUnit) => !!u.unitId).length;
+            const displayPerNight = nights > 0 && totalUnits > 0 ? Math.round(displayTotal / nights) : 0;
             return displayTotal > 0 ? (
               <div className="text-right">
                 <div className="font-black text-indigo-700 text-xl">{fmt(displayTotal)}</div>
-                <div className="text-xs text-indigo-400">{fmt(displayPerNight)}/ніч</div>
+                {totalUnits > 1
+                  ? <div className="text-xs text-indigo-400">{totalUnits} юніти разом</div>
+                  : <div className="text-xs text-indigo-400">{fmt(displayPerNight)}/ніч</div>
+                }
               </div>
             ) : null;
           })()}
@@ -480,22 +521,19 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
       {/* Extra units (group booking) */}
       {!!(form.extraUnits?.length) && (
         <div className="space-y-3">
-          {(form.extraUnits as ExtraUnit[]).map((unit, idx) => {
-            const selRate = form.rateId ? ratesData?.find((r: any) => r.id === form.rateId) : null;
-            const pricePerNight = selRate ? Number(selRate.pricePerNight) : (pricingPreview?.totalAmount > 0 && nights > 0 ? Math.round(pricingPreview.totalAmount / nights) : 0);
-            return (
-              <ExtraUnitCard
-                key={unit._key}
-                unit={unit}
-                idx={idx}
-                unitsData={unitsData || []}
-                nights={nights}
-                pricePerNight={pricePerNight}
-                onUpdate={updateExtraUnit}
-                onRemove={removeExtraUnit}
-              />
-            );
-          })}
+          {(form.extraUnits as ExtraUnit[]).map((unit, idx) => (
+            <ExtraUnitCard
+              key={unit._key}
+              unit={unit}
+              idx={idx}
+              unitsData={unitsData || []}
+              nights={nights}
+              checkIn={form.checkIn}
+              checkOut={form.checkOut}
+              onUpdate={updateExtraUnit}
+              onRemove={removeExtraUnit}
+            />
+          ))}
         </div>
       )}
 
@@ -1189,10 +1227,10 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   const rateBase = selectedRate ? Number(selectedRate.pricePerNight) * nights : 0;
   const unitPricePerNight = selectedRate ? Number(selectedRate.pricePerNight) : (nights > 0 ? previewTotal / nights : 0);
   const base = rateBase > 0 ? rateBase : previewTotal;
-  // Extra units: each unit with a selected unitId gets same rate price × nights
+  // Extra units: each unit uses its own customPrice (auto-fetched or user-entered)
   const extraUnitsTotal = (form.extraUnits || [])
     .filter((u: ExtraUnit) => !!u.unitId)
-    .reduce((_s: number, _u: ExtraUnit) => _s + (unitPricePerNight * nights), 0);
+    .reduce((_s: number, _u: ExtraUnit) => _s + (_u.customPrice || 0), 0);
   const addonCost = STANDARD_ADDONS.reduce((s, { key }) => {
     return form.selectedAddons[key] ? s + (addonPriceMap[key] || 0) * nights : s;
   }, 0);
@@ -1254,7 +1292,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
 
       let saved: any;
       if (isGroupBooking) {
-        // Group booking: send all units to the group endpoint
+        // Group booking: send all units to the group endpoint with individual prices
         const mainUnitTotal = rateBase > 0 ? rateBase : previewTotal;
         const units = [
           { unitId: form.unitId, adults: form.adults, childrenUnder6: form.childrenUnder6, childrenOver6: form.childrenOver6, extraBeds: form.extraBeds, totalAmount: mainUnitTotal },
@@ -1264,7 +1302,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
             childrenUnder6: u.childrenUnder6,
             childrenOver6: u.childrenOver6,
             extraBeds: 0,
-            totalAmount: unitPricePerNight * nights,
+            totalAmount: u.customPrice || 0,
           })),
         ];
         const r = await authFetch(`${API}/bookings/group`, { method: "POST", body: JSON.stringify({ ...commonFields, units }) });
