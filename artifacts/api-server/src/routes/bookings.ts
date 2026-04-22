@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable, housekeepingTasksTable, guestServiceOrdersTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, inArray, desc, sql, or, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
@@ -443,29 +443,34 @@ router.get("/calendar", requireAuth, async (req, res) => {
   const propNameMap = new Map(propertiesData.map((p: any) => [p.id, p.name]));
   const propSortMap = new Map(propertiesData.map((p: any) => [p.id, p.sort_order ?? 0]));
 
-  let unitConditions: any[] = [];
-  if (propIds.length > 0) unitConditions.push(inArray(unitsTable.propertyId, propIds));
-  if (categoryFilter) unitConditions.push(sql`${unitsTable.category} = ${categoryFilter}`);
+  // Build WHERE conditions as raw SQL strings to avoid Drizzle alias conflicts
+  const whereClauses: string[] = ["COALESCE(u.is_hidden, false) = false"];
+  const queryParams: any[] = [];
 
-  const unitRows = await db.execute<any>(
-    unitConditions.length > 0
-      ? sql`SELECT u.*, COALESCE(u.sort_order, 0) as unit_sort_order,
-              ug.id   as ug_id,
-              ug.name as ug_name,
-              COALESCE(ug.sort_order, 0) as ug_sort_order
-            FROM units u
-            LEFT JOIN unit_groups ug ON ug.id = u.unit_group_id
-            WHERE ${and(...unitConditions)} AND COALESCE(u.is_hidden, false) = false
-            ORDER BY COALESCE(ug.sort_order, 9999), COALESCE(u.sort_order, 0), u.name`
-      : sql`SELECT u.*, COALESCE(u.sort_order, 0) as unit_sort_order,
-              ug.id   as ug_id,
-              ug.name as ug_name,
-              COALESCE(ug.sort_order, 0) as ug_sort_order
-            FROM units u
-            LEFT JOIN unit_groups ug ON ug.id = u.unit_group_id
-            WHERE COALESCE(u.is_hidden, false) = false
-            ORDER BY COALESCE(ug.sort_order, 9999), COALESCE(u.sort_order, 0), u.name`
+  if (propIds.length > 0) {
+    const placeholders = propIds.map((_, i) => `$${queryParams.length + i + 1}`).join(", ");
+    whereClauses.push(`u.property_id IN (${placeholders})`);
+    queryParams.push(...propIds);
+  }
+  if (categoryFilter) {
+    queryParams.push(categoryFilter);
+    whereClauses.push(`u.category = $${queryParams.length}`);
+  }
+
+  const whereStr = whereClauses.join(" AND ");
+  const { rows: unitRawRows } = await pool.query(
+    `SELECT u.*,
+            COALESCE(u.sort_order, 0) as unit_sort_order,
+            ug.id   as ug_id,
+            ug.name as ug_name,
+            COALESCE(ug.sort_order, 0) as ug_sort_order
+     FROM units u
+     LEFT JOIN unit_groups ug ON ug.id = u.unit_group_id
+     WHERE ${whereStr}
+     ORDER BY COALESCE(ug.sort_order, 9999), COALESCE(u.sort_order, 0), u.name`,
+    queryParams
   );
+  const unitRows = { rows: unitRawRows };
 
   const units = unitRows.rows.map((u: any) => ({
     id: u.id,

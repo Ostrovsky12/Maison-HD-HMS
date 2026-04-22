@@ -1137,7 +1137,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
       const r = await authFetch(`${API}/legal-entities`);
       if (!r.ok) return [];
       const d = await r.json();
-      return Array.isArray(d) ? d : (d.entities || []);
+      return Array.isArray(d) ? d : (d.legalEntities || d.entities || []);
     },
   });
 
