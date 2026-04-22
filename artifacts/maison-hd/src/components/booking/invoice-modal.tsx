@@ -905,9 +905,12 @@ function SendInvoiceModal({ invoiceId, invoiceNumber, total, guestName, onClose 
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok()}` },
         body: JSON.stringify({ channel, recipient: recipient.trim(), message: defaultMessage }),
       });
-      if (!resp.ok) throw new Error((await resp.json()).error || "send failed");
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.message || data.error || "send failed");
+      }
       setSent(true);
-      toast({ title: "Надіслано!", description: `Рахунок відправлено через ${channel === "telegram" ? "Telegram" : channel === "sms" ? "SMS" : "посилання"}` });
+      toast({ title: "✅ Надіслано!", description: `Рахунок відправлено через ${channel === "telegram" ? "Telegram" : channel === "sms" ? "SMS" : "посилання"}` });
       setTimeout(onClose, 1500);
     } catch (e: any) {
       toast({ title: "Помилка надсилання", description: e.message, variant: "destructive" });

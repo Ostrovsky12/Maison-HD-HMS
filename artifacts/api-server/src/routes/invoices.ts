@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { invoicesTable, bookingsTable, guestsTable, usersTable } from "@workspace/db/schema";
+import { invoicesTable, bookingsTable, guestsTable, usersTable, channelConfigsTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
@@ -189,6 +189,7 @@ router.post("/:invoiceId/pay", requireAuth, async (req, res) => {
 // ─── Send invoice (via Telegram / SMS / link) ────────────────────────────────
 router.post("/:invoiceId/send", requireAuth, async (req, res) => {
   try {
+    const user = (req as any).user;
     const invoiceId = parseInt(req.params.invoiceId);
     const { channel, recipient, message } = req.body; // channel: telegram|sms|link
 
@@ -196,11 +197,83 @@ router.post("/:invoiceId/send", requireAuth, async (req, res) => {
       .where(eq(invoicesTable.id, invoiceId)).limit(1);
     if (!invoice) return res.status(404).json({ error: "Not found" });
 
+    if (channel === "telegram") {
+      // Look up the org's Telegram bot token from channel_configs
+      const [cfg] = await db.select().from(channelConfigsTable)
+        .where(and(
+          eq(channelConfigsTable.organizationId, user.organizationId),
+          eq(channelConfigsTable.channel, "telegram" as any),
+        ));
+      const botToken = cfg?.config?.bot_token as string | undefined;
+      if (!botToken) {
+        return res.status(400).json({
+          error: "telegram_not_configured",
+          message: "Telegram бот не налаштований. Перейдіть у Налаштування → Інбокс та підключіть бота.",
+        });
+      }
+
+      // Normalize recipient: accept @username or numeric chat_id
+      const chatId = recipient.trim().startsWith("@") ? recipient.trim() : recipient.trim();
+
+      // Build a nicely formatted invoice message
+      const uah = (v: any) => `${Number(v).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴`;
+      const lines: string[] = [
+        `🧾 <b>Рахунок № ${invoice.invoiceNumber}</b>`,
+        ``,
+      ];
+      if (invoice.counterpartyName) lines.push(`👤 ${invoice.counterpartyName}`);
+      if (invoice.description) lines.push(`📋 ${invoice.description}`);
+      lines.push(``, `💰 <b>Сума до оплати: ${uah(invoice.amount)}</b>`);
+      if (invoice.taxAmount && Number(invoice.taxAmount) > 0) {
+        lines.push(`   у т.ч. ПДВ: ${uah(invoice.taxAmount)}`);
+      }
+      if (invoice.dueDate) {
+        const due = new Date(invoice.dueDate).toLocaleDateString("uk-UA");
+        lines.push(`📅 Оплатити до: ${due}`);
+      }
+      if (message && message.trim()) {
+        lines.push(``, message.trim());
+      }
+      lines.push(``, `<i>— Команда ДОГОДА</i>`);
+
+      const text = lines.join("\n");
+
+      const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+      });
+      const tgData = await tgRes.json() as any;
+
+      if (!tgRes.ok) {
+        const desc: string = tgData?.description || "Telegram API error";
+        // Provide friendly error messages for common cases
+        if (desc.includes("chat not found") || desc.includes("user not found")) {
+          return res.status(400).json({
+            error: "chat_not_found",
+            message: `Гість не знайдений. Переконайтесь що він написав /start нашому боту, або перевірте username.`,
+          });
+        }
+        if (desc.includes("bot can't initiate conversation")) {
+          return res.status(400).json({
+            error: "bot_cant_initiate",
+            message: `Бот не може першим написати гостю. Попросіть гостя написати /start нашому Telegram-боту — після цього відправка спрацює.`,
+          });
+        }
+        return res.status(400).json({ error: "telegram_error", message: desc });
+      }
+
+      // Mark invoice as sent
+      await db.update(invoicesTable).set({ status: "pending", updatedAt: new Date() })
+        .where(eq(invoicesTable.id, invoiceId));
+
+      return res.json({ success: true, channel: "telegram", recipient: chatId, invoiceNumber: invoice.invoiceNumber });
+    }
+
+    // SMS / link: stub (no integration yet)
     await db.update(invoicesTable).set({ status: "pending", updatedAt: new Date() })
       .where(eq(invoicesTable.id, invoiceId));
 
-    // In a real implementation, dispatch via Telegram/SMS service
-    // For now, we log and return success
     res.json({
       success: true,
       channel,
