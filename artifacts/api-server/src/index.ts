@@ -289,6 +289,30 @@ async function ensureSchema() {
     ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_child_price   NUMERIC(10, 2);
   `);
 
+  // Unit groups (folders/папки for units — номерний фонд grouping)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS unit_groups (
+      id           SERIAL PRIMARY KEY,
+      property_id  INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      name         VARCHAR(255) NOT NULL,
+      sort_order   INTEGER DEFAULT 0,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS unit_group_id  INTEGER REFERENCES unit_groups(id) ON DELETE SET NULL;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS sort_order      INTEGER DEFAULT 0;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS is_hidden       BOOLEAN DEFAULT false;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS description     TEXT;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS has_balcony     BOOLEAN DEFAULT false;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS has_view        VARCHAR(50);
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS square_meters   NUMERIC(8,2);
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS max_capacity    INTEGER;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS base_guests     INTEGER DEFAULT 2;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS extra_guest_price NUMERIC(10,2) DEFAULT 0;
+  `);
+
   // Pricing calendar rules (rate calendar)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS pricing_calendar_rules (
