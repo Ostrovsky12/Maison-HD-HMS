@@ -1181,7 +1181,9 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
 
   const { data: pricingPreview } = useQuery<any>({
     queryKey: ["pricing-preview", form.unitId, form.checkIn, form.checkOut],
-    enabled: open && !!form.unitId && !!form.checkIn && !!form.checkOut && nights > 0,
+    // SPA same-day (nights=0) also needs pricing preview for base price
+    enabled: open && !!form.unitId && !!form.checkIn && !!form.checkOut &&
+      (nights > 0 || selectedProperty?.type === "spa" || selectedProperty?.type === "pool"),
     queryFn: () => authFetch(`${API}/bookings/pricing-preview?unitId=${form.unitId}&checkIn=${form.checkIn}&checkOut=${form.checkOut}`)
       .then(r => r.ok ? r.json() : null),
   });

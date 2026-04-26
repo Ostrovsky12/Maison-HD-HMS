@@ -654,6 +654,23 @@ router.get("/pricing-preview", requireAuth, async (req, res) => {
   const end = new Date(checkOut as string);
   const nights = Math.round((end.getTime() - start.getTime()) / 86400000);
   const today = new Date();
+
+  // Same-day booking (SPA / pool / jacuzzi slot): treat as 1 session at base price
+  if (nights === 0) {
+    return res.json({
+      unitId: unit.id,
+      unitName: unit.name,
+      basePrice: base,
+      checkIn: checkIn as string,
+      checkOut: checkOut as string,
+      nights: 0,
+      totalAmount: base,       // 1 session = base price
+      avgNightPrice: 0,
+      breakdown: [],
+      isSameDay: true,
+    });
+  }
+
   const breakdown = [];
   let total = 0;
   for (let i = 0; i < nights; i++) {
@@ -1404,13 +1421,18 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
       }
     }
 
+    const isSameDay = nights === 0 && booking.checkIn === booking.checkOut;
     const items: any[] = [];
     if (accommodationTotal > 0 || nights > 0) {
+      const lineDetail = isSameDay
+        ? `${booking.checkIn}${booking.checkinTime ? ` · ${booking.checkinTime}–${booking.checkoutTime || ""}` : ""}`
+        : `${booking.checkIn} → ${booking.checkOut} · ${nights} ніч`;
+      const lineUnit = isSameDay ? "сеанс" : (isAccommodation ? "ніч" : "шт");
       items.push({
         description: accommodationLineDesc,
-        detail: `${booking.checkIn} → ${booking.checkOut} · ${nights} ніч`,
+        detail: lineDetail,
         qty: nights || 1,
-        unit: isAccommodation ? "ніч" : "шт",
+        unit: lineUnit,
         price: pricePerNightPreDiscount,
         discount: accommodationDiscount > 0 ? accommodationDiscount : undefined,
         amount: accommodationTotal,
