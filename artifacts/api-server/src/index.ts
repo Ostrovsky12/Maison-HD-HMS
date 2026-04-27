@@ -316,6 +316,10 @@ async function ensureSchema() {
     ALTER TABLE units ADD COLUMN IF NOT EXISTS max_capacity    INTEGER;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS base_guests     INTEGER DEFAULT 2;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS extra_guest_price NUMERIC(10,2) DEFAULT 0;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS bedrooms        INTEGER DEFAULT 0;
+  `);
+  await db.execute(sql`
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS with_pets BOOLEAN NOT NULL DEFAULT false;
   `);
 
   // Pricing calendar rules (rate calendar)

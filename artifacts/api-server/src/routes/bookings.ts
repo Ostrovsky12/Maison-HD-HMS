@@ -166,7 +166,7 @@ router.post("/", requireAuth, async (req, res) => {
     firstName, lastName, middleName, phone,
     discountId, discountValue, discountType,
     selectedAddons, legalEntityId,
-    payOnArrival, partialAmount,
+    payOnArrival, partialAmount, withPets,
   } = req.body;
 
   let { guestId } = req.body;
@@ -223,6 +223,7 @@ router.post("/", requireAuth, async (req, res) => {
     childrenOver6: childrenOver6 || 0,
     extraBeds: extraBeds || 0,
     guestsCount,
+    withPets: Boolean(withPets),
     firstName: firstName || null,
     lastName: lastName || null,
     middleName: middleName || null,
@@ -785,7 +786,7 @@ router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
     firstName, lastName, middleName, phone,
     discountId, discountValue, discountType,
     selectedAddons, legalEntityId,
-    payOnArrival, partialAmount,
+    payOnArrival, partialAmount, withPets,
   } = req.body;
 
   const guestsCount = (adults ?? undefined) !== undefined
@@ -822,6 +823,7 @@ router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
     ...(legalEntityId !== undefined && { legalEntityId }),
     ...(notes !== undefined && { notes }),
     ...(payOnArrival !== undefined && { payOnArrival: Boolean(payOnArrival) }),
+    ...(withPets !== undefined && { withPets: Boolean(withPets) }),
     ...(draftExpiresAt && { draftExpiresAt }),
     updatedAt: new Date(),
   }).where(eq(bookingsTable.id, bookingId)).returning();

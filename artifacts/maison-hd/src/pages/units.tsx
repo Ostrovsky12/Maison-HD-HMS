@@ -108,6 +108,7 @@ function UnitModal({ unit, properties, groups, defaultPropertyId, defaultGroupId
     extraGuestPrice: String(unit?.extraGuestPrice || "0"),
     floor: unit?.floor || "",
     squareMeters: String(unit?.squareMeters || ""),
+    bedrooms: String(unit?.bedrooms || ""),
     hasBalcony: unit?.hasBalcony ?? false,
     hasView: unit?.hasView || "",
     description: unit?.description || "",
@@ -134,6 +135,7 @@ function UnitModal({ unit, properties, groups, defaultPropertyId, defaultGroupId
       extraGuestPrice: parseFloat(form.extraGuestPrice) || 0,
       floor: form.floor || null,
       squareMeters: form.squareMeters ? parseFloat(form.squareMeters) : null,
+      bedrooms: form.bedrooms ? parseInt(form.bedrooms) : null,
       hasBalcony: form.hasBalcony,
       hasView: form.hasView || null,
       description: form.description || null,
@@ -239,7 +241,7 @@ function UnitModal({ unit, properties, groups, defaultPropertyId, defaultGroupId
           </div>
 
           {/* Row 5: physical */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
             <div>
               <label className="text-xs font-semibold text-gray-600 mb-1 block">Поверх / корпус</label>
               <Input value={form.floor} onChange={e => set("floor", e.target.value)} placeholder="1, А, Б..." />
@@ -247,6 +249,10 @@ function UnitModal({ unit, properties, groups, defaultPropertyId, defaultGroupId
             <div>
               <label className="text-xs font-semibold text-gray-600 mb-1 block">Площа (м²)</label>
               <Input type="number" min="0" value={form.squareMeters} onChange={e => set("squareMeters", e.target.value)} placeholder="45" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-600 mb-1 block">Спальні</label>
+              <Input type="number" min="0" max="20" value={form.bedrooms} onChange={e => set("bedrooms", e.target.value)} placeholder="1" />
             </div>
             <div>
               <label className="text-xs font-semibold text-gray-600 mb-1 block">Вид</label>

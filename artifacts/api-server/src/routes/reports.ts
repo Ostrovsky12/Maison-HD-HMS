@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { bookingsTable, unitsTable, propertiesTable, guestsTable, minibarChargesTable } from "@workspace/db";
 import { bookingAddonsTable, addonsTable, guestServiceOrdersTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
@@ -503,6 +503,171 @@ router.get("/services", requireAuth, async (req: any, res) => {
       })).filter(p => p.total > 0).sort((a, b) => b.total - a.total),
       addonsList: Array.from(addonsMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 20),
       serviceOrdersList: Array.from(serviceTypeMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 20),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/analytics?from=&to= — comprehensive guest & service analytics
+router.get("/analytics", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+
+    // Org units + property tourist tax rates
+    const { rows: unitRows } = await pool.query<{
+      unit_id: number; property_id: number; property_name: string;
+      tourist_tax_rate: string; bedrooms: number;
+    }>(
+      `SELECT u.id AS unit_id, p.id AS property_id, p.name AS property_name,
+              p.tourist_tax_rate, COALESCE(u.bedrooms, 0) AS bedrooms
+       FROM units u
+       JOIN properties p ON u.property_id = p.id
+       WHERE p.organization_id = $1`, [orgId]
+    );
+    if (!unitRows.length) return res.json({ bookings: 0, guests: {}, children: {}, withPets: 0, touristTax: 0, nights: {}, spa: {}, addons: {}, units: [] });
+
+    const unitIds = unitRows.map(r => r.unit_id);
+    const unitMeta = new Map(unitRows.map(r => [r.unit_id, r]));
+
+    // Main bookings in period (non-cancelled)
+    const { rows: bookings } = await pool.query<{
+      id: number; unit_id: number; adults: number;
+      children_under_6: number; children_over_6: number;
+      with_pets: boolean; check_in: string; check_out: string;
+      total_amount: string;
+    }>(
+      `SELECT id, unit_id, adults, children_under_6, children_over_6,
+              with_pets, check_in, check_out, total_amount
+       FROM bookings
+       WHERE unit_id = ANY($1::int[])
+         AND check_in >= $2 AND check_in <= $3
+         AND status != 'cancelled'`,
+      [unitIds, from, to]
+    );
+
+    // Aggregates
+    let totalAdults = 0, totalChildrenUnder6 = 0, totalChildrenOver6 = 0;
+    let withPetsCount = 0, touristTaxTotal = 0;
+    const nightsByBedrooms = new Map<number, number>(); // bedrooms → nights
+    const nightsByPropertyId = new Map<number, { name: string; nights: number; revenue: number }>();
+
+    for (const b of bookings) {
+      totalAdults += b.adults || 1;
+      totalChildrenUnder6 += b.children_under_6 || 0;
+      totalChildrenOver6 += b.children_over_6 || 0;
+      if (b.with_pets) withPetsCount++;
+
+      const meta = unitMeta.get(b.unit_id);
+      const rate = Number(meta?.tourist_tax_rate || 0);
+      const nights = Math.max(0, Math.floor((new Date(b.check_out).getTime() - new Date(b.check_in).getTime()) / 86400000));
+
+      if (rate > 0) touristTaxTotal += Math.round(rate * (b.adults || 1) * nights * 100) / 100;
+
+      // Nights by bedrooms
+      const br = meta?.bedrooms ?? 0;
+      nightsByBedrooms.set(br, (nightsByBedrooms.get(br) || 0) + nights);
+
+      // Nights by property
+      if (meta) {
+        const pid = meta.property_id;
+        const existing = nightsByPropertyId.get(pid);
+        if (existing) { existing.nights += nights; existing.revenue += Number(b.total_amount || 0); }
+        else nightsByPropertyId.set(pid, { name: meta.property_name, nights, revenue: Number(b.total_amount || 0) });
+      }
+    }
+
+    const bookingIds = bookings.map(b => b.id);
+
+    // SPA bookings: from spa_bookings table joined with spa_services  
+    let spaJacuzzi = { sessions: 0, revenue: 0 };
+    let spaThermal = { sessions: 0, revenue: 0 };
+    let spaPool    = { sessions: 0, revenue: 0 };
+    let spaMassage = { sessions: 0, revenue: 0 };
+    let spaSauna   = { sessions: 0, revenue: 0 };
+    let spaOther   = { sessions: 0, revenue: 0 };
+    if (bookingIds.length > 0) {
+      const { rows: spaRows } = await pool.query<{ category: string; sessions: string; revenue: string }>(
+        `SELECT ss.category, COUNT(sb.id)::text AS sessions, COALESCE(SUM(sb.total_amount), 0)::text AS revenue
+         FROM spa_bookings sb
+         JOIN spa_services ss ON sb.service_id = ss.id
+         WHERE (sb.reservation_id = ANY($1::int[]) OR sb.organization_id = $2)
+           AND sb.appointment_date >= $3 AND sb.appointment_date <= $4
+           AND sb.status != 'cancelled'
+         GROUP BY ss.category`,
+        [bookingIds, orgId, from, to]
+      );
+      for (const r of spaRows) {
+        const s = parseInt(r.sessions), rev = parseFloat(r.revenue);
+        switch (r.category) {
+          case 'jacuzzi': spaJacuzzi = { sessions: s, revenue: rev }; break;
+          case 'thermal': spaThermal = { sessions: s, revenue: rev }; break;
+          case 'pool':    spaPool    = { sessions: s, revenue: rev }; break;
+          case 'massage': case 'body': case 'face': spaMassage = { sessions: spaMassage.sessions + s, revenue: spaMassage.revenue + rev }; break;
+          case 'sauna':   spaSauna   = { sessions: s, revenue: rev }; break;
+          default:        spaOther   = { sessions: spaOther.sessions + s, revenue: spaOther.revenue + rev };
+        }
+      }
+    }
+
+    // Booking addons: cribs, chairs + all addons summary
+    const addonsSummary = new Map<string, { name: string; qty: number; revenue: number }>();
+    let cribsCount = 0, chairsCount = 0;
+    if (bookingIds.length > 0) {
+      const { rows: addonRows } = await pool.query<{
+        addon_name: string; qty: string; total: string;
+      }>(
+        `SELECT a.name AS addon_name, SUM(ba.quantity)::text AS qty, COALESCE(SUM(ba.total_price), 0)::text AS total
+         FROM booking_addons ba
+         JOIN addons a ON ba.addon_id = a.id
+         WHERE ba.booking_id = ANY($1::int[])
+         GROUP BY a.id, a.name`,
+        [bookingIds]
+      );
+      for (const r of addonRows) {
+        const qty = parseInt(r.qty), rev = parseFloat(r.total);
+        addonsSummary.set(r.addon_name, { name: r.addon_name, qty, revenue: rev });
+        const lower = r.addon_name.toLowerCase();
+        if (lower.includes('ліжко') || lower.includes('crib') || lower.includes('ліжечко')) cribsCount += qty;
+        if (lower.includes('стіл') || lower.includes('стіле') || lower.includes('chair')) chairsCount += qty;
+      }
+    }
+
+    res.json({
+      from, to,
+      bookings: bookings.length,
+      guests: {
+        adults: totalAdults,
+        childrenUnder6: totalChildrenUnder6,
+        childrenOver6: totalChildrenOver6,
+        childrenTotal: totalChildrenUnder6 + totalChildrenOver6,
+        total: totalAdults + totalChildrenUnder6 + totalChildrenOver6,
+      },
+      withPets: withPetsCount,
+      touristTax: Math.round(touristTaxTotal * 100) / 100,
+      nights: {
+        byBedrooms: Array.from(nightsByBedrooms.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([bedrooms, nights]) => ({
+            bedrooms,
+            label: bedrooms === 0 ? "Без кімнат (SPA/інше)" : bedrooms === 1 ? "1 спальня" : `${bedrooms} спальні`,
+            nights,
+          })),
+        byProperty: Array.from(nightsByPropertyId.values()).sort((a, b) => b.nights - a.nights),
+      },
+      spa: {
+        jacuzzi: spaJacuzzi,
+        thermal: spaThermal,
+        pool: spaPool,
+        massage: spaMassage,
+        sauna: spaSauna,
+        other: spaOther,
+      },
+      addons: {
+        cribs: cribsCount,
+        chairs: chairsCount,
+        all: Array.from(addonsSummary.values()).sort((a, b) => b.qty - a.qty),
+      },
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

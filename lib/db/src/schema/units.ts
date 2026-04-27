@@ -26,6 +26,7 @@ export const unitsTable = pgTable("units", {
   squareMeters: numeric("square_meters", { precision: 6, scale: 1 }),
   unitGroupId: integer("unit_group_id").references(() => unitGroupsTable.id, { onDelete: "set null" }),
   isHidden: boolean("is_hidden").default(false),
+  bedrooms: integer("bedrooms").default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

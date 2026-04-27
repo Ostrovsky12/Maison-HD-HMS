@@ -7,7 +7,7 @@ import { InvoiceModal, type InvoiceData } from "./invoice-modal";
 import {
   X, ChevronRight, ChevronLeft, BedDouble, Calendar, User, Star,
   Minus, Plus, Tag, Check, AlertTriangle, Loader2,
-  FileText, Link2, CreditCard, Banknote, Copy, Send, ChevronDown, Trash2, PlusCircle, Home,
+  FileText, Link2, CreditCard, Banknote, Copy, Send, ChevronDown, Trash2, PlusCircle, Home, PawPrint,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -54,6 +54,7 @@ interface BookingForm {
   childrenUnder6: number;
   childrenOver6: number;
   extraBeds: number;
+  withPets: boolean;
   lastName: string;
   firstName: string;
   middleName: string;
@@ -109,6 +110,7 @@ const emptyForm = (unitId?: number, checkIn?: string, checkOut?: string): Bookin
   childrenUnder6: 0,
   childrenOver6: 0,
   extraBeds: 0,
+  withPets: false,
   lastName: "",
   firstName: "",
   middleName: "",
@@ -614,6 +616,28 @@ function StepDetails({ form, f, addonPriceMap, nights, selectedProperty }: any) 
         </div>
       </div>
 
+      {/* With Pets toggle */}
+      {!isSpa && (
+        <button
+          type="button"
+          onClick={() => f("withPets", !form.withPets)}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-colors text-left ${
+            form.withPets
+              ? "border-amber-400 bg-amber-50 text-amber-800"
+              : "border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300"
+          }`}
+        >
+          <PawPrint className={`h-5 w-5 flex-shrink-0 ${form.withPets ? "text-amber-500" : "text-gray-400"}`} />
+          <div className="flex-1">
+            <p className="text-sm font-medium">{form.withPets ? "З домашніми тваринами" : "Без тварин"}</p>
+            <p className="text-xs opacity-70">Натисніть щоб позначити гостя з вихованцем</p>
+          </div>
+          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${form.withPets ? "border-amber-500 bg-amber-500" : "border-gray-300"}`}>
+            {form.withPets && <Check className="h-3 w-3 text-white" />}
+          </div>
+        </button>
+      )}
+
       {/* SPA Children Tickets */}
       {isSpa && spaChildPrice > 0 && (
         <div>
@@ -1112,6 +1136,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         discountType: booking.discountType || "percent",
         totalAmount: Number(booking.totalAmount || 0),
         source: booking.source || "direct",
+        withPets: Boolean(booking.withPets),
         extraUnits: [],
         spaChildTickets: 0,
       };
@@ -1328,6 +1353,7 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
         childrenUnder6: form.childrenUnder6,
         childrenOver6: form.childrenOver6,
         extraBeds: form.extraBeds,
+        withPets: form.withPets,
         totalAmount: form.totalAmount,
         ...(paymentMethod && paymentMethod !== "arrival" && paymentMethod !== "link" && paymentMethod !== "invoice" && { paymentMethod }),
       };

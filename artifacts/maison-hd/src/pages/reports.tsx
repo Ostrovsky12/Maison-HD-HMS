@@ -7,6 +7,7 @@ import {
   CheckCircle2, AlertCircle, Printer, FileText, BarChart2, RefreshCw,
   ArrowUpRight, ArrowDownRight, Minus, Building2, Crown, Sparkles, ArrowLeftRight,
   Repeat2, ShoppingCart, Package, Landmark, UtensilsCrossed, BedDouble, ConciergeBell,
+  PawPrint, Baby, Droplets, Thermometer, Dumbbell, Activity,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -40,6 +41,7 @@ const TABS = [
   { id: "financial",  label: "Фінанси",         icon: DollarSign },
   { id: "units",      label: "Будинки",         icon: Building2 },
   { id: "services",   label: "Послуги",         icon: Package },
+  { id: "analytics",  label: "Аналітика",       icon: Activity },
   { id: "comparison", label: "Порівняння",      icon: ArrowLeftRight },
   { id: "owner",      label: "Власник",         icon: Crown },
   { id: "housekeeping", label: "Прибирання",    icon: Sparkles },
@@ -88,6 +90,7 @@ export default function ReportsPage() {
   const [ownerData, setOwnerData] = useState<any>(null);
   const [hkData, setHkData] = useState<any>(null);
   const [servicesData, setServicesData] = useState<any>(null);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
 
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const setLoad = (key: string, v: boolean) => setLoading(p => ({ ...p, [key]: v }));
@@ -122,6 +125,7 @@ export default function ReportsPage() {
   const loadOwner = useCallback(() => load("owner", `/owner?from=${dateFrom}&to=${dateTo}`, setOwnerData), [dateFrom, dateTo, load]);
   const loadHk = useCallback(() => load("hk", `/housekeeping`, setHkData), [load]);
   const loadServices = useCallback(() => load("services", `/services?from=${dateFrom}&to=${dateTo}`, setServicesData), [dateFrom, dateTo, load]);
+  const loadAnalytics = useCallback(() => load("analytics", `/analytics?from=${dateFrom}&to=${dateTo}`, setAnalyticsData), [dateFrom, dateTo, load]);
 
   const loadComparison = useCallback(() => {
     let f1 = p1from, t1 = p1to, f2 = p2from, t2 = p2to;
@@ -151,6 +155,7 @@ export default function ReportsPage() {
     else if (tab === "owner") loadOwner();
     else if (tab === "housekeeping") loadHk();
     else if (tab === "services") loadServices();
+    else if (tab === "analytics") loadAnalytics();
   }, [tab]);
 
   const handleRunAudit = () => {
@@ -173,6 +178,7 @@ export default function ReportsPage() {
     else if (tab === "owner") loadOwner();
     else if (tab === "housekeeping") loadHk();
     else if (tab === "services") loadServices();
+    else if (tab === "analytics") loadAnalytics();
   };
 
   const isLoading = (key: string) => !!loading[key];
@@ -791,6 +797,175 @@ export default function ReportsPage() {
                 </>
               );
             })() : <div className="text-center py-8 text-gray-400">Оберіть діапазон і натисніть оновити</div>}
+          </div>
+        )}
+
+        {/* ══ ANALYTICS ══ */}
+        {tab === "analytics" && (
+          <div className="space-y-4">
+            {isLoading("analytics") ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-violet-500" /></div>
+            ) : analyticsData ? (
+              <>
+                {/* Row 1: Guests KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { icon: Users,    bg: "bg-violet-50", ic: "text-violet-600", label: "Всього гостей",   value: analyticsData.guests?.total ?? 0,         sub: `${analyticsData.bookings} бронювань` },
+                    { icon: Users,    bg: "bg-blue-50",   ic: "text-blue-600",   label: "Дорослі",         value: analyticsData.guests?.adults ?? 0,          sub: `Ср. ${analyticsData.bookings > 0 ? ((analyticsData.guests?.adults ?? 0) / analyticsData.bookings).toFixed(1) : 0}/брон.` },
+                    { icon: Baby,     bg: "bg-pink-50",   ic: "text-pink-600",   label: "Діти разом",      value: analyticsData.guests?.childrenTotal ?? 0,   sub: `до 6: ${analyticsData.guests?.childrenUnder6 ?? 0} / 6+: ${analyticsData.guests?.childrenOver6 ?? 0}` },
+                    { icon: PawPrint, bg: "bg-amber-50",  ic: "text-amber-600",  label: "З тваринами",     value: analyticsData.withPets ?? 0,                sub: `${analyticsData.bookings > 0 ? Math.round(((analyticsData.withPets ?? 0) / analyticsData.bookings) * 100) : 0}% від бронювань` },
+                  ].map(c => (
+                    <Card key={c.label} className={`border-0 shadow-sm ${c.bg}`}>
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-2 mb-1"><c.icon className={`h-4 w-4 ${c.ic}`} /><p className={`text-xs ${c.ic}`}>{c.label}</p></div>
+                        <p className={`text-2xl font-bold ${c.ic}`}>{c.value}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{c.sub}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Row 2: Tourist Tax + Cribs/Chairs */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { icon: Landmark,  bg: "bg-green-50",  ic: "text-green-600",  label: "Туристичний збір",     value: fmtUAH(analyticsData.touristTax ?? 0),    sub: "За вибраний період" },
+                    { icon: BedDouble, bg: "bg-indigo-50", ic: "text-indigo-600", label: "Дитячих ліжечок",      value: `${analyticsData.addons?.cribs ?? 0} шт.`, sub: "Замовлено додатково" },
+                    { icon: Baby,      bg: "bg-rose-50",   ic: "text-rose-600",   label: "Дитячих стільців",     value: `${analyticsData.addons?.chairs ?? 0} шт.`, sub: "Замовлено додатково" },
+                    { icon: Hotel,     bg: "bg-cyan-50",   ic: "text-cyan-600",   label: "Бронювань усього",     value: analyticsData.bookings ?? 0,              sub: `${dateFrom} — ${dateTo}` },
+                  ].map(c => (
+                    <Card key={c.label} className={`border-0 shadow-sm ${c.bg}`}>
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-2 mb-1"><c.icon className={`h-4 w-4 ${c.ic}`} /><p className={`text-xs ${c.ic}`}>{c.label}</p></div>
+                        <p className={`text-2xl font-bold ${c.ic}`}>{c.value}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{c.sub}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Row 3: Nights by Bedrooms + SPA */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  {/* Nights by bedrooms */}
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader><CardTitle className="text-base flex items-center gap-2"><BedDouble className="h-4 w-4 text-indigo-500" />Ночі за кількістю спалень</CardTitle><CardDescription className="text-xs">Налаштуйте кількість спалень у розділі Налаштування → Юніти</CardDescription></CardHeader>
+                    <CardContent>
+                      {(analyticsData.nights?.byBedrooms || []).length > 0 ? (
+                        <div className="space-y-3">
+                          {(analyticsData.nights.byBedrooms as any[]).map((row: any) => {
+                            const maxN = Math.max(...(analyticsData.nights.byBedrooms as any[]).map((r: any) => r.nights), 1);
+                            return (
+                              <div key={row.bedrooms}>
+                                <div className="flex justify-between mb-1">
+                                  <span className="text-sm font-medium">{row.label}</span>
+                                  <span className="text-sm text-gray-600">{row.nights} {row.nights === 1 ? "ніч" : row.nights < 5 ? "ночі" : "ночей"}</span>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full bg-indigo-400 transition-all" style={{ width: `${(row.nights / maxN) * 100}%` }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+                          <BedDouble className="h-8 w-8 mb-2 opacity-30" />
+                          <p className="text-sm">Немає даних. Встановіть кількість спалень у налаштуваннях юнітів.</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* SPA breakdown */}
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader><CardTitle className="text-base flex items-center gap-2"><Droplets className="h-4 w-4 text-cyan-500" />SPA та водні зони</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {[
+                          { key: "jacuzzi", label: "Джакузі",       icon: Droplets,     color: "text-cyan-600",   bg: "bg-cyan-100" },
+                          { key: "thermal", label: "Термальна зона", icon: Thermometer,  color: "text-orange-600", bg: "bg-orange-100" },
+                          { key: "pool",    label: "Басейн",         icon: Droplets,     color: "text-blue-600",   bg: "bg-blue-100" },
+                          { key: "massage", label: "Масаж та SPA",   icon: Dumbbell,     color: "text-violet-600", bg: "bg-violet-100" },
+                          { key: "sauna",   label: "Сауна/лазня",    icon: Thermometer,  color: "text-red-600",    bg: "bg-red-100" },
+                        ].map(s => {
+                          const data = analyticsData.spa?.[s.key] || { sessions: 0, revenue: 0 };
+                          return (
+                            <div key={s.key} className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-lg ${s.bg} flex items-center justify-center flex-shrink-0`}>
+                                <s.icon className={`h-4 w-4 ${s.color}`} />
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium">{s.label}</span>
+                                  <div className="text-right">
+                                    <span className="text-sm font-semibold">{data.sessions} сеансів</span>
+                                    {data.revenue > 0 && <span className="text-xs text-gray-400 ml-2">{fmtUAH(data.revenue)}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {Object.values(analyticsData.spa || {}).every((v: any) => v.sessions === 0) && (
+                        <p className="text-xs text-gray-400 text-center pt-3">SPA бронювання через модуль SPA з'являться тут автоматично</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Row 4: All addons */}
+                {(analyticsData.addons?.all || []).length > 0 && (
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader><CardTitle className="text-base flex items-center gap-2"><Package className="h-4 w-4 text-amber-500" />Всі додаткові послуги та аддони</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead><tr className="border-b text-gray-400 text-xs">
+                            {["Послуга / Аддон", "Кількість", "Дохід"].map(h => (
+                              <th key={h} className="text-left py-2 pr-4 last:text-right">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody>
+                            {(analyticsData.addons.all as any[]).map((a: any, i: number) => (
+                              <tr key={i} className="border-b last:border-0 hover:bg-gray-50">
+                                <td className="py-2 pr-4 font-medium">{a.name}</td>
+                                <td className="py-2 pr-4">{a.qty} шт.</td>
+                                <td className="py-2 text-right font-semibold text-violet-700">{fmtUAH(a.revenue)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Row 5: Nights by property */}
+                {(analyticsData.nights?.byProperty || []).length > 1 && (
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader><CardTitle className="text-base flex items-center gap-2"><Building2 className="h-4 w-4 text-violet-500" />Ночі по об'єктах</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {(analyticsData.nights.byProperty as any[]).map((p: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between py-2 border-b last:border-0">
+                            <span className="text-sm font-medium">{p.name}</span>
+                            <div className="text-right">
+                              <span className="text-sm font-semibold">{p.nights} ночей</span>
+                              <span className="text-xs text-gray-400 ml-3">{fmtUAH(p.revenue)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-10 text-gray-400">
+                <Activity className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                <p>Оберіть діапазон дат і натисніть оновити</p>
+              </div>
+            )}
           </div>
         )}
 

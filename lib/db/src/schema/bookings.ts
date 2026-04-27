@@ -53,6 +53,7 @@ export const bookingsTable = pgTable("bookings", {
   childrenOver6: integer("children_over_6").notNull().default(0),
   extraBeds: integer("extra_beds").notNull().default(0),
   guestsCount: integer("guests_count").notNull().default(1),
+  withPets: boolean("with_pets").notNull().default(false),
 
   // Guest info (if no guest record)
   firstName: varchar("first_name", { length: 100 }),
