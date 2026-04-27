@@ -6,7 +6,7 @@ import {
   Loader2, Calendar, Moon, Play, TrendingUp, Users, Hotel, DollarSign,
   CheckCircle2, AlertCircle, Printer, FileText, BarChart2, RefreshCw,
   ArrowUpRight, ArrowDownRight, Minus, Building2, Crown, Sparkles, ArrowLeftRight,
-  Repeat2, ShoppingCart,
+  Repeat2, ShoppingCart, Package, Landmark, UtensilsCrossed, BedDouble, ConciergeBell,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -39,11 +39,27 @@ const TABS = [
   { id: "guests",     label: "Гості",           icon: Users },
   { id: "financial",  label: "Фінанси",         icon: DollarSign },
   { id: "units",      label: "Будинки",         icon: Building2 },
+  { id: "services",   label: "Послуги",         icon: Package },
   { id: "comparison", label: "Порівняння",      icon: ArrowLeftRight },
   { id: "owner",      label: "Власник",         icon: Crown },
   { id: "housekeeping", label: "Прибирання",    icon: Sparkles },
   { id: "audit",      label: "Нічний аудит",    icon: Moon },
 ];
+
+const SERVICE_CATEGORY_ICONS: Record<string, any> = {
+  accommodation: BedDouble,
+  touristTax: Landmark,
+  addons: Package,
+  serviceOrders: ConciergeBell,
+  minibar: UtensilsCrossed,
+};
+const SERVICE_CATEGORY_COLORS: Record<string, string> = {
+  accommodation: "#6366f1",
+  touristTax: "#22c55e",
+  addons: "#f59e0b",
+  serviceOrders: "#ec4899",
+  minibar: "#06b6d4",
+};
 
 // Delta badge helper
 function Delta({ curr, prev, suffix = "" }: { curr: number; prev: number; suffix?: string }) {
@@ -71,6 +87,7 @@ export default function ReportsPage() {
   const [comparisonData, setComparisonData] = useState<any>(null);
   const [ownerData, setOwnerData] = useState<any>(null);
   const [hkData, setHkData] = useState<any>(null);
+  const [servicesData, setServicesData] = useState<any>(null);
 
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const setLoad = (key: string, v: boolean) => setLoading(p => ({ ...p, [key]: v }));
@@ -104,6 +121,7 @@ export default function ReportsPage() {
   const loadUnits = useCallback(() => load("units", `/units-perf?from=${dateFrom}&to=${dateTo}`, setUnitsData), [dateFrom, dateTo, load]);
   const loadOwner = useCallback(() => load("owner", `/owner?from=${dateFrom}&to=${dateTo}`, setOwnerData), [dateFrom, dateTo, load]);
   const loadHk = useCallback(() => load("hk", `/housekeeping`, setHkData), [load]);
+  const loadServices = useCallback(() => load("services", `/services?from=${dateFrom}&to=${dateTo}`, setServicesData), [dateFrom, dateTo, load]);
 
   const loadComparison = useCallback(() => {
     let f1 = p1from, t1 = p1to, f2 = p2from, t2 = p2to;
@@ -132,6 +150,7 @@ export default function ReportsPage() {
     else if (tab === "comparison") loadComparison();
     else if (tab === "owner") loadOwner();
     else if (tab === "housekeeping") loadHk();
+    else if (tab === "services") loadServices();
   }, [tab]);
 
   const handleRunAudit = () => {
@@ -153,6 +172,7 @@ export default function ReportsPage() {
     else if (tab === "comparison") loadComparison();
     else if (tab === "owner") loadOwner();
     else if (tab === "housekeeping") loadHk();
+    else if (tab === "services") loadServices();
   };
 
   const isLoading = (key: string) => !!loading[key];
@@ -771,6 +791,193 @@ export default function ReportsPage() {
                 </>
               );
             })() : <div className="text-center py-8 text-gray-400">Оберіть діапазон і натисніть оновити</div>}
+          </div>
+        )}
+
+        {/* ══ SERVICES ══ */}
+        {tab === "services" && (
+          <div className="space-y-4">
+            {isLoading("services") ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-violet-500" /></div>
+            ) : servicesData ? (
+              <>
+                {/* Total + bookings KPI */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <Card className="border-0 shadow-sm bg-violet-50 col-span-2 md:col-span-1">
+                    <CardContent className="p-4">
+                      <p className="text-xs text-violet-600 mb-1">Загальний дохід</p>
+                      <p className="text-3xl font-bold text-violet-700">{fmtUAH(servicesData.total)}</p>
+                      <p className="text-xs text-violet-500 mt-1">{servicesData.bookings} бронювань у виб. діапазоні</p>
+                    </CardContent>
+                  </Card>
+                  {(servicesData.categories || []).filter((c: any) => c.amount > 0).slice(0, 4).map((cat: any) => {
+                    const Icon = SERVICE_CATEGORY_ICONS[cat.key] || Package;
+                    return (
+                      <Card key={cat.key} className="border-0 shadow-sm">
+                        <CardContent className="p-4">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <Icon className="h-3.5 w-3.5 text-gray-500" />
+                            <p className="text-xs text-gray-500">{cat.label}</p>
+                          </div>
+                          <p className="text-xl font-bold text-gray-800">{fmtUAH(cat.amount)}</p>
+                          {servicesData.total > 0 && (
+                            <p className="text-xs text-gray-400 mt-0.5">{Math.round((cat.amount / servicesData.total) * 100)}% від загального</p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+
+                {/* Pie + Category breakdown */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader><CardTitle className="text-base">Структура доходу</CardTitle></CardHeader>
+                    <CardContent>
+                      {(servicesData.categories || []).some((c: any) => c.amount > 0) ? (
+                        <ResponsiveContainer width="100%" height={220}>
+                          <PieChart>
+                            <Pie data={(servicesData.categories || []).filter((c: any) => c.amount > 0)}
+                              dataKey="amount" nameKey="label" cx="50%" cy="50%" outerRadius={85} label={({ label, percent }: any) => `${label} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                              {(servicesData.categories || []).filter((c: any) => c.amount > 0).map((cat: any) => (
+                                <Cell key={cat.key} fill={SERVICE_CATEGORY_COLORS[cat.key] || "#94a3b8"} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(v: any) => fmtUAH(v)} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-[220px] text-gray-400">
+                          <Package className="h-10 w-10 mb-2 opacity-30" />
+                          <p className="text-sm">Немає даних за вибраний період</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader><CardTitle className="text-base">Категорії доходів</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {(servicesData.categories || []).map((cat: any) => {
+                          const Icon = SERVICE_CATEGORY_ICONS[cat.key] || Package;
+                          const pct = servicesData.total > 0 ? (cat.amount / servicesData.total) * 100 : 0;
+                          return (
+                            <div key={cat.key}>
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-2">
+                                  <Icon className="h-4 w-4" style={{ color: SERVICE_CATEGORY_COLORS[cat.key] || "#94a3b8" }} />
+                                  <span className="text-sm font-medium">{cat.label}</span>
+                                </div>
+                                <span className="text-sm font-semibold">{fmtUAH(cat.amount)}</span>
+                              </div>
+                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: SERVICE_CATEGORY_COLORS[cat.key] || "#94a3b8" }} />
+                              </div>
+                              <p className="text-xs text-gray-400 mt-0.5 text-right">{pct.toFixed(1)}%</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* By Property */}
+                {(servicesData.byProperty || []).length > 0 && (
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader><CardTitle className="text-base">Розбивка по об'єктах</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead><tr className="border-b text-gray-400 text-xs">
+                            {["Об'єкт", "Проживання", "Турист. збір", "Дод. послуги", "Сервіс", "Мінібар", "Всього"].map(h => (
+                              <th key={h} className="text-right first:text-left py-2 pr-3">{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody>
+                            {(servicesData.byProperty || []).map((p: any, i: number) => (
+                              <tr key={i} className="border-b last:border-0 hover:bg-gray-50">
+                                <td className="py-2.5 pr-3 font-medium">{p.name}</td>
+                                <td className="py-2.5 pr-3 text-right tabular-nums">{fmtUAH(p.accommodation)}</td>
+                                <td className="py-2.5 pr-3 text-right tabular-nums">{fmtUAH(p.touristTax)}</td>
+                                <td className="py-2.5 pr-3 text-right tabular-nums">{fmtUAH(p.addons)}</td>
+                                <td className="py-2.5 pr-3 text-right tabular-nums">{fmtUAH(p.serviceOrders)}</td>
+                                <td className="py-2.5 pr-3 text-right tabular-nums">{fmtUAH(p.minibar)}</td>
+                                <td className="py-2.5 text-right tabular-nums font-semibold text-violet-700">{fmtUAH(p.total)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Top addons + service orders */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  {(servicesData.addonsList || []).length > 0 && (
+                    <Card className="border-0 shadow-sm">
+                      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Package className="h-4 w-4 text-amber-500" />Додаткові послуги</CardTitle></CardHeader>
+                      <CardContent>
+                        <div className="space-y-2">
+                          {(servicesData.addonsList || []).slice(0, 10).map((a: any, i: number) => (
+                            <div key={i} className="flex items-center justify-between py-1.5 border-b last:border-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400 w-5">{i + 1}</span>
+                                <span className="text-sm">{a.name}</span>
+                                <Badge variant="outline" className="text-xs h-5 px-1.5">{a.qty} шт.</Badge>
+                              </div>
+                              <span className="text-sm font-semibold">{fmtUAH(a.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {(servicesData.addonsList || []).length === 0 && (
+                          <p className="text-sm text-gray-400 text-center py-4">Немає даних</p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {(servicesData.serviceOrdersList || []).length > 0 && (
+                    <Card className="border-0 shadow-sm">
+                      <CardHeader><CardTitle className="text-base flex items-center gap-2"><ConciergeBell className="h-4 w-4 text-pink-500" />Сервісні замовлення</CardTitle></CardHeader>
+                      <CardContent>
+                        <div className="space-y-2">
+                          {(servicesData.serviceOrdersList || []).slice(0, 10).map((s: any, i: number) => (
+                            <div key={i} className="flex items-center justify-between py-1.5 border-b last:border-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400 w-5">{i + 1}</span>
+                                <span className="text-sm">{s.name}</span>
+                                <Badge variant="outline" className="text-xs h-5 px-1.5">{s.count} зам.</Badge>
+                              </div>
+                              <span className="text-sm font-semibold">{fmtUAH(s.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {(servicesData.serviceOrdersList || []).length === 0 && (
+                          <p className="text-sm text-gray-400 text-center py-4">Немає даних</p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {(servicesData.addonsList || []).length === 0 && (servicesData.serviceOrdersList || []).length === 0 && (
+                    <Card className="border-0 shadow-sm col-span-2">
+                      <CardContent className="flex flex-col items-center justify-center py-10 text-gray-400">
+                        <ShoppingCart className="h-10 w-10 mb-2 opacity-30" />
+                        <p className="text-sm">Немає сервісних замовлень та додатків за вибраний період</p>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-8 text-gray-400">
+                <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                <p>Оберіть діапазон і натисніть оновити</p>
+              </div>
+            )}
           </div>
         )}
 

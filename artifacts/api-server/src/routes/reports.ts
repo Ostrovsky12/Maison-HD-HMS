@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { bookingsTable, unitsTable, propertiesTable, guestsTable, minibarChargesTable } from "@workspace/db";
+import { bookingAddonsTable, addonsTable, guestServiceOrdersTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
@@ -328,6 +329,181 @@ router.get("/owner", requireAuth, async (req: any, res) => {
     }
 
     res.json({ current, previous, minibarRevenue, unpaidBookings: unpaid, housekeeping: hkStats, totalUnits: unitIds.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/services?from=&to= — revenue breakdown by service category
+router.get("/services", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+
+    // All units for this org with property info (incl. touristTaxRate)
+    const units = await db.select({
+      id: unitsTable.id,
+      propertyId: propertiesTable.id,
+      propertyName: propertiesTable.name,
+      touristTaxRate: propertiesTable.touristTaxRate,
+    }).from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(propertiesTable.organizationId, orgId));
+
+    const unitIds = units.map(u => u.id);
+    if (unitIds.length === 0) return res.json({ categories: [], total: 0, byProperty: [], addonsList: [], serviceOrdersList: [] });
+
+    const unitMeta = new Map(units.map(u => [u.id, u]));
+
+    // Active bookings in period
+    const bookings = await db.select({
+      id: bookingsTable.id,
+      unitId: bookingsTable.unitId,
+      totalAmount: bookingsTable.totalAmount,
+      paidAmount: bookingsTable.paidAmount,
+      checkIn: bookingsTable.checkIn,
+      checkOut: bookingsTable.checkOut,
+      adults: bookingsTable.adults,
+      status: bookingsTable.status,
+    }).from(bookingsTable)
+      .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to)));
+
+    const active = bookings.filter(b => b.status !== "cancelled");
+    const bookingIds = active.map(b => b.id);
+
+    // Tourist tax: computed per booking
+    let touristTaxTotal = 0;
+    const touristTaxByProp = new Map<number, number>();
+    for (const b of active) {
+      const meta = unitMeta.get(b.unitId!);
+      const rate = Number(meta?.touristTaxRate || 0);
+      if (rate > 0) {
+        const nights = Math.max(0, Math.floor((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000));
+        const adults = b.adults || 1;
+        const tax = Math.round(rate * adults * nights * 100) / 100;
+        touristTaxTotal += tax;
+        const pid = meta!.propertyId;
+        touristTaxByProp.set(pid, (touristTaxByProp.get(pid) || 0) + tax);
+      }
+    }
+
+    // Addons
+    let addonsTotal = 0;
+    const addonsMap = new Map<string, { name: string; amount: number; qty: number }>();
+    const addonsByProp = new Map<number, number>();
+    if (bookingIds.length > 0) {
+      const addonRows = await db.select({
+        bookingId: bookingAddonsTable.bookingId,
+        name: addonsTable.name,
+        qty: bookingAddonsTable.quantity,
+        price: addonsTable.price,
+        totalPrice: bookingAddonsTable.totalPrice,
+      }).from(bookingAddonsTable)
+        .leftJoin(addonsTable, eq(bookingAddonsTable.addonId, addonsTable.id))
+        .where(inArray(bookingAddonsTable.bookingId, bookingIds));
+
+      for (const a of addonRows) {
+        const amt = Number(a.totalPrice || 0) || (Number(a.price || 0) * Number(a.qty || 1));
+        addonsTotal += amt;
+        const name = a.name || "Додаток";
+        const existing = addonsMap.get(name);
+        if (existing) { existing.amount += amt; existing.qty += Number(a.qty || 1); }
+        else addonsMap.set(name, { name, amount: amt, qty: Number(a.qty || 1) });
+        // Map booking → property
+        const bk = active.find(b => b.id === a.bookingId);
+        if (bk) {
+          const pid = unitMeta.get(bk.unitId!)?.propertyId;
+          if (pid) addonsByProp.set(pid, (addonsByProp.get(pid) || 0) + amt);
+        }
+      }
+    }
+
+    // Guest service orders
+    let serviceOrdersTotal = 0;
+    const serviceTypeMap = new Map<string, { name: string; amount: number; count: number }>();
+    const serviceOrdersByProp = new Map<number, number>();
+    if (bookingIds.length > 0) {
+      const orders = await db.select({
+        bookingId: guestServiceOrdersTable.bookingId,
+        serviceName: guestServiceOrdersTable.serviceName,
+        totalPrice: guestServiceOrdersTable.totalPrice,
+        status: guestServiceOrdersTable.status,
+      }).from(guestServiceOrdersTable)
+        .where(inArray(guestServiceOrdersTable.bookingId, bookingIds));
+
+      for (const o of orders) {
+        if (o.status === "cancelled") continue;
+        const amt = Number(o.totalPrice || 0);
+        serviceOrdersTotal += amt;
+        const key = o.serviceName || "Послуга";
+        const existing = serviceTypeMap.get(key);
+        if (existing) { existing.amount += amt; existing.count++; }
+        else serviceTypeMap.set(key, { name: key, amount: amt, count: 1 });
+        const bk = active.find(b => b.id === o.bookingId);
+        if (bk) {
+          const pid = unitMeta.get(bk.unitId!)?.propertyId;
+          if (pid) serviceOrdersByProp.set(pid, (serviceOrdersByProp.get(pid) || 0) + amt);
+        }
+      }
+    }
+
+    // Minibar
+    let minibarTotal = 0;
+    const minibarByProp = new Map<number, number>();
+    if (bookingIds.length > 0) {
+      const charges = await db.select({ bookingId: minibarChargesTable.bookingId, totalAmount: minibarChargesTable.totalAmount })
+        .from(minibarChargesTable).where(inArray(minibarChargesTable.bookingId, bookingIds));
+      for (const c of charges) {
+        const amt = Number(c.totalAmount || 0);
+        minibarTotal += amt;
+        const bk = active.find(b => b.id === c.bookingId);
+        if (bk) {
+          const pid = unitMeta.get(bk.unitId!)?.propertyId;
+          if (pid) minibarByProp.set(pid, (minibarByProp.get(pid) || 0) + amt);
+        }
+      }
+    }
+
+    // Accommodation = total - addons - service orders - tourist tax - minibar
+    const grossTotal = active.reduce((s, b) => s + Number(b.totalAmount || 0), 0);
+    const accommodationTotal = Math.max(0, Math.round((grossTotal - addonsTotal - serviceOrdersTotal - touristTaxTotal - minibarTotal) * 100) / 100);
+
+    const grandTotal = accommodationTotal + touristTaxTotal + addonsTotal + serviceOrdersTotal + minibarTotal;
+
+    // Per-property: build from pid-keyed maps
+    const propResultMap = new Map<number, { name: string; accommodation: number; touristTax: number; addons: number; serviceOrders: number; minibar: number }>();
+    for (const u of units) {
+      if (!propResultMap.has(u.propertyId))
+        propResultMap.set(u.propertyId, { name: u.propertyName, accommodation: 0, touristTax: 0, addons: 0, serviceOrders: 0, minibar: 0 });
+    }
+    for (const b of active) {
+      const pid = unitMeta.get(b.unitId!)?.propertyId;
+      if (!pid) continue;
+      const p = propResultMap.get(pid);
+      if (p) p.accommodation += Number(b.totalAmount || 0);
+    }
+    for (const [pid, amt] of addonsByProp) { const p = propResultMap.get(pid); if (p) { p.accommodation = Math.max(0, p.accommodation - amt); p.addons += amt; } }
+    for (const [pid, amt] of serviceOrdersByProp) { const p = propResultMap.get(pid); if (p) { p.serviceOrders += amt; } }
+    for (const [pid, amt] of minibarByProp) { const p = propResultMap.get(pid); if (p) { p.minibar += amt; } }
+    for (const [pid, amt] of touristTaxByProp) { const p = propResultMap.get(pid); if (p) { p.accommodation = Math.max(0, p.accommodation - amt); p.touristTax += amt; } }
+
+    res.json({
+      from, to,
+      categories: [
+        { key: "accommodation", label: "Проживання",           amount: Math.round(accommodationTotal * 100) / 100 },
+        { key: "touristTax",    label: "Туристичний збір",     amount: Math.round(touristTaxTotal * 100) / 100 },
+        { key: "addons",        label: "Додаткові послуги",    amount: Math.round(addonsTotal * 100) / 100 },
+        { key: "serviceOrders", label: "Сервісні замовлення",  amount: Math.round(serviceOrdersTotal * 100) / 100 },
+        { key: "minibar",       label: "Мінібар",              amount: Math.round(minibarTotal * 100) / 100 },
+      ],
+      total: Math.round(grandTotal * 100) / 100,
+      bookings: active.length,
+      byProperty: Array.from(propResultMap.entries()).map(([, p]) => ({
+        ...p,
+        total: Math.round((p.accommodation + p.touristTax + p.addons + p.serviceOrders + p.minibar) * 100) / 100,
+      })).filter(p => p.total > 0).sort((a, b) => b.total - a.total),
+      addonsList: Array.from(addonsMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 20),
+      serviceOrdersList: Array.from(serviceTypeMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 20),
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
