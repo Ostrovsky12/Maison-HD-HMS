@@ -10,7 +10,7 @@ const authFetch = (url: string, opts: RequestInit = {}) =>
     ...opts,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${localStorage.getItem("auth_token") || ""}`,
+      Authorization: `Bearer ${localStorage.getItem("hms_token") || ""}`,
       ...(opts.headers || {}),
     },
   });
