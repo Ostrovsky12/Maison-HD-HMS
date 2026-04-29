@@ -345,6 +345,29 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_pricing_cal_rules_org ON pricing_calendar_rules (org_id)
   `);
 
+  // Guest Journey steps (editable per org)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS journey_steps (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+      stage           VARCHAR(120) NOT NULL,
+      time            VARCHAR(50)  NOT NULL DEFAULT '',
+      icon            VARCHAR(10)  NOT NULL DEFAULT '📋',
+      description     TEXT         NOT NULL DEFAULT '',
+      color           VARCHAR(40)  NOT NULL DEFAULT 'bg-blue-500',
+      is_enabled      BOOLEAN      NOT NULL DEFAULT true,
+      sort_order      INTEGER      NOT NULL DEFAULT 0,
+      email_subject   TEXT         NOT NULL DEFAULT '',
+      email_template  VARCHAR(50)  NOT NULL DEFAULT 'default',
+      message_text    TEXT         NOT NULL DEFAULT '',
+      created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_journey_steps_org ON journey_steps (organization_id, sort_order)
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (

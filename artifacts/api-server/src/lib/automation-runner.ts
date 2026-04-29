@@ -10,6 +10,7 @@ import {
   conversationsTable, messagesTable,
 } from "@workspace/db";
 import { eq, and, or, gte, lte, inArray, sql, ne } from "drizzle-orm";
+import { sendEmail, sendTelegram, sendSms, buildGuestConfirmationEmail } from "./notify.js";
 
 // Today's date string (YYYY-MM-DD)
 function todayStr() { return new Date().toISOString().split("T")[0]; }
@@ -119,7 +120,99 @@ async function execSendInboxMessage(ctx: ExecutionContext, params: any): Promise
     isRead: false,
   }).catch(() => {});
 
-  return `Повідомлення надіслано в Inbox гостю ${guestName} (шаблон: ${template})`;
+  // Also send email to guest if they have an email and email is configured
+  const guestEmail = ctx.booking.email || ctx.guest?.email;
+  if (guestEmail) {
+    const subject = params.emailSubject || ctx.rule.name || "Повідомлення від готелю";
+    const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+      <h2 style="color:#4f46e5">${subject}</h2>
+      <p>${content.replace(/\n/g, "<br>")}</p>
+      <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb">
+      <p style="color:#9ca3af;font-size:12px">Це автоматичне повідомлення від вашого готелю.</p>
+    </div>`;
+    await sendEmail(ctx.orgId, { to: guestEmail, subject, html }).catch(() => {});
+  }
+
+  return `Повідомлення надіслано в Inbox гостю ${guestName} (шаблон: ${template})${guestEmail ? " + Email" : ""}`;
+}
+
+async function execSendGuestEmail(ctx: ExecutionContext, params: any): Promise<string> {
+  if (!ctx.booking) return "Пропущено: бронювання не знайдено";
+  const guestEmail = ctx.booking.email || ctx.guest?.email;
+  if (!guestEmail) return "Пропущено: немає email гостя";
+
+  const guestName = ctx.guest
+    ? `${ctx.guest.firstName || ""} ${ctx.guest.lastName || ""}`.trim()
+    : `${ctx.booking.firstName || ""} ${ctx.booking.lastName || ""}`.trim();
+
+  const subject = params.subject || params.emailSubject || ctx.rule.name || "Повідомлення від готелю";
+  const bodyText = (params.message || params.body || ctx.rule.description || "").replace("{guest}", guestName);
+
+  // Use booking confirmation template if requested
+  if (params.template === "confirmation" && ctx.unit) {
+    const unit = ctx.unit;
+    const [prop] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, unit.propertyId)).limit(1);
+    const nights = ctx.booking.checkIn && ctx.booking.checkOut
+      ? Math.max(1, Math.round((new Date(ctx.booking.checkOut).getTime() - new Date(ctx.booking.checkIn).getTime()) / 86400000))
+      : 1;
+    const { html, text } = buildGuestConfirmationEmail({
+      bookingRef: String(ctx.booking.id).padStart(6, "0"),
+      guestName,
+      unitName: unit.name,
+      propertyName: prop?.name || "Готель",
+      checkIn: ctx.booking.checkIn || "",
+      checkOut: ctx.booking.checkOut || "",
+      nights,
+      totalAmount: Number(ctx.booking.totalAmount || 0),
+      guestsCount: (ctx.booking.adults || 1) + (ctx.booking.childrenUnder6 || 0) + (ctx.booking.childrenOver6 || 0),
+    });
+    const result = await sendEmail(ctx.orgId, { to: guestEmail, subject, html, text });
+    return result.ok
+      ? `Email підтвердження надіслано гостю ${guestName} (${guestEmail})`
+      : `Email не надіслано: ${result.error}`;
+  }
+
+  const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+    <h2 style="color:#4f46e5">${subject}</h2>
+    <p style="line-height:1.7;color:#374151">${bodyText.replace(/\n/g, "<br>")}</p>
+    <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb">
+    <p style="color:#9ca3af;font-size:12px">Це автоматичне повідомлення. Будь ласка, не відповідайте на цей лист.</p>
+  </div>`;
+  const result = await sendEmail(ctx.orgId, { to: guestEmail, subject, html, text: bodyText });
+  return result.ok
+    ? `Email надіслано гостю ${guestName} (${guestEmail})`
+    : `Email не надіслано: ${result.error}`;
+}
+
+async function execSendGuestSms(ctx: ExecutionContext, params: any): Promise<string> {
+  if (!ctx.booking) return "Пропущено: бронювання не знайдено";
+  const guestPhone = ctx.booking.phone || ctx.guest?.phone;
+  if (!guestPhone) return "Пропущено: немає телефону гостя";
+
+  const guestName = ctx.guest
+    ? `${ctx.guest.firstName || ""} ${ctx.guest.lastName || ""}`.trim()
+    : `${ctx.booking.firstName || ""} ${ctx.booking.lastName || ""}`.trim();
+
+  const message = (params.message || ctx.rule.description || "Повідомлення від готелю").replace("{guest}", guestName);
+  const result = await sendSms(ctx.orgId, guestPhone, message);
+  return result.ok
+    ? `SMS надіслано гостю ${guestName} (${guestPhone})`
+    : `SMS не надіслано: ${result.error}`;
+}
+
+async function execSendAdminTelegram(ctx: ExecutionContext, params: any): Promise<string> {
+  const guestName = ctx.guest
+    ? `${ctx.guest.firstName || ""} ${ctx.guest.lastName || ""}`.trim()
+    : ctx.booking ? `${ctx.booking.firstName || ""} ${ctx.booking.lastName || ""}`.trim() : "Гість";
+
+  const message = (params.message || ctx.rule.description || `📌 ${ctx.rule.name}`)
+    .replace("{guest}", guestName)
+    .replace("{booking}", ctx.booking ? `#${ctx.booking.id}` : "—");
+
+  const result = await sendTelegram(ctx.orgId, `📌 <b>${ctx.rule.name}</b>\n${message}`);
+  return result.ok
+    ? `Telegram-повідомлення надіслано адміністратору`
+    : `Telegram не надіслано: ${result.error}`;
 }
 
 async function execUpsell(ctx: ExecutionContext, params: any, offerType: string): Promise<string> {
@@ -153,15 +246,18 @@ async function execUpsell(ctx: ExecutionContext, params: any, offerType: string)
 async function executeAction(action: any, ctx: ExecutionContext): Promise<string> {
   const p = action.params || {};
   switch (action.type) {
-    case "create_hk_task":     return execCreateHkTask(ctx, p);
+    case "create_hk_task":      return execCreateHkTask(ctx, p);
     case "create_notification": return execCreateNotification(ctx, p);
     case "send_inbox_message":  return execSendInboxMessage(ctx, p);
-    case "upsell_spa":         return execUpsell(ctx, p, "spa");
-    case "upsell_upgrade":     return execUpsell(ctx, p, "upgrade");
-    case "upsell_fb":          return execUpsell(ctx, p, "fb");
-    case "send_email":         return `Email надіслано (${p.template || "default"}) — інтеграція email не підключена`;
-    case "webhook_call":       return `Webhook виклик на ${p.url || "N/A"} — не реалізовано в цьому середовищі`;
-    default:                   return `Невідома дія: ${action.type}`;
+    case "upsell_spa":          return execUpsell(ctx, p, "spa");
+    case "upsell_upgrade":      return execUpsell(ctx, p, "upgrade");
+    case "upsell_fb":           return execUpsell(ctx, p, "fb");
+    case "send_email":          return execSendGuestEmail(ctx, p);
+    case "send_guest_email":    return execSendGuestEmail(ctx, p);
+    case "send_guest_sms":      return execSendGuestSms(ctx, p);
+    case "send_telegram":       return execSendAdminTelegram(ctx, p);
+    case "webhook_call":        return `Webhook виклик на ${p.url || "N/A"} — не реалізовано в цьому середовищі`;
+    default:                    return `Невідома дія: ${action.type}`;
   }
 }
 

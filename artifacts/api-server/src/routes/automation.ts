@@ -29,14 +29,17 @@ const TRIGGER_LABELS: Record<string, string> = {
 };
 
 const ACTION_LABELS: Record<string, string> = {
-  send_inbox_message: "Надіслати повідомлення в Inbox",
-  create_hk_task: "Створити завдання Housekeeping",
-  create_notification: "Надіслати сповіщення персоналу",
-  upsell_spa: "Пропозиція: SPA",
-  upsell_fb: "Пропозиція: F&B / доставка",
-  upsell_upgrade: "Пропозиція: апгрейд номера",
-  send_email: "Надіслати email гостю",
-  webhook_call: "Webhook виклик",
+  send_inbox_message: "Повідомлення гостю (Inbox + Email)",
+  send_guest_email:   "Email гостю (окремий лист)",
+  send_guest_sms:     "SMS гостю",
+  send_telegram:      "Telegram адміністратору",
+  create_hk_task:     "Створити завдання Housekeeping",
+  create_notification: "Сповіщення персоналу",
+  upsell_spa:         "Пропозиція: SPA",
+  upsell_fb:          "Пропозиція: F&B / доставка",
+  upsell_upgrade:     "Пропозиція: апгрейд номера",
+  send_email:         "Email гостю (застарілий синонім)",
+  webhook_call:       "Webhook виклик",
 };
 
 // ─── Seed demo rules ─────────────────────────────────────────────────────────

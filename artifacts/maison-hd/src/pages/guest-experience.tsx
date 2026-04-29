@@ -14,7 +14,7 @@ import {
   CheckCircle2, Clock, RefreshCw, Plus, Send, Eye, EyeOff,
   ThumbsUp, Crown, Zap, AlertCircle, ChevronRight, Mail,
   BarChart3, Sparkles, Globe, Calendar, ShoppingBag, Check, X, Package,
-  UserCheck, Phone, BedDouble, ChevronDown,
+  UserCheck, Phone, BedDouble, ChevronDown, Pencil, Trash2, GripVertical, Loader2,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
@@ -320,6 +320,42 @@ function CheckinsTab() {
   );
 }
 
+const STEP_COLORS = [
+  "bg-blue-500","bg-purple-500","bg-indigo-500","bg-green-500","bg-teal-500",
+  "bg-orange-500","bg-yellow-500","bg-pink-500","bg-red-500","bg-cyan-500","bg-violet-500",
+];
+
+const STEP_ICONS = ["📋","📲","🏨","🔑","💬","🧳","⭐","🎁","📧","🎉","🎯","💌","🏷️","🛎️","🧹"];
+
+const CHANNEL_LABELS: Record<string, { label: string; color: string }> = {
+  send_inbox_message: { label: "Inbox + Email",   color: "bg-violet-100 text-violet-700" },
+  send_guest_email:   { label: "Email",            color: "bg-blue-100 text-blue-700" },
+  send_guest_sms:     { label: "SMS",              color: "bg-green-100 text-green-700" },
+  send_telegram:      { label: "Telegram (адмін)", color: "bg-sky-100 text-sky-700" },
+  upsell_spa:         { label: "SPA upsell",       color: "bg-rose-100 text-rose-700" },
+  upsell_upgrade:     { label: "Апгрейд",          color: "bg-amber-100 text-amber-700" },
+  upsell_fb:          { label: "F&B",              color: "bg-orange-100 text-orange-700" },
+};
+
+type JourneyStep = {
+  id: number;
+  stage: string;
+  time: string;
+  icon: string;
+  description: string;
+  color: string;
+  is_enabled: boolean;
+  sort_order: number;
+  email_subject: string;
+  email_template: string;
+  message_text: string;
+};
+
+const emptyStep = (): Omit<JourneyStep, "id"> => ({
+  stage: "", time: "", icon: "📋", description: "", color: "bg-blue-500",
+  is_enabled: true, sort_order: 0, email_subject: "", email_template: "default", message_text: "",
+});
+
 export default function GuestExperiencePage() {
   const [summary, setSummary] = useState<any>(null);
   const [loyalty, setLoyalty] = useState<any[]>([]);
@@ -333,6 +369,60 @@ export default function GuestExperiencePage() {
   const [responseDialog, setResponseDialog] = useState<{ id: number; guestName: string } | null>(null);
   const [responseText, setResponseText] = useState("");
   const [savingResponse, setSavingResponse] = useState(false);
+
+  // Journey Steps
+  const [journeySteps, setJourneySteps] = useState<JourneyStep[]>([]);
+  const [journeyLoading, setJourneyLoading] = useState(false);
+  const [stepDialog, setStepDialog] = useState<{ open: boolean; step: Partial<JourneyStep> & { id?: number }; isEdit: boolean }>({
+    open: false, step: emptyStep(), isEdit: false,
+  });
+  const [savingStep, setSavingStep] = useState(false);
+
+  const loadJourneySteps = useCallback(async () => {
+    setJourneyLoading(true);
+    const r = await apiFetch("/journey-steps");
+    if (r.ok) {
+      const steps = await r.json();
+      if (steps.length === 0) {
+        // Auto-seed defaults
+        const seedR = await apiFetch("/journey-steps/seed", { method: "POST" });
+        if (seedR.ok) {
+          const r2 = await apiFetch("/journey-steps");
+          if (r2.ok) setJourneySteps(await r2.json());
+        }
+      } else {
+        setJourneySteps(steps);
+      }
+    }
+    setJourneyLoading(false);
+  }, []);
+
+  const saveStep = async () => {
+    const s = stepDialog.step;
+    if (!s.stage?.trim()) { toast({ title: "Назва кроку обов'язкова", variant: "destructive" }); return; }
+    setSavingStep(true);
+    try {
+      const r = s.id
+        ? await apiFetch(`/journey-steps/${s.id}`, { method: "PUT", body: JSON.stringify(s) })
+        : await apiFetch("/journey-steps", { method: "POST", body: JSON.stringify(s) });
+      if (r.ok) {
+        toast({ title: s.id ? "Крок оновлено" : "Крок додано" });
+        setStepDialog(p => ({ ...p, open: false }));
+        loadJourneySteps();
+      }
+    } finally { setSavingStep(false); }
+  };
+
+  const deleteStep = async (id: number) => {
+    await apiFetch(`/journey-steps/${id}`, { method: "DELETE" });
+    toast({ title: "Крок видалено" });
+    loadJourneySteps();
+  };
+
+  const toggleStepEnabled = async (step: JourneyStep) => {
+    await apiFetch(`/journey-steps/${step.id}`, { method: "PUT", body: JSON.stringify({ isEnabled: !step.is_enabled }) });
+    loadJourneySteps();
+  };
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -351,6 +441,7 @@ export default function GuestExperiencePage() {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { loadJourneySteps(); }, [loadJourneySteps]);
 
   async function saveOffer() {
     if (!offerForm.title) return;
@@ -723,42 +814,70 @@ export default function GuestExperiencePage() {
           <TabsContent value="workflow" className="mt-4 space-y-4">
             <Card className="border-0 shadow-sm">
               <CardHeader className="pb-2 pt-4 px-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Zap className="h-4 w-4 text-yellow-600" />Гостьовий Journey — Автоматизація
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-yellow-600" />Гостьовий Journey — Автоматизація
+                  </CardTitle>
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                    onClick={() => setStepDialog({ open: true, step: { ...emptyStep(), sort_order: journeySteps.length }, isEdit: false })}>
+                    <Plus className="h-3 w-3" />Додати крок
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="px-4 pb-4">
-                <div className="relative">
-                  {[
-                    { stage: "Бронювання", time: "Одразу", icon: "📋", desc: "Підтвердження бронювання + посилання на гостьовий портал", color: "bg-blue-500", done: true },
-                    { stage: "За 3 дні до заїзду", time: "72 год до", icon: "📲", desc: "Нагадування + онлайн-чекін + уpsell SPA / активності", color: "bg-purple-500", done: true },
-                    { stage: "За 1 день до заїзду", time: "24 год до", icon: "🏨", desc: "Нагадування заповнити форму + спецпропозиції на час перебування", color: "bg-indigo-500", done: false },
-                    { stage: "День заїзду", time: "Check-in", icon: "🔑", desc: "Вітальне повідомлення + WiFi + корисна інформація", color: "bg-green-500", done: false },
-                    { stage: "Під час перебування", time: "In-stay", icon: "💬", desc: "Доступний чат з готелем + замовлення послуг", color: "bg-teal-500", done: true },
-                    { stage: "День виїзду", time: "Check-out", icon: "🧳", desc: "Запит на виїзд + збір зворотнього зв'язку + квитанція", color: "bg-orange-500", done: true },
-                    { stage: "Через 24 год", time: "Post-stay", icon: "⭐", desc: "Запит на відгук + нарахування loyalty балів", color: "bg-yellow-500", done: false },
-                    { stage: "Через 30 днів", time: "+1 місяць", icon: "🎁", desc: "Спецпропозиція для повернення + loyalty бонус", color: "bg-pink-500", done: false },
-                  ].map((step, i) => (
-                    <div key={i} className="flex gap-4 mb-4 last:mb-0">
-                      <div className="flex flex-col items-center">
-                        <div className={`w-10 h-10 rounded-full ${step.color} text-white flex items-center justify-center text-lg shrink-0`}>
-                          {step.icon}
+                {journeyLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
+                ) : (
+                  <div className="relative">
+                    {journeySteps.map((step, i) => (
+                      <div key={step.id} className={`flex gap-4 mb-4 last:mb-0 ${!step.is_enabled ? "opacity-40" : ""}`}>
+                        <div className="flex flex-col items-center">
+                          <div className={`w-10 h-10 rounded-full ${step.color} text-white flex items-center justify-center text-lg shrink-0`}>
+                            {step.icon}
+                          </div>
+                          {i < journeySteps.length - 1 && <div className="w-0.5 flex-1 bg-gray-200 my-1" />}
                         </div>
-                        {i < 7 && <div className="w-0.5 flex-1 bg-gray-200 my-1" />}
-                      </div>
-                      <div className="flex-1 pb-4">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-sm">{step.stage}</h3>
-                          <Badge className="bg-gray-100 text-gray-600 text-xs">{step.time}</Badge>
-                          {step.done
-                            ? <Badge className="bg-green-100 text-green-700 text-xs"><CheckCircle2 className="h-2.5 w-2.5 mr-1" />Реалізовано</Badge>
-                            : <Badge className="bg-orange-100 text-orange-700 text-xs"><Clock className="h-2.5 w-2.5 mr-1" />Планується</Badge>}
+                        <div className="flex-1 pb-4">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-semibold text-sm">{step.stage}</h3>
+                            {step.time && <Badge className="bg-gray-100 text-gray-600 text-xs">{step.time}</Badge>}
+                            <Badge className={`text-xs ${step.is_enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                              {step.is_enabled ? <><CheckCircle2 className="h-2.5 w-2.5 mr-1" />Активно</> : <><Clock className="h-2.5 w-2.5 mr-1" />Вимкнено</>}
+                            </Badge>
+                            {step.email_subject && (
+                              <Badge className="bg-blue-50 text-blue-600 text-xs"><Mail className="h-2.5 w-2.5 mr-1" />Email</Badge>
+                            )}
+                            {step.message_text && (
+                              <Badge className="bg-violet-50 text-violet-600 text-xs"><MessageSquare className="h-2.5 w-2.5 mr-1" />Текст</Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-0.5">{step.description}</p>
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5">{step.desc}</p>
+                        <div className="flex items-start gap-1 pt-1 shrink-0">
+                          <button onClick={() => toggleStepEnabled(step)}
+                            className={`p-1.5 rounded-lg transition-colors ${step.is_enabled ? "text-green-600 hover:bg-green-50" : "text-gray-400 hover:bg-gray-100"}`}
+                            title={step.is_enabled ? "Вимкнути" : "Увімкнути"}>
+                            {step.is_enabled ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                          </button>
+                          <button onClick={() => setStepDialog({ open: true, step: { ...step }, isEdit: true })}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => deleteStep(step.id)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                    {journeySteps.length === 0 && (
+                      <div className="text-center py-8 text-gray-400">
+                        <Zap className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">Натисніть «Додати крок» щоб розпочати</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -864,6 +983,106 @@ export default function GuestExperiencePage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* ===== Journey Step Edit Dialog ===== */}
+        <Dialog open={stepDialog.open} onOpenChange={v => setStepDialog(p => ({ ...p, open: v }))}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-yellow-500" />
+                {stepDialog.isEdit ? "Редагувати крок" : "Новий крок Journey"}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-1">
+              {/* Stage name */}
+              <div className="space-y-1">
+                <Label>Назва кроку *</Label>
+                <Input value={stepDialog.step.stage || ""} placeholder="Бронювання, День заїзду…"
+                  onChange={e => setStepDialog(p => ({ ...p, step: { ...p.step, stage: e.target.value } }))} />
+              </div>
+
+              {/* Time */}
+              <div className="space-y-1">
+                <Label>Час / тригер</Label>
+                <Input value={stepDialog.step.time || ""} placeholder="Одразу, 72 год до, Check-in…"
+                  onChange={e => setStepDialog(p => ({ ...p, step: { ...p.step, time: e.target.value } }))} />
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1">
+                <Label>Опис (що відбувається)</Label>
+                <Textarea value={stepDialog.step.description || ""} rows={2}
+                  placeholder="Підтвердження бронювання + посилання на гостьовий портал"
+                  onChange={e => setStepDialog(p => ({ ...p, step: { ...p.step, description: e.target.value } }))} />
+              </div>
+
+              {/* Icon picker */}
+              <div className="space-y-1">
+                <Label>Іконка</Label>
+                <div className="flex flex-wrap gap-2">
+                  {STEP_ICONS.map(ic => (
+                    <button key={ic} onClick={() => setStepDialog(p => ({ ...p, step: { ...p.step, icon: ic } }))}
+                      className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center border-2 transition-all
+                        ${stepDialog.step.icon === ic ? "border-violet-500 bg-violet-50" : "border-gray-200 hover:border-gray-300"}`}>
+                      {ic}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Color picker */}
+              <div className="space-y-1">
+                <Label>Колір</Label>
+                <div className="flex flex-wrap gap-2">
+                  {STEP_COLORS.map(c => (
+                    <button key={c} onClick={() => setStepDialog(p => ({ ...p, step: { ...p.step, color: c } }))}
+                      className={`w-8 h-8 rounded-full ${c} border-2 transition-all
+                        ${stepDialog.step.color === c ? "border-gray-900 scale-110" : "border-transparent hover:scale-105"}`} />
+                  ))}
+                </div>
+              </div>
+
+              {/* Email subject */}
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1"><Mail className="h-3 w-3" />Тема Email (опційно)</Label>
+                <Input value={stepDialog.step.email_subject || ""} placeholder="Підтвердження вашого бронювання в ДОГОДА"
+                  onChange={e => setStepDialog(p => ({ ...p, step: { ...p.step, email_subject: e.target.value } }))} />
+              </div>
+
+              {/* Message text */}
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1"><MessageSquare className="h-3 w-3" />Текст повідомлення (Inbox / SMS)</Label>
+                <Textarea value={stepDialog.step.message_text || ""} rows={3}
+                  placeholder="Шановний {{guestName}}, вітаємо в ДОГОДА! Ваш номер {{roomName}} готовий…"
+                  onChange={e => setStepDialog(p => ({ ...p, step: { ...p.step, message_text: e.target.value } }))} />
+                <p className="text-xs text-gray-400">Підтримуються змінні: {"{{guestName}}"}, {"{{checkIn}}"}, {"{{checkOut}}"}, {"{{roomName}}"}</p>
+              </div>
+
+              {/* Enabled toggle */}
+              <div className="flex items-center gap-3 pt-1">
+                <button onClick={() => setStepDialog(p => ({ ...p, step: { ...p.step, is_enabled: !p.step.is_enabled } }))}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent
+                    transition-colors focus:outline-none
+                    ${stepDialog.step.is_enabled ? "bg-violet-600" : "bg-gray-200"}`}>
+                  <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform
+                    ${stepDialog.step.is_enabled ? "translate-x-4" : "translate-x-0"}`} />
+                </button>
+                <span className="text-sm text-gray-600">
+                  {stepDialog.step.is_enabled ? "Крок активний" : "Крок вимкнено"}
+                </span>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setStepDialog(p => ({ ...p, open: false }))}>Скасувати</Button>
+              <Button onClick={saveStep} disabled={savingStep} className="bg-violet-600 hover:bg-violet-700">
+                {savingStep ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4 mr-1" />Зберегти</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </AppLayout>
   );

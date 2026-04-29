@@ -68,6 +68,7 @@ import { router as pushRouter } from "./push.js";
 import assistRouter from "./assist.js";
 import guideRouter from "./guide.js";
 import pricingRulesRouter from "./pricing-rules.js";
+import journeyStepsRouter from "./journey-steps.js";
 
 const router: IRouter = Router();
 
@@ -139,6 +140,7 @@ router.use("/push", pushRouter);
 router.use("/assist", assistRouter);
 router.use("/guide", guideRouter);
 router.use("/pricing-rules", pricingRulesRouter);
+router.use("/journey-steps", journeyStepsRouter);
 router.use("/", storageRouter);
 
 export default router;
