@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/room-concierge/"
+title = "Room Concierge — Maison HD"
+version = "1.0.0"
+id = "artifacts/room-concierge"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/room-concierge/" ]
+localPort = 25995
+
+[services.development]
+run = "pnpm --filter @workspace/room-concierge run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/room-concierge", "run", "build" ]
+publicDir = "artifacts/room-concierge/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25995"
+BASE_PATH = "/room-concierge/"

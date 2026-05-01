@@ -368,6 +368,52 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_journey_steps_org ON journey_steps (organization_id, sort_order)
   `);
 
+  // Room Concierge tables
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS concierge_knowledge (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+      category        VARCHAR(100) NOT NULL DEFAULT 'general',
+      title           VARCHAR(255) NOT NULL,
+      content         TEXT NOT NULL,
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      sort_order      INTEGER NOT NULL DEFAULT 0,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS concierge_requests (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+      unit_id         INTEGER REFERENCES units(id) ON DELETE SET NULL,
+      booking_id      INTEGER REFERENCES bookings(id) ON DELETE SET NULL,
+      guest_name      TEXT,
+      request_type    VARCHAR(50) NOT NULL DEFAULT 'general',
+      request_text    TEXT NOT NULL,
+      ai_response     TEXT,
+      status          VARCHAR(50) NOT NULL DEFAULT 'pending',
+      admin_reply     TEXT,
+      session_id      TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS concierge_sessions (
+      id              SERIAL PRIMARY KEY,
+      session_id      TEXT UNIQUE NOT NULL,
+      organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+      unit_id         INTEGER REFERENCES units(id) ON DELETE SET NULL,
+      unit_name       TEXT,
+      booking_id      INTEGER REFERENCES bookings(id) ON DELETE SET NULL,
+      guest_name      TEXT,
+      guest_id        INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+      preferences     JSONB DEFAULT '{}',
+      last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_concierge_requests_org ON concierge_requests (organization_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_concierge_sessions_unit ON concierge_sessions (unit_id, organization_id);
+    CREATE INDEX IF NOT EXISTS idx_concierge_knowledge_org ON concierge_knowledge (organization_id, category);
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (
