@@ -31,13 +31,21 @@ router.get("/terminal/:orgSlug/:unitId", async (req, res) => {
     if (!orgs[0]) return res.status(404).json({ error: "Organization not found" });
     const org = orgs[0];
 
-    // Get unit
+    // Get unit (must belong to the org)
     const { rows: units } = await pool.query(
-      `SELECT u.id, u.name FROM units u WHERE u.id = $1 LIMIT 1`,
-      [unitId],
+      `SELECT u.id, u.name FROM units u WHERE u.organization_id = $1 AND u.id = $2 LIMIT 1`,
+      [org.id, unitId],
     );
-    if (!units[0]) return res.status(404).json({ error: "Unit not found" });
-    const unit = units[0];
+    // If not found by ID, try first available unit in org
+    let unit = units[0];
+    if (!unit) {
+      const { rows: anyUnit } = await pool.query(
+        `SELECT u.id, u.name FROM units u WHERE u.organization_id = $1 ORDER BY u.id LIMIT 1`,
+        [org.id],
+      );
+      unit = anyUnit[0];
+    }
+    if (!unit) return res.status(404).json({ error: "No units found for this organization" });
 
     // Get active booking for this unit (checked-in or confirmed today)
     const { rows: bookings } = await pool.query(
