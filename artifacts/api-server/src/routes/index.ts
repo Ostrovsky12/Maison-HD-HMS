@@ -70,6 +70,7 @@ import guideRouter from "./guide.js";
 import pricingRulesRouter from "./pricing-rules.js";
 import journeyStepsRouter from "./journey-steps.js";
 import roomConciergeRouter from "./room-concierge.js";
+import accLedgerRouter from "./acc-ledger.js";
 
 const router: IRouter = Router();
 
@@ -143,6 +144,7 @@ router.use("/guide", guideRouter);
 router.use("/pricing-rules", pricingRulesRouter);
 router.use("/journey-steps", journeyStepsRouter);
 router.use("/room-concierge", roomConciergeRouter);
+router.use("/acc", accLedgerRouter);
 router.use("/", storageRouter);
 
 export default router;

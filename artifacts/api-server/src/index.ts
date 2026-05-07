@@ -414,6 +414,147 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_concierge_knowledge_org ON concierge_knowledge (organization_id, category);
   `);
 
+  // ── Accounting / Maison Finance ────────────────────────────────────────────
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS acc_accounts (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      code            VARCHAR(10) NOT NULL,
+      name            TEXT NOT NULL,
+      type            VARCHAR(20) NOT NULL CHECK (type IN ('asset','liability','equity','income','expense','tax','off-balance')),
+      class           INTEGER,
+      parent_id       INTEGER REFERENCES acc_accounts(id),
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      is_system       BOOLEAN NOT NULL DEFAULT false,
+      description     TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (organization_id, code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_accounts_org ON acc_accounts (organization_id, code);
+
+    CREATE TABLE IF NOT EXISTS acc_periods (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      year            INTEGER NOT NULL,
+      month           INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+      status          VARCHAR(10) NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+      closed_at       TIMESTAMPTZ,
+      closed_by       INTEGER REFERENCES users(id),
+      UNIQUE (organization_id, year, month)
+    );
+
+    CREATE TABLE IF NOT EXISTS acc_contractors (
+      id               SERIAL PRIMARY KEY,
+      organization_id  INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      name             TEXT NOT NULL,
+      edrpou           VARCHAR(20),
+      ipn              VARCHAR(20),
+      vat_number       VARCHAR(20),
+      contractor_type  VARCHAR(20) NOT NULL DEFAULT 'both' CHECK (contractor_type IN ('customer','supplier','both')),
+      address          TEXT,
+      bank_name        TEXT,
+      bank_account     VARCHAR(50),
+      mfo              VARCHAR(10),
+      notes            TEXT,
+      is_active        BOOLEAN NOT NULL DEFAULT true,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_contractors_org ON acc_contractors (organization_id);
+
+    CREATE TABLE IF NOT EXISTS acc_documents (
+      id               SERIAL PRIMARY KEY,
+      organization_id  INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      doc_type         VARCHAR(50) NOT NULL,
+      doc_number       TEXT NOT NULL,
+      doc_date         DATE NOT NULL,
+      contractor_id    INTEGER REFERENCES acc_contractors(id),
+      period_id        INTEGER REFERENCES acc_periods(id),
+      status           VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','posted','cancelled')),
+      description      TEXT,
+      currency         VARCHAR(3) NOT NULL DEFAULT 'UAH',
+      subtotal         NUMERIC(15,2) NOT NULL DEFAULT 0,
+      tax_amount       NUMERIC(15,2) NOT NULL DEFAULT 0,
+      total            NUMERIC(15,2) NOT NULL DEFAULT 0,
+      vat_rate         NUMERIC(5,2) NOT NULL DEFAULT 20,
+      linked_doc_id    INTEGER REFERENCES acc_documents(id),
+      created_by       INTEGER REFERENCES users(id),
+      posted_by        INTEGER REFERENCES users(id),
+      posted_at        TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_documents_org ON acc_documents (organization_id, doc_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_acc_documents_type ON acc_documents (organization_id, doc_type, status);
+
+    CREATE TABLE IF NOT EXISTS acc_document_items (
+      id                 SERIAL PRIMARY KEY,
+      document_id        INTEGER NOT NULL REFERENCES acc_documents(id) ON DELETE CASCADE,
+      sort_order         INTEGER NOT NULL DEFAULT 0,
+      description        TEXT NOT NULL,
+      unit               VARCHAR(20) NOT NULL DEFAULT 'шт',
+      quantity           NUMERIC(15,4) NOT NULL DEFAULT 1,
+      unit_price         NUMERIC(15,4) NOT NULL,
+      amount             NUMERIC(15,2) NOT NULL,
+      tax_rate           NUMERIC(5,2) NOT NULL DEFAULT 20,
+      tax_amount         NUMERIC(15,2) NOT NULL DEFAULT 0,
+      account_id         INTEGER REFERENCES acc_accounts(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS acc_entries (
+      id                 SERIAL PRIMARY KEY,
+      organization_id    INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      document_id        INTEGER REFERENCES acc_documents(id) ON DELETE SET NULL,
+      entry_date         DATE NOT NULL,
+      period_id          INTEGER REFERENCES acc_periods(id),
+      debit_account_id   INTEGER NOT NULL REFERENCES acc_accounts(id),
+      credit_account_id  INTEGER NOT NULL REFERENCES acc_accounts(id),
+      amount             NUMERIC(15,2) NOT NULL,
+      currency           VARCHAR(3) NOT NULL DEFAULT 'UAH',
+      description        TEXT,
+      is_manual          BOOLEAN NOT NULL DEFAULT false,
+      created_by         INTEGER REFERENCES users(id),
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_entries_org_date ON acc_entries (organization_id, entry_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_acc_entries_doc ON acc_entries (document_id);
+    CREATE INDEX IF NOT EXISTS idx_acc_entries_debit ON acc_entries (debit_account_id);
+    CREATE INDEX IF NOT EXISTS idx_acc_entries_credit ON acc_entries (credit_account_id);
+
+    CREATE TABLE IF NOT EXISTS acc_vat_records (
+      id                  SERIAL PRIMARY KEY,
+      organization_id     INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      document_id         INTEGER REFERENCES acc_documents(id) ON DELETE CASCADE,
+      record_type         VARCHAR(10) NOT NULL CHECK (record_type IN ('issued','received')),
+      record_date         DATE NOT NULL,
+      contractor_id       INTEGER REFERENCES acc_contractors(id),
+      tax_invoice_number  TEXT,
+      tax_invoice_date    DATE,
+      amount_excl_vat     NUMERIC(15,2) NOT NULL,
+      vat_amount          NUMERIC(15,2) NOT NULL,
+      vat_rate            NUMERIC(5,2) NOT NULL DEFAULT 20,
+      period_id           INTEGER REFERENCES acc_periods(id),
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_vat_org ON acc_vat_records (organization_id, record_date DESC);
+
+    CREATE TABLE IF NOT EXISTS acc_bank_statements (
+      id               SERIAL PRIMARY KEY,
+      organization_id  INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      bank_account     VARCHAR(50),
+      statement_date   DATE NOT NULL,
+      description      TEXT,
+      amount           NUMERIC(15,2) NOT NULL,
+      contractor_id    INTEGER REFERENCES acc_contractors(id),
+      document_id      INTEGER REFERENCES acc_documents(id),
+      entry_id         INTEGER REFERENCES acc_entries(id),
+      is_reconciled    BOOLEAN NOT NULL DEFAULT false,
+      external_id      TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_bank_org ON acc_bank_statements (organization_id, statement_date DESC);
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (

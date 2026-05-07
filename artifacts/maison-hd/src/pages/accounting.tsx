@@ -27,7 +27,9 @@ import {
   FileClock, FileWarning,
   Archive, Cpu, PenSquare, FolderOpen, Code2, ExternalLink,
   ShieldCheck, Shuffle, UserPlus, BookOpen, BadgeCheck, Server,
+  TrendingUp, TrendingDown, Wallet, PieChart,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
@@ -45,6 +47,45 @@ function useAccounting(path: string) {
     staleTime: 30_000,
   });
 }
+
+function useAccLedger(path: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["acc-ledger", path],
+    queryFn: async () => {
+      const token = localStorage.getItem("hms_token");
+      const r = await fetch(`${API_BASE}/api/acc/${path}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return r.json();
+    },
+    staleTime: 30_000,
+    enabled: options?.enabled,
+  });
+}
+
+// → Новий бухгалтерський леджер (/api/acc/*)
+const accFetch = async (path: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem("hms_token");
+  const r = await fetch(`${API_BASE}/api/acc/${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "API Error");
+  return r.json();
+};
+
+// → Старий модуль обліку документів (/api/accounting/*)
+const acctFetch = (path: string, opts?: RequestInit) => {
+  const token = localStorage.getItem("hms_token");
+  return fetch(`${API_BASE}/api/accounting/${path}`, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token ?? ""}`, "Content-Type": "application/json", ...(opts?.headers ?? {}) },
+  }).then(r => r.json());
+};
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 const fmtDate = (d: string | null | undefined) => {
@@ -111,7 +152,8 @@ const INTEGRATION_INFO: Record<string, { label: string; desc: string; color: str
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrations"
-         | "tax-invoices" | "bas" | "signing" | "archive" | "invoices";
+         | "tax-invoices" | "bas" | "signing" | "archive" | "invoices"
+         | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors" | "acc-vat" | "acc-reports";
 
 export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -146,6 +188,12 @@ export default function AccountingPage() {
             { id: "counterparties",label: "Контрагенти",         icon: Users },
             { id: "entities",      label: "Юр. особи",           icon: Building2 },
             { id: "integrations",  label: "Інтеграції",          icon: Settings },
+            { id: "acc-accounts",  label: "План рахунків",       icon: BookOpen },
+            { id: "acc-journal",   label: "Журнал проводок",     icon: FileText },
+            { id: "acc-documents", label: "ЛК Документи",        icon: FileText },
+            { id: "acc-contractors",label: "ЛК Контрагенти",     icon: Users },
+            { id: "acc-vat",       label: "ПДВ",                 icon: Landmark },
+            { id: "acc-reports",   label: "Звіти",               icon: BarChart3 },
           ] as { id: Tab; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
@@ -169,6 +217,12 @@ export default function AccountingPage() {
         {tab === "counterparties" && <CounterpartiesTab />}
         {tab === "entities"       && <LegalEntitiesTab />}
         {tab === "integrations"   && <IntegrationsTab />}
+        {tab === "acc-accounts"   && <AccChartOfAccountsTab />}
+        {tab === "acc-journal"    && <AccJournalTab />}
+        {tab === "acc-documents"  && <AccDocumentsTab />}
+        {tab === "acc-contractors"&& <AccContractorsTab />}
+        {tab === "acc-vat"        && <AccVatTab />}
+        {tab === "acc-reports"    && <AccReportsTab />}
       </div>
     </AppLayout>
   );
@@ -1681,14 +1735,6 @@ function IntegrationsTab() {
 // UKRAINIAN ACCOUNTING LAYER TABS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const accFetch = (path: string, opts?: RequestInit) => {
-  const t = localStorage.getItem("hms_token") || "";
-  const API_BASE2 = (import.meta.env.VITE_API_URL ?? "");
-  return fetch(`${API_BASE2}/api/accounting/${path}`, {
-    ...opts,
-    headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json", ...(opts?.headers || {}) },
-  }).then(r => r.json());
-};
 const fmtNum2 = (n: any) => n ? new Intl.NumberFormat("uk-UA", { minimumFractionDigits: 2 }).format(Number(n)) : "0,00";
 const fmtCur2 = (n: any) => `${fmtNum2(n)} ₴`;
 
@@ -1702,28 +1748,28 @@ function TaxInvoicesTab() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["ua-tax-invoices", filter],
-    queryFn: () => accFetch(`tax-invoices${filter !== "all" ? `?status=${filter}` : ""}`), staleTime: 15_000,
+    queryFn: () => acctFetch(`tax-invoices${filter !== "all" ? `?status=${filter}` : ""}`), staleTime: 15_000,
   });
-  const { data: entitiesData } = useQuery({ queryKey: ["acc-entities-sel"], queryFn: () => accFetch("legal-entities"), staleTime: 60_000 });
-  const { data: cpData } = useQuery({ queryKey: ["acc-counterparties-sel"], queryFn: () => accFetch("counterparties"), staleTime: 60_000 });
+  const { data: entitiesData } = useQuery({ queryKey: ["acc-entities-sel"], queryFn: () => acctFetch("legal-entities"), staleTime: 60_000 });
+  const { data: cpData } = useQuery({ queryKey: ["acc-counterparties-sel"], queryFn: () => acctFetch("counterparties"), staleTime: 60_000 });
 
   const createMut = useMutation({
-    mutationFn: (body: any) => accFetch("tax-invoices", { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: (body: any) => acctFetch("tax-invoices", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); setNewOpen(false); },
   });
 
   const genXmlMut = useMutation({
-    mutationFn: (id: number) => accFetch(`tax-invoices/${id}/generate-xml`, { method: "POST" }),
+    mutationFn: (id: number) => acctFetch(`tax-invoices/${id}/generate-xml`, { method: "POST" }),
     onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); if (d.xml) alert("XML ПН згенеровано успішно!"); },
   });
 
   const medocMut = useMutation({
-    mutationFn: (id: number) => accFetch(`tax-invoices/${id}/submit-medoc`, { method: "POST" }),
+    mutationFn: (id: number) => acctFetch(`tax-invoices/${id}/submit-medoc`, { method: "POST" }),
     onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); alert(d.message); },
   });
 
   const vchasnoMut = useMutation({
-    mutationFn: (id: number) => accFetch(`tax-invoices/${id}/submit-vchasno`, { method: "POST" }),
+    mutationFn: (id: number) => acctFetch(`tax-invoices/${id}/submit-vchasno`, { method: "POST" }),
     onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["ua-tax-invoices"] }); alert(d.message); },
   });
 
@@ -1898,16 +1944,16 @@ function BasExportTab() {
   const [result, setResult] = useState<any>(null);
 
   const { data: historyData, isLoading: histLoading } = useQuery({
-    queryKey: ["bas-history"], queryFn: () => accFetch("export/bas/history"), staleTime: 30_000,
+    queryKey: ["bas-history"], queryFn: () => acctFetch("export/bas/history"), staleTime: 30_000,
   });
 
   const exportMut = useMutation({
-    mutationFn: (body: any) => accFetch("export/bas", { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: (body: any) => acctFetch("export/bas", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["bas-history"] }); setResult(d); },
   });
 
   const markMut = useMutation({
-    mutationFn: (id: number) => accFetch(`export/bas/${id}/mark-imported`, { method: "PATCH" }),
+    mutationFn: (id: number) => acctFetch(`export/bas/${id}/mark-imported`, { method: "PATCH" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["bas-history"] }),
   });
 
@@ -2044,16 +2090,16 @@ function SigningTab() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["signing-requests", filter],
-    queryFn: () => accFetch(`signing-requests${filter !== "all" ? `?status=${filter}` : ""}`), staleTime: 15_000,
+    queryFn: () => acctFetch(`signing-requests${filter !== "all" ? `?status=${filter}` : ""}`), staleTime: 15_000,
   });
 
   const createMut = useMutation({
-    mutationFn: (body: any) => accFetch("signing-requests", { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: (body: any) => acctFetch("signing-requests", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["signing-requests"] }); setNewOpen(false); },
   });
 
   const signMut = useMutation({
-    mutationFn: ({ id, status }: any) => accFetch(`signing-requests/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    mutationFn: ({ id, status }: any) => acctFetch(`signing-requests/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["signing-requests"] }),
   });
 
@@ -2192,17 +2238,17 @@ function ArchiveTab() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["doc-archive", search, category],
-    queryFn: () => accFetch(`archive${(search || category) ? `?${search ? `search=${encodeURIComponent(search)}` : ""}${category ? `&category=${category}` : ""}` : ""}`),
+    queryFn: () => acctFetch(`archive${(search || category) ? `?${search ? `search=${encodeURIComponent(search)}` : ""}${category ? `&category=${category}` : ""}` : ""}`),
     staleTime: 15_000,
   });
 
   const createMut = useMutation({
-    mutationFn: (body: any) => accFetch("archive", { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: (body: any) => acctFetch("archive", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["doc-archive"] }); setAddOpen(false); setForm({ title: "", documentType: "invoice", category: "primary", counterpartyName: "", docDate: "", amount: "", retentionYears: "10", isOriginal: false, isSigned: false, hasKep: false, fileName: "", notes: "" }); },
   });
 
   const deleteMut = useMutation({
-    mutationFn: (id: number) => accFetch(`archive/${id}`, { method: "DELETE" }),
+    mutationFn: (id: number) => acctFetch(`archive/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["doc-archive"] }),
   });
 
@@ -2336,6 +2382,440 @@ function ArchiveTab() {
             </TableBody>
           </Table>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: CHART OF ACCOUNTS (ПЛАН РАХУНКІВ) ───────────────────────────────────
+function AccChartOfAccountsTab() {
+  const [search, setSearch] = useState("");
+  const [classFilter, setClassFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState<any>({});
+  const qc = useQueryClient();
+
+  const { data: accData, isLoading, refetch } = useAccLedger("accounts");
+  const accounts = Array.isArray(accData) ? accData : [];
+
+  const createMut = useMutation({
+    mutationFn: (body: any) => accFetch("accounts", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["acc-ledger", "accounts"] }); setAddOpen(false); setForm({}); },
+  });
+
+  const toggleActiveMut = useMutation({
+    mutationFn: ({ id, is_active }: any) => accFetch(`accounts/${id}`, { method: "PATCH", body: JSON.stringify({ is_active }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["acc-ledger", "accounts"] }),
+  });
+
+  const types: Record<string, string> = { asset: "blue", liability: "orange", equity: "purple", income: "green", expense: "red", tax: "slate" };
+  const typeLabels: Record<string, string> = { asset: "Актив", liability: "Пасив", equity: "Капітал", income: "Дохід", expense: "Витрати", tax: "Податок" };
+
+  let filtered = accounts.filter((a: any) => {
+    if (search && !a.code.includes(search) && !a.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (classFilter !== "all" && String(a.class) !== classFilter) return false;
+    if (typeFilter !== "all" && a.type !== typeFilter) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex gap-2 flex-wrap">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input className="pl-9 w-48 h-9 text-sm" placeholder="Пошук..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <Select value={classFilter} onValueChange={setClassFilter}>
+            <SelectTrigger className="w-32 h-9 text-sm"><SelectValue placeholder="Клас" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Всі класи</SelectItem>
+              {[1,2,3,4,5,6,7,8,9].map(c => <SelectItem key={c} value={String(c)}>Клас {c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="w-32 h-9 text-sm"><SelectValue placeholder="Тип" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Всі типи</SelectItem>
+              {Object.entries(typeLabels).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex gap-2">
+          {accounts.length === 0 && !isLoading && (
+            <Button variant="outline" size="sm" onClick={() => refetch()}><RefreshCw className="h-4 w-4 mr-1"/> Завантажити НП(С)БО №291</Button>
+          )}
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-1" />Додати рахунок</Button></DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Новий рахунок</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div><Label>Код</Label><Input value={form.code || ""} onChange={e => setForm({ ...form, code: e.target.value })} /></div>
+                <div><Label>Назва</Label><Input value={form.name || ""} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+                <div>
+                  <Label>Тип</Label>
+                  <Select value={form.type} onValueChange={v => setForm({ ...form, type: v })}>
+                    <SelectTrigger><SelectValue/></SelectTrigger>
+                    <SelectContent>{Object.entries(typeLabels).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Клас (1-9)</Label>
+                  <Select value={form.class ? String(form.class) : undefined} onValueChange={v => setForm({ ...form, class: parseInt(v) })}>
+                    <SelectTrigger><SelectValue/></SelectTrigger>
+                    <SelectContent>{[1,2,3,4,5,6,7,8,9].map(c => <SelectItem key={c} value={String(c)}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <Button className="w-full" onClick={() => createMut.mutate(form)} disabled={createMut.isPending}>Зберегти</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gray-50">
+                <TableHead>Код</TableHead><TableHead>Назва</TableHead><TableHead>Тип</TableHead>
+                <TableHead>Клас</TableHead><TableHead>Активний</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((a: any) => (
+                <TableRow key={a.id}>
+                  <TableCell className="font-mono text-sm font-semibold">{a.code}</TableCell>
+                  <TableCell className="text-sm" style={{ paddingLeft: a.parent_id ? '2rem' : '1rem' }}>{a.name}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={`bg-${types[a.type]}-50 text-${types[a.type]}-700 border-${types[a.type]}-200`}>
+                      {typeLabels[a.type] || a.type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs">{a.class}</TableCell>
+                  <TableCell>
+                    <Switch checked={a.is_active} onCheckedChange={(v) => toggleActiveMut.mutate({ id: a.id, is_active: v })} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: JOURNAL (ЖУРНАЛ ПРОВОДОК) ───────────────────────────────────────────
+function AccJournalTab() {
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [search, setSearch] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState<any>({});
+  const qc = useQueryClient();
+
+  const { data, isLoading } = useAccLedger(`entries?from=${dateFrom}&to=${dateTo}&account_code=${search}`);
+  const { data: accs } = useAccLedger("accounts");
+
+  const createMut = useMutation({
+    mutationFn: (body: any) => accFetch("entries", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["acc-ledger"] }); setAddOpen(false); setForm({}); },
+  });
+  
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => accFetch(`entries/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["acc-ledger"] }),
+  });
+
+  const entries = Array.isArray(data) ? data : [];
+
+  const fmtNumLoc = (n: number | string) => n ? Number(n).toFixed(2) : "0.00";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 items-center flex-wrap">
+        <Input type="date" className="w-40 h-9 text-sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        <span className="text-gray-400">-</span>
+        <Input type="date" className="w-40 h-9 text-sm" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        <Input className="w-48 h-9 text-sm" placeholder="Код рахунку..." value={search} onChange={e => setSearch(e.target.value)} />
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogTrigger asChild><Button size="sm" className="ml-auto"><Plus className="h-4 w-4 mr-1"/>Ручна проводка</Button></DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Нова проводка</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div><Label>Дата</Label><Input type="date" value={form.entry_date || ""} onChange={e => setForm({ ...form, entry_date: e.target.value })} /></div>
+              <div><Label>Дебет</Label>
+                <Select value={form.debit_account_id ? String(form.debit_account_id) : ""} onValueChange={v => setForm({ ...form, debit_account_id: parseInt(v) })}>
+                  <SelectTrigger><SelectValue placeholder="Дт" /></SelectTrigger>
+                  <SelectContent>{(accs?.accounts||[]).filter((a: any)=>a.is_active).map((a: any) => <SelectItem key={a.id} value={String(a.id)}>{a.code} - {a.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Кредит</Label>
+                <Select value={form.credit_account_id ? String(form.credit_account_id) : ""} onValueChange={v => setForm({ ...form, credit_account_id: parseInt(v) })}>
+                  <SelectTrigger><SelectValue placeholder="Кт" /></SelectTrigger>
+                  <SelectContent>{(accs?.accounts||[]).filter((a: any)=>a.is_active).map((a: any) => <SelectItem key={a.id} value={String(a.id)}>{a.code} - {a.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Сума</Label><Input type="number" value={form.amount || ""} onChange={e => setForm({ ...form, amount: e.target.value })} /></div>
+              <div><Label>Опис</Label><Input value={form.description || ""} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+              <Button className="w-full" onClick={() => createMut.mutate({ ...form, amount: parseFloat(form.amount) })} disabled={createMut.isPending}>Зберегти</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader className="bg-gray-50">
+              <TableRow>
+                <TableHead>Дата</TableHead><TableHead>Дт</TableHead><TableHead>Назва Дт</TableHead>
+                <TableHead>Кт</TableHead><TableHead>Назва Кт</TableHead><TableHead className="text-right">Сума</TableHead>
+                <TableHead>Опис</TableHead><TableHead>Документ</TableHead><TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.map((e: any) => (
+                <TableRow key={e.id}>
+                  <TableCell className="text-xs">{e.entry_date ? format(new Date(e.entry_date), "dd.MM.yyyy") : "—"}</TableCell>
+                  <TableCell className="font-mono text-xs font-semibold">{e.debit_code}</TableCell>
+                  <TableCell className="text-xs max-w-[120px] truncate">{e.debit_name}</TableCell>
+                  <TableCell className="font-mono text-xs font-semibold">{e.credit_code}</TableCell>
+                  <TableCell className="text-xs max-w-[120px] truncate">{e.credit_name}</TableCell>
+                  <TableCell className="text-right text-sm font-semibold">{fmtNumLoc(e.amount)}</TableCell>
+                  <TableCell className="text-xs text-gray-600">{e.description}</TableCell>
+                  <TableCell className="text-xs text-gray-400">{e.doc_id ? `Doc #${e.doc_id}` : e.is_manual ? "Ручна" : "—"}</TableCell>
+                  <TableCell>
+                    {e.is_manual && <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500" onClick={() => deleteMut.mutate(e.id)}><XCircle className="h-4 w-4"/></Button>}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="bg-gray-50 p-4 border-t text-sm font-semibold flex justify-end gap-4">
+            <span>Всього оборот:</span>
+            <span className="text-blue-600">{fmtNumLoc(entries.reduce((a:number, e:any)=>a + parseFloat(e.amount), 0))} ₴</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: DOCUMENTS (ДОКУМЕНТИ) ───────────────────────────────────────────────
+function AccDocumentsTab() {
+  const [type, setType] = useState("");
+  const qc = useQueryClient();
+  const { data, isLoading } = useAccLedger(`documents${type ? `?doc_type=${type}` : ""}`);
+  const docs = Array.isArray(data) ? data : [];
+
+  const postMut = useMutation({
+    mutationFn: (id: number) => accFetch(`documents/${id}/post`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["acc-ledger"] }),
+  });
+
+  const Types: Record<string, string> = {
+    invoice_out: "Видаткова накладна", invoice_in: "Прибуткова накладна",
+    act_out: "Акт (видача)", act_in: "Акт (отримання)",
+    payment_in: "Оплата отримана", payment_out: "Оплата сплачена",
+    advance_in: "Аванс отриманий", advance_out: "Аванс виданий",
+    payroll: "Нарахування ЗП", esv: "ЄСВ"
+  };
+
+  const fmtNumLoc = (n: number | string) => n ? Number(n).toFixed(2) : "0.00";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <Select value={type} onValueChange={setType}>
+          <SelectTrigger className="w-48 h-9 text-sm"><SelectValue placeholder="Всі типи" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Всі типи</SelectItem>
+            {Object.entries(Types).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button size="sm" className="ml-auto"><Plus className="h-4 w-4 mr-1"/>Створити документ</Button>
+      </div>
+      {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader className="bg-gray-50">
+              <TableRow><TableHead>Дата</TableHead><TableHead>Номер</TableHead><TableHead>Тип</TableHead><TableHead>Контрагент</TableHead><TableHead className="text-right">Сума</TableHead><TableHead>Статус</TableHead><TableHead></TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {docs.map((d: any) => (
+                <TableRow key={d.id}>
+                  <TableCell className="text-xs">{d.doc_date ? format(new Date(d.doc_date), "dd.MM.yyyy") : "—"}</TableCell>
+                  <TableCell className="text-xs font-semibold">{d.doc_number}</TableCell>
+                  <TableCell className="text-xs">{Types[d.doc_type] || d.doc_type}</TableCell>
+                  <TableCell className="text-xs">{d.contractor_name || "—"}</TableCell>
+                  <TableCell className="text-sm font-semibold text-right">{fmtNumLoc(d.total)}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={d.status === "posted" ? "bg-green-50 text-green-700" : d.status === "cancelled" ? "bg-red-50 text-red-700" : "bg-gray-100 text-gray-600"}>
+                      {d.status === "posted" ? "Проведено" : d.status === "draft" ? "Чернетка" : "Скасовано"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {d.status === "draft" && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => postMut.mutate(d.id)}>Провести</Button>}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: CONTRACTORS (КОНТРАГЕНТИ) ───────────────────────────────────────────
+function AccContractorsTab() {
+  const [search, setSearch] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState<any>({ contractor_type: "both" });
+  const qc = useQueryClient();
+  const { data, isLoading } = useAccLedger(`contractors${search ? `?search=${encodeURIComponent(search)}` : ""}`);
+  const list = Array.isArray(data) ? data : [];
+
+  const createMut = useMutation({
+    mutationFn: (body: any) => accFetch("contractors", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["acc-ledger"] }); setAddOpen(false); setForm({ contractor_type: "both" }); },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <Input className="w-64 h-9 text-sm" placeholder="Пошук за назвою або ЄДРПОУ..." value={search} onChange={e => setSearch(e.target.value)} />
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogTrigger asChild><Button size="sm" className="ml-auto"><Plus className="h-4 w-4 mr-1"/>Додати</Button></DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Новий контрагент</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div><Label>Назва *</Label><Input value={form.name || ""} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+              <div><Label>ЄДРПОУ</Label><Input value={form.edrpou || ""} onChange={e => setForm({ ...form, edrpou: e.target.value })} /></div>
+              <div><Label>ІПН</Label><Input value={form.ipn || ""} onChange={e => setForm({ ...form, ipn: e.target.value })} /></div>
+              <div><Label>№ ПДВ</Label><Input value={form.vat_number || ""} onChange={e => setForm({ ...form, vat_number: e.target.value })} /></div>
+              <div><Label>Тип</Label>
+                <Select value={form.contractor_type} onValueChange={v => setForm({ ...form, contractor_type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="customer">Покупець</SelectItem>
+                    <SelectItem value="supplier">Постачальник</SelectItem>
+                    <SelectItem value="both">Обидва</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Адреса</Label><Input value={form.address || ""} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
+              <Button className="w-full" onClick={() => createMut.mutate(form)} disabled={createMut.isPending}>Зберегти</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader className="bg-gray-50">
+              <TableRow><TableHead>Назва</TableHead><TableHead>ЄДРПОУ</TableHead><TableHead>ІПН</TableHead><TableHead>Тип</TableHead><TableHead>Статус</TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.map((c: any) => (
+                <TableRow key={c.id}>
+                  <TableCell className="text-sm font-medium">{c.name}</TableCell>
+                  <TableCell className="text-xs font-mono">{c.edrpou || "—"}</TableCell>
+                  <TableCell className="text-xs font-mono">{c.ipn || "—"}</TableCell>
+                  <TableCell className="text-xs capitalize">{c.contractor_type}</TableCell>
+                  <TableCell><Badge variant="outline">{c.is_active ? "Активний" : "Неактивний"}</Badge></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: VAT (ПДВ) ───────────────────────────────────────────────────────────
+function AccVatTab() {
+  const [year, setYear] = useState(new Date().getFullYear().toString());
+  const [month, setMonth] = useState((new Date().getMonth() + 1).toString());
+  const { data, isLoading } = useAccLedger(`vat/declaration?year=${year}&month=${month}`);
+  
+  const fmtNumLoc = (n: number | string) => n ? Number(n).toFixed(2) : "0.00";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 items-center">
+        <Select value={year} onValueChange={setYear}>
+          <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>{[2023,2024,2025,2026].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={month} onValueChange={setMonth}>
+          <SelectTrigger className="w-32 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <SelectItem key={m} value={String(m)}>Місяць {m}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+        <div className="grid grid-cols-3 gap-4">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">Податкове зобов'язання (Ряд 9)</CardTitle></CardHeader>
+            <CardContent><p className="text-2xl font-bold text-red-600">{fmtNumLoc(data?.tax_liability || 0)} ₴</p><p className="text-xs text-gray-400 mt-1">База: {fmtNumLoc(data?.issued_base || 0)} ₴</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">Податковий кредит (Ряд 17)</CardTitle></CardHeader>
+            <CardContent><p className="text-2xl font-bold text-blue-600">{fmtNumLoc(data?.tax_credit || 0)} ₴</p><p className="text-xs text-gray-400 mt-1">База: {fmtNumLoc(data?.received_base || 0)} ₴</p></CardContent>
+          </Card>
+          <Card className={Number(data?.vat_to_pay) > 0 ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200"}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">{Number(data?.vat_to_pay) > 0 ? "ПДВ до сплати" : "Переплата / Відшкодування"}</CardTitle></CardHeader>
+            <CardContent><p className={`text-2xl font-bold ${Number(data?.vat_to_pay) > 0 ? "text-amber-700" : "text-green-700"}`}>{fmtNumLoc(Number(data?.vat_to_pay) > 0 ? data?.vat_to_pay : data?.vat_refund || 0)} ₴</p></CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: REPORTS (ЗВІТИ) ─────────────────────────────────────────────────────
+function AccReportsTab() {
+  const { data, isLoading } = useAccLedger("reports/trial-balance");
+  
+  const fmtNumLoc = (n: number | string) => n ? Number(n).toFixed(2) : "0.00";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm">Оборотно-сальдова відомість</Button>
+        <Button variant="outline" size="sm">Фінансові результати</Button>
+        <Button variant="outline" size="sm">Баланс</Button>
+      </div>
+      {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+        <Card>
+          <CardHeader><CardTitle className="text-lg">Оборотно-сальдова відомість (ОСВ)</CardTitle></CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow><TableHead>Рахунок</TableHead><TableHead>Назва</TableHead><TableHead className="text-right">Сальдо поч.</TableHead><TableHead className="text-right">Дт оборот</TableHead><TableHead className="text-right">Кт оборот</TableHead><TableHead className="text-right">Сальдо кін.</TableHead></TableRow>
+              </TableHeader>
+              <TableBody>
+                {(Array.isArray(data) ? data : []).map((r: any, i: number) => (
+                  <TableRow key={i}>
+                    <TableCell className="font-mono text-sm font-semibold">{r.code}</TableCell>
+                    <TableCell className="text-xs">{r.name}</TableCell>
+                    <TableCell className="text-right text-xs">—</TableCell>
+                    <TableCell className="text-right text-xs text-blue-600">{fmtNumLoc(r.debit_turn)}</TableCell>
+                    <TableCell className="text-right text-xs text-orange-600">{fmtNumLoc(r.credit_turn)}</TableCell>
+                    <TableCell className={`text-right text-xs font-semibold ${Number(r.balance) >= 0 ? "text-blue-700" : "text-red-600"}`}>{fmtNumLoc(Math.abs(r.balance))}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
