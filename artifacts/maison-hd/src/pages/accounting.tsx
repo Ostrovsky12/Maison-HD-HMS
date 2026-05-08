@@ -6332,12 +6332,23 @@ function AccPayrollTab() {
   const [view, setView]   = useState<"sheet" | "employees">("sheet");
   const [year, setYear]   = useState(String(now.getFullYear()));
   const [month, setMonth] = useState(String(now.getMonth() + 1));
-  const [showEmpForm, setShowEmpForm] = useState(false);
-  const [showAccrual, setShowAccrual] = useState<any>(null);
+  const [showEmpForm, setShowEmpForm]   = useState(false);
+  const [editEmp, setEditEmp]           = useState<any>(null);  // employee being edited
+  const [showAccrual, setShowAccrual]   = useState<any>(null);
+  const [accrualYear, setAccrualYear]   = useState(String(now.getFullYear()));
+  const [accrualMonth, setAccrualMonth] = useState(String(now.getMonth() + 1));
   const [posting, setPosting] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
   const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+  const POSITIONS  = ["Адміністратор","Менеджер","Покоївка","Офіціант","Бармен","Кухар","Охоронець","Бухгалтер","Директор","Прибиральник","Інший"];
+  const ACC_TYPES  = [
+    { v:"salary",   l:"Зарплата (оклад)" },
+    { v:"bonus",    l:"Премія" },
+    { v:"sick",     l:"Лікарняні" },
+    { v:"vacation", l:"Відпускні" },
+    { v:"other",    l:"Інші нарахування" },
+  ];
 
   const sheetKey = `payroll/sheet?year=${year}&month=${month}`;
   const empKey   = "payroll/employees";
@@ -6346,34 +6357,79 @@ function AccPayrollTab() {
 
   const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const emptyEmp = { full_name:"", position:"", ipn:"", base_salary:"", hire_date:"" };
-  const [empForm, setEmpForm] = useState<any>(emptyEmp);
-  const [empLoading2, setEmpLoading2] = useState(false);
+  const emptyEmp = { full_name:"", position:"", ipn:"", base_salary:"", hire_date:"", notes:"" };
+  const [empForm, setEmpForm]     = useState<any>(emptyEmp);
+  const [empSaving, setEmpSaving] = useState(false);
 
-  const [accrualForm, setAccrualForm] = useState({ gross_amount:"", accrual_type:"salary", notes:"" });
+  const [accrualForm, setAccrualForm]       = useState({ gross_amount:"", accrual_type:"salary", notes:"" });
   const [accrualLoading, setAccrualLoading] = useState(false);
 
-  const handleAddEmployee = async () => {
-    if (!empForm.full_name || !empForm.base_salary) { toast({ title:"Вкажіть ПІБ та оклад", variant:"destructive" }); return; }
-    setEmpLoading2(true);
+  const openAddEmp = () => { setEmpForm(emptyEmp); setEditEmp(null); setShowEmpForm(true); };
+
+  const openEditEmp = (e: any) => {
+    setEmpForm({
+      full_name:   e.full_name,
+      position:    e.position ?? "",
+      ipn:         e.ipn ?? "",
+      base_salary: String(e.base_salary),
+      hire_date:   e.hire_date ? e.hire_date.slice(0, 10) : "",
+      notes:       e.notes ?? "",
+    });
+    setEditEmp(e);
+    setShowEmpForm(true);
+  };
+
+  const handleSaveEmployee = async () => {
+    if (!empForm.full_name.trim()) { toast({ title:"Вкажіть ПІБ", variant:"destructive" }); return; }
+    if (!empForm.base_salary || +empForm.base_salary <= 0) { toast({ title:"Вкажіть оклад", variant:"destructive" }); return; }
+    setEmpSaving(true);
     try {
-      await accFetch("payroll/employees", { method:"POST", body: JSON.stringify({ ...empForm, base_salary: +empForm.base_salary }) });
-      toast({ title:"Співробітника додано" });
+      const body = { ...empForm, base_salary: +empForm.base_salary };
+      if (editEmp) {
+        await accFetch(`payroll/employees/${editEmp.id}`, { method:"PATCH", body: JSON.stringify(body) });
+        toast({ title:"Дані співробітника оновлено" });
+      } else {
+        await accFetch("payroll/employees", { method:"POST", body: JSON.stringify(body) });
+        toast({ title:"Співробітника додано", description:`${empForm.full_name} · ${empForm.position || "—"} · ${fmt(+empForm.base_salary)} грн/міс` });
+      }
       qc.invalidateQueries({ queryKey:["acc-ledger"] });
-      setShowEmpForm(false); setEmpForm(emptyEmp);
+      setShowEmpForm(false); setEmpForm(emptyEmp); setEditEmp(null);
     } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
-    finally { setEmpLoading2(false); }
+    finally { setEmpSaving(false); }
+  };
+
+  const handleDeactivate = async (emp: any) => {
+    if (!confirm(`Звільнити ${emp.full_name}? Вони не з'являтимуться у відомості.`)) return;
+    try {
+      await accFetch(`payroll/employees/${emp.id}`, { method:"PATCH", body: JSON.stringify({ is_active: false }) });
+      toast({ title:`${emp.full_name} звільнено` });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+  };
+
+  const openAccrual = (e: any) => {
+    setShowAccrual(e);
+    setAccrualYear(year);
+    setAccrualMonth(month);
+    setAccrualForm({ gross_amount: String(e.base_salary ?? e.gross_total ?? ""), accrual_type:"salary", notes:"" });
   };
 
   const handleAddAccrual = async () => {
-    if (!accrualForm.gross_amount) { toast({ title:"Вкажіть суму нарахування", variant:"destructive" }); return; }
+    if (!accrualForm.gross_amount || +accrualForm.gross_amount <= 0) {
+      toast({ title:"Вкажіть суму нарахування", variant:"destructive" }); return;
+    }
     setAccrualLoading(true);
     try {
+      const empId = showAccrual.id ?? showAccrual.employee_id;
       await accFetch("payroll/accruals", { method:"POST", body: JSON.stringify({
-        employee_id: showAccrual.employee_id, period_year: +year, period_month: +month,
-        accrual_type: accrualForm.accrual_type, gross_amount: +accrualForm.gross_amount, notes: accrualForm.notes,
+        employee_id: empId,
+        period_year:  +accrualYear,
+        period_month: +accrualMonth,
+        accrual_type: accrualForm.accrual_type,
+        gross_amount: +accrualForm.gross_amount,
+        notes: accrualForm.notes,
       }) });
-      toast({ title:"Нарахування додано" });
+      toast({ title:"Нарахування додано", description:`${ACC_TYPES.find(a=>a.v===accrualForm.accrual_type)?.l} · ${fmt(+accrualForm.gross_amount)} грн` });
       qc.invalidateQueries({ queryKey:["acc-ledger"] });
       setShowAccrual(null); setAccrualForm({ gross_amount:"", accrual_type:"salary", notes:"" });
     } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
@@ -6381,37 +6437,50 @@ function AccPayrollTab() {
   };
 
   const handlePost = async () => {
-    if (!confirm(`Провести зарплату за ${MONTHS_UK[+month-1]} ${year}? Будуть створені проводки 661/641/642/651.`)) return;
+    if (!confirm(`Провести зарплату за ${MONTHS_UK[+month-1]} ${year}?\nБудуть створені проводки 661/641/642/651.`)) return;
     setPosting(true);
     try {
       const res = await accFetch("payroll/post", { method:"POST", body: JSON.stringify({ year:+year, month:+month }) });
-      toast({ title:`Зарплату проведено`, description:`Нараховано: ${fmt(res.gross)} грн, ЄСВ: ${fmt(res.esv)} грн. Створено ${res.entriesCreated} проводок` });
+      toast({ title:`Зарплату проведено`, description:`Нараховано: ${fmt(res.gross)} грн, ЄСВ: ${fmt(res.esv)} грн. Проводок: ${res.entriesCreated}` });
       qc.invalidateQueries({ queryKey:["acc-ledger"] });
     } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
     finally { setPosting(false); }
   };
 
-  const emps: any[] = Array.isArray(employees) ? employees : [];
+  const emps: any[]    = Array.isArray(employees) ? employees : [];
+  const activeEmps     = emps.filter((e:any) => e.is_active !== false);
   const empList: any[] = sheet?.employees ?? [];
-  const totals = sheet?.totals ?? {};
-  const isPosted = empList.some((e:any) => e.is_posted);
+  const totals         = sheet?.totals ?? {};
+  const isPosted       = empList.some((e:any) => e.is_posted);
+
+  const grossAmt = +accrualForm.gross_amount || 0;
 
   return (
     <div className="space-y-4">
+      {/* ── Top bar ── */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex border rounded-lg overflow-hidden">
-          {(["sheet","employees"] as const).map(v=>(
-            <button key={v} onClick={()=>setView(v)}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${view===v?"bg-blue-600 text-white":"bg-white text-gray-600 hover:bg-gray-50"}`}>
-              {v==="sheet"?"Відомість":"Співробітники"}
+        <div className="flex border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+          {(["sheet","employees"] as const).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                v === view ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}>
+              {v === "sheet" ? <><FileText className="w-3.5 h-3.5" />Відомість</> : <><Users className="w-3.5 h-3.5" />Співробітники
+                {activeEmps.length > 0 && (
+                  <span className={`ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                    v === view ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-600"
+                  }`}>{activeEmps.length}</span>
+                )}
+              </>}
             </button>
           ))}
         </div>
+
         {view === "sheet" && (
           <>
             <Select value={year} onValueChange={setYear}>
               <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>{[2023,2024,2025,2026].map(y=><SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+              <SelectContent>{[2023,2024,2025,2026,2027].map(y=><SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={month} onValueChange={setMonth}>
               <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
@@ -6419,201 +6488,380 @@ function AccPayrollTab() {
             </Select>
           </>
         )}
+
         <div className="ml-auto flex gap-2">
-          {view === "sheet" && (
-            <Button size="sm" onClick={handlePost} disabled={posting || isPosted || empList.length === 0}
-              className={isPosted ? "bg-green-100 text-green-700 border border-green-300" : "bg-[--mhd-primary] hover:bg-[--mhd-primary]/90"}>
+          {view === "sheet" && empList.length > 0 && (
+            <Button size="sm" onClick={handlePost} disabled={posting || isPosted}
+              className={isPosted ? "bg-green-100 text-green-700 border border-green-300 hover:bg-green-100" : "bg-[--mhd-primary] hover:bg-[--mhd-primary]/90"}>
               {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
               {isPosted ? "Проведено" : "Провести зарплату"}
             </Button>
           )}
           {view === "employees" && (
-            <Button size="sm" className="h-9 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={()=>setShowEmpForm(true)}>
-              <Plus className="w-3.5 h-3.5" /> Додати співробітника
+            <Button size="sm" className="h-9 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={openAddEmp}>
+              <UserPlus className="w-3.5 h-3.5" /> Додати співробітника
             </Button>
           )}
         </div>
       </div>
 
-      {/* KPI */}
+      {/* ── KPI tiles (sheet view) ── */}
       {view === "sheet" && (
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-5 gap-2">
           {[
-            { label:"Нараховано (Гр)",    val: totals.gross, color:"blue" },
-            { label:"ПДФО 18%",           val: totals.pdfo,  color:"red" },
-            { label:"ВЗ 1.5%",            val: totals.vz,    color:"orange" },
-            { label:"ЄСВ 22% (робот.)",   val: totals.esv,   color:"purple" },
-            { label:"До виплати (Нт)",    val: totals.net,   color:"green" },
-          ].map(({label,val,color}) => (
-            <Card key={label} className={`border-${color}-200 bg-${color}-50`}>
-              <CardContent className="p-3">
-                <div className={`text-[10px] text-${color}-700 font-medium mb-0.5`}>{label}</div>
-                <div className={`text-base font-bold text-${color}-700`}>{fmt(val)}</div>
-              </CardContent>
-            </Card>
+            { label:"Нараховано (Гр)", val: totals.gross, textCls:"text-blue-700",   bgCls:"bg-blue-50 border-blue-200" },
+            { label:"ПДФО 18%",        val: totals.pdfo,  textCls:"text-red-600",    bgCls:"bg-red-50 border-red-200" },
+            { label:"ВЗ 1.5%",         val: totals.vz,    textCls:"text-orange-600", bgCls:"bg-orange-50 border-orange-200" },
+            { label:"ЄСВ 22% (роб.)",  val: totals.esv,   textCls:"text-purple-600", bgCls:"bg-purple-50 border-purple-200" },
+            { label:"До виплати (Нт)", val: totals.net,   textCls:"text-green-700",  bgCls:"bg-green-50 border-green-200" },
+          ].map(({ label, val, textCls, bgCls }) => (
+            <div key={label} className={`border rounded-xl p-3 ${bgCls}`}>
+              <div className={`text-[10px] font-medium mb-0.5 ${textCls}`}>{label}</div>
+              <div className={`text-base font-bold ${textCls}`}>{fmt(val)}</div>
+            </div>
           ))}
         </div>
       )}
 
+      {/* ── ВІДОМІСТЬ ── */}
       {view === "sheet" && (
-        <Card>
-          <CardContent className="p-0">
-            {sheetLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
-              <Table>
-                <TableHeader className="bg-gray-50">
-                  <TableRow>
-                    <TableHead>ПІБ</TableHead>
-                    <TableHead>Посада</TableHead>
-                    <TableHead>ІПН</TableHead>
-                    <TableHead className="text-right w-32 text-blue-700">Нараховано</TableHead>
-                    <TableHead className="text-right w-28 text-red-600">ПДФО 18%</TableHead>
-                    <TableHead className="text-right w-24 text-orange-600">ВЗ 1.5%</TableHead>
-                    <TableHead className="text-right w-28 text-purple-600">ЄСВ 22%</TableHead>
-                    <TableHead className="text-right w-32 text-green-700">До виплати</TableHead>
-                    <TableHead className="text-center w-24">Статус</TableHead>
-                    <TableHead className="w-20" />
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {sheetLoading ? (
+            <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-400" /></div>
+          ) : empList.length === 0 ? (
+            /* Empty state with CTA */
+            <div className="py-14 flex flex-col items-center gap-4 text-center px-6">
+              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center">
+                <Users className="w-8 h-8 text-blue-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800 text-base mb-1">Співробітників поки немає</p>
+                <p className="text-sm text-gray-500">Спочатку додайте співробітників, а потім вносьте нарахування</p>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => { setView("employees"); openAddEmp(); }}
+                  className="bg-blue-600 hover:bg-blue-700 gap-1.5">
+                  <UserPlus className="w-4 h-4" /> Додати першого співробітника
+                </Button>
+                <Button variant="outline" onClick={() => setView("employees")}>
+                  Перейти до Співробітників
+                </Button>
+              </div>
+              <div className="mt-2 bg-gray-50 border border-gray-200 rounded-xl p-4 text-left text-xs text-gray-600 max-w-sm space-y-1.5">
+                <div className="font-bold text-gray-700 mb-2">Як нарахувати зарплату:</div>
+                <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">1</span>Перейдіть на вкладку <strong>«Співробітники»</strong> і натисніть <strong>«Додати співробітника»</strong></div>
+                <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">2</span>Вкажіть ПІБ, посаду, ІПН та оклад (базова ставка)</div>
+                <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">3</span>Поверніться у <strong>«Відомість»</strong>, натисніть <strong>«Нарахування»</strong> навпроти співробітника</div>
+                <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">4</span>Натисніть <strong>«Провести зарплату»</strong> — будуть створені проводки 661/641/651</div>
+              </div>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead>ПІБ</TableHead>
+                  <TableHead>Посада</TableHead>
+                  <TableHead>ІПН</TableHead>
+                  <TableHead className="text-right w-32 text-blue-700">Нараховано</TableHead>
+                  <TableHead className="text-right w-28 text-red-600">ПДФО 18%</TableHead>
+                  <TableHead className="text-right w-24 text-orange-600">ВЗ 1.5%</TableHead>
+                  <TableHead className="text-right w-28 text-purple-600">ЄСВ 22%</TableHead>
+                  <TableHead className="text-right w-32 text-green-700">До виплати</TableHead>
+                  <TableHead className="text-center w-28">Статус</TableHead>
+                  <TableHead className="w-28" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {empList.map((e:any) => (
+                  <TableRow key={e.employee_id} className={`hover:bg-gray-50 ${!e.gross_total ? "opacity-60" : ""}`}>
+                    <TableCell className="text-sm font-medium">{e.full_name}</TableCell>
+                    <TableCell className="text-xs text-gray-500">{e.position || "—"}</TableCell>
+                    <TableCell className="text-xs font-mono text-gray-500">{e.ipn || "—"}</TableCell>
+                    <TableCell className="text-right font-mono text-sm font-bold text-blue-700">{fmt(e.gross_total)}</TableCell>
+                    <TableCell className="text-right font-mono text-sm text-red-600">{fmt(e.pdfo_total)}</TableCell>
+                    <TableCell className="text-right font-mono text-sm text-orange-600">{fmt(e.vz_total)}</TableCell>
+                    <TableCell className="text-right font-mono text-sm text-purple-600">{fmt(e.esv_total)}</TableCell>
+                    <TableCell className="text-right font-mono text-sm font-bold text-green-700">{fmt(e.net_total)}</TableCell>
+                    <TableCell className="text-center">
+                      {e.is_posted
+                        ? <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">Проведено</Badge>
+                        : e.gross_total > 0
+                          ? <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">Не проведено</Badge>
+                          : <Badge variant="outline" className="text-[10px] text-gray-400">Без нарах.</Badge>}
+                    </TableCell>
+                    <TableCell>
+                      {!e.is_posted && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
+                          onClick={() => openAccrual({ ...e, id: e.employee_id, base_salary: e.gross_total || 0 })}>
+                          <Plus className="w-3 h-3" /> Нарахування
+                        </Button>
+                      )}
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {empList.length === 0 ? (
-                    <TableRow><TableCell colSpan={10} className="text-center py-10 text-gray-400 text-sm">
-                      <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                      Активних співробітників не знайдено. Спочатку додайте їх у вкладці «Співробітники».
-                    </TableCell></TableRow>
-                  ) : empList.map((e:any) => (
-                    <TableRow key={e.employee_id} className="hover:bg-gray-50">
-                      <TableCell className="text-sm font-medium">{e.full_name}</TableCell>
-                      <TableCell className="text-xs text-gray-500">{e.position || "—"}</TableCell>
-                      <TableCell className="text-xs font-mono text-gray-500">{e.ipn || "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-sm font-bold text-blue-700">{fmt(e.gross_total)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm text-red-600">{fmt(e.pdfo_total)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm text-orange-600">{fmt(e.vz_total)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm text-purple-600">{fmt(e.esv_total)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm font-bold text-green-700">{fmt(e.net_total)}</TableCell>
-                      <TableCell className="text-center">
-                        {e.is_posted
-                          ? <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">Проведено</Badge>
-                          : <Badge variant="outline" className="text-[10px] text-gray-400">Не проведено</Badge>}
-                      </TableCell>
-                      <TableCell>
-                        {!e.is_posted && (
-                          <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-blue-600" onClick={() => setShowAccrual(e)}>
-                            <Plus className="w-3 h-3 mr-0.5" /> Нарахування
+                ))}
+                <TableRow className="bg-gray-100 border-t-2 border-gray-300">
+                  <TableCell colSpan={3} className="font-bold text-xs text-gray-700">РАЗОМ</TableCell>
+                  <TableCell className="text-right font-bold text-blue-800 font-mono">{fmt(totals.gross)}</TableCell>
+                  <TableCell className="text-right font-bold text-red-700 font-mono">{fmt(totals.pdfo)}</TableCell>
+                  <TableCell className="text-right font-bold text-orange-700 font-mono">{fmt(totals.vz)}</TableCell>
+                  <TableCell className="text-right font-bold text-purple-700 font-mono">{fmt(totals.esv)}</TableCell>
+                  <TableCell className="text-right font-bold text-green-800 font-mono">{fmt(totals.net)}</TableCell>
+                  <TableCell colSpan={2} />
+                </TableRow>
+              </TableBody>
+            </Table>
+          )}
+        </div>
+      )}
+
+      {/* ── СПІВРОБІТНИКИ ── */}
+      {view === "employees" && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {empLoading ? (
+            <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-400" /></div>
+          ) : emps.length === 0 ? (
+            /* Empty state */
+            <div className="py-14 flex flex-col items-center gap-4 text-center px-6">
+              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center">
+                <UserPlus className="w-8 h-8 text-blue-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800 text-base mb-1">Поки немає жодного співробітника</p>
+                <p className="text-sm text-gray-500">Додайте першого — вкажіть ПІБ, посаду, ІПН та оклад</p>
+              </div>
+              <Button onClick={openAddEmp} className="bg-blue-600 hover:bg-blue-700 gap-1.5">
+                <UserPlus className="w-4 h-4" /> Додати першого співробітника
+              </Button>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead>ПІБ</TableHead>
+                  <TableHead>Посада</TableHead>
+                  <TableHead>ІПН</TableHead>
+                  <TableHead className="text-right w-36">Оклад, грн/міс</TableHead>
+                  <TableHead className="w-32">З дати</TableHead>
+                  <TableHead className="text-center w-24">Статус</TableHead>
+                  <TableHead className="w-44 text-right">Дії</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {emps.map((e:any) => (
+                  <TableRow key={e.id} className={`hover:bg-gray-50 ${!e.is_active ? "opacity-50" : ""}`}>
+                    <TableCell className="text-sm font-semibold">{e.full_name}</TableCell>
+                    <TableCell className="text-xs text-gray-500">{e.position || "—"}</TableCell>
+                    <TableCell className="text-xs font-mono text-gray-500">{e.ipn || "—"}</TableCell>
+                    <TableCell className="text-right font-mono text-sm font-bold">{fmt(e.base_salary)}</TableCell>
+                    <TableCell className="text-xs text-gray-500">{e.hire_date ? format(new Date(e.hire_date),"dd.MM.yyyy") : "—"}</TableCell>
+                    <TableCell className="text-center">
+                      <Badge className={`text-[10px] ${e.is_active !== false ? "bg-green-100 text-green-700 border-green-200" : "bg-gray-100 text-gray-500"}`}>
+                        {e.is_active !== false ? "Активний" : "Звільнено"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex gap-1 justify-end">
+                        <Button variant="outline" size="sm" className="h-7 text-xs gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
+                          onClick={() => openAccrual(e)}>
+                          <Calculator className="w-3 h-3" /> Нарахування
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-gray-400 hover:text-gray-700"
+                          onClick={() => openEditEmp(e)} title="Редагувати">
+                          <Pen className="w-3.5 h-3.5" />
+                        </Button>
+                        {e.is_active !== false && (
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
+                            onClick={() => handleDeactivate(e)} title="Звільнити">
+                            <XCircle className="w-3.5 h-3.5" />
                           </Button>
                         )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {empList.length > 0 && (
-                    <TableRow className="bg-gray-100 border-t-2 border-gray-300 font-bold text-xs">
-                      <TableCell colSpan={3} className="font-bold text-gray-800">РАЗОМ</TableCell>
-                      <TableCell className="text-right font-bold text-blue-800">{fmt(totals.gross)}</TableCell>
-                      <TableCell className="text-right font-bold text-red-700">{fmt(totals.pdfo)}</TableCell>
-                      <TableCell className="text-right font-bold text-orange-700">{fmt(totals.vz)}</TableCell>
-                      <TableCell className="text-right font-bold text-purple-700">{fmt(totals.esv)}</TableCell>
-                      <TableCell className="text-right font-bold text-green-800">{fmt(totals.net)}</TableCell>
-                      <TableCell colSpan={2} />
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       )}
 
-      {view === "employees" && (
-        <Card>
-          <CardContent className="p-0">
-            {empLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
-              <Table>
-                <TableHeader className="bg-gray-50"><TableRow>
-                  <TableHead>ПІБ</TableHead><TableHead>Посада</TableHead>
-                  <TableHead>ІПН</TableHead><TableHead className="text-right w-36">Оклад, грн</TableHead>
-                  <TableHead className="w-28">З дати</TableHead><TableHead className="text-center w-24">Статус</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {emps.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="text-center py-10 text-gray-400 text-sm">
-                      <UserCheck className="w-8 h-8 mx-auto mb-2 opacity-30" />Співробітників не знайдено. Додайте першого.
-                    </TableCell></TableRow>
-                  ) : emps.map((e:any) => (
-                    <TableRow key={e.id} className="hover:bg-gray-50">
-                      <TableCell className="text-sm font-medium">{e.full_name}</TableCell>
-                      <TableCell className="text-xs text-gray-500">{e.position||"—"}</TableCell>
-                      <TableCell className="text-xs font-mono text-gray-500">{e.ipn||"—"}</TableCell>
-                      <TableCell className="text-right font-mono text-sm font-semibold">{fmt(e.base_salary)}</TableCell>
-                      <TableCell className="text-xs">{e.hire_date ? format(new Date(e.hire_date),"dd.MM.yyyy") : "—"}</TableCell>
-                      <TableCell className="text-center">
-                        <Badge className={e.is_active ? "bg-green-100 text-green-700 border-green-200 text-[10px]" : "bg-gray-100 text-gray-500 text-[10px]"}>
-                          {e.is_active ? "Активний" : "Звільнено"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* ════ DIALOG: Add / Edit Employee ════ */}
+      <Dialog open={showEmpForm} onOpenChange={v => { if (!v) { setShowEmpForm(false); setEditEmp(null); setEmpForm(emptyEmp); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-blue-600" />
+              {editEmp ? "Редагувати співробітника" : "Новий співробітник"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-1">
+            {/* ПІБ */}
+            <div>
+              <Label className="text-xs font-semibold">ПІБ <span className="text-red-500">*</span></Label>
+              <Input value={empForm.full_name}
+                onChange={e => setEmpForm((f:any) => ({ ...f, full_name: e.target.value }))}
+                className="mt-1" placeholder="Іваненко Іван Іванович" autoFocus />
+            </div>
 
-      {/* Add employee dialog */}
-      <Dialog open={showEmpForm} onOpenChange={setShowEmpForm}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Новий співробітник</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2">
-            <div><Label className="text-xs">ПІБ *</Label><Input value={empForm.full_name} onChange={e=>setEmpForm((f:any)=>({...f,full_name:e.target.value}))} className="mt-1" placeholder="Іваненко Іван Іванович" /></div>
+            {/* Посада + ІПН */}
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Посада</Label><Input value={empForm.position} onChange={e=>setEmpForm((f:any)=>({...f,position:e.target.value}))} className="mt-1" placeholder="Адміністратор" /></div>
-              <div><Label className="text-xs">ІПН</Label><Input value={empForm.ipn} onChange={e=>setEmpForm((f:any)=>({...f,ipn:e.target.value}))} className="mt-1" placeholder="1234567890" /></div>
+              <div>
+                <Label className="text-xs font-semibold">Посада</Label>
+                <Select value={empForm.position || "__custom"} onValueChange={v => {
+                  if (v !== "__custom") setEmpForm((f:any) => ({ ...f, position: v }));
+                }}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Оберіть посаду" /></SelectTrigger>
+                  <SelectContent>
+                    {POSITIONS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                    <SelectItem value="__custom">Своя (ввести нижче)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input className="mt-1.5" placeholder="Або введіть вручну" value={empForm.position}
+                  onChange={e => setEmpForm((f:any) => ({ ...f, position: e.target.value }))} />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">ІПН (РНОКПП)</Label>
+                <Input value={empForm.ipn} maxLength={10}
+                  onChange={e => setEmpForm((f:any) => ({ ...f, ipn: e.target.value.replace(/\D/g,"") }))}
+                  className="mt-1 font-mono" placeholder="1234567890" />
+              </div>
             </div>
+
+            {/* Оклад + дата прийому */}
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Оклад, грн *</Label><Input type="number" step="100" value={empForm.base_salary} onChange={e=>setEmpForm((f:any)=>({...f,base_salary:e.target.value}))} className="mt-1" placeholder="20000" /></div>
-              <div><Label className="text-xs">Дата прийому</Label><Input type="date" value={empForm.hire_date} onChange={e=>setEmpForm((f:any)=>({...f,hire_date:e.target.value}))} className="mt-1" /></div>
+              <div>
+                <Label className="text-xs font-semibold">Оклад (брутто), грн/міс <span className="text-red-500">*</span></Label>
+                <Input type="number" step="500" min="0" value={empForm.base_salary}
+                  onChange={e => setEmpForm((f:any) => ({ ...f, base_salary: e.target.value }))}
+                  className="mt-1" placeholder="20 000" />
+                {empForm.base_salary && +empForm.base_salary > 0 && (
+                  <div className="mt-1.5 text-[10px] text-gray-500 space-y-0.5">
+                    <div>→ ПДФО 18%: <strong>{(+empForm.base_salary * 0.18).toFixed(0)} грн</strong></div>
+                    <div>→ ВЗ 1.5%: <strong>{(+empForm.base_salary * 0.015).toFixed(0)} грн</strong></div>
+                    <div className="text-green-700 font-semibold">→ До виплати: {(+empForm.base_salary * 0.805).toFixed(0)} грн</div>
+                  </div>
+                )}
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Дата прийому</Label>
+                <Input type="date" value={empForm.hire_date}
+                  onChange={e => setEmpForm((f:any) => ({ ...f, hire_date: e.target.value }))}
+                  className="mt-1" />
+              </div>
             </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" onClick={()=>{setShowEmpForm(false);setEmpForm(emptyEmp);}}>Скасувати</Button>
-              <Button onClick={handleAddEmployee} disabled={empLoading2} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
-                {empLoading2?<Loader2 className="w-4 h-4 animate-spin mr-1"/>:<Plus className="w-4 h-4 mr-1"/>} Зберегти
+
+            {/* Примітка */}
+            <div>
+              <Label className="text-xs font-semibold">Примітка</Label>
+              <Input value={empForm.notes}
+                onChange={e => setEmpForm((f:any) => ({ ...f, notes: e.target.value }))}
+                className="mt-1" placeholder="Необов'язково" />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1 border-t">
+              <Button variant="outline" onClick={() => { setShowEmpForm(false); setEditEmp(null); setEmpForm(emptyEmp); }}>Скасувати</Button>
+              <Button onClick={handleSaveEmployee} disabled={empSaving} className="bg-blue-600 hover:bg-blue-700 gap-1.5">
+                {empSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                {editEmp ? "Зберегти зміни" : "Додати співробітника"}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Add accrual dialog */}
-      <Dialog open={!!showAccrual} onOpenChange={v=>!v&&setShowAccrual(null)}>
+      {/* ════ DIALOG: Add Accrual ════ */}
+      <Dialog open={!!showAccrual} onOpenChange={v => !v && setShowAccrual(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Нарахування — {showAccrual?.full_name}</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2">
-            <div><Label className="text-xs">Вид нарахування</Label>
-              <Select value={accrualForm.accrual_type} onValueChange={v=>setAccrualForm(f=>({...f,accrual_type:v}))}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="salary">Зарплата</SelectItem>
-                  <SelectItem value="bonus">Премія</SelectItem>
-                  <SelectItem value="sick">Лікарняні</SelectItem>
-                  <SelectItem value="vacation">Відпускні</SelectItem>
-                </SelectContent>
-              </Select>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calculator className="w-5 h-5 text-blue-600" />
+              Нарахування — {showAccrual?.full_name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-1">
+            {/* Period */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Рік</Label>
+                <Select value={accrualYear} onValueChange={setAccrualYear}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>{[2023,2024,2025,2026,2027].map(y=><SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Місяць</Label>
+                <Select value={accrualMonth} onValueChange={setAccrualMonth}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>{MONTHS_UK.map((m,i)=><SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
-            <div><Label className="text-xs">Нараховано (Гр), грн *</Label>
-              <Input type="number" step="0.01" value={accrualForm.gross_amount} onChange={e=>setAccrualForm(f=>({...f,gross_amount:e.target.value}))} className="mt-1" placeholder="20000.00" />
+
+            {/* Type */}
+            <div>
+              <Label className="text-xs font-semibold">Вид нарахування</Label>
+              <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                {ACC_TYPES.map(({ v, l }) => (
+                  <button key={v} onClick={() => setAccrualForm(f => ({ ...f, accrual_type: v }))}
+                    className={`px-2.5 py-2 rounded-lg text-xs font-medium border transition-all text-center ${
+                      accrualForm.accrual_type === v
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
+                    }`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
             </div>
-            {accrualForm.gross_amount && (
-              <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs space-y-1">
-                <div className="flex justify-between"><span>ПДФО 18%:</span><strong>{(+accrualForm.gross_amount * 0.18).toFixed(2)} грн</strong></div>
-                <div className="flex justify-between"><span>ВЗ 1.5%:</span><strong>{(+accrualForm.gross_amount * 0.015).toFixed(2)} грн</strong></div>
-                <div className="flex justify-between"><span>ЄСВ 22% (роб.):</span><strong>{(+accrualForm.gross_amount * 0.22).toFixed(2)} грн</strong></div>
-                <div className="flex justify-between border-t pt-1 font-semibold text-green-700"><span>До виплати:</span><strong>{(+accrualForm.gross_amount * 0.805).toFixed(2)} грн</strong></div>
+
+            {/* Amount */}
+            <div>
+              <Label className="text-xs font-semibold">Нараховано (брутто), грн <span className="text-red-500">*</span></Label>
+              <Input type="number" step="100" min="0" value={accrualForm.gross_amount}
+                onChange={e => setAccrualForm(f => ({ ...f, gross_amount: e.target.value }))}
+                className="mt-1 text-lg font-bold" placeholder="0.00" autoFocus />
+              {showAccrual?.base_salary > 0 && (
+                <button className="mt-1 text-xs text-blue-600 hover:underline"
+                  onClick={() => setAccrualForm(f => ({ ...f, gross_amount: String(showAccrual.base_salary) }))}>
+                  Підставити оклад: {fmt(showAccrual.base_salary)} грн
+                </button>
+              )}
+            </div>
+
+            {/* Tax breakdown */}
+            {grossAmt > 0 && (
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-4 space-y-2">
+                <div className="text-xs font-bold text-gray-700 mb-1">Розрахунок утримань</div>
+                {[
+                  { label:"ПДФО 18%",       val: grossAmt * 0.18,  cls:"text-red-600" },
+                  { label:"ВЗ 1.5%",         val: grossAmt * 0.015, cls:"text-orange-600" },
+                  { label:"ЄСВ 22% (роб.)",  val: grossAmt * 0.22,  cls:"text-purple-600" },
+                ].map(({ label, val, cls }) => (
+                  <div key={label} className="flex items-center justify-between text-xs">
+                    <span className="text-gray-600">{label}</span>
+                    <span className={`font-semibold ${cls}`}>− {val.toFixed(2)} грн</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-2 border-t border-blue-200">
+                  <span className="text-sm font-bold text-gray-800">До виплати (нетто)</span>
+                  <span className="text-base font-bold text-green-700">{(grossAmt * 0.805).toFixed(2)} грн</span>
+                </div>
               </div>
             )}
-            <div><Label className="text-xs">Примітка</Label><Input value={accrualForm.notes} onChange={e=>setAccrualForm(f=>({...f,notes:e.target.value}))} className="mt-1" /></div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" onClick={()=>setShowAccrual(null)}>Скасувати</Button>
-              <Button onClick={handleAddAccrual} disabled={accrualLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
-                {accrualLoading?<Loader2 className="w-4 h-4 animate-spin mr-1"/>:<Calculator className="w-4 h-4 mr-1"/>} Нарахувати
+
+            <div>
+              <Label className="text-xs font-semibold">Примітка</Label>
+              <Input value={accrualForm.notes}
+                onChange={e => setAccrualForm(f => ({ ...f, notes: e.target.value }))}
+                className="mt-1" placeholder="Необов'язково" />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1 border-t">
+              <Button variant="outline" onClick={() => setShowAccrual(null)}>Скасувати</Button>
+              <Button onClick={handleAddAccrual} disabled={accrualLoading || grossAmt <= 0}
+                className="bg-blue-600 hover:bg-blue-700 gap-1.5">
+                {accrualLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
+                Зберегти нарахування
               </Button>
             </div>
           </div>
