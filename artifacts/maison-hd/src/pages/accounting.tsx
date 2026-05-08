@@ -32,6 +32,8 @@ import {
   LayoutDashboard, ListChecks, Calendar, ChevronDown, Zap, Star,
   Target, Clipboard, ArrowRight, Info, SlidersHorizontal, Bell,
   GanttChart, ArrowUpRight, SquareCheck, Square, Layers,
+  PlugZap, Timer, Play, Pause, FileSpreadsheet, Webhook, Globe,
+  ChevronUp, Eye, EyeOff, Link, Copy, Check,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
@@ -4049,65 +4051,466 @@ function AccReportsTab() {
 }
 
 // ─── ACC: SYNC TAB ────────────────────────────────────────────────────────────
+// ─── POS / EXTERNAL INTEGRATION SOURCES ───────────────────────────────────────
 const SYNC_SOURCES = [
   {
     id: "poster",
     name: "Poster POS",
     icon: "🖨️",
-    desc: "Щоденна виручка з ресторану/кафе. Дт 361→703 (дохід), Дт 703→6411 (ПДВ), Дт 311/30→361 (оплата).",
+    category: "pos",
+    categoryLabel: "POS-система",
     color: "orange",
     accent: "bg-orange-50 border-orange-200",
     badge: "bg-orange-100 text-orange-700",
     docsLabel: "Документів",
     endpoint: "poster",
+    desc: "Щоденна виручка ресторану/кафе. Авто-проводки: Дт 361→703 (дохід), Дт 703→6411 (ПДВ).",
+    authType: "api_key",
+    fields: [
+      { key: "poster_api_key", label: "API-ключ Poster", placeholder: "Отримайте в joinposter.com → Налаштування → API", secret: true },
+      { key: "poster_account", label: "Account ID (домен)", placeholder: "mykafe (з joinposter.com/mykafe)" },
+    ],
+    webhookSupport: true,
+    docsUrl: "https://joinposter.com/en/api",
+    scheduleDefault: "hourly",
+    accountMapping: [
+      { category: "Готівка",      debit: "301", credit: "703" },
+      { category: "Картка",       debit: "311", credit: "703" },
+      { category: "Інкасація",    debit: "311", credit: "301" },
+      { category: "ПДВ 20%",      debit: "703", credit: "6411" },
+    ],
+  },
+  {
+    id: "iiko",
+    name: "iiko / Syrve",
+    icon: "🍽️",
+    category: "pos",
+    categoryLabel: "POS-система",
+    color: "red",
+    accent: "bg-red-50 border-red-200",
+    badge: "bg-red-100 text-red-700",
+    docsLabel: "Закриттів зміни",
+    endpoint: "iiko",
+    desc: "Виручка зі зміни iiko/Syrve Cloud. Авто-проводки з категорій оплат.",
+    authType: "login",
+    fields: [
+      { key: "iiko_server_url", label: "URL сервера iiko/Syrve", placeholder: "https://api.syrve.com або http://192.168.1.100:9900" },
+      { key: "iiko_api_login",  label: "API login", placeholder: "apiuser", secret: false },
+      { key: "iiko_api_key",    label: "API key / secret", placeholder: "••••••••", secret: true },
+      { key: "iiko_org_id",     label: "Organization ID (GUID)", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+    ],
+    webhookSupport: false,
+    docsUrl: "https://api.syrve.com/help",
+    scheduleDefault: "daily",
+    accountMapping: [
+      { category: "Готівка",      debit: "301", credit: "703" },
+      { category: "Безготівка",   debit: "311", credit: "703" },
+      { category: "ПДВ 20%",      debit: "703", credit: "6411" },
+      { category: "Знижки",       debit: "704", credit: "703" },
+    ],
   },
   {
     id: "checkbox",
     name: "Checkbox ПРРО",
     icon: "🧾",
-    desc: "Z-звіти з програмного РРО. Дт 30→702 (готівка), Дт 311→702 (безготівка), Дт 702→6411 (ПДВ).",
+    category: "prro",
+    categoryLabel: "ПРРО",
     color: "green",
     accent: "bg-green-50 border-green-200",
     badge: "bg-green-100 text-green-700",
     docsLabel: "Z-звітів",
     endpoint: "checkbox",
+    desc: "Z-звіти ПРРО. Дт 30→702 (готівка), Дт 311→702 (безготівка), Дт 702→6411 (ПДВ).",
+    authType: "login",
+    fields: [
+      { key: "checkbox_login",    label: "Логін касира", placeholder: "cashier@domain.com" },
+      { key: "checkbox_password", label: "Пароль", placeholder: "••••••••", secret: true },
+      { key: "checkbox_license",  label: "Ліцензійний ключ ПРРО", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+    ],
+    webhookSupport: true,
+    docsUrl: "https://docs.checkbox.ua",
+    scheduleDefault: "daily",
+    accountMapping: [
+      { category: "Готівка",      debit: "301", credit: "702" },
+      { category: "Картка",       debit: "311", credit: "702" },
+      { category: "ПДВ 20%",      debit: "702", credit: "6411" },
+    ],
   },
   {
     id: "liqpay",
     name: "LiqPay",
     icon: "💳",
-    desc: "Онлайн-платежі. Банківська виписка + Дт 311→361 (зарахування від клієнта).",
+    category: "payment",
+    categoryLabel: "Платіжний шлюз",
     color: "blue",
     accent: "bg-blue-50 border-blue-200",
     badge: "bg-blue-100 text-blue-700",
-    docsLabel: "Платежів",
+    docsLabel: "Транзакцій",
     endpoint: "liqpay",
+    desc: "Онлайн-платежі через LiqPay. Дт 311→361 (зарахування), авто-виписка.",
+    authType: "api_key",
+    fields: [
+      { key: "liqpay_public_key",  label: "Public Key", placeholder: "sandbox_pub_xxxxxxxxxxxx" },
+      { key: "liqpay_private_key", label: "Private Key", placeholder: "sandbox_priv_xxxxxxxxxxxx", secret: true },
+    ],
+    webhookSupport: true,
+    docsUrl: "https://www.liqpay.ua/documentation",
+    scheduleDefault: "hourly",
+    accountMapping: [
+      { category: "Зарахування",  debit: "311", credit: "361" },
+      { category: "Комісія",      debit: "92",  credit: "311" },
+    ],
+  },
+  {
+    id: "wayforpay",
+    name: "WayForPay",
+    icon: "💰",
+    category: "payment",
+    categoryLabel: "Платіжний шлюз",
+    color: "indigo",
+    accent: "bg-indigo-50 border-indigo-200",
+    badge: "bg-indigo-100 text-indigo-700",
+    docsLabel: "Транзакцій",
+    endpoint: "wayforpay",
+    desc: "Онлайн-оплати WayForPay. Дт 311→361 (зарахування), Дт 92→311 (комісія).",
+    authType: "api_key",
+    fields: [
+      { key: "wfp_merchant_account", label: "Merchant Account", placeholder: "test_merch_n1" },
+      { key: "wfp_secret_key",       label: "Secret Key", placeholder: "flk3409refn54t54t*", secret: true },
+    ],
+    webhookSupport: true,
+    docsUrl: "https://wiki.wayforpay.com",
+    scheduleDefault: "hourly",
+    accountMapping: [
+      { category: "Зарахування",  debit: "311", credit: "361" },
+      { category: "Комісія",      debit: "92",  credit: "311" },
+    ],
   },
   {
     id: "servio",
     name: "Servio PMS",
     icon: "🏨",
-    desc: "Виїзди гостей з PMS. Дт 361→703 (виручка проживання), Дт 703→6411 (ПДВ 20%).",
+    category: "pms",
+    categoryLabel: "PMS-система",
     color: "purple",
     accent: "bg-purple-50 border-purple-200",
     badge: "bg-purple-100 text-purple-700",
     docsLabel: "Виїздів",
     endpoint: "servio",
+    desc: "Виїзди гостей з PMS Servio. Дт 361→703 (виручка проживання), Дт 703→6411 (ПДВ 20%).",
+    authType: "api_key",
+    fields: [
+      { key: "servio_base_url", label: "URL Servio сервера", placeholder: "http://192.168.1.100:8080" },
+      { key: "servio_api_key",  label: "API ключ", placeholder: "••••••••••••••••••••••••", secret: true },
+    ],
+    webhookSupport: false,
+    docsUrl: "https://servio.ua",
+    scheduleDefault: "daily",
+    accountMapping: [
+      { category: "Проживання",   debit: "361", credit: "703" },
+      { category: "Доп. послуги", debit: "361", credit: "703" },
+      { category: "ПДВ 20%",      debit: "703", credit: "6411" },
+    ],
+  },
+  {
+    id: "bas_xml",
+    name: "BAS / 1C XML",
+    icon: "📂",
+    category: "accounting",
+    categoryLabel: "Облікова система",
+    color: "teal",
+    accent: "bg-teal-50 border-teal-200",
+    badge: "bg-teal-100 text-teal-700",
+    docsLabel: "XML-файлів",
+    endpoint: "bas",
+    desc: "Імпорт XML-вивантажень з BAS або 1С Підприємство. Авто-розбір проводок і документів.",
+    authType: "file",
+    fields: [
+      { key: "bas_exchange_path", label: "Папка обміну (UNC-шлях)", placeholder: "\\\\server\\BAS_Exchange\\ або C:\\Exchange\\" },
+      { key: "bas_file_prefix",   label: "Префікс файлів вивантаження", placeholder: "READY_" },
+      { key: "bas_encoding",      label: "Кодування файлів", placeholder: "windows-1251 (за замовчуванням)" },
+    ],
+    webhookSupport: false,
+    docsUrl: "https://bas-soft.eu/",
+    scheduleDefault: "manual",
+    accountMapping: [],
+  },
+  {
+    id: "csv",
+    name: "CSV / Excel імпорт",
+    icon: "📊",
+    category: "manual",
+    categoryLabel: "Ручний імпорт",
+    color: "gray",
+    accent: "bg-gray-50 border-gray-200",
+    badge: "bg-gray-100 text-gray-700",
+    docsLabel: "Рядків імпорту",
+    endpoint: "csv",
+    desc: "Завантаження CSV або Excel-файлів продажів з будь-якої системи. Гнучке маппінгування колонок.",
+    authType: "file_upload",
+    fields: [],
+    webhookSupport: false,
+    docsUrl: "",
+    scheduleDefault: "manual",
+    accountMapping: [
+      { category: "Продаж",       debit: "361", credit: "703" },
+      { category: "ПДВ",          debit: "703", credit: "6411" },
+      { category: "Оплата",       debit: "311", credit: "361" },
+    ],
   },
 ] as const;
+
+type SyncSourceId = typeof SYNC_SOURCES[number]["id"];
+
+const SYNC_STORAGE_KEY = "mhd_acc_sync_settings_v1";
+function loadSyncSettings(): Record<string, any> {
+  try { return JSON.parse(localStorage.getItem(SYNC_STORAGE_KEY) || "{}"); } catch { return {}; }
+}
+function saveSyncSettings(data: Record<string, any>) {
+  localStorage.setItem(SYNC_STORAGE_KEY, JSON.stringify({ ...loadSyncSettings(), ...data }));
+}
+
+const SCHEDULE_OPTIONS = [
+  { value: "manual",  label: "Вручну" },
+  { value: "hourly",  label: "Щогодини" },
+  { value: "every3h", label: "Кожні 3 години" },
+  { value: "every6h", label: "Кожні 6 годин" },
+  { value: "daily",   label: "Щодня" },
+  { value: "daily_8", label: "Щодня о 08:00" },
+  { value: "daily_22",label: "Щодня о 22:00 (нічна)" },
+];
+
+// ─── CONNECTOR SETUP DRAWER ────────────────────────────────────────────────────
+function ConnectorSetupDrawer({ src, onClose }: { src: typeof SYNC_SOURCES[number]; onClose: () => void }) {
+  const settings = loadSyncSettings();
+  const [form, setForm] = useState<Record<string, string>>(settings[src.id] ?? {});
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [schedule, setSchedule] = useState<string>(settings[`${src.id}_schedule`] ?? src.scheduleDefault);
+  const [enabled, setEnabled] = useState<boolean>(settings[`${src.id}_enabled`] ?? false);
+  const [saved, setSaved] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvPreview, setCsvPreview] = useState<string[][]>([]);
+  const { toast } = useToast();
+
+  const fld = (key: string) => form[key] ?? "";
+  const setFld = (key: string, val: string) => setForm(f => ({ ...f, [key]: val }));
+
+  const handleSave = () => {
+    saveSyncSettings({
+      [src.id]: form,
+      [`${src.id}_schedule`]: schedule,
+      [`${src.id}_enabled`]: enabled,
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    toast({ title: `${src.name} налаштовано`, description: enabled ? `Авто-синх: ${SCHEDULE_OPTIONS.find(o=>o.value===schedule)?.label}` : "Авто-синх вимкнено" });
+  };
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target?.result as string;
+      const rows = text.split("\n").slice(0, 6).map(r => r.split(",").slice(0, 6));
+      setCsvPreview(rows);
+    };
+    reader.readAsText(file);
+  };
+
+  const isConfigured = src.authType === "file_upload"
+    ? true
+    : src.fields.every(f => !(f as any).required || fld(f.key));
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <div className="w-[480px] bg-white shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-3">
+          <span className="text-2xl">{src.icon}</span>
+          <div className="flex-1">
+            <div className="font-bold text-gray-900">{src.name}</div>
+            <div className="text-xs text-gray-400">{src.categoryLabel} · {src.desc.slice(0, 60)}…</div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-100 rounded-lg">
+            <XCircle className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+            <div>
+              <div className="text-sm font-semibold text-gray-800">Активувати інтеграцію</div>
+              <div className="text-xs text-gray-500 mt-0.5">Дані автоматично вантажитимуться в бухоблік</div>
+            </div>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+
+          {/* API Credentials */}
+          {src.authType !== "file_upload" && src.fields.length > 0 && (
+            <div className="space-y-3">
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Облікові дані</div>
+              {(src.fields as unknown as any[]).map((f: any) => (
+                <div key={f.key}>
+                  <Label className="text-xs font-semibold text-gray-700">{f.label}</Label>
+                  <div className="relative mt-1">
+                    <Input
+                      type={f.secret && !showSecrets[f.key] ? "password" : "text"}
+                      value={fld(f.key)}
+                      onChange={e => setFld(f.key, e.target.value)}
+                      placeholder={f.placeholder}
+                      className="pr-8"
+                    />
+                    {f.secret && (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        onClick={() => setShowSecrets(s => ({ ...s, [f.key]: !s[f.key] }))}>
+                        {showSecrets[f.key] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {src.docsUrl && (
+                <a href={src.docsUrl} target="_blank" rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline mt-1">
+                  <ExternalLink className="w-3 h-3" /> Документація {src.name}
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* CSV Upload */}
+          {src.authType === "file_upload" && (
+            <div className="space-y-3">
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Завантажити файл</div>
+              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-6 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-all">
+                <FileSpreadsheet className="w-8 h-8 text-gray-400 mb-2" />
+                <span className="text-sm font-medium text-gray-700">Оберіть CSV або Excel файл</span>
+                <span className="text-xs text-gray-400 mt-0.5">.csv, .xlsx, .xls · До 10 МБ</span>
+                <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleCsvUpload} />
+              </label>
+              {csvFile && (
+                <div className="text-xs text-green-700 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" /> {csvFile.name}
+                </div>
+              )}
+              {csvPreview.length > 0 && (
+                <div className="overflow-auto rounded-lg border border-gray-200">
+                  <table className="text-[10px] w-full">
+                    <tbody>
+                      {csvPreview.map((row, i) => (
+                        <tr key={i} className={i === 0 ? "bg-gray-50 font-semibold" : ""}>
+                          {row.map((cell, j) => <td key={j} className="px-2 py-1 border-r border-gray-100 truncate max-w-[80px]">{cell}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Schedule */}
+          <div className="space-y-2">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Розклад авто-вивантаження</div>
+            <Select value={schedule} onValueChange={setSchedule}>
+              <SelectTrigger className="w-full">
+                <Timer className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SCHEDULE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {schedule !== "manual" && (
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 px-3 py-2 rounded-lg">
+                <Info className="w-3.5 h-3.5 shrink-0" />
+                Авто-синхронізація виконується на сервері. Необхідно, щоб сервер Maison HD був доступний.
+              </div>
+            )}
+          </div>
+
+          {/* Account mapping */}
+          {(src as any).accountMapping?.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Маппінг рахунків</div>
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-left px-3 py-1.5 text-gray-500 font-semibold">Категорія</th>
+                      <th className="text-center px-2 py-1.5 text-gray-500 font-semibold">Дт</th>
+                      <th className="text-center px-2 py-1.5 text-gray-500 font-semibold">Кт</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(src as any).accountMapping.map((m: any, i: number) => (
+                      <tr key={i} className="border-t border-gray-100">
+                        <td className="px-3 py-1.5 text-gray-700">{m.category}</td>
+                        <td className="px-2 py-1.5 text-center font-mono text-indigo-700 font-semibold">{m.debit}</td>
+                        <td className="px-2 py-1.5 text-center font-mono text-emerald-700 font-semibold">{m.credit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-[10px] text-gray-400">Маппінг НП(С)БО. Зміни в «Плані рахунків».</div>
+            </div>
+          )}
+
+          {/* Webhook info */}
+          {(src as any).webhookSupport && (
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                <Webhook className="w-3.5 h-3.5" /> Webhook (реал-тайм)
+              </div>
+              <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-1.5">
+                <div className="text-[11px] text-gray-600">Налаштуйте у {src.name} цей URL для миттєвого отримання даних:</div>
+                <div className="flex items-center gap-2 bg-white border border-gray-200 rounded px-2 py-1.5">
+                  <code className="text-[10px] text-indigo-700 flex-1 truncate">
+                    {`${window.location.origin}/api/acc/webhook/${src.id}`}
+                  </code>
+                  <button className="text-gray-400 hover:text-gray-600 shrink-0"
+                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/api/acc/webhook/${src.id}`)}>
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
+          <Button variant="outline" className="flex-1" onClick={onClose}>Скасувати</Button>
+          <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" onClick={handleSave}>
+            {saved ? <><Check className="w-3.5 h-3.5 mr-1" /> Збережено!</> : "Зберегти налаштування"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AccSyncTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const now = new Date();
-  const [dateFrom, setDateFrom] = useState(
-    format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd"),
-  );
+  const [dateFrom, setDateFrom] = useState(format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd"));
   const [dateTo, setDateTo] = useState(format(now, "yyyy-MM-dd"));
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [lastResult, setLastResult] = useState<Record<string, any>>({});
+  const [setupSrc, setSetupSrc] = useState<typeof SYNC_SOURCES[number] | null>(null);
+  const [activeSection, setActiveSection] = useState<"connectors" | "log">("connectors");
+  const [settings, setSettings] = useState(loadSyncSettings());
+  const [, forceUpdate] = useState(0);
 
-  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useQuery({
+  const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ["acc-sync-status"],
     queryFn: () => accFetch("sync/status"),
     staleTime: 15_000,
@@ -4119,8 +4522,8 @@ function AccSyncTab() {
     staleTime: 15_000,
   });
 
-  const fmtNum = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 0 });
   const fmtAmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtN   = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 0 });
 
   const runSync = async (endpoint: string, sourceName: string) => {
     setRunning(r => ({ ...r, [endpoint]: true }));
@@ -4136,187 +4539,282 @@ function AccSyncTab() {
       qc.invalidateQueries({ queryKey: ["acc-bank"] });
       toast({
         title: `${sourceName} — синхронізовано`,
-        description: `Документів: ${result.docsCreated ?? result.bankStatementsCreated ?? 0} · Проводок: ${result.entriesCreated ?? 0} · Сума: ${fmtAmt(result.totalAmount)} грн`,
+        description: `Документів: ${result.docsCreated ?? 0} · Проводок: ${result.entriesCreated ?? 0} · Сума: ${fmtAmt(result.totalAmount)} грн`,
       });
     } catch (e: any) {
-      toast({ title: `Помилка синхронізації ${sourceName}`, description: e.message, variant: "destructive" });
+      toast({ title: `Помилка ${sourceName}`, description: e.message, variant: "destructive" });
     } finally {
       setRunning(r => ({ ...r, [endpoint]: false }));
     }
   };
 
   const syncAll = async () => {
-    for (const src of SYNC_SOURCES) {
+    for (const src of SYNC_SOURCES.filter(s => settings[`${s.id}_enabled`])) {
       await runSync(src.endpoint, src.name);
     }
   };
 
+  const enabledCount = SYNC_SOURCES.filter(s => settings[`${s.id}_enabled`]).length;
+  const anyRunning = Object.values(running).some(Boolean);
+
+  // ── Category groups ──
+  const CATEGORY_ORDER = ["pos", "prro", "payment", "pms", "accounting", "manual"];
+  const CATEGORY_LABELS: Record<string, string> = {
+    pos: "POS-системи", prro: "ПРРО / РРО", payment: "Платіжні шлюзи",
+    pms: "PMS системи", accounting: "Облікові системи", manual: "Ручний імпорт",
+  };
+
+  const sourcesByCategory = CATEGORY_ORDER.reduce((acc, cat) => {
+    const items = (SYNC_SOURCES as unknown as any[]).filter(s => s.category === cat);
+    if (items.length) acc[cat] = items;
+    return acc;
+  }, {} as Record<string, typeof SYNC_SOURCES[number][]>);
+
   return (
-    <div className="space-y-6">
-      {/* Header bar */}
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="space-y-5 max-w-5xl">
+      {/* ── Top bar ── */}
+      <div className="flex flex-wrap items-center gap-3 pb-2 border-b border-gray-200">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">Синхронізація з зовнішніми системами</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Імпорт продажів і платежів → автоматичні проводки в подвійному обліку</p>
+          <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            <PlugZap className="w-4 h-4 text-indigo-600" /> Автоматичне вивантаження продажів
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Підключіть POS, ПРРО, платіжні шлюзи → авто-проводки в бухобліку
+            {enabledCount > 0 && <span className="ml-2 text-green-600 font-medium">· {enabledCount} активних</span>}
+          </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-500">Період:</span>
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-36 h-8 text-xs" />
           <span className="text-xs text-gray-400">—</span>
-          <Input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="w-36 h-8 text-xs" />
-          <Button onClick={syncAll}
-            disabled={Object.values(running).some(Boolean)}
-            className="h-8 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
-            {Object.values(running).some(Boolean)
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <RefreshCw className="w-3.5 h-3.5" />}
-            Синхронізувати все
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-36 h-8 text-xs" />
+          <Button onClick={syncAll} disabled={anyRunning || enabledCount === 0}
+            className="h-8 gap-1.5 bg-indigo-600 hover:bg-indigo-700">
+            {anyRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Синхронізувати активні
           </Button>
         </div>
       </div>
 
-      {/* Source cards */}
-      <div className="grid grid-cols-2 gap-4">
-        {SYNC_SOURCES.map(src => {
-          const st: any = status?.[src.id] || {};
-          const res = lastResult[src.endpoint];
-          const isRunning = running[src.endpoint];
-          return (
-            <Card key={src.id} className={`border ${src.accent} transition-all ${isRunning ? "opacity-80" : ""}`}>
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="text-2xl mt-0.5">{src.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-sm text-gray-900">{src.name}</span>
-                      {statusLoading ? (
-                        <Loader2 className="w-3 h-3 animate-spin text-gray-400" />
-                      ) : st.connected ? (
-                        <Badge className={`text-[10px] px-1.5 py-0 ${src.badge}`}>Підключено</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-gray-400">Demo-режим</Badge>
+      {/* ── Section tabs ── */}
+      <div className="flex gap-1 border-b border-gray-200">
+        {(["connectors", "log"] as const).map(s => (
+          <button key={s} onClick={() => setActiveSection(s)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeSection === s ? "border-indigo-600 text-indigo-700" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}>
+            {s === "connectors" ? "Конектори" : "Журнал синхронізацій"}
+          </button>
+        ))}
+      </div>
+
+      {/* ── CONNECTORS ── */}
+      {activeSection === "connectors" && (
+        <div className="space-y-6">
+          {CATEGORY_ORDER.filter(cat => sourcesByCategory[cat]).map(cat => (
+            <div key={cat}>
+              <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                {cat === "pos" && <>{/* restaurant */}</>}
+                {CATEGORY_LABELS[cat]}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {sourcesByCategory[cat].map(src => {
+                  const st: any = status?.[src.id] || {};
+                  const res = lastResult[src.endpoint];
+                  const isRunning = running[src.endpoint];
+                  const isEnabled = !!settings[`${src.id}_enabled`];
+                  const schedule  = settings[`${src.id}_schedule`] ?? src.scheduleDefault;
+                  const scheduleLabel = SCHEDULE_OPTIONS.find(o => o.value === schedule)?.label ?? schedule;
+                  const isConfigured = (src as any).authType === "file_upload" || (src as any).authType === "file"
+                    ? true
+                    : (src as any).fields?.every((f: any) => !f.required || settings[src.id]?.[f.key]);
+
+                  return (
+                    <div key={src.id}
+                      className={`rounded-xl border p-4 transition-all ${isRunning ? "opacity-80" : ""} ${
+                        isEnabled ? `${src.accent} shadow-sm` : "bg-white border-gray-200"
+                      }`}>
+                      {/* Header */}
+                      <div className="flex items-start gap-2 mb-2">
+                        <span className="text-xl shrink-0">{src.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-sm text-gray-900">{src.name}</span>
+                            {isEnabled ? (
+                              <Badge className={`text-[10px] px-1.5 py-0 ${src.badge}`}>
+                                <Play className="w-2.5 h-2.5 mr-0.5" /> Активно
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-gray-400">Вимкнено</Badge>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-gray-400 mt-0.5">{src.categoryLabel}</div>
+                        </div>
+                      </div>
+
+                      {/* Desc */}
+                      <p className="text-[11px] text-gray-500 leading-relaxed mb-3">{src.desc}</p>
+
+                      {/* Stats */}
+                      {(st.totalDocs > 0 || st.totalAmount > 0) && (
+                        <div className="grid grid-cols-3 gap-1.5 mb-3">
+                          {[
+                            { label: src.docsLabel, val: fmtN(st.totalDocs) },
+                            { label: "Проводок",    val: fmtN(st.totalEntries) },
+                            { label: "Сума, грн",   val: fmtAmt(st.totalAmount) },
+                          ].map(({ label, val }) => (
+                            <div key={label} className="bg-white/80 rounded-lg px-2 py-1.5 text-center border border-white/60">
+                              <div className="text-xs font-bold text-gray-800 truncate">{val}</div>
+                              <div className="text-[9px] text-gray-400">{label}</div>
+                            </div>
+                          ))}
+                        </div>
                       )}
+
+                      {/* Schedule badge */}
+                      {isEnabled && (
+                        <div className="flex items-center gap-1 text-[10px] text-gray-500 mb-2">
+                          <Timer className="w-3 h-3" />
+                          <span>{scheduleLabel}</span>
+                          {st.lastSync && <><span className="mx-1">·</span><span>Остання: {fmtDate(st.lastSync)}</span></>}
+                        </div>
+                      )}
+
+                      {/* Last sync result */}
+                      {res && (
+                        <div className="text-[10px] bg-green-50 border border-green-100 rounded px-2 py-1 mb-2 text-green-700">
+                          ✓ {res.docsCreated ?? 0} dok · {res.entriesCreated ?? 0} prov · {fmtAmt(res.totalAmount)} грн
+                          {res.source === "demo" && <span className="text-gray-400 ml-1">(demo)</span>}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="outline"
+                          className="h-7 text-xs flex-1 gap-1"
+                          onClick={() => { setSetupSrc(src); }}>
+                          <Settings className="w-3 h-3" /> Налаштувати
+                        </Button>
+                        {isEnabled && (
+                          <Button size="sm"
+                            className="h-7 text-xs flex-1 gap-1 bg-indigo-600 hover:bg-indigo-700"
+                            disabled={isRunning}
+                            onClick={() => runSync(src.endpoint, src.name)}>
+                            {isRunning
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <RefreshCw className="w-3 h-3" />}
+                            {isRunning ? "Синх..." : "Синхронізувати"}
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-[11px] text-gray-500 leading-relaxed mb-3">{src.desc}</p>
-
-                    {/* Stats row */}
-                    <div className="grid grid-cols-3 gap-2 mb-3">
-                      <div className="bg-white/70 rounded p-2 text-center border border-gray-100">
-                        <div className="text-xs font-bold text-gray-800">{fmtNum(st.totalDocs)}</div>
-                        <div className="text-[10px] text-gray-500">{src.docsLabel}</div>
-                      </div>
-                      <div className="bg-white/70 rounded p-2 text-center border border-gray-100">
-                        <div className="text-xs font-bold text-gray-800">{fmtNum(st.totalEntries)}</div>
-                        <div className="text-[10px] text-gray-500">Проводок</div>
-                      </div>
-                      <div className="bg-white/70 rounded p-2 text-center border border-gray-100">
-                        <div className="text-xs font-bold text-gray-800">{fmtAmt(st.totalAmount)}</div>
-                        <div className="text-[10px] text-gray-500">Сума, грн</div>
-                      </div>
-                    </div>
-
-                    {/* Last sync info */}
-                    {st.lastSync && (
-                      <div className="text-[10px] text-gray-400 mb-2">
-                        Остання синх.: {fmtDate(st.lastSync)}
-                      </div>
-                    )}
-
-                    {/* Last result */}
-                    {res && (
-                      <div className="text-[10px] bg-white/80 border border-gray-100 rounded px-2 py-1 mb-2 text-green-700">
-                        ✓ {res.docsCreated ?? res.bankStatementsCreated ?? 0} док · {res.entriesCreated ?? 0} провод · {fmtAmt(res.totalAmount)} грн
-                        {res.source === "demo" && <span className="text-gray-400 ml-1">(demo)</span>}
-                      </div>
-                    )}
-
-                    <Button
-                      size="sm" variant="outline"
-                      className="h-7 text-xs w-full gap-1.5"
-                      disabled={isRunning}
-                      onClick={() => runSync(src.endpoint, src.name)}>
-                      {isRunning
-                        ? <><Loader2 className="w-3 h-3 animate-spin" /> Синхронізація...</>
-                        : <><RefreshCw className="w-3 h-3" /> Синхронізувати {src.name}</>}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Sync log */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <FileClock className="w-4 h-4" /> Журнал синхронізацій
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {logLoading ? (
-            <div className="py-8 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-gray-400" /></div>
-          ) : (Array.isArray(logData) && logData.length === 0) ? (
-            <div className="py-8 text-center text-gray-400 text-sm">
-              <RefreshCw className="w-7 h-7 mx-auto mb-2 opacity-30" />
-              Синхронізацій ще не було. Натисніть «Синхронізувати все» щоб почати.
+                  );
+                })}
+              </div>
             </div>
-          ) : (
-            <Table>
-              <TableHeader className="bg-gray-50">
-                <TableRow>
-                  <TableHead className="w-36">Дата/час</TableHead>
-                  <TableHead className="w-28">Джерело</TableHead>
-                  <TableHead>Діапазон</TableHead>
-                  <TableHead className="text-right w-24">Докум.</TableHead>
-                  <TableHead className="text-right w-24">Провод.</TableHead>
-                  <TableHead className="text-right w-36">Сума, грн</TableHead>
-                  <TableHead className="text-center w-20">Статус</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(Array.isArray(logData) ? logData : []).map((row: any) => (
-                  <TableRow key={row.id} className="hover:bg-gray-50">
-                    <TableCell className="text-xs">{fmtDate(row.sync_date)}</TableCell>
-                    <TableCell>
-                      <span className="text-xs font-medium capitalize">
-                        {row.source === "poster"   ? "🖨️ Poster"   :
-                         row.source === "checkbox" ? "🧾 Checkbox" :
-                         row.source === "liqpay"   ? "💳 LiqPay"   :
-                         row.source === "servio"   ? "🏨 Servio"   : row.source}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-xs text-gray-500">
-                      {fmtDate(row.date_from)} — {fmtDate(row.date_to)}
-                    </TableCell>
-                    <TableCell className="text-right text-xs">{row.docs_created}</TableCell>
-                    <TableCell className="text-right text-xs">{row.entries_created}</TableCell>
-                    <TableCell className="text-right text-xs font-medium">{fmtAmt(row.total_amount)}</TableCell>
-                    <TableCell className="text-center">
-                      {row.status === "ok"
-                        ? <Badge className="text-[10px] bg-green-100 text-green-700 border-0">OK</Badge>
-                        : <Badge variant="destructive" className="text-[10px]">Помилка</Badge>}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+          ))}
 
-      {/* Info box */}
-      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-xs text-blue-800 space-y-1.5">
-        <div className="font-semibold text-sm mb-2 flex items-center gap-2">
-          <Server className="w-4 h-4" /> Як налаштувати реальні підключення
+          {/* How-to info box */}
+          <div className="rounded-xl border border-indigo-100 bg-gradient-to-r from-indigo-50 to-blue-50 p-5">
+            <div className="font-semibold text-sm text-indigo-900 mb-3 flex items-center gap-2">
+              <Globe className="w-4 h-4" /> Як працює автоматичне вивантаження
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4 text-xs text-indigo-800">
+              <div className="flex gap-2.5">
+                <div className="w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold shrink-0 text-[10px]">1</div>
+                <div>
+                  <div className="font-semibold mb-0.5">Налаштуйте конектор</div>
+                  Натисніть «Налаштувати», введіть API-ключ або логін, оберіть розклад.
+                </div>
+              </div>
+              <div className="flex gap-2.5">
+                <div className="w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold shrink-0 text-[10px]">2</div>
+                <div>
+                  <div className="font-semibold mb-0.5">Авто-синхронізація</div>
+                  Система за розкладом тягне продажі з POS/ПРРО і формує бухгалтерські проводки Дт/Кт.
+                </div>
+              </div>
+              <div className="flex gap-2.5">
+                <div className="w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold shrink-0 text-[10px]">3</div>
+                <div>
+                  <div className="font-semibold mb-0.5">Перевірте в обліку</div>
+                  Проводки з'являться в «Журналі проводок», ОСВ, ПДВ-декларації та банківській виписці.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div><span className="font-medium">Poster POS:</span> введіть API-ключ у вкладці Інтеграції → Poster. Ключ генерується в Особистому кабінеті joinposter.com.</div>
-        <div><span className="font-medium">Checkbox ПРРО:</span> вкажіть логін касира, пароль і ліцензійний ключ ПРРО у вкладці Інтеграції → Checkbox.</div>
-        <div><span className="font-medium">LiqPay:</span> додайте LIQPAY_PUBLIC_KEY та LIQPAY_PRIVATE_KEY у налаштуваннях середовища. Підтримується API звіту по транзакціях.</div>
-        <div><span className="font-medium">Servio PMS:</span> вкажіть Base URL сервера Servio та API-ключ у вкладці Інтеграції → Servio.</div>
-        <div className="text-blue-600 pt-1">Без реальних ключів система працює в <strong>demo-режимі</strong> — генерує реалістичні дані для тестування проводок.</div>
-      </div>
+      )}
+
+      {/* ── LOG ── */}
+      {activeSection === "log" && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <FileClock className="w-4 h-4" /> Журнал синхронізацій
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {logLoading ? (
+              <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></div>
+            ) : (Array.isArray(logData) && logData.length === 0) ? (
+              <div className="py-12 text-center text-gray-400 text-sm">
+                <RefreshCw className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                <div>Синхронізацій ще не було.</div>
+                <div className="text-xs mt-1">Налаштуйте конектор і натисніть «Синхронізувати».</div>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="w-36">Дата/час</TableHead>
+                    <TableHead className="w-32">Джерело</TableHead>
+                    <TableHead>Діапазон</TableHead>
+                    <TableHead className="text-right w-20">Докум.</TableHead>
+                    <TableHead className="text-right w-20">Провод.</TableHead>
+                    <TableHead className="text-right w-36">Сума, грн</TableHead>
+                    <TableHead className="text-center w-20">Статус</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(Array.isArray(logData) ? logData : []).map((row: any) => {
+                    const srcInfo = SYNC_SOURCES.find(s => s.endpoint === row.source || s.id === row.source);
+                    return (
+                      <TableRow key={row.id} className="hover:bg-gray-50">
+                        <TableCell className="text-xs">{fmtDate(row.sync_date)}</TableCell>
+                        <TableCell>
+                          <span className="text-xs font-medium">{srcInfo?.icon ?? "🔄"} {srcInfo?.name ?? row.source}</span>
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-500">{fmtDate(row.date_from)} — {fmtDate(row.date_to)}</TableCell>
+                        <TableCell className="text-right text-xs">{row.docs_created}</TableCell>
+                        <TableCell className="text-right text-xs">{row.entries_created}</TableCell>
+                        <TableCell className="text-right text-xs font-medium">{fmtAmt(row.total_amount)}</TableCell>
+                        <TableCell className="text-center">
+                          {row.status === "ok"
+                            ? <Badge className="text-[10px] bg-green-100 text-green-700 border-0">OK</Badge>
+                            : <Badge variant="destructive" className="text-[10px]">Помилка</Badge>}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── DRAWER ── */}
+      {setupSrc && (
+        <ConnectorSetupDrawer
+          src={setupSrc}
+          onClose={() => {
+            setSetupSrc(null);
+            setSettings(loadSyncSettings());
+            forceUpdate(n => n + 1);
+          }}
+        />
+      )}
     </div>
   );
 }
