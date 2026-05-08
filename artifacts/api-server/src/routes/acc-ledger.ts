@@ -1321,6 +1321,151 @@ router.get("/cash/book", async (req: any, res) => {
 // IMPORT — імпорт з 1С
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BAS / 1C XML IMPORT — імпорт з BAS або 1С Підприємство
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Ensure import log table
+async function ensureBasImportTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_bas_imports (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL,
+      imported_at     TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      source_format   TEXT DEFAULT 'bas_xml',
+      file_name       TEXT,
+      date_from       DATE,
+      date_to         DATE,
+      entries_total   INTEGER DEFAULT 0,
+      entries_ok      INTEGER DEFAULT 0,
+      entries_failed  INTEGER DEFAULT 0,
+      contractors_ok  INTEGER DEFAULT 0,
+      notes           TEXT,
+      imported_by     INTEGER
+    )
+  `);
+}
+
+// Preview: parse incoming entries array and resolve account IDs
+router.post("/import/bas-xml/preview", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    await seedChart(orgId);
+    const { entries = [] } = req.body;
+    if (!Array.isArray(entries) || entries.length === 0)
+      return res.status(400).json({ error: "entries required" });
+
+    // Resolve account codes to IDs and validate
+    const results = await Promise.all(entries.map(async (e: any, idx: number) => {
+      const dtId = await getAccId(orgId, String(e.debit_code  ?? ""));
+      const ktId = await getAccId(orgId, String(e.credit_code ?? ""));
+      const amt  = parseFloat(e.amount ?? 0);
+      return {
+        idx,
+        entry_date:   e.entry_date,
+        debit_code:   e.debit_code,
+        credit_code:  e.credit_code,
+        debit_name:   e.debit_name  ?? null,
+        credit_name:  e.credit_name ?? null,
+        amount:        amt,
+        description:  e.description ?? null,
+        doc_number:   e.doc_number  ?? null,
+        debit_id:     dtId,
+        credit_id:    ktId,
+        valid: !!dtId && !!ktId && amt > 0 && !!e.entry_date,
+        error: !dtId ? `Дт рахунок ${e.debit_code} не знайдено` :
+               !ktId ? `Кт рахунок ${e.credit_code} не знайдено` :
+               amt <= 0 ? "Сума має бути > 0" :
+               !e.entry_date ? "Дата відсутня" : null,
+      };
+    }));
+    const valid   = results.filter(r => r.valid).length;
+    const invalid = results.filter(r => !r.valid).length;
+    res.json({ results, valid, invalid, total: results.length });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// Confirm import: save valid entries to acc_entries
+router.post("/import/bas-xml/confirm", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const userId = req.user.userId;
+    await ensureBasImportTable();
+    await seedChart(orgId);
+
+    const { entries = [], fileName, sourceFormat = "bas_xml", dateFrom, dateTo, contractors = [] } = req.body;
+    if (!Array.isArray(entries) || entries.length === 0)
+      return res.status(400).json({ error: "entries required" });
+
+    let ok = 0, failed = 0, contractorsOk = 0;
+    const errors: string[] = [];
+
+    // Import contractors first
+    for (const c of contractors) {
+      try {
+        await pool.query(
+          `INSERT INTO acc_contractors (organization_id,name,edrpou,ipn)
+           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+          [orgId, c.name, c.edrpou ?? null, c.ipn ?? null],
+        );
+        contractorsOk++;
+      } catch (_) {}
+    }
+
+    // Import entries
+    for (const e of entries) {
+      try {
+        if (!e.debit_id || !e.credit_id || !e.amount || !e.entry_date) {
+          failed++;
+          errors.push(`Рядок ${e.idx ?? "?"}: відсутні поля`);
+          continue;
+        }
+        const periodId = await ensurePeriod(orgId, new Date(e.entry_date));
+        await pool.query(
+          `INSERT INTO acc_entries
+             (organization_id,entry_date,period_id,debit_account_id,credit_account_id,
+              amount,currency,description,is_manual,created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,'UAH',$7,true,$8)`,
+          [orgId, e.entry_date, periodId, e.debit_id, e.credit_id,
+           parseFloat(e.amount), e.description ?? null, userId],
+        );
+        ok++;
+      } catch (err: any) {
+        failed++;
+        errors.push(`Рядок ${e.idx ?? "?"}: ${err.message}`);
+      }
+    }
+
+    // Log the import
+    const allDates = entries.map((e: any) => e.entry_date).filter(Boolean).sort();
+    await pool.query(
+      `INSERT INTO acc_bas_imports
+         (organization_id,source_format,file_name,date_from,date_to,
+          entries_total,entries_ok,entries_failed,contractors_ok,imported_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [orgId, sourceFormat, fileName ?? null,
+       dateFrom ?? allDates[0] ?? null,
+       dateTo   ?? allDates[allDates.length-1] ?? null,
+       entries.length, ok, failed, contractorsOk, userId],
+    );
+
+    res.json({ ok, failed, contractorsOk, total: entries.length, errors: errors.slice(0, 10) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// Import history
+router.get("/import/bas-xml/history", async (req: any, res) => {
+  try {
+    await ensureBasImportTable();
+    const orgId = req.user.organizationId;
+    const { rows } = await pool.query(
+      `SELECT * FROM acc_bas_imports WHERE organization_id=$1 ORDER BY imported_at DESC LIMIT 50`,
+      [orgId],
+    );
+    res.json({ imports: rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 router.post("/import/contractors", async (req: any, res) => {
   const orgId = req.user.organizationId;
   const { contractors } = req.body;

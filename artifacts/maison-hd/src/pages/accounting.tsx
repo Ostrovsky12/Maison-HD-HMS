@@ -220,7 +220,7 @@ const TAB_TITLES: Partial<Record<Tab, { title: string; desc: string }>> = {
   "invoices":       { title: "Рахунки",                 desc: "Рахунки-фактури та оплата" },
   "documents":      { title: "Договори та акти",        desc: "Первинна документація" },
   "tax-invoices":   { title: "Податкові накладні",      desc: "ПН / РК для ДПС" },
-  "bas":            { title: "BAS / 1C",                desc: "Вивантаження та завантаження XML" },
+  "bas":            { title: "BAS / 1C",                desc: "Імпорт та експорт XML — міграція з 1С/BAS" },
   "signing":        { title: "Підписання КЕП",          desc: "Електронний підпис документів" },
   "archive":        { title: "Архів",                   desc: "Заархівовані документи" },
   "acc-journal":    { title: "Журнал проводок",         desc: "Подвійний запис · Дт / Кт" },
@@ -2718,146 +2718,665 @@ function TaxInvoicesTab() {
   );
 }
 
-// ─── BAS / 1C EXPORT TAB ─────────────────────────────────────────────────────
+// ─── BAS / 1C IMPORT + EXPORT TAB ────────────────────────────────────────────
+// ─── BAS XML CLIENT-SIDE PARSER ───────────────────────────────────────────────
+function parseBasXml(xmlText: string, fileName: string): { entries: any[]; contractors: any[]; format: string; warnings: string[] } {
+  const entries: any[] = [];
+  const contractors: any[] = [];
+  const warnings: string[] = [];
+  let format = "unknown";
+
+  try {
+    // Fix encoding if needed (windows-1251 often present in BAS exports)
+    const text = xmlText;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "application/xml");
+    const root = doc.documentElement;
+
+    if (!root || root.nodeName === "parsererror") {
+      warnings.push("Помилка розбору XML. Перевірте кодування файлу (має бути UTF-8 або windows-1251).");
+      return { entries, contractors, format, warnings };
+    }
+
+    // ── Format 1: BAS HKBOS (Господарські операції) ──────────────────────────
+    const hkbosRows = doc.querySelectorAll("HKBOSROW, ENTRROW, ENTROW");
+    if (hkbosRows.length > 0) {
+      format = "bas_hkbos";
+      hkbosRows.forEach((row, i) => {
+        const getText = (tag: string) => row.querySelector(tag)?.textContent?.trim() ?? "";
+        const rawDate = getText("RDATE") || getText("DATE") || getText("OPDATE");
+        const dateStr = rawDate.length === 8
+          ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`
+          : rawDate.includes(".") ? rawDate.split(".").reverse().join("-") : rawDate;
+        entries.push({
+          idx: i,
+          entry_date:  dateStr,
+          debit_code:  getText("DACCOUNT") || getText("DT") || getText("DEBIT"),
+          credit_code: getText("CACCOUNT") || getText("KT") || getText("CREDIT"),
+          amount:      parseFloat(getText("SUM") || getText("AMOUNT") || "0"),
+          description: getText("CONTENT") || getText("DESCRIPTION") || getText("NOTE"),
+          doc_number:  getText("DOCNO")  || getText("DOCNUM") || getText("NUM"),
+        });
+      });
+    }
+
+    // ── Format 2: 1C v8 ComTrans (ОперацияДокумент / Проводка) ──────────────
+    else if (doc.querySelector("Проводка, Операция")) {
+      format = "1c_v8_comtrans";
+      const provList = doc.querySelectorAll("Проводка");
+      provList.forEach((p, i) => {
+        const g = (tag: string) => p.querySelector(tag)?.textContent?.trim() ?? "";
+        const raw = g("Дата") || g("ДатаДокумента");
+        const dateStr = raw.includes(".") ? raw.split(".").reverse().join("-") : raw;
+        entries.push({
+          idx: i,
+          entry_date:  dateStr,
+          debit_code:  g("СчетДт") || g("ДебетСчет"),
+          credit_code: g("СчетКт") || g("КредитСчет"),
+          amount:      parseFloat(g("Сумма") || g("СуммаДт") || "0"),
+          description: g("Содержание") || g("Комментарий"),
+          doc_number:  g("НомерДокумента") || g("Номер"),
+        });
+      });
+      // Contractors
+      doc.querySelectorAll("Контрагент").forEach(c => {
+        const name = c.querySelector("Наименование")?.textContent?.trim();
+        const edrpou = c.querySelector("ИНН")?.textContent?.trim();
+        if (name) contractors.push({ name, edrpou });
+      });
+    }
+
+    // ── Format 3: Generic XML — scan for Дт/Кт-like tags ────────────────────
+    else {
+      format = "generic_xml";
+      const allRows = doc.querySelectorAll("row, Row, ROW, entry, Entry, operation, Operation, record, Record");
+      allRows.forEach((row, i) => {
+        const g = (tags: string[]) => {
+          for (const t of tags) {
+            const el = row.querySelector(t);
+            if (el?.textContent?.trim()) return el.textContent.trim();
+          }
+          return "";
+        };
+        const dt = g(["debit","Debit","DEBIT","dt","Dt","DT","debit_account","ДебетСчет","СчетДт"]);
+        const kt = g(["credit","Credit","CREDIT","kt","Kt","KT","credit_account","КредитСчет","СчетКт"]);
+        const sum = g(["amount","Amount","AMOUNT","sum","Sum","SUM","total","Сумма"]);
+        const rawDate = g(["date","Date","DATE","entry_date","Дата"]);
+        if (!dt || !kt || !sum) return;
+        const dateStr = rawDate.includes(".") ? rawDate.split(".").reverse().join("-") : rawDate;
+        entries.push({ idx: i, entry_date: dateStr, debit_code: dt, credit_code: kt,
+          amount: parseFloat(sum), description: g(["description","Description","note","Note","Содержание","Комментарий"]),
+          doc_number: g(["doc_number","DocNumber","num","Номер"]) });
+      });
+      if (entries.length === 0)
+        warnings.push(`Формат "${root.tagName}" не розпізнано автоматично. Спробуйте зберегти файл у форматі "BAS XML (J1201009)" або "Стандартний обмін 1С".`);
+    }
+
+    if (entries.length === 0 && warnings.length === 0)
+      warnings.push("У файлі не знайдено проводок. Перевірте формат вивантаження в 1С/BAS.");
+
+  } catch (e: any) {
+    warnings.push(`Критична помилка: ${e.message}`);
+  }
+
+  return { entries, contractors, format, warnings };
+}
+
+// ─── BAS IMPORT TAB ────────────────────────────────────────────────────────────
 function BasExportTab() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ dateFrom: "", dateTo: "", format: "bas_xml" });
-  const [result, setResult] = useState<any>(null);
+  const { toast } = useToast();
 
-  const { data: historyData, isLoading: histLoading } = useQuery({
-    queryKey: ["bas-history"], queryFn: () => acctFetch("export/bas/history"), staleTime: 30_000,
+  // Wizard state
+  const [wizStep, setWizStep] = useState<"upload" | "preview" | "confirm" | "done">("upload");
+  const [dragOver, setDragOver] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [parsed, setParsed] = useState<{ entries: any[]; contractors: any[]; format: string; warnings: string[] } | null>(null);
+  const [preview, setPreview] = useState<any>(null);   // server-validated preview
+  const [importResult, setImportResult] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<"import" | "export" | "history">("import");
+  const [filterValid, setFilterValid] = useState<"all" | "valid" | "invalid">("all");
+
+  // Export state
+  const [exportForm, setExportForm] = useState({ dateFrom: "", dateTo: "", format: "bas_xml" });
+  const [exportResult, setExportResult] = useState<any>(null);
+
+  // Queries
+  const { data: importHistoryData, isLoading: histLoading } = useQuery({
+    queryKey: ["bas-import-history"],
+    queryFn: () => accFetch("import/bas-xml/history"),
+    staleTime: 30_000,
+    enabled: activeTab === "history",
+  });
+  const { data: exportHistoryData } = useQuery({
+    queryKey: ["bas-export-history"],
+    queryFn: () => acctFetch("export/bas/history"),
+    staleTime: 30_000,
+    enabled: activeTab === "export",
   });
 
   const exportMut = useMutation({
     mutationFn: (body: any) => acctFetch("export/bas", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["bas-history"] }); setResult(d); },
+    onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["bas-export-history"] }); setExportResult(d); },
   });
 
-  const markMut = useMutation({
-    mutationFn: (id: number) => acctFetch(`export/bas/${id}/mark-imported`, { method: "PATCH" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["bas-history"] }),
-  });
+  // Step 1 → 2: parse file client-side → preview on server
+  const handleFile = async (f: File) => {
+    setFile(f);
+    const text = await f.text();
+    const result = parseBasXml(text, f.name);
+    setParsed(result);
+    if (result.entries.length === 0) {
+      toast({ title: "Не знайдено проводок", description: result.warnings[0] ?? "Перевірте формат файлу", variant: "destructive" });
+      return;
+    }
+    // Send to server for validation
+    try {
+      const token = localStorage.getItem("hms_token");
+      const resp = await fetch(`${API_BASE}/api/acc/import/bas-xml/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ entries: result.entries }),
+      });
+      const data = await resp.json();
+      setPreview(data);
+      setWizStep("preview");
+    } catch (e: any) {
+      toast({ title: "Помилка перевірки", description: e.message, variant: "destructive" });
+    }
+  };
 
-  const handleDownload = (xml: string, fileName: string) => {
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false);
+    const f = e.dataTransfer.files[0];
+    if (f && (f.name.endsWith(".xml") || f.name.endsWith(".XML"))) handleFile(f);
+    else toast({ title: "Тільки XML файли", variant: "destructive" });
+  };
+
+  // Step 3 → done: confirm import
+  const handleConfirm = async () => {
+    if (!preview || !parsed || !file) return;
+    const validEntries = preview.results.filter((r: any) => r.valid);
+    try {
+      const token = localStorage.getItem("hms_token");
+      const resp = await fetch(`${API_BASE}/api/acc/import/bas-xml/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          entries: validEntries,
+          contractors: parsed.contractors,
+          fileName: file.name,
+          sourceFormat: parsed.format,
+        }),
+      });
+      const data = await resp.json();
+      setImportResult(data);
+      setWizStep("done");
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      qc.invalidateQueries({ queryKey: ["acc-sync-status"] });
+      qc.invalidateQueries({ queryKey: ["bas-import-history"] });
+      toast({ title: "Імпорт завершено!", description: `${data.ok} проводок додано до журналу` });
+    } catch (e: any) {
+      toast({ title: "Помилка імпорту", description: (e as any).message, variant: "destructive" });
+    }
+  };
+
+  const handleDownloadXml = (xml: string, fileName: string) => {
     const blob = new Blob([xml], { type: "application/xml" });
     const u = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = u; a.download = fileName; a.click(); URL.revokeObjectURL(u);
   };
 
-  const history = historyData?.exports || [];
-  const STATUS_C: Record<string, string> = { generated: "bg-blue-100 text-blue-700", imported: "bg-green-100 text-green-700" };
+  const reset = () => {
+    setWizStep("upload"); setFile(null); setParsed(null);
+    setPreview(null); setImportResult(null); setFilterValid("all");
+  };
+
+  const fmtAmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const WIZARD_STEPS = [
+    { id: "upload",  label: "Завантажити XML" },
+    { id: "preview", label: "Перевірити дані" },
+    { id: "confirm", label: "Підтвердити" },
+    { id: "done",    label: "Готово" },
+  ];
+  const wizIdx = WIZARD_STEPS.findIndex(s => s.id === wizStep);
+
+  const previewRows = preview?.results ?? [];
+  const filteredRows = filterValid === "all" ? previewRows
+    : filterValid === "valid" ? previewRows.filter((r: any) => r.valid)
+    : previewRows.filter((r: any) => !r.valid);
 
   return (
-    <div className="space-y-5">
-      <div className="grid md:grid-cols-2 gap-5">
-        {/* Export form */}
-        <div className="bg-white border rounded-xl p-5 space-y-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Cpu className="h-5 w-5 text-indigo-600" />
-            <h3 className="font-semibold">Експорт до BAS / 1C</h3>
+    <div className="space-y-5 max-w-5xl">
+      {/* ── Tab bar ── */}
+      <div className="flex gap-1 border-b border-gray-200">
+        {[
+          { id: "import",  label: "Імпорт з BAS / 1С", icon: Upload },
+          { id: "export",  label: "Експорт до BAS / 1С", icon: Download },
+          { id: "history", label: "Журнал імпортів", icon: FileClock },
+        ].map(({ id, label, icon: Icon }) => (
+          <button key={id} onClick={() => setActiveTab(id as any)}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === id ? "border-indigo-600 text-indigo-700" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}>
+            <Icon className="w-3.5 h-3.5" /> {label}
+            {id === "import" && <span className="ml-1 text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-semibold">Новий</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══════════════ IMPORT TAB ═══════════════ */}
+      {activeTab === "import" && (
+        <div className="space-y-5">
+          {/* Wizard progress */}
+          <div className="flex items-center gap-0">
+            {WIZARD_STEPS.map((s, i) => (
+              <div key={s.id} className="flex items-center flex-1">
+                <div className={`flex items-center gap-2 ${i < wizIdx ? "cursor-pointer" : ""}`}
+                  onClick={() => i < wizIdx && i === 0 ? reset() : undefined}>
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    i < wizIdx ? "bg-green-500 text-white" :
+                    i === wizIdx ? "bg-indigo-600 text-white ring-4 ring-indigo-100" : "bg-gray-200 text-gray-500"
+                  }`}>
+                    {i < wizIdx ? "✓" : i + 1}
+                  </div>
+                  <span className={`text-xs font-medium ${i === wizIdx ? "text-indigo-700" : i < wizIdx ? "text-green-700" : "text-gray-400"}`}>
+                    {s.label}
+                  </span>
+                </div>
+                {i < WIZARD_STEPS.length - 1 && (
+                  <div className={`flex-1 h-px mx-3 ${i < wizIdx ? "bg-green-300" : "bg-gray-200"}`} />
+                )}
+              </div>
+            ))}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label className="text-xs">Дата від</Label><Input type="date" value={form.dateFrom} onChange={e => setForm(f => ({ ...f, dateFrom: e.target.value }))} /></div>
-            <div><Label className="text-xs">Дата до</Label><Input type="date" value={form.dateTo} onChange={e => setForm(f => ({ ...f, dateTo: e.target.value }))} /></div>
-          </div>
-          <div>
-            <Label className="text-xs">Формат</Label>
-            <Select value={form.format} onValueChange={v => setForm(f => ({ ...f, format: v }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="bas_xml">BAS XML (J1201009)</SelectItem>
-                <SelectItem value="bas_v8">BAS 8.x XML</SelectItem>
-                <SelectItem value="medoc_xml">M.E.Doc XML</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => exportMut.mutate(form)} disabled={exportMut.isPending}>
-            {exportMut.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Генерація...</> : <><Download className="h-4 w-4 mr-1" />Генерувати XML</>}
-          </Button>
-          {result && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
-              <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-green-600" /><p className="text-sm font-medium text-green-800">Експорт: {result.docCount} документів</p></div>
-              <Button size="sm" className="w-full" variant="outline" onClick={() => handleDownload(result.xml, result.fileName)}>
-                <Download className="h-4 w-4 mr-1" />Завантажити {result.fileName}
-              </Button>
-              <div className="text-xs text-green-700 bg-green-100 rounded p-2">
-                <p className="font-semibold">Імпорт в BAS:</p>
-                <p>{result.instructions?.bas}</p>
+
+          {/* ── STEP 1: Upload ── */}
+          {wizStep === "upload" && (
+            <div className="space-y-4">
+              {/* Instruction panel */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-100 rounded-xl p-5">
+                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-indigo-600" /> Як вивантажити дані з BAS / 1С Підприємство
+                </h3>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-xs font-bold text-indigo-800 mb-2">BAS Бухгалтерія (Підприємство)</div>
+                    <ol className="text-xs text-gray-700 space-y-1 list-decimal list-inside">
+                      <li>Меню <strong>Підприємство → Вигрузка / Завантаження даних</strong></li>
+                      <li>Оберіть <strong>«Виванаження в XML»</strong></li>
+                      <li>Вкажіть діапазон дат і тип даних: <em>Журнал господарських операцій</em></li>
+                      <li>Формат: <strong>J1201009</strong> або <em>Стандартний обмін</em></li>
+                      <li>Збережіть XML-файл і завантажте нижче</li>
+                    </ol>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-indigo-800 mb-2">1С:Підприємство 8.x</div>
+                    <ol className="text-xs text-gray-700 space-y-1 list-decimal list-inside">
+                      <li>Меню <strong>Файл → Відкрити конфігуратор</strong></li>
+                      <li><strong>Адміністрування → Вивантаження даних</strong></li>
+                      <li>Оберіть об'єкти: <em>Журнал проводок</em>, <em>Контрагенти</em></li>
+                      <li>Вивантажте як <strong>ComТrans XML</strong> або <strong>ДатаОбмін XML</strong></li>
+                      <li>Завантажте отриманий файл нижче</li>
+                    </ol>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2 text-xs text-indigo-700 bg-white/60 rounded-lg px-3 py-2">
+                  <Info className="w-3.5 h-3.5 shrink-0" />
+                  Підтримуються формати: <strong>BAS J1201009, HKBOS, 1С v8 ComTrans, Generic XML</strong>.
+                  Кодування: UTF-8 або windows-1251.
+                </div>
+              </div>
+
+              {/* Drop zone */}
+              <div
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-2xl p-10 text-center transition-all cursor-pointer ${
+                  dragOver ? "border-indigo-500 bg-indigo-50" : "border-gray-300 hover:border-indigo-400 hover:bg-gray-50"
+                }`}
+                onClick={() => document.getElementById("bas-xml-file-input")?.click()}>
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 ${dragOver ? "bg-indigo-100" : "bg-gray-100"}`}>
+                  <Upload className={`w-7 h-7 ${dragOver ? "text-indigo-600" : "text-gray-400"}`} />
+                </div>
+                <div className="text-base font-semibold text-gray-800 mb-1">
+                  {dragOver ? "Відпустіть файл тут" : "Перетягніть XML-файл або натисніть"}
+                </div>
+                <div className="text-sm text-gray-500">
+                  Підтримується вивантаження з BAS, 1С, M.E.Doc · Формат .xml
+                </div>
+                <input id="bas-xml-file-input" type="file" accept=".xml,.XML" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              </div>
+
+              {/* Supported formats */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { label: "BAS J1201009",    color: "bg-blue-50 border-blue-200 text-blue-800" },
+                  { label: "HKBOS (Hosp.Op)", color: "bg-teal-50 border-teal-200 text-teal-800" },
+                  { label: "1С ComTrans XML", color: "bg-purple-50 border-purple-200 text-purple-800" },
+                  { label: "Generic XML",     color: "bg-gray-50 border-gray-200 text-gray-700" },
+                ].map(({ label, color }) => (
+                  <div key={label} className={`border rounded-lg px-3 py-2 text-center text-xs font-medium ${color}`}>
+                    {label}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 2: Preview ── */}
+          {wizStep === "preview" && preview && parsed && (
+            <div className="space-y-4">
+              {/* Summary bar */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "Всього проводок",  value: preview.total,   cls: "text-gray-800", bg: "bg-gray-50" },
+                  { label: "Готових до імп.",  value: preview.valid,   cls: "text-green-700", bg: "bg-green-50" },
+                  { label: "З помилками",      value: preview.invalid, cls: "text-red-700",   bg: "bg-red-50" },
+                  { label: "Контрагентів",     value: parsed.contractors.length, cls: "text-indigo-700", bg: "bg-indigo-50" },
+                ].map(({ label, value, cls, bg }) => (
+                  <div key={label} className={`rounded-xl px-4 py-3 ${bg}`}>
+                    <div className={`text-xl font-bold ${cls}`}>{value}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Format + file info */}
+              <div className="flex items-center gap-3 text-xs text-gray-600 bg-gray-50 rounded-lg px-4 py-2.5">
+                <FileText className="w-4 h-4 text-gray-400" />
+                <span className="font-medium">{file?.name}</span>
+                <span className="text-gray-400">·</span>
+                <span>Формат: <strong>{parsed.format}</strong></span>
+                {parsed.warnings.map((w, i) => (
+                  <div key={i} className="flex items-center gap-1 text-amber-700 ml-2">
+                    <AlertTriangle className="w-3.5 h-3.5" /> {w}
+                  </div>
+                ))}
+              </div>
+
+              {/* Filter */}
+              <div className="flex gap-1">
+                {[
+                  { v: "all",     label: `Всі (${preview.total})` },
+                  { v: "valid",   label: `✓ Готові (${preview.valid})` },
+                  { v: "invalid", label: `✗ Помилки (${preview.invalid})` },
+                ].map(({ v, label }) => (
+                  <button key={v} onClick={() => setFilterValid(v as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                      filterValid === v
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Table preview */}
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="max-h-80 overflow-y-auto">
+                  <Table>
+                    <TableHeader className="bg-gray-50 sticky top-0">
+                      <TableRow>
+                        <TableHead className="w-8"></TableHead>
+                        <TableHead className="w-28">Дата</TableHead>
+                        <TableHead className="w-20">Дт</TableHead>
+                        <TableHead className="w-20">Кт</TableHead>
+                        <TableHead className="text-right w-32">Сума, грн</TableHead>
+                        <TableHead>Опис / Документ</TableHead>
+                        <TableHead className="w-20 text-center">Статус</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRows.slice(0, 200).map((r: any) => (
+                        <TableRow key={r.idx} className={r.valid ? "hover:bg-gray-50" : "bg-red-50/50"}>
+                          <TableCell className="text-center">
+                            {r.valid
+                              ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500 mx-auto" />
+                              : <AlertCircle className="w-3.5 h-3.5 text-red-500 mx-auto" />}
+                          </TableCell>
+                          <TableCell className="text-xs font-mono">{r.entry_date || "—"}</TableCell>
+                          <TableCell>
+                            <span className="text-xs font-bold text-indigo-700 font-mono">{r.debit_code}</span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs font-bold text-emerald-700 font-mono">{r.credit_code}</span>
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-medium">{fmtAmt(r.amount)}</TableCell>
+                          <TableCell className="text-xs text-gray-600 max-w-[200px] truncate">
+                            {r.doc_number && <span className="text-gray-400 mr-1">{r.doc_number}</span>}
+                            {r.description}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {r.valid
+                              ? <Badge className="text-[10px] bg-green-100 text-green-700 border-0">OK</Badge>
+                              : <Badge variant="destructive" className="text-[10px]" title={r.error}>Помилка</Badge>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {filteredRows.length === 0 && (
+                        <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-400 text-sm">Немає записів</TableCell></TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                {filteredRows.length > 200 && (
+                  <div className="text-center text-xs text-gray-400 py-2 border-t">
+                    Показано перші 200 з {filteredRows.length} рядків
+                  </div>
+                )}
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={reset}>← Назад</Button>
+                <Button
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700"
+                  disabled={preview.valid === 0}
+                  onClick={() => setWizStep("confirm")}>
+                  Продовжити → ({preview.valid} проводок буде імпортовано)
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 3: Confirm ── */}
+          {wizStep === "confirm" && preview && parsed && (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+                <h3 className="font-bold text-amber-900 flex items-center gap-2 mb-3">
+                  <AlertTriangle className="w-5 h-5" /> Підтвердіть імпорт
+                </h3>
+                <div className="text-sm text-amber-800 space-y-1.5">
+                  <div>Буде додано <strong>{preview.valid} проводок</strong> до Журналу бухгалтерських записів.</div>
+                  {preview.invalid > 0 && (
+                    <div>{preview.invalid} рядків з помилками буде <strong>пропущено</strong> (не імпортовано).</div>
+                  )}
+                  {parsed.contractors.length > 0 && (
+                    <div>Контрагентів: <strong>{parsed.contractors.length}</strong> — буде додано до довідника (або пропущено якщо вже є).</div>
+                  )}
+                  <div className="mt-2 pt-2 border-t border-amber-200 text-xs">
+                    Джерело: <strong>{file?.name}</strong> · Формат: <strong>{parsed.format}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Account summary */}
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Зведення по рахунках (топ-10)</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(() => {
+                    const acc: Record<string, number> = {};
+                    preview.results.filter((r: any) => r.valid).forEach((r: any) => {
+                      acc[r.debit_code]  = (acc[r.debit_code]  || 0) + r.amount;
+                      acc[r.credit_code] = (acc[r.credit_code] || 0) + r.amount;
+                    });
+                    return Object.entries(acc)
+                      .sort(([,a],[,b]) => b - a)
+                      .slice(0, 10)
+                      .map(([code, amt]) => (
+                        <div key={code} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-1.5">
+                          <span className="text-xs font-bold text-indigo-700 font-mono">{code}</span>
+                          <span className="text-xs text-gray-700">{fmtAmt(amt)} ₴</span>
+                        </div>
+                      ));
+                  })()}
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setWizStep("preview")}>← Назад</Button>
+                <Button className="flex-1 bg-green-600 hover:bg-green-700" onClick={handleConfirm}>
+                  <CheckCircle2 className="w-4 h-4 mr-1.5" /> Підтвердити та імпортувати {preview.valid} проводок
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 4: Done ── */}
+          {wizStep === "done" && importResult && (
+            <div className="text-center py-10 space-y-4">
+              <div className="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-10 h-10 text-green-500" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Імпорт завершено успішно!</h3>
+              <div className="grid grid-cols-3 gap-3 max-w-sm mx-auto">
+                {[
+                  { label: "Проводок додано",  value: importResult.ok,             cls: "text-green-700 bg-green-50" },
+                  { label: "Пропущено",         value: importResult.failed,         cls: "text-red-700 bg-red-50" },
+                  { label: "Контрагентів",      value: importResult.contractorsOk,  cls: "text-indigo-700 bg-indigo-50" },
+                ].map(({ label, value, cls }) => (
+                  <div key={label} className={`rounded-xl p-3 ${cls}`}>
+                    <div className="text-2xl font-bold">{value}</div>
+                    <div className="text-xs mt-0.5">{label}</div>
+                  </div>
+                ))}
+              </div>
+              {importResult.errors?.length > 0 && (
+                <div className="text-xs text-red-600 bg-red-50 rounded-lg p-3 max-w-sm mx-auto text-left space-y-0.5">
+                  {importResult.errors.map((e: string, i: number) => <div key={i}>· {e}</div>)}
+                </div>
+              )}
+              <div className="flex gap-2 justify-center mt-2">
+                <Button variant="outline" onClick={reset}>Імпортувати ще один файл</Button>
+                <Button className="bg-indigo-600 hover:bg-indigo-700"
+                  onClick={() => { setActiveTab("history"); reset(); }}>
+                  Переглянути журнал імпортів
+                </Button>
               </div>
             </div>
           )}
         </div>
+      )}
 
-        {/* Integration guides */}
-        <div className="space-y-3">
-          {[
-            {
-              name: "BAS / 1C Підприємство",
-              icon: Cpu,
-              color: "border-blue-200 bg-blue-50",
-              steps: ["Меню Файл → Відкрити", "Обрати XML файл експорту", "Документи → Журнал", "Перевірити імпортовані записи"],
-              status: "XML адаптер готовий",
-              statusColor: "bg-green-100 text-green-700",
-            },
-            {
-              name: "M.E.Doc",
-              icon: FolderOpen,
-              color: "border-violet-200 bg-violet-50",
-              steps: ["Реєстр → Імпорт XML", "Вказати папку обміну", "Отримати квитанцію ДПС", "Перевірити реєстрацію ПН"],
-              status: "Файловий обмін",
-              statusColor: "bg-violet-100 text-violet-700",
-            },
-            {
-              name: "Вчасно.КЕП / Вчасно",
-              icon: ShieldCheck,
-              color: "border-green-200 bg-green-50",
-              steps: ["Інтеграції → Вчасно → API ключ", "POST /api/v1/documents", "Підписати КЕП через API", "Відстежити статус реєстрації"],
-              status: "REST API готовий",
-              statusColor: "bg-green-100 text-green-700",
-            },
-          ].map(({ name, icon: Icon, color, steps, status, statusColor }) => (
-            <div key={name} className={`border rounded-xl p-4 ${color}`}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2"><Icon className="h-4 w-4" /><span className="font-semibold text-sm">{name}</span></div>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor}`}>{status}</span>
-              </div>
-              <ol className="text-xs space-y-0.5 text-gray-600 list-decimal list-inside">
-                {steps.map(s => <li key={s}>{s}</li>)}
-              </ol>
+      {/* ═══════════════ EXPORT TAB ═══════════════ */}
+      {activeTab === "export" && (
+        <div className="grid md:grid-cols-2 gap-5">
+          <div className="bg-white border rounded-xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Download className="h-5 w-5 text-indigo-600" />
+              <h3 className="font-semibold">Експорт з Maison Finance → BAS / 1C</h3>
             </div>
-          ))}
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Дата від</Label><Input type="date" value={exportForm.dateFrom} onChange={e => setExportForm(f => ({ ...f, dateFrom: e.target.value }))} /></div>
+              <div><Label className="text-xs">Дата до</Label><Input type="date" value={exportForm.dateTo} onChange={e => setExportForm(f => ({ ...f, dateTo: e.target.value }))} /></div>
+            </div>
+            <div>
+              <Label className="text-xs">Формат</Label>
+              <Select value={exportForm.format} onValueChange={v => setExportForm(f => ({ ...f, format: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bas_xml">BAS XML (J1201009)</SelectItem>
+                  <SelectItem value="bas_v8">BAS 8.x XML</SelectItem>
+                  <SelectItem value="medoc_xml">M.E.Doc XML</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+              onClick={() => exportMut.mutate(exportForm)} disabled={exportMut.isPending}>
+              {exportMut.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Генерація...</> : <><Download className="h-4 w-4 mr-1" />Генерувати XML</>}
+            </Button>
+            {exportResult && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  <p className="text-sm font-medium text-green-800">Експорт: {exportResult.docCount} документів</p>
+                </div>
+                <Button size="sm" className="w-full" variant="outline"
+                  onClick={() => handleDownloadXml(exportResult.xml, exportResult.fileName)}>
+                  <Download className="h-4 w-4 mr-1" />Завантажити {exportResult.fileName}
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="space-y-3">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Як завантажити в BAS / 1С</div>
+            {[
+              { name: "BAS", steps: ["Меню Файл → Відкрити", "Обрати XML файл", "Документи → Журнал → Перевірити"] },
+              { name: "1С v8", steps: ["Адміністрування → Завантаження даних", "Вибрати XML файл", "Розпочати імпорт"] },
+              { name: "M.E.Doc", steps: ["Реєстр → Імпорт XML", "Вказати папку обміну", "Отримати квитанцію"] },
+            ].map(({ name, steps }) => (
+              <div key={name} className="border rounded-xl p-4 bg-gray-50">
+                <div className="text-sm font-semibold mb-2">{name}</div>
+                <ol className="text-xs space-y-0.5 text-gray-600 list-decimal list-inside">
+                  {steps.map(s => <li key={s}>{s}</li>)}
+                </ol>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Export history */}
-      <div className="bg-white border rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
-          <span className="font-semibold text-sm flex items-center gap-2"><Cpu className="h-4 w-4 text-indigo-600" />Історія експортів</span>
-        </div>
-        {histLoading ? <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-indigo-600" /></div> : (
-          <Table>
-            <TableHeader><TableRow className="text-xs"><TableHead>Дата</TableHead><TableHead>Формат</TableHead><TableHead>Период</TableHead><TableHead className="text-center">Документів</TableHead><TableHead>Статус</TableHead><TableHead>Дії</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {history.map((h: any) => (
-                <TableRow key={h.id} className="hover:bg-gray-50">
-                  <TableCell className="text-xs">{h.exported_at ? new Date(h.exported_at).toLocaleString("uk-UA") : "—"}</TableCell>
-                  <TableCell className="text-xs font-mono">{h.format}</TableCell>
-                  <TableCell className="text-xs">{h.date_from || "—"} → {h.date_to || "—"}</TableCell>
-                  <TableCell className="text-center font-semibold">{h.doc_count}</TableCell>
-                  <TableCell><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_C[h.status] || "bg-gray-100 text-gray-500"}`}>{h.status === "imported" ? "Імпортовано" : "Згенеровано"}</span></TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      {h.status === "generated" && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => markMut.mutate(h.id)}>Позн. імпортованим</Button>}
-                    </div>
-                  </TableCell>
+      {/* ═══════════════ HISTORY TAB ═══════════════ */}
+      {activeTab === "history" && (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b bg-gray-50">
+            <span className="font-semibold text-sm flex items-center gap-2">
+              <FileClock className="h-4 w-4 text-indigo-600" /> Журнал імпортів з BAS / 1С
+            </span>
+          </div>
+          {histLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="text-xs bg-gray-50">
+                  <TableHead>Дата імпорту</TableHead>
+                  <TableHead>Файл</TableHead>
+                  <TableHead>Формат</TableHead>
+                  <TableHead>Період</TableHead>
+                  <TableHead className="text-right">Всього</TableHead>
+                  <TableHead className="text-right">Успішно</TableHead>
+                  <TableHead className="text-right">Помилок</TableHead>
                 </TableRow>
-              ))}
-              {!history.length && <TableRow><TableCell colSpan={6} className="text-center text-xs text-gray-400 py-8">Немає історії експортів</TableCell></TableRow>}
-            </TableBody>
-          </Table>
-        )}
-      </div>
+              </TableHeader>
+              <TableBody>
+                {(importHistoryData?.imports || []).map((h: any) => (
+                  <TableRow key={h.id} className="hover:bg-gray-50">
+                    <TableCell className="text-xs">{new Date(h.imported_at).toLocaleString("uk-UA")}</TableCell>
+                    <TableCell className="text-xs font-mono max-w-[160px] truncate">{h.file_name || "—"}</TableCell>
+                    <TableCell><Badge variant="outline" className="text-[10px]">{h.source_format}</Badge></TableCell>
+                    <TableCell className="text-xs text-gray-500">{h.date_from || "—"} → {h.date_to || "—"}</TableCell>
+                    <TableCell className="text-right text-xs">{h.entries_total}</TableCell>
+                    <TableCell className="text-right text-xs font-semibold text-green-700">{h.entries_ok}</TableCell>
+                    <TableCell className="text-right text-xs text-red-600">{h.entries_failed || 0}</TableCell>
+                  </TableRow>
+                ))}
+                {!(importHistoryData?.imports?.length) && (
+                  <TableRow><TableCell colSpan={7} className="text-center text-xs text-gray-400 py-10">
+                    Імпортів ще не було. Перейдіть на вкладку «Імпорт» та завантажте XML-файл.
+                  </TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
