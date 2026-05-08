@@ -624,33 +624,263 @@ router.get("/vat", async (req: any, res) => {
   res.json(rows);
 });
 
+// Додаток Д5 — розшифровка кредиту по контрагентах (BEFORE /declaration to avoid routing conflict)
+router.get("/vat/declaration/d5", async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  const { year, month } = req.query;
+  const { rows } = await pool.query(`
+    SELECT
+      COALESCE(c.name,'(без контрагента)') as contractor_name,
+      c.ipn, c.vat_number, c.edrpou,
+      COALESCE(SUM(v.amount_excl_vat), 0) as base,
+      COALESCE(SUM(v.vat_amount), 0) as vat,
+      COUNT(*) as records_count
+    FROM acc_vat_records v
+    LEFT JOIN acc_contractors c ON c.id=v.contractor_id
+    WHERE v.organization_id=$1 AND v.record_type='received'
+      AND ($2::int IS NULL OR EXTRACT(YEAR  FROM v.record_date)=$2)
+      AND ($3::int IS NULL OR EXTRACT(MONTH FROM v.record_date)=$3)
+    GROUP BY c.id, c.name, c.ipn, c.vat_number, c.edrpou
+    ORDER BY SUM(v.vat_amount) DESC
+  `, [orgId, year ?? null, month ?? null]);
+  const total = rows.reduce((s: any, r: any) => ({
+    base: s.base + parseFloat(r.base), vat: s.vat + parseFloat(r.vat),
+  }), { base: 0, vat: 0 });
+  res.json({ year, month, rows, total });
+});
+
+// Повна декларація з ПДВ (всі рядки форми 0110)
 router.get("/vat/declaration", async (req: any, res) => {
   const orgId = req.user.organizationId;
   const { year, month } = req.query;
-  const { rows } = await pool.query(
-    `SELECT record_type,
-       COALESCE(SUM(amount_excl_vat),0) as base,
-       COALESCE(SUM(vat_amount),0)      as vat
-     FROM acc_vat_records
-     WHERE organization_id=$1
-       AND ($2::int IS NULL OR EXTRACT(YEAR  FROM record_date)=$2)
-       AND ($3::int IS NULL OR EXTRACT(MONTH FROM record_date)=$3)
-     GROUP BY record_type`,
-    [orgId, year ?? null, month ?? null],
-  );
-  const issued   = rows.find((r: any) => r.record_type === "issued")   ?? { base: 0, vat: 0 };
-  const received = rows.find((r: any) => r.record_type === "received") ?? { base: 0, vat: 0 };
-  const liability = parseFloat(issued.vat)   || 0;
-  const credit    = parseFloat(received.vat) || 0;
+
+  // Get issued/received by vat_rate
+  const { rows: byRate } = await pool.query(`
+    SELECT record_type, vat_rate,
+      COALESCE(SUM(amount_excl_vat),0) as base,
+      COALESCE(SUM(vat_amount),0)      as vat
+    FROM acc_vat_records
+    WHERE organization_id=$1
+      AND ($2::int IS NULL OR EXTRACT(YEAR  FROM record_date)=$2)
+      AND ($3::int IS NULL OR EXTRACT(MONTH FROM record_date)=$3)
+    GROUP BY record_type, vat_rate
+  `, [orgId, year ?? null, month ?? null]);
+
+  const get = (type: string, rate: number, field: "base"|"vat") => {
+    const r = byRate.find((x: any) => x.record_type === type && Number(x.vat_rate) === rate);
+    return parseFloat(r?.[field] ?? 0) || 0;
+  };
+  const getAny = (type: string, field: "base"|"vat") =>
+    byRate.filter((x: any) => x.record_type === type).reduce((s: number, r: any) => s + parseFloat(r[field]), 0);
+
+  // Section A — податкові зобов'язання
+  const r1_1_base = get("issued", 20, "base");   // Р1.1 — 20%
+  const r1_1_vat  = get("issued", 20, "vat");
+  const r1_2_base = get("issued",  7, "base");   // Р1.2 — 7%
+  const r1_2_vat  = get("issued",  7, "vat");
+  const r3_1_base = get("issued",  0, "base");   // Р3.1 — 0% (export/zero-rated)
+  const r4_1_base = getAny("exempt", "base");    // Р4.1 — звільнені
+  const r6_vat    = r1_1_vat + r1_2_vat;        // Р6 — разом ПЗ
+
+  // Section B — податковий кредит
+  const r10_1_base = get("received", 20, "base"); // Р10.1 — 20%
+  const r10_1_vat  = get("received", 20, "vat");
+  const r10_2_base = get("received",  7, "base"); // Р10.2 — 7%
+  const r10_2_vat  = get("received",  7, "vat");
+  const r12_credit = r10_1_vat + r10_2_vat;       // Р12 — разом кредит
+  const r17_credit = r12_credit;                   // Р17 = Р12 (без коригувань)
+
+  // Section C — розрахунки з бюджетом
+  const r18_to_pay  = Math.max(0, r6_vat - r17_credit);
+  const r19_negative = Math.max(0, r17_credit - r6_vat);
+
   res.json({
     year, month,
-    tax_liability:  liability,
-    tax_credit:     credit,
-    vat_to_pay:     Math.max(0, liability - credit),
-    vat_refund:     Math.max(0, credit - liability),
-    issued_base:    parseFloat(issued.base)   || 0,
-    received_base:  parseFloat(received.base) || 0,
+    // Backward compat
+    tax_liability:  r6_vat,
+    tax_credit:     r17_credit,
+    vat_to_pay:     r18_to_pay,
+    vat_refund:     r19_negative,
+    issued_base:    r1_1_base + r1_2_base,
+    received_base:  r10_1_base + r10_2_base,
+    // Full declaration rows
+    section_a: {
+      r1_1: { base: r1_1_base, vat: r1_1_vat, label: "Ряд 1.1 — операції 20%" },
+      r1_2: { base: r1_2_base, vat: r1_2_vat, label: "Ряд 1.2 — операції 7%" },
+      r3_1: { base: r3_1_base, vat: 0, label: "Ряд 3.1 — 0% (експорт)" },
+      r4_1: { base: r4_1_base, vat: 0, label: "Ряд 4.1 — звільнені операції" },
+      r6:   { vat: r6_vat, label: "Ряд 6 — разом зобов'язання" },
+    },
+    section_b: {
+      r10_1: { base: r10_1_base, vat: r10_1_vat, label: "Ряд 10.1 — кредит 20%" },
+      r10_2: { base: r10_2_base, vat: r10_2_vat, label: "Ряд 10.2 — кредит 7%" },
+      r12:   { vat: r12_credit, label: "Ряд 12 — разом кредит" },
+      r17:   { vat: r17_credit, label: "Ряд 17 — загальна сума кредиту" },
+    },
+    section_c: {
+      r18: { vat: r18_to_pay,   label: "Ряд 18 — до сплати (позитивне значення)" },
+      r19: { vat: r19_negative, label: "Ряд 19 — від'ємне значення" },
+    },
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MONTH-END CLOSING — закриття місяця
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get("/month-close/preview", requireRole("admin", "owner"), async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  const { year, month } = req.query;
+  if (!year || !month) return res.status(400).json({ error: "year and month required" });
+  await seedChart(orgId);
+  const yr = Number(year), mo = Number(month);
+  const prefix = `[ЗАКРИТТЯ ${yr}-${String(mo).padStart(2, "0")}]`;
+
+  const { rows: income } = await pool.query(`
+    SELECT a.id, a.code, a.name,
+      COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) -
+      COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) as net
+    FROM acc_accounts a
+    LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+      AND e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+      AND EXTRACT(MONTH FROM e.entry_date)=$3 AND e.description NOT LIKE $4
+    WHERE a.organization_id=$1 AND a.class=7
+    GROUP BY a.id, a.code, a.name
+    HAVING ABS(COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) -
+              COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0)) > 0.001
+    ORDER BY a.code
+  `, [orgId, yr, mo, `${prefix}%`]);
+
+  const { rows: expenses } = await pool.query(`
+    SELECT a.id, a.code, a.name,
+      COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) -
+      COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) as net
+    FROM acc_accounts a
+    LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+      AND e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+      AND EXTRACT(MONTH FROM e.entry_date)=$3 AND e.description NOT LIKE $4
+    WHERE a.organization_id=$1 AND a.class=9 AND a.code NOT LIKE '99%'
+    GROUP BY a.id, a.code, a.name
+    HAVING ABS(COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) -
+              COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0)) > 0.001
+    ORDER BY a.code
+  `, [orgId, yr, mo, `${prefix}%`]);
+
+  const totalIncome   = income.reduce((s: number, r: any) => s + parseFloat(r.net), 0);
+  const totalExpenses = expenses.reduce((s: number, r: any) => s + parseFloat(r.net), 0);
+  const netResult     = totalIncome - totalExpenses;
+
+  const entries: any[] = [
+    ...income.filter((r: any) => parseFloat(r.net) > 0).map((r: any) => ({
+      debit: r.code, credit: "791", amount: parseFloat(r.net),
+      description: `${prefix} ${r.code}→791`,
+    })),
+    ...expenses.filter((r: any) => parseFloat(r.net) > 0).map((r: any) => ({
+      debit: "791", credit: r.code, amount: parseFloat(r.net),
+      description: `${prefix} 791→${r.code}`,
+    })),
+    ...(netResult > 0.001  ? [{ debit: "791", credit: "441", amount: netResult,         description: `${prefix} Прибуток 791→441` }] : []),
+    ...(netResult < -0.001 ? [{ debit: "442", credit: "791", amount: Math.abs(netResult), description: `${prefix} Збиток 442→791` }] : []),
+  ];
+
+  const { rows: periods } = await pool.query(
+    `SELECT status FROM acc_periods WHERE organization_id=$1 AND year=$2 AND month=$3`, [orgId, yr, mo],
+  );
+  res.json({ year: yr, month: mo, income, expenses, totalIncome, totalExpenses, netResult, entries, isClosed: periods[0]?.status === "closed" });
+});
+
+router.post("/month-close/execute", requireRole("admin", "owner"), async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  const userId = req.user.userId;
+  const { year, month } = req.body;
+  if (!year || !month) return res.status(400).json({ error: "year and month required" });
+  await seedChart(orgId);
+  const yr = Number(year), mo = Number(month);
+  const prefix = `[ЗАКРИТТЯ ${yr}-${String(mo).padStart(2, "0")}]`;
+  const lastDay = new Date(yr, mo, 0);
+  const lastDayStr = lastDay.toISOString().slice(0, 10);
+  const periodId = await ensurePeriod(orgId, lastDay);
+
+  const { rows: alreadyDone } = await pool.query(
+    `SELECT id FROM acc_entries WHERE organization_id=$1 AND description LIKE $2
+     AND EXTRACT(YEAR FROM entry_date)=$3 AND EXTRACT(MONTH FROM entry_date)=$4 LIMIT 1`,
+    [orgId, `${prefix}%`, yr, mo],
+  );
+  if (alreadyDone[0]) return res.status(400).json({ error: "Місяць вже закрито. Спочатку скасуйте закриття." });
+
+  const [id791, id441, id442] = await Promise.all([getAccId(orgId, "791"), getAccId(orgId, "441"), getAccId(orgId, "442")]);
+  if (!id791 || !id441 || !id442) return res.status(500).json({ error: "Рахунки 791/441/442 не знайдено в плані рахунків" });
+
+  const { rows: income } = await pool.query(`
+    SELECT a.id,
+      COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) -
+      COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) as net,
+      a.code
+    FROM acc_accounts a
+    LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+      AND e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+      AND EXTRACT(MONTH FROM e.entry_date)=$3 AND e.description NOT LIKE $4
+    WHERE a.organization_id=$1 AND a.class=7
+    GROUP BY a.id, a.code
+    HAVING COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) -
+           COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) > 0.001
+  `, [orgId, yr, mo, `${prefix}%`]);
+
+  const { rows: expenses } = await pool.query(`
+    SELECT a.id,
+      COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) -
+      COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) as net,
+      a.code
+    FROM acc_accounts a
+    LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+      AND e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+      AND EXTRACT(MONTH FROM e.entry_date)=$3 AND e.description NOT LIKE $4
+    WHERE a.organization_id=$1 AND a.class=9 AND a.code NOT LIKE '99%'
+    GROUP BY a.id, a.code
+    HAVING COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) -
+           COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) > 0.001
+  `, [orgId, yr, mo, `${prefix}%`]);
+
+  const ins = async (dId: number, cId: number, amt: number, desc: string) => {
+    await pool.query(
+      `INSERT INTO acc_entries (organization_id,document_id,entry_date,period_id,debit_account_id,credit_account_id,amount,currency,description,is_manual,created_by)
+       VALUES ($1,NULL,$2,$3,$4,$5,$6,'UAH',$7,false,$8)`,
+      [orgId, lastDayStr, periodId, dId, cId, amt, desc, userId],
+    );
+  };
+
+  for (const r of income)   await ins(r.id, id791, parseFloat(r.net), `${prefix} ${r.code}→791`);
+  for (const r of expenses) await ins(id791, r.id, parseFloat(r.net), `${prefix} 791→${r.code}`);
+
+  const totalIncome   = income.reduce((s: number, r: any) => s + parseFloat(r.net), 0);
+  const totalExpenses = expenses.reduce((s: number, r: any) => s + parseFloat(r.net), 0);
+  const net = totalIncome - totalExpenses;
+  if (net > 0.001)  await ins(id791, id441, net,             `${prefix} Прибуток 791→441`);
+  if (net < -0.001) await ins(id442, id791, Math.abs(net),   `${prefix} Збиток 442→791`);
+
+  await pool.query(
+    `UPDATE acc_periods SET status='closed', closed_at=NOW(), closed_by=$1 WHERE organization_id=$2 AND year=$3 AND month=$4`,
+    [userId, orgId, yr, mo],
+  );
+  res.json({ ok: true, entriesCreated: income.length + expenses.length + (Math.abs(net) > 0.001 ? 1 : 0), netResult: net, totalIncome, totalExpenses });
+});
+
+router.post("/month-close/undo", requireRole("admin", "owner"), async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  const { year, month } = req.body;
+  if (!year || !month) return res.status(400).json({ error: "year and month required" });
+  const yr = Number(year), mo = Number(month);
+  const prefix = `[ЗАКРИТТЯ ${yr}-${String(mo).padStart(2, "0")}]`;
+  const { rowCount } = await pool.query(
+    `DELETE FROM acc_entries WHERE organization_id=$1 AND description LIKE $2
+     AND EXTRACT(YEAR FROM entry_date)=$3 AND EXTRACT(MONTH FROM entry_date)=$4`,
+    [orgId, `${prefix}%`, yr, mo],
+  );
+  await pool.query(
+    `UPDATE acc_periods SET status='open', closed_at=NULL, closed_by=NULL WHERE organization_id=$1 AND year=$2 AND month=$3`,
+    [orgId, yr, mo],
+  );
+  res.json({ ok: true, deleted: rowCount });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -807,6 +1037,194 @@ router.patch("/bank/:id/reconcile", async (req: any, res) => {
   );
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
   res.json(rows[0]);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACCOUNT CARD — картка рахунку
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get("/reports/account-card", async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  const { code, from, to } = req.query;
+  if (!code) return res.status(400).json({ error: "code required" });
+  await seedChart(orgId);
+  const { rows: accs } = await pool.query(
+    `SELECT * FROM acc_accounts WHERE organization_id=$1 AND code=$2 LIMIT 1`, [orgId, code],
+  );
+  if (!accs[0]) return res.status(404).json({ error: "Рахунок не знайдено" });
+  const acc = accs[0];
+
+  // Opening balance (entries BEFORE from date)
+  const { rows: openRows } = await pool.query(`
+    SELECT
+      COALESCE(SUM(CASE WHEN debit_account_id=$2  THEN amount ELSE 0 END),0) as od,
+      COALESCE(SUM(CASE WHEN credit_account_id=$2 THEN amount ELSE 0 END),0) as oc
+    FROM acc_entries WHERE organization_id=$1
+      AND ($3::date IS NULL OR entry_date < $3::date)
+  `, [orgId, acc.id, from ?? null]);
+  const od = parseFloat(openRows[0].od);
+  const oc = parseFloat(openRows[0].oc);
+  const openingBalance = od - oc;
+
+  // Entries in period
+  const { rows: entries } = await pool.query(`
+    SELECT e.id, e.entry_date, e.amount, e.description,
+      da.code as debit_code, da.name as debit_name,
+      ca.code as credit_code, ca.name as credit_name,
+      d.doc_number, d.doc_type,
+      CASE WHEN e.debit_account_id=$2  THEN e.amount ELSE 0 END as debit_amount,
+      CASE WHEN e.credit_account_id=$2 THEN e.amount ELSE 0 END as credit_amount
+    FROM acc_entries e
+    JOIN acc_accounts da ON da.id=e.debit_account_id
+    JOIN acc_accounts ca ON ca.id=e.credit_account_id
+    LEFT JOIN acc_documents d ON d.id=e.document_id
+    WHERE e.organization_id=$1 AND (e.debit_account_id=$2 OR e.credit_account_id=$2)
+      AND ($3::date IS NULL OR e.entry_date>=$3::date)
+      AND ($4::date IS NULL OR e.entry_date<=$4::date)
+    ORDER BY e.entry_date ASC, e.id ASC
+  `, [orgId, acc.id, from ?? null, to ?? null]);
+
+  let balance = openingBalance;
+  const rows = entries.map((e: any) => {
+    balance += parseFloat(e.debit_amount) - parseFloat(e.credit_amount);
+    return { ...e, running_balance: Math.round(balance * 100) / 100 };
+  });
+
+  const totalDebit  = entries.reduce((s: number, r: any) => s + parseFloat(r.debit_amount),  0);
+  const totalCredit = entries.reduce((s: number, r: any) => s + parseFloat(r.credit_amount), 0);
+  res.json({ account: acc, openingBalance, closingBalance: balance, totalDebit, totalCredit, rows });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CASH ORDERS — касові ордери (ПКО / ВКО)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureCashTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_cash_orders (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL,
+      order_type      TEXT    NOT NULL CHECK (order_type IN ('pko','vko')),
+      order_number    TEXT    NOT NULL,
+      order_date      DATE    NOT NULL,
+      amount          NUMERIC(15,2) NOT NULL,
+      description     TEXT,
+      contractor_id   INTEGER,
+      corr_account    TEXT,
+      basis           TEXT,
+      cashier         TEXT,
+      person          TEXT,
+      period_id       INTEGER,
+      entry_id        INTEGER,
+      created_by      INTEGER,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+router.get("/cash", async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  await ensureCashTable();
+  const { from, to, type } = req.query;
+  let q = `SELECT o.*, c.name as contractor_name
+           FROM acc_cash_orders o LEFT JOIN acc_contractors c ON c.id=o.contractor_id
+           WHERE o.organization_id=$1`;
+  const p: any[] = [orgId];
+  if (from) { p.push(from); q += ` AND o.order_date>=$${p.length}`; }
+  if (to)   { p.push(to);   q += ` AND o.order_date<=$${p.length}`; }
+  if (type) { p.push(type); q += ` AND o.order_type=$${p.length}`; }
+  q += ` ORDER BY o.order_date DESC, o.id DESC`;
+  const { rows } = await pool.query(q, p);
+  res.json(rows);
+});
+
+router.post("/cash", async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  const userId = req.user.userId;
+  await ensureCashTable();
+  const { order_type, order_number, order_date, amount, description,
+          contractor_id, corr_account, basis, cashier, person } = req.body;
+  if (!order_type || !order_number || !order_date || !amount)
+    return res.status(400).json({ error: "order_type, order_number, order_date, amount required" });
+
+  const periodId = await ensurePeriod(orgId, new Date(order_date));
+
+  // Auto-create journal entry
+  await seedChart(orgId);
+  const acc30Id = await getAccId(orgId, "30");
+  const corrId  = corr_account ? await getAccId(orgId, corr_account) : null;
+  let entryId: number | null = null;
+
+  if (acc30Id) {
+    const debitId  = order_type === "pko" ? acc30Id : (corrId ?? null);
+    const creditId = order_type === "pko" ? (corrId ?? null) : acc30Id;
+    if (debitId && creditId) {
+      const { rows: eRows } = await pool.query(
+        `INSERT INTO acc_entries (organization_id,entry_date,period_id,debit_account_id,credit_account_id,amount,currency,description,is_manual,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,'UAH',$7,false,$8) RETURNING id`,
+        [orgId, order_date, periodId, debitId, creditId, amount,
+         `${order_type.toUpperCase()} №${order_number}: ${description ?? ""}`, userId],
+      );
+      entryId = eRows[0].id;
+    }
+  }
+
+  const { rows } = await pool.query(
+    `INSERT INTO acc_cash_orders (organization_id,order_type,order_number,order_date,amount,description,contractor_id,corr_account,basis,cashier,person,period_id,entry_id,created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [orgId, order_type, order_number, order_date, amount, description ?? null,
+     contractor_id ?? null, corr_account ?? null, basis ?? null, cashier ?? null,
+     person ?? null, periodId, entryId, userId],
+  );
+  res.status(201).json(rows[0]);
+});
+
+router.delete("/cash/:id", async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  await ensureCashTable();
+  const { rows } = await pool.query(
+    `SELECT entry_id FROM acc_cash_orders WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId],
+  );
+  if (!rows[0]) return res.status(404).json({ error: "Not found" });
+  if (rows[0].entry_id) await pool.query(`DELETE FROM acc_entries WHERE id=$1`, [rows[0].entry_id]);
+  await pool.query(`DELETE FROM acc_cash_orders WHERE id=$1`, [req.params.id]);
+  res.json({ ok: true });
+});
+
+router.get("/cash/book", async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  await ensureCashTable();
+  const { from, to } = req.query;
+  const dateFrom = from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+  const dateTo   = to   ?? new Date().toISOString().slice(0, 10);
+
+  const { rows: openRow } = await pool.query(
+    `SELECT COALESCE(SUM(CASE WHEN order_type='pko' THEN amount ELSE -amount END),0) as balance
+     FROM acc_cash_orders WHERE organization_id=$1 AND order_date < $2`,
+    [orgId, dateFrom],
+  );
+  const openingBalance = parseFloat(openRow[0].balance);
+
+  const { rows: daily } = await pool.query(`
+    SELECT order_date::text,
+      COALESCE(SUM(CASE WHEN order_type='pko' THEN amount ELSE 0 END),0) as income,
+      COALESCE(SUM(CASE WHEN order_type='vko' THEN amount ELSE 0 END),0) as expense,
+      COUNT(*) as docs_count
+    FROM acc_cash_orders
+    WHERE organization_id=$1 AND order_date BETWEEN $2 AND $3
+    GROUP BY order_date ORDER BY order_date
+  `, [orgId, dateFrom, dateTo]);
+
+  let balance = openingBalance;
+  const rows = daily.map((d: any) => {
+    const open = balance;
+    balance += parseFloat(d.income) - parseFloat(d.expense);
+    return { ...d, opening_balance: Math.round(open * 100) / 100, closing_balance: Math.round(balance * 100) / 100 };
+  });
+
+  const totalIncome  = daily.reduce((s: number, r: any) => s + parseFloat(r.income),  0);
+  const totalExpense = daily.reduce((s: number, r: any) => s + parseFloat(r.expense), 0);
+  res.json({ dateFrom, dateTo, openingBalance, closingBalance: balance, totalIncome, totalExpense, rows });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

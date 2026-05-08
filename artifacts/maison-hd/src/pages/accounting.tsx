@@ -153,7 +153,9 @@ const INTEGRATION_INFO: Record<string, { label: string; desc: string; color: str
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrations"
          | "tax-invoices" | "bas" | "signing" | "archive" | "invoices"
-         | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors" | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync";
+         | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors"
+         | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync"
+         | "acc-monthclose" | "acc-card" | "acc-cash";
 
 export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -192,10 +194,13 @@ export default function AccountingPage() {
             { id: "acc-journal",   label: "Журнал проводок",     icon: FileText },
             { id: "acc-documents", label: "ЛК Документи",        icon: FileText },
             { id: "acc-contractors",label: "ЛК Контрагенти",     icon: Users },
-            { id: "acc-vat",       label: "ПДВ",                 icon: Landmark },
-            { id: "acc-reports",   label: "Звіти",               icon: BarChart3 },
-            { id: "acc-bank",      label: "Банк",                icon: CreditCard },
-            { id: "acc-sync",      label: "Синхронізація",       icon: RefreshCw },
+            { id: "acc-vat",        label: "ПДВ",                icon: Landmark },
+            { id: "acc-reports",    label: "Звіти",              icon: BarChart3 },
+            { id: "acc-bank",       label: "Банк",               icon: CreditCard },
+            { id: "acc-sync",       label: "Синхронізація",      icon: RefreshCw },
+            { id: "acc-monthclose", label: "Закриття місяця",    icon: CheckCircle2 },
+            { id: "acc-card",       label: "Картка рахунку",     icon: BookOpen },
+            { id: "acc-cash",       label: "Каса ПКО/ВКО",      icon: Wallet },
           ] as { id: Tab; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
@@ -227,6 +232,9 @@ export default function AccountingPage() {
         {tab === "acc-reports"    && <AccReportsTab />}
         {tab === "acc-bank"       && <AccBankTab />}
         {tab === "acc-sync"       && <AccSyncTab />}
+        {tab === "acc-monthclose" && <AccMonthCloseTab />}
+        {tab === "acc-card"       && <AccAccountCardTab />}
+        {tab === "acc-cash"       && <AccCashTab />}
       </div>
     </AppLayout>
   );
@@ -2743,42 +2751,193 @@ function AccContractorsTab() {
 
 // ─── ACC: VAT (ПДВ) ───────────────────────────────────────────────────────────
 function AccVatTab() {
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [month, setMonth] = useState((new Date().getMonth() + 1).toString());
+  const now = new Date();
+  const [year, setYear]   = useState(now.getFullYear().toString());
+  const [month, setMonth] = useState((now.getMonth() + 1).toString());
+  const [view, setView]   = useState<"declaration" | "d5">("declaration");
   const { data, isLoading } = useAccLedger(`vat/declaration?year=${year}&month=${month}`);
-  
-  const fmtNumLoc = (n: number | string) => n ? Number(n).toFixed(2) : "0.00";
+  const { data: d5, isLoading: d5Loading } = useAccLedger(`vat/declaration/d5?year=${year}&month=${month}`);
+  const fmt2 = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2 items-center">
+      <div className="flex gap-2 items-center flex-wrap">
         <Select value={year} onValueChange={setYear}>
           <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>{[2023,2024,2025,2026].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
         </Select>
         <Select value={month} onValueChange={setMonth}>
-          <SelectTrigger className="w-32 h-9 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <SelectItem key={m} value={String(m)}>Місяць {m}</SelectItem>)}
-          </SelectContent>
+          <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>{MONTHS_UK.map((m, i) => <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
         </Select>
+        <div className="flex border rounded-lg overflow-hidden ml-auto">
+          {(["declaration","d5"] as const).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${view===v ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+              {v === "declaration" ? "Декларація" : "Додаток Д5"}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
-        <div className="grid grid-cols-3 gap-4">
+      {view === "declaration" && (
+        isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+          <div className="space-y-4">
+            {/* KPI cards */}
+            <div className="grid grid-cols-3 gap-4">
+              <Card className="border-red-200 bg-red-50">
+                <CardHeader className="pb-1"><CardTitle className="text-xs text-red-700">Зобов'язання (Р6)</CardTitle></CardHeader>
+                <CardContent className="pt-0"><div className="text-2xl font-bold text-red-700">{fmt2(data?.section_a?.r6?.vat)} ₴</div><div className="text-xs text-red-500 mt-0.5">База: {fmt2(data?.issued_base)} ₴</div></CardContent>
+              </Card>
+              <Card className="border-blue-200 bg-blue-50">
+                <CardHeader className="pb-1"><CardTitle className="text-xs text-blue-700">Кредит (Р17)</CardTitle></CardHeader>
+                <CardContent className="pt-0"><div className="text-2xl font-bold text-blue-700">{fmt2(data?.section_b?.r17?.vat)} ₴</div><div className="text-xs text-blue-500 mt-0.5">База: {fmt2(data?.received_base)} ₴</div></CardContent>
+              </Card>
+              <Card className={Number(data?.section_c?.r18?.vat) > 0 ? "border-amber-300 bg-amber-50" : "border-green-200 bg-green-50"}>
+                <CardHeader className="pb-1">
+                  <CardTitle className={`text-xs ${Number(data?.section_c?.r18?.vat) > 0 ? "text-amber-700" : "text-green-700"}`}>
+                    {Number(data?.section_c?.r18?.vat) > 0 ? "До сплати (Р18)" : "Відшкодування (Р19)"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className={`text-2xl font-bold ${Number(data?.section_c?.r18?.vat) > 0 ? "text-amber-700" : "text-green-700"}`}>
+                    {fmt2(Number(data?.section_c?.r18?.vat) > 0 ? data?.section_c?.r18?.vat : data?.section_c?.r19?.vat)} ₴
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Section A */}
+            <Card>
+              <CardHeader className="pb-2 bg-red-50/50 rounded-t-lg border-b"><CardTitle className="text-sm font-bold text-red-800">Розділ А — Податкові зобов'язання</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader><TableRow className="bg-gray-50"><TableHead>Рядок</TableHead><TableHead className="text-right">База (грн)</TableHead><TableHead className="text-right">ПДВ (грн)</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {[
+                      { label: "Р1.1 — Операції 20%",            base: data?.section_a?.r1_1?.base, vat: data?.section_a?.r1_1?.vat },
+                      { label: "Р1.2 — Операції 7%",             base: data?.section_a?.r1_2?.base, vat: data?.section_a?.r1_2?.vat },
+                      { label: "Р3.1 — 0% (експорт)",            base: data?.section_a?.r3_1?.base, vat: null },
+                      { label: "Р4.1 — Звільнені операції",       base: data?.section_a?.r4_1?.base, vat: null },
+                    ].map((r, i) => (
+                      <TableRow key={i} className="hover:bg-red-50/30">
+                        <TableCell className="text-sm text-gray-700">{r.label}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{fmt2(r.base)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-red-700">{r.vat != null ? fmt2(r.vat) : "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="bg-red-100 border-t-2 border-red-300 font-bold">
+                      <TableCell className="text-sm font-bold text-red-800">Р6 — Разом зобов'язання</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-red-800">{fmt2(data?.issued_base)}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-red-800">{fmt2(data?.section_a?.r6?.vat)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            {/* Section B */}
+            <Card>
+              <CardHeader className="pb-2 bg-blue-50/50 rounded-t-lg border-b"><CardTitle className="text-sm font-bold text-blue-800">Розділ Б — Податковий кредит</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader><TableRow className="bg-gray-50"><TableHead>Рядок</TableHead><TableHead className="text-right">База (грн)</TableHead><TableHead className="text-right">ПДВ (грн)</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {[
+                      { label: "Р10.1 — Кредит 20%", base: data?.section_b?.r10_1?.base, vat: data?.section_b?.r10_1?.vat },
+                      { label: "Р10.2 — Кредит 7%",  base: data?.section_b?.r10_2?.base, vat: data?.section_b?.r10_2?.vat },
+                    ].map((r, i) => (
+                      <TableRow key={i} className="hover:bg-blue-50/30">
+                        <TableCell className="text-sm text-gray-700">{r.label}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{fmt2(r.base)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-blue-700">{fmt2(r.vat)}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="bg-blue-100 border-t-2 border-blue-300">
+                      <TableCell className="text-sm font-bold text-blue-800">Р12 — Разом кредит</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-blue-800">{fmt2(data?.received_base)}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-blue-800">{fmt2(data?.section_b?.r12?.vat)}</TableCell>
+                    </TableRow>
+                    <TableRow className="bg-blue-200 border-t border-blue-400">
+                      <TableCell className="text-sm font-bold text-blue-900">Р17 — Загальна сума кредиту</TableCell>
+                      <TableCell />
+                      <TableCell className="text-right font-mono font-bold text-blue-900">{fmt2(data?.section_b?.r17?.vat)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            {/* Section C */}
+            <Card className={Number(data?.section_c?.r18?.vat) > 0 ? "border-amber-300" : "border-green-300"}>
+              <CardHeader className="pb-2 rounded-t-lg border-b"><CardTitle className="text-sm font-bold text-gray-800">Розділ В — Розрахунки з бюджетом</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader><TableRow className="bg-gray-50"><TableHead>Рядок</TableHead><TableHead className="text-right">Сума ПДВ (грн)</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    <TableRow className={Number(data?.section_c?.r18?.vat) > 0 ? "bg-amber-50" : "bg-gray-50"}>
+                      <TableCell className="text-sm font-semibold">Р18 — До сплати (позитивне значення)</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-amber-700">{fmt2(data?.section_c?.r18?.vat)}</TableCell>
+                    </TableRow>
+                    <TableRow className={Number(data?.section_c?.r19?.vat) > 0 ? "bg-green-50" : "bg-gray-50"}>
+                      <TableCell className="text-sm font-semibold">Р19 — Від'ємне значення (відшкодування)</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-green-700">{fmt2(data?.section_c?.r19?.vat)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
+        )
+      )}
+
+      {view === "d5" && (
+        d5Loading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Податкове зобов'язання (Ряд 9)</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-bold text-red-600">{fmtNumLoc(data?.tax_liability || 0)} ₴</p><p className="text-xs text-gray-400 mt-1">База: {fmtNumLoc(data?.issued_base || 0)} ₴</p></CardContent>
+            <CardHeader className="pb-2 border-b">
+              <CardTitle className="text-sm font-bold text-blue-800">Додаток Д5 — Розшифровка податкового кредиту по постачальниках</CardTitle>
+              <p className="text-xs text-gray-500 mt-1">Використовується для заповнення Д5 до декларації ПДВ</p>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-blue-50">
+                  <TableRow>
+                    <TableHead>Постачальник</TableHead>
+                    <TableHead className="w-32">ІПН</TableHead>
+                    <TableHead className="w-32">ЄДРПОУ</TableHead>
+                    <TableHead className="text-right w-32">База, грн</TableHead>
+                    <TableHead className="text-right w-32">ПДВ, грн</TableHead>
+                    <TableHead className="text-right w-20">К-ть ПН</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(!d5?.rows || d5.rows.length === 0) ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-400 text-sm">Немає вхідних ПН за вказаний період</TableCell></TableRow>
+                  ) : d5.rows.map((r: any, i: number) => (
+                    <TableRow key={i} className="hover:bg-blue-50/30">
+                      <TableCell className="text-sm font-medium">{r.contractor_name}</TableCell>
+                      <TableCell className="font-mono text-xs text-gray-600">{r.ipn || "—"}</TableCell>
+                      <TableCell className="font-mono text-xs text-gray-600">{r.edrpou || "—"}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{fmt2(r.base)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-blue-700 font-semibold">{fmt2(r.vat)}</TableCell>
+                      <TableCell className="text-right text-sm text-gray-500">{r.records_count}</TableCell>
+                    </TableRow>
+                  ))}
+                  {d5?.rows?.length > 0 && (
+                    <TableRow className="bg-blue-100 border-t-2 border-blue-300 font-bold">
+                      <TableCell colSpan={3} className="text-sm font-bold text-blue-900">РАЗОМ</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-blue-900">{fmt2(d5?.total?.base)}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-blue-900">{fmt2(d5?.total?.vat)}</TableCell>
+                      <TableCell />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Податковий кредит (Ряд 17)</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-bold text-blue-600">{fmtNumLoc(data?.tax_credit || 0)} ₴</p><p className="text-xs text-gray-400 mt-1">База: {fmtNumLoc(data?.received_base || 0)} ₴</p></CardContent>
-          </Card>
-          <Card className={Number(data?.vat_to_pay) > 0 ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200"}>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">{Number(data?.vat_to_pay) > 0 ? "ПДВ до сплати" : "Переплата / Відшкодування"}</CardTitle></CardHeader>
-            <CardContent><p className={`text-2xl font-bold ${Number(data?.vat_to_pay) > 0 ? "text-amber-700" : "text-green-700"}`}>{fmtNumLoc(Number(data?.vat_to_pay) > 0 ? data?.vat_to_pay : data?.vat_refund || 0)} ₴</p></CardContent>
-          </Card>
-        </div>
+        )
       )}
     </div>
   );
@@ -3470,8 +3629,8 @@ function AccBankTab() {
           <Input type="date" value={to}   onChange={e => setTo(e.target.value)}   className="w-36 h-8 text-xs" />
         </div>
         <div className="ml-auto flex gap-2">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5">
-            <Upload className="w-3.5 h-3.5" /> Імпорт CSV
+          <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled title="Буде в наступному релізі">
+            <Upload className="w-3.5 h-3.5" /> Імпорт XML НБУ
           </Button>
           <Button size="sm" className="h-8 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={() => setShowAdd(true)}>
             <Plus className="w-3.5 h-3.5" /> Додати операцію
@@ -3607,6 +3766,556 @@ function AccBankTab() {
               <Button onClick={handleAdd} disabled={addLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
                 {addLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
                 Додати
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── ACC: MONTH CLOSE (ЗАКРИТТЯ МІСЯЦЯ) ───────────────────────────────────────
+function AccMonthCloseTab() {
+  const now = new Date();
+  const [year, setYear]   = useState(now.getFullYear().toString());
+  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [loading, setLoading] = useState(false);
+  const [undoLoading, setUndoLoading] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const previewKey = `month-close/preview?year=${year}&month=${month}`;
+  const { data: preview, isLoading: prevLoading, refetch } = useAccLedger(previewKey);
+  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+
+  const handleClose = async () => {
+    if (!confirm(`Закрити місяць ${MONTHS_UK[+month-1]} ${year}? Будуть створені регламентні проводки.`)) return;
+    setLoading(true);
+    try {
+      const res = await accFetch("month-close/execute", { method: "POST", body: JSON.stringify({ year: +year, month: +month }) });
+      toast({ title: `Місяць закрито`, description: `Створено ${res.entriesCreated} проводок. Результат: ${res.netResult >= 0 ? "прибуток" : "збиток"} ${fmt(Math.abs(res.netResult))} грн` });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      refetch();
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setLoading(false); }
+  };
+
+  const handleUndo = async () => {
+    if (!confirm(`Скасувати закриття ${MONTHS_UK[+month-1]} ${year}? Регламентні проводки будуть видалені.`)) return;
+    setUndoLoading(true);
+    try {
+      await accFetch("month-close/undo", { method: "POST", body: JSON.stringify({ year: +year, month: +month }) });
+      toast({ title: "Закриття скасовано" });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      refetch();
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setUndoLoading(false); }
+  };
+
+  const isClosed = preview?.isClosed;
+  const hasData  = (preview?.income?.length > 0 || preview?.expenses?.length > 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 items-center flex-wrap">
+        <Select value={year} onValueChange={v => { setYear(v); }}>
+          <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>{[2023,2024,2025,2026].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={month} onValueChange={v => { setMonth(v); }}>
+          <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>{MONTHS_UK.map((m, i) => <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
+        </Select>
+        <div className="ml-auto flex gap-2">
+          {isClosed ? (
+            <>
+              <Badge className="bg-green-100 text-green-700 border-green-300 px-3 py-1.5"><CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Закрито</Badge>
+              <Button variant="outline" size="sm" onClick={handleUndo} disabled={undoLoading} className="border-orange-300 text-orange-700 hover:bg-orange-50">
+                {undoLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
+                Скасувати закриття
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" onClick={handleClose} disabled={loading || !hasData} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
+              Закрити місяць
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {prevLoading ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+        <div className="space-y-4">
+          {/* Summary */}
+          <div className="grid grid-cols-3 gap-4">
+            <Card className="border-green-200 bg-green-50">
+              <CardContent className="p-4"><div className="text-xs text-green-700 font-medium mb-1">Доходи (кл. 7)</div><div className="text-2xl font-bold text-green-700">{fmt(preview?.totalIncome)}</div></CardContent>
+            </Card>
+            <Card className="border-red-200 bg-red-50">
+              <CardContent className="p-4"><div className="text-xs text-red-700 font-medium mb-1">Витрати (кл. 9)</div><div className="text-2xl font-bold text-red-700">{fmt(preview?.totalExpenses)}</div></CardContent>
+            </Card>
+            <Card className={`border-2 ${(preview?.netResult ?? 0) >= 0 ? "border-blue-300 bg-blue-50" : "border-orange-300 bg-orange-50"}`}>
+              <CardContent className="p-4">
+                <div className={`text-xs font-medium mb-1 ${(preview?.netResult ?? 0) >= 0 ? "text-blue-700" : "text-orange-700"}`}>
+                  {(preview?.netResult ?? 0) >= 0 ? "Прибуток → 441" : "Збиток → 442"}
+                </div>
+                <div className={`text-2xl font-bold ${(preview?.netResult ?? 0) >= 0 ? "text-blue-700" : "text-orange-700"}`}>
+                  {fmt(Math.abs(preview?.netResult ?? 0))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Preview entries */}
+          {preview?.entries?.length > 0 ? (
+            <Card>
+              <CardHeader className="pb-2 border-b">
+                <CardTitle className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  {isClosed ? "Регламентні проводки (виконано)" : "Попередній перегляд проводок"}
+                  <Badge className="ml-2 text-[10px]">{preview.entries.length} проводок</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead className="w-20">Дт</TableHead>
+                      <TableHead className="w-20">Кт</TableHead>
+                      <TableHead>Зміст</TableHead>
+                      <TableHead className="text-right w-40">Сума, грн</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.entries.map((e: any, i: number) => (
+                      <TableRow key={i} className={`hover:bg-gray-50 ${e.credit === "441" || e.debit === "442" ? "bg-blue-50/50 font-semibold" : ""}`}>
+                        <TableCell className="font-mono text-sm font-bold text-blue-800">{e.debit}</TableCell>
+                        <TableCell className="font-mono text-sm font-bold text-orange-700">{e.credit}</TableCell>
+                        <TableCell className="text-xs text-gray-600">{e.description}</TableCell>
+                        <TableCell className="text-right font-mono text-sm font-semibold">{fmt(e.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="py-12 text-center text-gray-400">
+              <Scale className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <div className="text-sm font-medium">Немає оборотів для закриття</div>
+              <div className="text-xs mt-1">За обраний місяць не знайдено доходів або витрат</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: ACCOUNT CARD (КАРТКА РАХУНКУ) ───────────────────────────────────────
+function AccAccountCardTab() {
+  const now = new Date();
+  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [code, setCode] = useState("311");
+  const [from, setFrom] = useState(format(firstOfMonth, "yyyy-MM-dd"));
+  const [to, setTo]     = useState(format(now, "yyyy-MM-dd"));
+  const [searchCode, setSearchCode] = useState(code);
+  const { data: accounts } = useAccLedger("accounts");
+
+  const { data, isLoading, refetch } = useAccLedger(
+    `reports/account-card?code=${searchCode}&from=${from}&to=${to}`,
+    { enabled: !!searchCode },
+  );
+
+  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d: string) => d ? format(new Date(d), "dd.MM.yyyy") : "—";
+
+  const topAccounts = ["311","361","631","702","703","92","93","441","30","6411"];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 items-center flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500 whitespace-nowrap">Рахунок:</span>
+          <Select value={code} onValueChange={v => { setCode(v); setSearchCode(v); }}>
+            <SelectTrigger className="w-64 h-9 text-sm"><SelectValue placeholder="Оберіть рахунок..." /></SelectTrigger>
+            <SelectContent>
+              <div className="px-2 py-1 text-[10px] text-gray-400 font-medium uppercase">Часті</div>
+              {topAccounts.map(c => {
+                const acc = (Array.isArray(accounts) ? accounts : []).find((a: any) => a.code === c);
+                return <SelectItem key={c} value={c}>{c} — {acc?.name ?? c}</SelectItem>;
+              })}
+              <div className="px-2 py-1 text-[10px] text-gray-400 font-medium uppercase mt-1">Усі</div>
+              {(Array.isArray(accounts) ? accounts : []).map((a: any) => (
+                <SelectItem key={a.id} value={a.code}>{a.code} — {a.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500">Від:</span>
+          <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36 h-9 text-xs" />
+          <span className="text-xs text-gray-500">До:</span>
+          <Input type="date" value={to}   onChange={e => setTo(e.target.value)}   className="w-36 h-9 text-xs" />
+        </div>
+        <Button size="sm" variant="outline" className="h-9" onClick={() => { setSearchCode(code); refetch(); }}>
+          <Search className="w-3.5 h-3.5 mr-1.5" /> Показати
+        </Button>
+      </div>
+
+      {isLoading ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : data?.account ? (
+        <div className="space-y-4">
+          {/* Account info + balances */}
+          <div className="grid grid-cols-4 gap-3">
+            <Card className="col-span-1 bg-gray-50">
+              <CardContent className="p-3">
+                <div className="text-xs text-gray-500 mb-0.5">Рахунок</div>
+                <div className="font-mono text-2xl font-bold text-gray-800">{data.account.code}</div>
+                <div className="text-xs text-gray-600 mt-1 leading-tight">{data.account.name}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3">
+                <div className="text-xs text-gray-500 mb-0.5">Вхідний залишок</div>
+                <div className={`text-lg font-bold ${data.openingBalance >= 0 ? "text-blue-700" : "text-red-700"}`}>{fmt(data.openingBalance)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3">
+                <div className="grid grid-cols-2 gap-1">
+                  <div><div className="text-[10px] text-blue-600">Дт обороти</div><div className="font-bold text-blue-700 text-sm">{fmt(data.totalDebit)}</div></div>
+                  <div><div className="text-[10px] text-orange-600">Кт обороти</div><div className="font-bold text-orange-700 text-sm">{fmt(data.totalCredit)}</div></div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border-2 border-gray-300">
+              <CardContent className="p-3">
+                <div className="text-xs text-gray-500 mb-0.5">Вихідний залишок</div>
+                <div className={`text-lg font-bold ${data.closingBalance >= 0 ? "text-gray-900" : "text-red-700"}`}>{fmt(data.closingBalance)}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Entries table */}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="w-28">Дата</TableHead>
+                    <TableHead className="w-28">Документ</TableHead>
+                    <TableHead>Зміст</TableHead>
+                    <TableHead className="w-20 text-center">Кореспонд.</TableHead>
+                    <TableHead className="text-right w-36">Дт, грн</TableHead>
+                    <TableHead className="text-right w-36">Кт, грн</TableHead>
+                    <TableHead className="text-right w-36">Залишок, грн</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {/* Opening balance row */}
+                  <TableRow className="bg-gray-100 border-b-2 border-gray-300">
+                    <TableCell colSpan={4} className="text-xs font-bold text-gray-700 py-2">Вхідний залишок</TableCell>
+                    <TableCell className="text-right font-mono text-xs font-bold text-gray-700" colSpan={2} />
+                    <TableCell className="text-right font-mono text-sm font-bold text-gray-900">{fmt(data.openingBalance)}</TableCell>
+                  </TableRow>
+                  {data.rows?.length === 0 ? (
+                    <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-400 text-sm">Оборотів за обраний період не знайдено</TableCell></TableRow>
+                  ) : data.rows?.map((r: any) => (
+                    <TableRow key={r.id} className="hover:bg-gray-50">
+                      <TableCell className="text-xs font-medium">{fmtDate(r.entry_date)}</TableCell>
+                      <TableCell className="text-xs font-mono text-gray-500">
+                        {r.doc_type && r.doc_number ? `${r.doc_type.toUpperCase()} №${r.doc_number}` : "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-600 max-w-xs truncate">{r.description || "—"}</TableCell>
+                      <TableCell className="text-center text-xs font-mono">
+                        {parseFloat(r.debit_amount) > 0
+                          ? <span className="text-orange-600">Кт {r.credit_code}</span>
+                          : <span className="text-blue-600">Дт {r.debit_code}</span>}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm text-blue-700">
+                        {parseFloat(r.debit_amount) > 0 ? fmt(r.debit_amount) : ""}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm text-orange-700">
+                        {parseFloat(r.credit_amount) > 0 ? fmt(r.credit_amount) : ""}
+                      </TableCell>
+                      <TableCell className={`text-right font-mono text-sm font-semibold ${r.running_balance >= 0 ? "text-gray-800" : "text-red-700"}`}>
+                        {fmt(r.running_balance)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {/* Closing balance row */}
+                  {data.rows?.length > 0 && (
+                    <TableRow className="bg-gray-100 border-t-2 border-gray-300">
+                      <TableCell colSpan={4} className="text-xs font-bold text-gray-700 py-2">Вихідний залишок</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-blue-800">{fmt(data.totalDebit)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-orange-800">{fmt(data.totalCredit)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-gray-900">{fmt(data.closingBalance)}</TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <div className="py-12 text-center text-gray-400">
+          <BookOpen className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <div className="text-sm">Оберіть рахунок і натисніть «Показати»</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ACC: CASH (КАСА ПКО/ВКО) ─────────────────────────────────────────────────
+function AccCashTab() {
+  const now = new Date();
+  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [from, setFrom]     = useState(format(firstOfMonth, "yyyy-MM-dd"));
+  const [to, setTo]         = useState(format(now, "yyyy-MM-dd"));
+  const [view, setView]     = useState<"orders" | "book">("orders");
+  const [showAdd, setShowAdd] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: contractors } = useAccLedger("contractors");
+  const { data: accounts }    = useAccLedger("accounts");
+
+  const ordersKey = `cash?from=${from}&to=${to}`;
+  const bookKey   = `cash/book?from=${from}&to=${to}`;
+  const { data: orders,  isLoading: ordersLoading } = useAccLedger(ordersKey);
+  const { data: book,    isLoading: bookLoading   } = useAccLedger(bookKey);
+
+  const emptyForm = { order_type: "pko", order_number: "", order_date: format(now, "yyyy-MM-dd"),
+    amount: "", description: "", contractor_id: "", corr_account: "", basis: "", cashier: "", person: "" };
+  const [form, setForm] = useState<any>(emptyForm);
+  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d: string) => d ? format(new Date(d), "dd.MM.yyyy") : "—";
+
+  const cashAccounts = ["301","311","361","631","371","681","372","92","93","70","71"];
+
+  const totalPko = (Array.isArray(orders) ? orders : []).filter((o: any) => o.order_type === "pko").reduce((s: number, o: any) => s + Number(o.amount), 0);
+  const totalVko = (Array.isArray(orders) ? orders : []).filter((o: any) => o.order_type === "vko").reduce((s: number, o: any) => s + Number(o.amount), 0);
+
+  const handleAdd = async () => {
+    if (!form.order_number || !form.order_date || !form.amount) {
+      toast({ title: "Заповніть обов'язкові поля", variant: "destructive" }); return;
+    }
+    setAddLoading(true);
+    try {
+      await accFetch("cash", { method: "POST", body: JSON.stringify({ ...form, amount: parseFloat(form.amount), contractor_id: form.contractor_id ? +form.contractor_id : null }) });
+      toast({ title: `${form.order_type === "pko" ? "ПКО" : "ВКО"} створено` });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      setShowAdd(false); setForm(emptyForm);
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setAddLoading(false); }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Видалити ордер? Пов'язану проводку теж буде видалено.")) return;
+    try {
+      await accFetch(`cash/${id}`, { method: "DELETE" });
+      toast({ title: "Ордер видалено" });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-gray-500">Період:</span>
+        <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36 h-8 text-xs" />
+        <span className="text-xs text-gray-400">—</span>
+        <Input type="date" value={to}   onChange={e => setTo(e.target.value)}   className="w-36 h-8 text-xs" />
+        <div className="flex border rounded-lg overflow-hidden">
+          {(["orders","book"] as const).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors ${view===v ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+              {v === "orders" ? "Ордери" : "Касова книга"}
+            </button>
+          ))}
+        </div>
+        <Button size="sm" className="ml-auto h-8 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={() => setShowAdd(true)}>
+          <Plus className="w-3.5 h-3.5" /> Новий ордер
+        </Button>
+      </div>
+
+      {/* KPI */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="border-green-200 bg-green-50">
+          <CardContent className="p-3 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-green-600 shrink-0" />
+            <div><div className="text-[10px] text-green-700">ПКО (прихід)</div><div className="font-bold text-green-700">{fmt(totalPko)}</div></div>
+          </CardContent>
+        </Card>
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-3 flex items-center gap-2">
+            <TrendingDown className="w-4 h-4 text-red-600 shrink-0" />
+            <div><div className="text-[10px] text-red-700">ВКО (видаток)</div><div className="font-bold text-red-700">{fmt(totalVko)}</div></div>
+          </CardContent>
+        </Card>
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="p-3 flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-blue-600 shrink-0" />
+            <div><div className="text-[10px] text-blue-700">Залишок (30)</div><div className="font-bold text-blue-700">{fmt(book?.closingBalance ?? 0)}</div></div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {view === "orders" && (
+        <Card>
+          <CardContent className="p-0">
+            {ordersLoading ? <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="w-20">Тип</TableHead>
+                    <TableHead className="w-24">№ Ордера</TableHead>
+                    <TableHead className="w-28">Дата</TableHead>
+                    <TableHead>Зміст / Підстава</TableHead>
+                    <TableHead>Контрагент</TableHead>
+                    <TableHead className="w-16 text-center">Кор. рах.</TableHead>
+                    <TableHead className="text-right w-36">Сума, грн</TableHead>
+                    <TableHead className="w-12" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(Array.isArray(orders) && orders.length === 0) ? (
+                    <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-400 text-sm">
+                      <Wallet className="w-8 h-8 mx-auto mb-2 opacity-30" />Ордерів за обраний період не знайдено
+                    </TableCell></TableRow>
+                  ) : (Array.isArray(orders) ? orders : []).map((o: any) => (
+                    <TableRow key={o.id} className="hover:bg-gray-50">
+                      <TableCell>
+                        <Badge className={o.order_type === "pko" ? "bg-green-100 text-green-700 border-green-300" : "bg-red-100 text-red-700 border-red-300"}>
+                          {o.order_type.toUpperCase()}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs font-medium">{o.order_number}</TableCell>
+                      <TableCell className="text-xs">{fmtDate(o.order_date)}</TableCell>
+                      <TableCell className="text-xs max-w-xs">
+                        <div className="truncate">{o.description || "—"}</div>
+                        {o.basis && <div className="text-[10px] text-gray-400 truncate">{o.basis}</div>}
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-600">{o.contractor_name || o.person || "—"}</TableCell>
+                      <TableCell className="text-center font-mono text-xs text-gray-500">{o.corr_account || "—"}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm font-bold ${o.order_type === "pko" ? "text-green-700" : "text-red-700"}`}>
+                        {o.order_type === "pko" ? "+" : "–"}{fmt(o.amount)}
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-gray-400 hover:text-red-600" onClick={() => handleDelete(o.id)}>
+                          <XCircle className="w-3.5 h-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {view === "book" && (
+        <Card>
+          <CardHeader className="pb-2 border-b"><CardTitle className="text-sm font-bold text-gray-800">Касова книга — залишки по днях</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            {bookLoading ? <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead>Дата</TableHead>
+                    <TableHead className="text-right">Залишок на поч. дня</TableHead>
+                    <TableHead className="text-right text-green-700">Надходження (ПКО)</TableHead>
+                    <TableHead className="text-right text-red-700">Видаток (ВКО)</TableHead>
+                    <TableHead className="text-right font-bold">Залишок на кін. дня</TableHead>
+                    <TableHead className="text-center w-16">К-ть</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="bg-blue-50 border-b-2 border-blue-200">
+                    <TableCell className="text-xs font-bold text-blue-800">Вхідний залишок ({format(new Date(from), "dd.MM.yyyy")})</TableCell>
+                    <TableCell colSpan={3} />
+                    <TableCell className="text-right font-mono font-bold text-blue-800">{fmt(book?.openingBalance)}</TableCell>
+                    <TableCell />
+                  </TableRow>
+                  {(!book?.rows || book.rows.length === 0) ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-6 text-gray-400 text-sm">Операцій за обраний період не знайдено</TableCell></TableRow>
+                  ) : book.rows.map((r: any, i: number) => (
+                    <TableRow key={i} className="hover:bg-gray-50">
+                      <TableCell className="text-xs font-medium">{fmtDate(r.order_date)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-gray-600">{fmt(r.opening_balance)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-green-700 font-semibold">+{fmt(r.income)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-red-700 font-semibold">–{fmt(r.expense)}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm font-bold ${r.closing_balance >= 0 ? "text-gray-900" : "text-red-700"}`}>
+                        {fmt(r.closing_balance)}
+                      </TableCell>
+                      <TableCell className="text-center text-xs text-gray-500">{r.docs_count}</TableCell>
+                    </TableRow>
+                  ))}
+                  {book?.rows?.length > 0 && (
+                    <TableRow className="bg-gray-100 border-t-2 border-gray-300 font-bold">
+                      <TableCell className="text-xs font-bold text-gray-800">РАЗОМ за період</TableCell>
+                      <TableCell />
+                      <TableCell className="text-right font-mono font-bold text-green-800">{fmt(book?.totalIncome)}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-red-800">{fmt(book?.totalExpense)}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-gray-900">{fmt(book?.closingBalance)}</TableCell>
+                      <TableCell />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add dialog */}
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Новий касовий ордер</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div className="flex gap-2">
+              {(["pko","vko"] as const).map(t => (
+                <button key={t} onClick={() => setForm((f: any) => ({ ...f, order_type: t }))}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-colors ${form.order_type === t
+                    ? (t === "pko" ? "border-green-500 bg-green-50 text-green-700" : "border-red-500 bg-red-50 text-red-700")
+                    : "border-gray-200 text-gray-500 hover:border-gray-300"}`}>
+                  {t === "pko" ? "ПКО — Прихідний" : "ВКО — Видатковий"}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">№ Ордера *</Label>
+                <Input value={form.order_number} onChange={e => setForm((f: any) => ({ ...f, order_number: e.target.value }))} className="mt-1" placeholder="ПКО-001" /></div>
+              <div><Label className="text-xs">Дата *</Label>
+                <Input type="date" value={form.order_date} onChange={e => setForm((f: any) => ({ ...f, order_date: e.target.value }))} className="mt-1" /></div>
+            </div>
+            <div><Label className="text-xs">Сума, грн *</Label>
+              <Input type="number" step="0.01" value={form.amount} onChange={e => setForm((f: any) => ({ ...f, amount: e.target.value }))} className="mt-1" placeholder="1000.00" /></div>
+            <div><Label className="text-xs">Кореспондуючий рахунок (Дт/Кт)</Label>
+              <Select value={form.corr_account} onValueChange={v => setForm((f: any) => ({ ...f, corr_account: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Оберіть рахунок..." /></SelectTrigger>
+                <SelectContent>
+                  {cashAccounts.map(c => {
+                    const acc = (Array.isArray(accounts) ? accounts : []).find((a: any) => a.code === c);
+                    return <SelectItem key={c} value={c}>{c} — {acc?.name ?? c}</SelectItem>;
+                  })}
+                </SelectContent>
+              </Select></div>
+            <div><Label className="text-xs">{form.order_type === "pko" ? "Прийнято від" : "Видано кому"}</Label>
+              <Input value={form.person} onChange={e => setForm((f: any) => ({ ...f, person: e.target.value }))} className="mt-1" placeholder="Прізвище І.О." /></div>
+            <div><Label className="text-xs">Підстава</Label>
+              <Input value={form.basis} onChange={e => setForm((f: any) => ({ ...f, basis: e.target.value }))} className="mt-1" placeholder="Оплата за послуги згідно рахунку №..." /></div>
+            <div><Label className="text-xs">Зміст операції</Label>
+              <Input value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} className="mt-1" /></div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => { setShowAdd(false); setForm(emptyForm); }}>Скасувати</Button>
+              <Button onClick={handleAdd} disabled={addLoading} className={form.order_type === "pko" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"}>
+                {addLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
+                Зберегти {form.order_type.toUpperCase()}
               </Button>
             </div>
           </div>
