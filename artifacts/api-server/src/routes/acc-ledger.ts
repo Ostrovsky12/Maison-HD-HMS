@@ -888,64 +888,154 @@ router.post("/month-close/undo", requireRole("admin", "owner"), async (req: any,
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ОСВ — Оборотно-сальдова відомість
+// ОСВ — Оборотно-сальдова відомість з вхідним сальдо
 router.get("/reports/trial-balance", async (req: any, res) => {
   const orgId = req.user.organizationId;
-  const { from, to } = req.query;
+  let { from, to, year, month } = req.query as Record<string, string>;
   await seedChart(orgId);
+  // Support year/month OR from/to
+  if (!from && year && month) {
+    const y = parseInt(year), m = parseInt(month);
+    from = `${y}-${String(m).padStart(2,"0")}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    to   = `${y}-${String(m).padStart(2,"0")}-${lastDay}`;
+  }
+  const fromDate = from ? from : null;
+  const toDate   = to   ? to   : null;
+
   const { rows } = await pool.query(
-    `WITH mv AS (
-       SELECT debit_account_id  as acc, SUM(amount) as d, 0::numeric as c
-       FROM acc_entries WHERE organization_id=$1
-         AND ($2::date IS NULL OR entry_date>=$2::date)
-         AND ($3::date IS NULL OR entry_date<=$3::date)
-       GROUP BY debit_account_id
-       UNION ALL
-       SELECT credit_account_id as acc, 0::numeric    as d, SUM(amount) as c
-       FROM acc_entries WHERE organization_id=$1
-         AND ($2::date IS NULL OR entry_date>=$2::date)
-         AND ($3::date IS NULL OR entry_date<=$3::date)
-       GROUP BY credit_account_id
+    `WITH
+     opening AS (
+       SELECT account_id, SUM(d) as d, SUM(c) as c FROM (
+         SELECT debit_account_id  AS account_id, SUM(amount) AS d, 0::numeric AS c
+           FROM acc_entries WHERE organization_id=$1
+             AND ($2::date IS NULL OR entry_date < $2::date)
+           GROUP BY debit_account_id
+         UNION ALL
+         SELECT credit_account_id AS account_id, 0::numeric AS d, SUM(amount) AS c
+           FROM acc_entries WHERE organization_id=$1
+             AND ($2::date IS NULL OR entry_date < $2::date)
+           GROUP BY credit_account_id
+       ) s GROUP BY account_id
      ),
-     tot AS (SELECT acc, SUM(d) as d, SUM(c) as c FROM mv GROUP BY acc)
+     period AS (
+       SELECT account_id, SUM(d) as d, SUM(c) as c FROM (
+         SELECT debit_account_id  AS account_id, SUM(amount) AS d, 0::numeric AS c
+           FROM acc_entries WHERE organization_id=$1
+             AND ($2::date IS NULL OR entry_date >= $2::date)
+             AND ($3::date IS NULL OR entry_date <= $3::date)
+           GROUP BY debit_account_id
+         UNION ALL
+         SELECT credit_account_id AS account_id, 0::numeric AS d, SUM(amount) AS c
+           FROM acc_entries WHERE organization_id=$1
+             AND ($2::date IS NULL OR entry_date >= $2::date)
+             AND ($3::date IS NULL OR entry_date <= $3::date)
+           GROUP BY credit_account_id
+       ) s GROUP BY account_id
+     )
      SELECT a.code, a.name, a.type, a.class,
-       COALESCE(t.d,0) as debit_turn,
-       COALESCE(t.c,0) as credit_turn,
-       COALESCE(t.d,0)-COALESCE(t.c,0) as balance
-     FROM acc_accounts a LEFT JOIN tot t ON t.acc=a.id
-     WHERE a.organization_id=$1 AND (t.d IS NOT NULL OR t.c IS NOT NULL)
+       COALESCE(o.d,0)-COALESCE(o.c,0)                                          AS opening_balance,
+       COALESCE(p.d,0)                                                           AS debit_turn,
+       COALESCE(p.c,0)                                                           AS credit_turn,
+       (COALESCE(o.d,0)-COALESCE(o.c,0)) + COALESCE(p.d,0) - COALESCE(p.c,0)  AS closing_balance
+     FROM acc_accounts a
+     LEFT JOIN opening o ON o.account_id = a.id
+     LEFT JOIN period  p ON p.account_id = a.id
+     WHERE a.organization_id=$1
+       AND (o.d IS NOT NULL OR o.c IS NOT NULL OR p.d IS NOT NULL OR p.c IS NOT NULL)
      ORDER BY a.code`,
-    [orgId, from ?? null, to ?? null],
+    [orgId, fromDate, toDate],
   );
-  res.json(rows);
+  res.json({ rows, from: fromDate, to: toDate });
 });
 
-// Звіт про фінансові результати
+// Звіт про фінансові результати (НП(С)БО 1, Форма 2)
 router.get("/reports/profit-loss", async (req: any, res) => {
   const orgId = req.user.organizationId;
-  const { year, month } = req.query;
-  const { rows } = await pool.query(
-    `SELECT a.code, a.name, a.type, a.class,
-       COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) -
-       COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) as net
-     FROM acc_accounts a
-     LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
-       AND e.organization_id=$1
-       AND ($2::int IS NULL OR EXTRACT(YEAR  FROM e.entry_date)=$2)
-       AND ($3::int IS NULL OR EXTRACT(MONTH FROM e.entry_date)=$3)
-     WHERE a.organization_id=$1 AND a.class >= 7
-     GROUP BY a.id,a.code,a.name,a.type,a.class
-     HAVING COALESCE(SUM(e.amount),0) > 0
-     ORDER BY a.code`,
-    [orgId, year ?? null, month ?? null],
-  );
-  const income   = rows.filter((r: any) => r.type === "income");
-  const expenses = rows.filter((r: any) => r.type === "expense");
-  const totalIn  = income.reduce((s: number, r: any)   => s + parseFloat(r.net), 0);
-  const totalEx  = expenses.reduce((s: number, r: any) => s + Math.abs(parseFloat(r.net)), 0);
-  res.json({ income, expenses, totalIncome: totalIn, totalExpenses: totalEx, netProfit: totalIn - totalEx });
+  const { year, month, from, to } = req.query as Record<string, string>;
+
+  // Build date conditions
+  let dateWhere = "";
+  const params: any[] = [orgId];
+  if (year && month) {
+    params.push(parseInt(year), parseInt(month));
+    dateWhere = `AND EXTRACT(YEAR FROM e.entry_date)=$${params.length-1} AND EXTRACT(MONTH FROM e.entry_date)=$${params.length}`;
+  } else if (from && to) {
+    params.push(from, to);
+    dateWhere = `AND e.entry_date>=$${params.length-1} AND e.entry_date<=$${params.length}`;
+  }
+
+  // Helper: net credit-side amount for given account code prefixes (income)
+  const netCredit = async (codes: string[]): Promise<number> => {
+    const likes = codes.map((c, i) => `a.code LIKE $${params.length + i + 1}`).join(" OR ");
+    const q = await pool.query(
+      `SELECT COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END)
+                      -SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END),0) as net
+       FROM acc_accounts a
+       LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+         AND e.organization_id=$1 ${dateWhere}
+       WHERE a.organization_id=$1 AND (${likes})`,
+      [...params, ...codes.map(c => c + "%")],
+    );
+    return parseFloat(q.rows[0]?.net ?? 0);
+  };
+  const netDebit = async (codes: string[]): Promise<number> => {
+    const likes = codes.map((c, i) => `a.code LIKE $${params.length + i + 1}`).join(" OR ");
+    const q = await pool.query(
+      `SELECT COALESCE(SUM(CASE WHEN e.debit_account_id =a.id THEN e.amount ELSE 0 END)
+                      -SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) as net
+       FROM acc_accounts a
+       LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+         AND e.organization_id=$1 ${dateWhere}
+       WHERE a.organization_id=$1 AND (${likes})`,
+      [...params, ...codes.map(c => c + "%")],
+    );
+    return parseFloat(q.rows[0]?.net ?? 0);
+  };
+
+  const [r2000, r2050, r2120, r2130, r2150, r2160, r2200, r2220, r2250, r2270, r2280, r2300] = await Promise.all([
+    netCredit(["701","702","703"]),   // Р2000 чистий дохід від реалізації
+    netDebit(["901","902","903"]),    // Р2050 собівартість
+    netCredit(["71"]),               // Р2120 інші операційні доходи
+    netDebit(["92"]),                // Р2130 адмінвитрати
+    netDebit(["93"]),                // Р2150 витрати на збут
+    netDebit(["94"]),                // Р2160 інші операційні витрати
+    netCredit(["72"]),               // Р2200 дохід від участі в капіталі
+    netCredit(["73"]),               // Р2220 інші фінансові доходи
+    netCredit(["74"]),               // Р2250 інші доходи
+    netDebit(["95"]),                // Р2270 фінансові витрати
+    netDebit(["97"]),                // Р2280 інші витрати
+    netDebit(["98"]),                // Р2300 податок на прибуток
+  ]);
+
+  const r2090 = r2000 - r2050;                         // валовий прибуток/збиток
+  const r2190 = r2090 + r2120 - r2130 - r2150 - r2160; // фін результат операційної
+  const r2290 = r2190 + r2200 + r2220 + r2250 - r2270 - r2280; // прибуток до оподаткування
+  const r2350 = r2290 - r2300;                          // чистий прибуток
+
+  const rows = [
+    { code: "2000", label: "Чистий дохід від реалізації продукції",      value: r2000,  section: "A" },
+    { code: "2050", label: "Собівартість реалізованої продукції",         value: -r2050, section: "A" },
+    { code: "2090", label: "Валовий прибуток (збиток)",                   value: r2090,  section: "A", bold: true },
+    { code: "2120", label: "Інші операційні доходи",                      value: r2120,  section: "B" },
+    { code: "2130", label: "Адміністративні витрати",                     value: -r2130, section: "B" },
+    { code: "2150", label: "Витрати на збут",                             value: -r2150, section: "B" },
+    { code: "2160", label: "Інші операційні витрати",                     value: -r2160, section: "B" },
+    { code: "2190", label: "Фінансовий результат від операційної діяльності", value: r2190, section: "B", bold: true },
+    { code: "2200", label: "Дохід від участі в капіталі",                 value: r2200,  section: "C" },
+    { code: "2220", label: "Інші фінансові доходи",                       value: r2220,  section: "C" },
+    { code: "2250", label: "Інші доходи",                                 value: r2250,  section: "C" },
+    { code: "2270", label: "Фінансові витрати",                           value: -r2270, section: "C" },
+    { code: "2280", label: "Інші витрати",                                value: -r2280, section: "C" },
+    { code: "2290", label: "Фінансовий результат до оподаткування",       value: r2290,  section: "C", bold: true },
+    { code: "2300", label: "Витрати (дохід) з податку на прибуток",       value: -r2300, section: "D" },
+    { code: "2350", label: "Чистий фінансовий результат",                 value: r2350,  section: "D", bold: true, final: true },
+  ];
+
+  res.json({ rows, period: { year, month, from, to }, netProfit: r2350 });
 });
 
-// Баланс
+// Баланс (Форма 1, НП(С)БО 1)
 router.get("/reports/balance-sheet", async (req: any, res) => {
   const orgId = req.user.organizationId;
   const { date } = req.query;
@@ -1308,6 +1398,493 @@ router.get("/dashboard", async (req: any, res) => {
     payables:    parseFloat(payQ.rows[0]?.amount ?? 0),
     entries_count: parseInt(entQ.rows[0]?.cnt ?? 0),
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TOURIST TAX — Туристичний збір (ст. 268 ПКУ)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureTouristTaxTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_tourist_tax (
+      id               SERIAL PRIMARY KEY,
+      organization_id  INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      record_date      DATE NOT NULL,
+      guest_name       VARCHAR(200),
+      check_in         DATE NOT NULL,
+      check_out        DATE NOT NULL,
+      nights           INT NOT NULL DEFAULT 1,
+      rate_per_night   NUMERIC(10,2) NOT NULL DEFAULT 0,
+      amount           NUMERIC(14,2) GENERATED ALWAYS AS (nights * rate_per_night) STORED,
+      is_paid          BOOLEAN NOT NULL DEFAULT false,
+      notes            TEXT,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_tourist_tax_org ON acc_tourist_tax(organization_id);
+    CREATE INDEX IF NOT EXISTS idx_acc_tourist_tax_date ON acc_tourist_tax(record_date);
+  `);
+}
+
+router.get("/tourist-tax", async (req: any, res) => {
+  await ensureTouristTaxTable();
+  const orgId = req.user.organizationId;
+  const { from, to, year, month } = req.query as Record<string, string>;
+  let where = "WHERE organization_id=$1";
+  const params: any[] = [orgId];
+  if (year && month) {
+    params.push(parseInt(year), parseInt(month));
+    where += ` AND EXTRACT(YEAR FROM record_date)=$${params.length-1} AND EXTRACT(MONTH FROM record_date)=$${params.length}`;
+  } else if (from && to) {
+    params.push(from, to);
+    where += ` AND record_date>=$${params.length-1} AND record_date<=$${params.length}`;
+  }
+  const { rows } = await pool.query(`SELECT * FROM acc_tourist_tax ${where} ORDER BY record_date DESC, id DESC`, params);
+  res.json(rows);
+});
+
+router.post("/tourist-tax", async (req: any, res) => {
+  await ensureTouristTaxTable();
+  const orgId = req.user.organizationId;
+  const { record_date, guest_name, check_in, check_out, nights, rate_per_night, notes } = req.body;
+  if (!record_date || !check_in || !check_out || !nights || rate_per_night == null)
+    return res.status(400).json({ error: "Missing required fields" });
+  const { rows } = await pool.query(
+    `INSERT INTO acc_tourist_tax (organization_id, record_date, guest_name, check_in, check_out, nights, rate_per_night, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [orgId, record_date, guest_name || null, check_in, check_out, parseInt(nights), parseFloat(rate_per_night), notes || null],
+  );
+  res.json(rows[0]);
+});
+
+router.patch("/tourist-tax/:id", async (req: any, res) => {
+  const orgId = req.user.organizationId;
+  const { id } = req.params;
+  const { is_paid, rate_per_night, nights, notes, guest_name, check_in, check_out } = req.body;
+  await pool.query(
+    `UPDATE acc_tourist_tax SET
+       is_paid=$3, rate_per_night=COALESCE($4,rate_per_night), nights=COALESCE($5,nights),
+       notes=COALESCE($6,notes), guest_name=COALESCE($7,guest_name),
+       check_in=COALESCE($8::date,check_in), check_out=COALESCE($9::date,check_out)
+     WHERE id=$1 AND organization_id=$2`,
+    [id, orgId, is_paid ?? false, rate_per_night ?? null, nights ?? null, notes ?? null, guest_name ?? null, check_in ?? null, check_out ?? null],
+  );
+  res.json({ ok: true });
+});
+
+router.delete("/tourist-tax/:id", requireRole("admin","owner"), async (req: any, res) => {
+  await pool.query(`DELETE FROM acc_tourist_tax WHERE id=$1 AND organization_id=$2`, [req.params.id, req.user.organizationId]);
+  res.json({ ok: true });
+});
+
+// Monthly report: nights, guests, total collected
+router.get("/tourist-tax/report", async (req: any, res) => {
+  await ensureTouristTaxTable();
+  const orgId = req.user.organizationId;
+  const { year } = req.query as Record<string, string>;
+  const y = parseInt(year ?? new Date().getFullYear().toString());
+  const { rows } = await pool.query(
+    `SELECT
+       EXTRACT(MONTH FROM record_date)::int AS month,
+       COUNT(*) AS guests_count,
+       SUM(nights) AS total_nights,
+       SUM(amount) AS total_amount,
+       SUM(CASE WHEN is_paid THEN amount ELSE 0 END) AS paid_amount,
+       SUM(CASE WHEN NOT is_paid THEN amount ELSE 0 END) AS unpaid_amount
+     FROM acc_tourist_tax
+     WHERE organization_id=$1 AND EXTRACT(YEAR FROM record_date)=$2
+     GROUP BY EXTRACT(MONTH FROM record_date)
+     ORDER BY month`,
+    [orgId, y],
+  );
+  const totalYear = rows.reduce((s: any, r: any) => ({
+    guests: s.guests + parseInt(r.guests_count),
+    nights: s.nights + parseInt(r.total_nights),
+    amount: s.amount + parseFloat(r.total_amount),
+  }), { guests: 0, nights: 0, amount: 0 });
+  res.json({ year: y, months: rows, total: totalYear });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYROLL — Зарплата (нарахування, ПДФО 18%, ВЗ 1.5%, ЄСВ 22%)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensurePayrollTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_payroll_employees (
+      id              SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      full_name       VARCHAR(200) NOT NULL,
+      position        VARCHAR(200),
+      ipn             VARCHAR(20),
+      base_salary     NUMERIC(14,2) NOT NULL DEFAULT 0,
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      hire_date       DATE,
+      notes           TEXT,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_payroll_emp_org ON acc_payroll_employees(organization_id);
+
+    CREATE TABLE IF NOT EXISTS acc_payroll_accruals (
+      id              SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      employee_id     INT NOT NULL REFERENCES acc_payroll_employees(id) ON DELETE CASCADE,
+      period_year     INT NOT NULL,
+      period_month    INT NOT NULL,
+      accrual_type    VARCHAR(30) NOT NULL DEFAULT 'salary',
+      gross_amount    NUMERIC(14,2) NOT NULL DEFAULT 0,
+      pdfo_amount     NUMERIC(14,2) GENERATED ALWAYS AS (ROUND(gross_amount * 0.18, 2)) STORED,
+      vz_amount       NUMERIC(14,2) GENERATED ALWAYS AS (ROUND(gross_amount * 0.015, 2)) STORED,
+      esv_amount      NUMERIC(14,2) GENERATED ALWAYS AS (ROUND(gross_amount * 0.22, 2)) STORED,
+      net_amount      NUMERIC(14,2) GENERATED ALWAYS AS (ROUND(gross_amount * (1 - 0.18 - 0.015), 2)) STORED,
+      is_posted       BOOLEAN NOT NULL DEFAULT false,
+      notes           TEXT,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(employee_id, period_year, period_month, accrual_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_payroll_acc_org ON acc_payroll_accruals(organization_id);
+  `);
+}
+
+router.get("/payroll/employees", async (req: any, res) => {
+  await ensurePayrollTables();
+  const { rows } = await pool.query(
+    `SELECT * FROM acc_payroll_employees WHERE organization_id=$1 ORDER BY full_name`,
+    [req.user.organizationId],
+  );
+  res.json(rows);
+});
+
+router.post("/payroll/employees", async (req: any, res) => {
+  await ensurePayrollTables();
+  const orgId = req.user.organizationId;
+  const { full_name, position, ipn, base_salary, hire_date, notes } = req.body;
+  if (!full_name) return res.status(400).json({ error: "full_name required" });
+  const { rows } = await pool.query(
+    `INSERT INTO acc_payroll_employees (organization_id,full_name,position,ipn,base_salary,hire_date,notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [orgId, full_name, position||null, ipn||null, parseFloat(base_salary)||0, hire_date||null, notes||null],
+  );
+  res.json(rows[0]);
+});
+
+router.patch("/payroll/employees/:id", async (req: any, res) => {
+  const { full_name, position, ipn, base_salary, hire_date, is_active, notes } = req.body;
+  await pool.query(
+    `UPDATE acc_payroll_employees SET
+       full_name=COALESCE($3,full_name), position=COALESCE($4,position), ipn=COALESCE($5,ipn),
+       base_salary=COALESCE($6,base_salary), hire_date=COALESCE($7::date,hire_date),
+       is_active=COALESCE($8,is_active), notes=COALESCE($9,notes)
+     WHERE id=$1 AND organization_id=$2`,
+    [req.params.id, req.user.organizationId, full_name||null, position||null, ipn||null,
+     base_salary ? parseFloat(base_salary) : null, hire_date||null, is_active??null, notes||null],
+  );
+  res.json({ ok: true });
+});
+
+router.delete("/payroll/employees/:id", requireRole("admin","owner"), async (req: any, res) => {
+  await pool.query(`DELETE FROM acc_payroll_employees WHERE id=$1 AND organization_id=$2`, [req.params.id, req.user.organizationId]);
+  res.json({ ok: true });
+});
+
+router.get("/payroll/accruals", async (req: any, res) => {
+  await ensurePayrollTables();
+  const orgId = req.user.organizationId;
+  const { year, month } = req.query as Record<string, string>;
+  const params: any[] = [orgId];
+  let where = "WHERE a.organization_id=$1";
+  if (year)  { params.push(parseInt(year));  where += ` AND a.period_year=$${params.length}`; }
+  if (month) { params.push(parseInt(month)); where += ` AND a.period_month=$${params.length}`; }
+  const { rows } = await pool.query(
+    `SELECT a.*, e.full_name, e.position, e.ipn
+     FROM acc_payroll_accruals a JOIN acc_payroll_employees e ON e.id=a.employee_id
+     ${where} ORDER BY e.full_name, a.period_year, a.period_month`,
+    params,
+  );
+  res.json(rows);
+});
+
+router.post("/payroll/accruals", async (req: any, res) => {
+  await ensurePayrollTables();
+  const orgId = req.user.organizationId;
+  const { employee_id, period_year, period_month, accrual_type, gross_amount, notes } = req.body;
+  if (!employee_id || !period_year || !period_month || !gross_amount)
+    return res.status(400).json({ error: "Missing required fields" });
+  const { rows } = await pool.query(
+    `INSERT INTO acc_payroll_accruals (organization_id,employee_id,period_year,period_month,accrual_type,gross_amount,notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (employee_id,period_year,period_month,accrual_type) DO UPDATE
+       SET gross_amount=$6, notes=COALESCE($7,acc_payroll_accruals.notes)
+     RETURNING *`,
+    [orgId, parseInt(employee_id), parseInt(period_year), parseInt(period_month),
+     accrual_type||"salary", parseFloat(gross_amount), notes||null],
+  );
+  res.json(rows[0]);
+});
+
+// Відомість нарахування зарплати за місяць
+router.get("/payroll/sheet", async (req: any, res) => {
+  await ensurePayrollTables();
+  const orgId = req.user.organizationId;
+  const { year, month } = req.query as Record<string, string>;
+  const y = parseInt(year ?? new Date().getFullYear().toString());
+  const m = parseInt(month ?? (new Date().getMonth() + 1).toString());
+  const { rows } = await pool.query(
+    `SELECT e.id as employee_id, e.full_name, e.position, e.ipn,
+       COALESCE(SUM(a.gross_amount),0) as gross_total,
+       COALESCE(SUM(a.pdfo_amount),0)  as pdfo_total,
+       COALESCE(SUM(a.vz_amount),0)    as vz_total,
+       COALESCE(SUM(a.esv_amount),0)   as esv_total,
+       COALESCE(SUM(a.net_amount),0)   as net_total,
+       BOOL_OR(a.is_posted) as is_posted
+     FROM acc_payroll_employees e
+     LEFT JOIN acc_payroll_accruals a ON a.employee_id=e.id
+       AND a.period_year=$2 AND a.period_month=$3 AND a.organization_id=$1
+     WHERE e.organization_id=$1 AND e.is_active=true
+     GROUP BY e.id, e.full_name, e.position, e.ipn
+     ORDER BY e.full_name`,
+    [orgId, y, m],
+  );
+  const totals = rows.reduce((s: any, r: any) => ({
+    gross: s.gross + parseFloat(r.gross_total),
+    pdfo:  s.pdfo  + parseFloat(r.pdfo_total),
+    vz:    s.vz    + parseFloat(r.vz_total),
+    esv:   s.esv   + parseFloat(r.esv_total),
+    net:   s.net   + parseFloat(r.net_total),
+  }), { gross: 0, pdfo: 0, vz: 0, esv: 0, net: 0 });
+  res.json({ period: { year: y, month: m }, employees: rows, totals });
+});
+
+// Провести зарплату (створити проводки 661/641/642/651)
+router.post("/payroll/post", requireRole("admin","owner"), async (req: any, res) => {
+  await ensurePayrollTables();
+  const orgId = req.user.organizationId;
+  const { year, month } = req.body;
+  const y = parseInt(year), m = parseInt(month);
+  if (!y || !m) return res.status(400).json({ error: "year and month required" });
+
+  const sheetQ = await pool.query(
+    `SELECT COALESCE(SUM(gross_amount),0) as gross, COALESCE(SUM(pdfo_amount),0) as pdfo,
+            COALESCE(SUM(vz_amount),0) as vz, COALESCE(SUM(esv_amount),0) as esv
+     FROM acc_payroll_accruals WHERE organization_id=$1 AND period_year=$2 AND period_month=$3 AND NOT is_posted`,
+    [orgId, y, m],
+  );
+  const sheet = sheetQ.rows[0];
+  if (parseFloat(sheet.gross) === 0) return res.status(400).json({ error: "Немає непроведених нарахувань" });
+
+  // Ensure accounts exist
+  await seedChart(orgId);
+  const getAcc = async (code: string) => {
+    const q = await pool.query(`SELECT id FROM acc_accounts WHERE organization_id=$1 AND code=$2`, [orgId, code]);
+    return q.rows[0]?.id;
+  };
+  const [acc92, acc661, acc641, acc642, acc651, acc311] = await Promise.all([
+    getAcc("92"), getAcc("661"), getAcc("641"), getAcc("642"), getAcc("651"), getAcc("311"),
+  ]);
+
+  const period = `${y}-${String(m).padStart(2,"0")}`;
+  const entries: any[] = [];
+
+  if (parseFloat(sheet.gross) > 0 && acc92 && acc661) {
+    entries.push({ dt: acc92, ct: acc661, amount: parseFloat(sheet.gross), desc: `[ЗАРПЛАТА ${period}] Нарахування 92→661` });
+  }
+  if (parseFloat(sheet.pdfo) > 0 && acc661 && acc641) {
+    entries.push({ dt: acc661, ct: acc641, amount: parseFloat(sheet.pdfo), desc: `[ЗАРПЛАТА ${period}] ПДФО 18% 661→641` });
+  }
+  if (parseFloat(sheet.vz) > 0 && acc661 && acc642) {
+    entries.push({ dt: acc661, ct: acc642, amount: parseFloat(sheet.vz), desc: `[ЗАРПЛАТА ${period}] ВЗ 1.5% 661→642` });
+  }
+  if (parseFloat(sheet.esv) > 0 && acc92 && acc651) {
+    entries.push({ dt: acc92, ct: acc651, amount: parseFloat(sheet.esv), desc: `[ЗАРПЛАТА ${period}] ЄСВ 22% 92→651` });
+  }
+
+  const now = new Date();
+  const entryDate = new Date(y, m - 1, now.getMonth() + 1 === m && now.getFullYear() === y ? now.getDate() : new Date(y, m, 0).getDate());
+
+  for (const e of entries) {
+    await pool.query(
+      `INSERT INTO acc_entries (organization_id,entry_date,debit_account_id,credit_account_id,amount,description,is_manual,created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,true,$7)`,
+      [orgId, entryDate.toISOString().split("T")[0], e.dt, e.ct, e.amount, e.desc, req.user.id],
+    );
+  }
+  await pool.query(
+    `UPDATE acc_payroll_accruals SET is_posted=true WHERE organization_id=$1 AND period_year=$2 AND period_month=$3`,
+    [orgId, y, m],
+  );
+  res.json({ ok: true, entriesCreated: entries.length, gross: parseFloat(sheet.gross), esv: parseFloat(sheet.esv) });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIXED ASSETS — Основні засоби (рах. 10x, амортизація 131)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureFixedAssetsTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_fixed_assets (
+      id                  SERIAL PRIMARY KEY,
+      organization_id     INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      name                VARCHAR(300) NOT NULL,
+      inventory_number    VARCHAR(50),
+      account_code        VARCHAR(10) NOT NULL DEFAULT '104',
+      initial_cost        NUMERIC(16,2) NOT NULL DEFAULT 0,
+      liquidation_value   NUMERIC(16,2) NOT NULL DEFAULT 0,
+      useful_life_months  INT NOT NULL DEFAULT 60,
+      depreciation_method VARCHAR(20) NOT NULL DEFAULT 'straight-line',
+      start_date          DATE NOT NULL,
+      category            VARCHAR(100),
+      notes               TEXT,
+      is_disposed         BOOLEAN NOT NULL DEFAULT false,
+      disposed_at         DATE,
+      created_at          TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_fa_org ON acc_fixed_assets(organization_id);
+
+    CREATE TABLE IF NOT EXISTS acc_asset_depreciation (
+      id              SERIAL PRIMARY KEY,
+      asset_id        INT NOT NULL REFERENCES acc_fixed_assets(id) ON DELETE CASCADE,
+      organization_id INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      period_year     INT NOT NULL,
+      period_month    INT NOT NULL,
+      amount          NUMERIC(14,2) NOT NULL DEFAULT 0,
+      accumulated     NUMERIC(14,2) NOT NULL DEFAULT 0,
+      entry_id        INT,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(asset_id, period_year, period_month)
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_depr_org ON acc_asset_depreciation(organization_id);
+  `);
+}
+
+router.get("/fixed-assets", async (req: any, res) => {
+  await ensureFixedAssetsTables();
+  const orgId = req.user.organizationId;
+  const { include_disposed } = req.query;
+  const { rows } = await pool.query(
+    `SELECT fa.*,
+       COALESCE((SELECT SUM(d.amount) FROM acc_asset_depreciation d WHERE d.asset_id=fa.id), 0) AS accumulated_depreciation,
+       fa.initial_cost - COALESCE((SELECT SUM(d.amount) FROM acc_asset_depreciation d WHERE d.asset_id=fa.id), 0) AS residual_value
+     FROM acc_fixed_assets fa
+     WHERE fa.organization_id=$1 ${include_disposed === "true" ? "" : "AND fa.is_disposed=false"}
+     ORDER BY fa.account_code, fa.name`,
+    [orgId],
+  );
+  res.json(rows);
+});
+
+router.post("/fixed-assets", async (req: any, res) => {
+  await ensureFixedAssetsTables();
+  const orgId = req.user.organizationId;
+  const { name, inventory_number, account_code, initial_cost, liquidation_value, useful_life_months, depreciation_method, start_date, category, notes } = req.body;
+  if (!name || !initial_cost || !start_date) return res.status(400).json({ error: "name, initial_cost, start_date required" });
+  const { rows } = await pool.query(
+    `INSERT INTO acc_fixed_assets (organization_id,name,inventory_number,account_code,initial_cost,liquidation_value,useful_life_months,depreciation_method,start_date,category,notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [orgId, name, inventory_number||null, account_code||"104", parseFloat(initial_cost), parseFloat(liquidation_value)||0,
+     parseInt(useful_life_months)||60, depreciation_method||"straight-line", start_date, category||null, notes||null],
+  );
+  res.json(rows[0]);
+});
+
+router.patch("/fixed-assets/:id", async (req: any, res) => {
+  const { name, inventory_number, account_code, useful_life_months, depreciation_method, category, notes, is_disposed, disposed_at } = req.body;
+  await pool.query(
+    `UPDATE acc_fixed_assets SET
+       name=COALESCE($3,name), inventory_number=COALESCE($4,inventory_number),
+       account_code=COALESCE($5,account_code), useful_life_months=COALESCE($6,useful_life_months),
+       depreciation_method=COALESCE($7,depreciation_method), category=COALESCE($8,category),
+       notes=COALESCE($9,notes), is_disposed=COALESCE($10,is_disposed),
+       disposed_at=COALESCE($11::date,disposed_at)
+     WHERE id=$1 AND organization_id=$2`,
+    [req.params.id, req.user.organizationId, name||null, inventory_number||null, account_code||null,
+     useful_life_months ? parseInt(useful_life_months) : null, depreciation_method||null, category||null,
+     notes||null, is_disposed??null, disposed_at||null],
+  );
+  res.json({ ok: true });
+});
+
+router.delete("/fixed-assets/:id", requireRole("admin","owner"), async (req: any, res) => {
+  await pool.query(`DELETE FROM acc_fixed_assets WHERE id=$1 AND organization_id=$2`, [req.params.id, req.user.organizationId]);
+  res.json({ ok: true });
+});
+
+// Нарахування амортизації за місяць для одного ОЗ
+router.post("/fixed-assets/:id/depreciate", requireRole("admin","owner"), async (req: any, res) => {
+  await ensureFixedAssetsTables();
+  const orgId = req.user.organizationId;
+  const assetId = parseInt(req.params.id);
+  const { year, month } = req.body;
+  const y = parseInt(year), m = parseInt(month);
+  if (!y || !m) return res.status(400).json({ error: "year and month required" });
+
+  const assetQ = await pool.query(`SELECT * FROM acc_fixed_assets WHERE id=$1 AND organization_id=$2`, [assetId, orgId]);
+  if (!assetQ.rows.length) return res.status(404).json({ error: "Asset not found" });
+  const asset = assetQ.rows[0];
+
+  const accQ = await pool.query(`SELECT SUM(amount) as total FROM acc_asset_depreciation WHERE asset_id=$1`, [assetId]);
+  const accumulated = parseFloat(accQ.rows[0]?.total ?? 0);
+  const depreciableBase = parseFloat(asset.initial_cost) - parseFloat(asset.liquidation_value);
+  const monthlyAmount = Math.max(0, Math.min(
+    parseFloat((depreciableBase / asset.useful_life_months).toFixed(2)),
+    depreciableBase - accumulated,
+  ));
+
+  if (monthlyAmount <= 0) return res.status(400).json({ error: "Амортизацію вже нараховано повністю або актив досяг ліквідаційної вартості" });
+
+  // Create accounting entry: Дт 92 → Кт 131
+  await seedChart(orgId);
+  const [acc92Q, acc131Q] = await Promise.all([
+    pool.query(`SELECT id FROM acc_accounts WHERE organization_id=$1 AND code='92'`, [orgId]),
+    pool.query(`SELECT id FROM acc_accounts WHERE organization_id=$1 AND code='131'`, [orgId]),
+  ]);
+  const acc92  = acc92Q.rows[0]?.id;
+  const acc131 = acc131Q.rows[0]?.id;
+  let entryId: number | null = null;
+
+  if (acc92 && acc131) {
+    const entryDate = `${y}-${String(m).padStart(2,"0")}-${new Date(y, m, 0).getDate()}`;
+    const eQ = await pool.query(
+      `INSERT INTO acc_entries (organization_id,entry_date,debit_account_id,credit_account_id,amount,description,is_manual,created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,true,$7) RETURNING id`,
+      [orgId, entryDate, acc92, acc131, monthlyAmount, `[АМОРТИЗАЦІЯ ${y}-${String(m).padStart(2,"0")}] ${asset.name}`, req.user.id],
+    );
+    entryId = eQ.rows[0].id;
+  }
+
+  const { rows } = await pool.query(
+    `INSERT INTO acc_asset_depreciation (asset_id,organization_id,period_year,period_month,amount,accumulated,entry_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (asset_id,period_year,period_month) DO UPDATE
+       SET amount=$5, accumulated=$6, entry_id=$7
+     RETURNING *`,
+    [assetId, orgId, y, m, monthlyAmount, accumulated + monthlyAmount, entryId],
+  );
+  res.json({ ...rows[0], asset_name: asset.name });
+});
+
+// Відомість по ОЗ (усі активи з залишковою вартістю)
+router.get("/fixed-assets/report", async (req: any, res) => {
+  await ensureFixedAssetsTables();
+  const orgId = req.user.organizationId;
+  const { date } = req.query as Record<string, string>;
+  const { rows } = await pool.query(
+    `SELECT fa.*,
+       COALESCE((SELECT SUM(d.amount) FROM acc_asset_depreciation d WHERE d.asset_id=fa.id
+                 ${date ? "AND (d.period_year*100+d.period_month) <= (EXTRACT(YEAR FROM $2::date)*100+EXTRACT(MONTH FROM $2::date))::int" : ""}
+                ), 0) AS accumulated_depreciation,
+       fa.initial_cost - COALESCE((SELECT SUM(d.amount) FROM acc_asset_depreciation d WHERE d.asset_id=fa.id
+                 ${date ? "AND (d.period_year*100+d.period_month) <= (EXTRACT(YEAR FROM $2::date)*100+EXTRACT(MONTH FROM $2::date))::int" : ""}
+                ), 0) AS residual_value
+     FROM acc_fixed_assets fa
+     WHERE fa.organization_id=$1
+     ORDER BY fa.account_code, fa.name`,
+    date ? [orgId, date] : [orgId],
+  );
+  const totals = rows.reduce((s: any, r: any) => ({
+    initial_cost:             s.initial_cost             + parseFloat(r.initial_cost),
+    accumulated_depreciation: s.accumulated_depreciation + parseFloat(r.accumulated_depreciation),
+    residual_value:           s.residual_value           + parseFloat(r.residual_value),
+  }), { initial_cost: 0, accumulated_depreciation: 0, residual_value: 0 });
+  res.json({ rows, totals, as_of: date ?? null });
 });
 
 export default router;

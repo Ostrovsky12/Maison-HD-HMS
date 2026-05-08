@@ -27,7 +27,8 @@ import {
   FileClock, FileWarning,
   Archive, Cpu, PenSquare, FolderOpen, Code2, ExternalLink,
   ShieldCheck, Shuffle, UserPlus, BookOpen, BadgeCheck, Server,
-  TrendingUp, TrendingDown, Wallet, PieChart,
+  TrendingUp, TrendingDown, Wallet, PieChart, MapPin,
+  UserCheck, Briefcase, HardDrive, Calculator, AlertTriangle,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
@@ -155,7 +156,8 @@ type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrati
          | "tax-invoices" | "bas" | "signing" | "archive" | "invoices"
          | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors"
          | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync"
-         | "acc-monthclose" | "acc-card" | "acc-cash";
+         | "acc-monthclose" | "acc-card" | "acc-cash"
+         | "acc-tourist" | "acc-payroll" | "acc-assets";
 
 export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -201,6 +203,9 @@ export default function AccountingPage() {
             { id: "acc-monthclose", label: "Закриття місяця",    icon: CheckCircle2 },
             { id: "acc-card",       label: "Картка рахунку",     icon: BookOpen },
             { id: "acc-cash",       label: "Каса ПКО/ВКО",      icon: Wallet },
+            { id: "acc-tourist",    label: "Тур. збір",          icon: MapPin },
+            { id: "acc-payroll",    label: "Зарплата",           icon: Users },
+            { id: "acc-assets",     label: "Основні засоби",     icon: Building2 },
           ] as { id: Tab; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
@@ -235,6 +240,9 @@ export default function AccountingPage() {
         {tab === "acc-monthclose" && <AccMonthCloseTab />}
         {tab === "acc-card"       && <AccAccountCardTab />}
         {tab === "acc-cash"       && <AccCashTab />}
+        {tab === "acc-tourist"    && <AccTouristTaxTab />}
+        {tab === "acc-payroll"    && <AccPayrollTab />}
+        {tab === "acc-assets"     && <AccFixedAssetsTab />}
       </div>
     </AppLayout>
   );
@@ -2950,47 +2958,52 @@ function AccReportsTab() {
   const [year, setYear]   = useState(String(now.getFullYear()));
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [asDate, setAsDate] = useState(format(now, "yyyy-MM-dd"));
+  const qc = useQueryClient();
 
   const osvPath  = `reports/trial-balance?year=${year}&month=${month}`;
   const pnlPath  = `reports/profit-loss?year=${year}&month=${month}`;
   const balPath  = `reports/balance-sheet?date=${asDate}`;
 
-  const { data: osvData,  isLoading: osvLoading  } = useQuery({ queryKey: ["acc-ledger", osvPath],  queryFn: () => accFetch(osvPath),  staleTime: 30_000, enabled: reportType === "osv"     });
-  const { data: pnlData,  isLoading: pnlLoading  } = useQuery({ queryKey: ["acc-ledger", pnlPath],  queryFn: () => accFetch(pnlPath),  staleTime: 30_000, enabled: reportType === "pnl"     });
-  const { data: balData,  isLoading: balLoading  } = useQuery({ queryKey: ["acc-ledger", balPath],  queryFn: () => accFetch(balPath),  staleTime: 30_000, enabled: reportType === "balance" });
+  const { data: osvRaw, isLoading: osvLoading } = useQuery({ queryKey: ["acc-ledger", osvPath], queryFn: () => accFetch(osvPath), staleTime: 30_000, enabled: reportType === "osv" });
+  const { data: pnlData, isLoading: pnlLoading } = useQuery({ queryKey: ["acc-ledger", pnlPath], queryFn: () => accFetch(pnlPath), staleTime: 30_000, enabled: reportType === "pnl" });
+  const { data: balData, isLoading: balLoading } = useQuery({ queryKey: ["acc-ledger", balPath], queryFn: () => accFetch(balPath), staleTime: 30_000, enabled: reportType === "balance" });
 
+  const osvData: any[] = osvRaw?.rows ?? (Array.isArray(osvRaw) ? osvRaw : []);
   const loading = osvLoading || pnlLoading || balLoading;
   const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const months = [
+  const MONTHS = [
     ["1","Січень"],["2","Лютий"],["3","Березень"],["4","Квітень"],
     ["5","Травень"],["6","Червень"],["7","Липень"],["8","Серпень"],
     ["9","Вересень"],["10","Жовтень"],["11","Листопад"],["12","Грудень"],
   ];
   const years = Array.from({ length: 5 }, (_, i) => String(now.getFullYear() - i));
 
+  const PNL_SECTIONS: Record<string, string> = { A: "А. Доходи від реалізації", B: "Б. Операційна діяльність", C: "В. Інша діяльність", D: "Г. Результат" };
+
   return (
     <div className="space-y-4">
-      {/* Report type switcher */}
+      {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        {([
-          { id: "osv",     label: "Оборотно-сальдова (ОСВ)" },
-          { id: "pnl",     label: "Фінансові результати (P&L)" },
-          { id: "balance", label: "Баланс" },
-        ] as const).map(({ id, label }) => (
-          <Button key={id} variant={reportType === id ? "default" : "outline"} size="sm"
-            className={reportType === id ? "bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" : ""}
-            onClick={() => setReportType(id)}>
-            {label}
-          </Button>
-        ))}
+        <div className="flex border rounded-lg overflow-hidden">
+          {([
+            { id: "osv",     label: "ОСВ" },
+            { id: "pnl",     label: "Форма 2 (Ф2)" },
+            { id: "balance", label: "Баланс (Ф1)" },
+          ] as const).map(({ id, label }) => (
+            <button key={id} onClick={() => setReportType(id)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${reportType === id ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           {reportType !== "balance" ? (
             <>
               <Select value={month} onValueChange={setMonth}>
                 <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>{months.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+                <SelectContent>{MONTHS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
               </Select>
               <Select value={year} onValueChange={setYear}>
                 <SelectTrigger className="w-24 h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -3000,14 +3013,9 @@ function AccReportsTab() {
           ) : (
             <Input type="date" value={asDate} onChange={e => setAsDate(e.target.value)} className="w-40 h-8 text-xs" />
           )}
-          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => {
-            // force refetch by invalidating
-            if (reportType === "osv") window.dispatchEvent(new CustomEvent("refetch-osv"));
-          }}>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5"
+            onClick={() => qc.invalidateQueries({ queryKey: ["acc-ledger", reportType === "osv" ? osvPath : reportType === "pnl" ? pnlPath : balPath] })}>
             <RefreshCw className="w-3.5 h-3.5" /> Оновити
-          </Button>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5">
-            <Download className="w-3.5 h-3.5" /> XLSX
           </Button>
         </div>
       </div>
@@ -3016,59 +3024,74 @@ function AccReportsTab() {
         <div className="py-16 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div>
       ) : (
         <>
-          {/* ОСВ */}
+          {/* ═══ ОСВ ═══ */}
           {reportType === "osv" && (
             <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
+              <CardHeader className="pb-2 border-b">
+                <CardTitle className="text-sm font-bold text-gray-800 flex items-center gap-2">
                   <Scale className="w-4 h-4 text-blue-600" />
-                  Оборотно-сальдова відомість — {months.find(m => m[0] === month)?.[1]} {year}
+                  Оборотно-сальдова відомість — {MONTHS.find(m => m[0] === month)?.[1]} {year}
+                  {osvData.length > 0 && <Badge className="ml-2 text-[10px]">{osvData.length} рахунків</Badge>}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
-                  <TableHeader className="bg-gray-50">
+                  <TableHeader className="bg-gray-50 text-[11px]">
                     <TableRow>
-                      <TableHead className="w-20">Рахунок</TableHead>
+                      <TableHead className="w-20 text-center">Рахунок</TableHead>
                       <TableHead>Назва рахунку</TableHead>
-                      <TableHead className="text-right w-32">Сальдо поч. Дт</TableHead>
-                      <TableHead className="text-right w-32">Сальдо поч. Кт</TableHead>
-                      <TableHead className="text-right w-32 text-blue-600">Оборот Дт</TableHead>
-                      <TableHead className="text-right w-32 text-orange-600">Оборот Кт</TableHead>
-                      <TableHead className="text-right w-32">Сальдо кін. Дт</TableHead>
-                      <TableHead className="text-right w-32">Сальдо кін. Кт</TableHead>
+                      <TableHead className="text-right w-28 text-gray-600">Сальдо поч. Дт</TableHead>
+                      <TableHead className="text-right w-28 text-gray-600">Сальдо поч. Кт</TableHead>
+                      <TableHead className="text-right w-28 text-blue-700">Оборот Дт</TableHead>
+                      <TableHead className="text-right w-28 text-orange-700">Оборот Кт</TableHead>
+                      <TableHead className="text-right w-28 text-gray-800">Сальдо кін. Дт</TableHead>
+                      <TableHead className="text-right w-28 text-gray-800">Сальдо кін. Кт</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(Array.isArray(osvData) ? osvData : []).length === 0 ? (
-                      <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-400 text-sm">Проводок за обраний період не знайдено</TableCell></TableRow>
-                    ) : (Array.isArray(osvData) ? osvData : []).map((r: any, i: number) => {
-                      const bal = Number(r.balance || 0);
+                    {osvData.length === 0 ? (
+                      <TableRow><TableCell colSpan={8} className="text-center py-12 text-gray-400 text-sm">
+                        <Scale className="w-8 h-8 mx-auto mb-2 opacity-30" />Проводок за обраний місяць не знайдено
+                      </TableCell></TableRow>
+                    ) : osvData.map((r: any, i: number) => {
+                      const ob = Number(r.opening_balance || 0);
+                      const cb = Number(r.closing_balance || 0);
                       return (
                         <TableRow key={i} className="hover:bg-gray-50">
-                          <TableCell className="font-mono text-sm font-bold text-blue-800">{r.code}</TableCell>
-                          <TableCell className="text-xs text-gray-700">{r.name}</TableCell>
-                          <TableCell className="text-right text-xs text-gray-400">—</TableCell>
-                          <TableCell className="text-right text-xs text-gray-400">—</TableCell>
-                          <TableCell className="text-right text-xs font-medium text-blue-700">{fmt(r.debit_turn)}</TableCell>
-                          <TableCell className="text-right text-xs font-medium text-orange-700">{fmt(r.credit_turn)}</TableCell>
-                          <TableCell className="text-right text-xs font-semibold">{bal > 0 ? fmt(bal) : "—"}</TableCell>
-                          <TableCell className="text-right text-xs font-semibold">{bal < 0 ? fmt(Math.abs(bal)) : "—"}</TableCell>
+                          <TableCell className="font-mono text-sm font-bold text-blue-800 text-center">{r.code}</TableCell>
+                          <TableCell className="text-xs text-gray-700 max-w-xs truncate">{r.name}</TableCell>
+                          <TableCell className="text-right text-xs font-medium text-gray-700">{ob > 0 ? fmt(ob) : "—"}</TableCell>
+                          <TableCell className="text-right text-xs font-medium text-gray-700">{ob < 0 ? fmt(Math.abs(ob)) : "—"}</TableCell>
+                          <TableCell className="text-right text-xs font-medium text-blue-700">{Number(r.debit_turn) > 0 ? fmt(r.debit_turn) : "—"}</TableCell>
+                          <TableCell className="text-right text-xs font-medium text-orange-700">{Number(r.credit_turn) > 0 ? fmt(r.credit_turn) : "—"}</TableCell>
+                          <TableCell className="text-right text-xs font-semibold text-gray-900">{cb > 0 ? fmt(cb) : "—"}</TableCell>
+                          <TableCell className="text-right text-xs font-semibold text-gray-900">{cb < 0 ? fmt(Math.abs(cb)) : "—"}</TableCell>
                         </TableRow>
                       );
                     })}
                   </TableBody>
-                  {(Array.isArray(osvData) && osvData.length > 0) && (
-                    <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-                      <tr>
-                        <td colSpan={4} className="px-4 py-2 text-xs font-bold text-gray-700">РАЗОМ</td>
-                        <td className="px-4 py-2 text-right text-xs font-bold text-blue-700">
-                          {fmt((osvData as any[]).reduce((s, r) => s + Number(r.debit_turn || 0), 0))}
+                  {osvData.length > 0 && (
+                    <tfoot className="bg-blue-50 border-t-2 border-blue-300">
+                      <tr className="font-bold text-[11px]">
+                        <td colSpan={2} className="px-4 py-2 text-blue-900">РАЗОМ</td>
+                        <td className="px-4 py-2 text-right text-gray-700">
+                          {fmt(osvData.reduce((s, r) => s + Math.max(0, Number(r.opening_balance||0)), 0))}
                         </td>
-                        <td className="px-4 py-2 text-right text-xs font-bold text-orange-700">
-                          {fmt((osvData as any[]).reduce((s, r) => s + Number(r.credit_turn || 0), 0))}
+                        <td className="px-4 py-2 text-right text-gray-700">
+                          {fmt(osvData.reduce((s, r) => s + Math.max(0, -Number(r.opening_balance||0)), 0))}
                         </td>
-                        <td colSpan={2} />
+                        <td className="px-4 py-2 text-right text-blue-800">
+                          {fmt(osvData.reduce((s, r) => s + Number(r.debit_turn||0), 0))}
+                        </td>
+                        <td className="px-4 py-2 text-right text-orange-800">
+                          {fmt(osvData.reduce((s, r) => s + Number(r.credit_turn||0), 0))}
+                        </td>
+                        <td className="px-4 py-2 text-right text-gray-900">
+                          {fmt(osvData.reduce((s, r) => s + Math.max(0, Number(r.closing_balance||0)), 0))}
+                        </td>
+                        <td className="px-4 py-2 text-right text-gray-900">
+                          {fmt(osvData.reduce((s, r) => s + Math.max(0, -Number(r.closing_balance||0)), 0))}
+                        </td>
                       </tr>
                     </tfoot>
                   )}
@@ -3077,102 +3100,81 @@ function AccReportsTab() {
             </Card>
           )}
 
-          {/* P&L — Звіт про фінансові результати */}
+          {/* ═══ Ф2 — Звіт про фінансові результати ═══ */}
           {reportType === "pnl" && pnlData && (
-            <div className="grid grid-cols-1 gap-4">
-              {/* Summary KPI cards */}
+            <div className="space-y-4">
+              {/* KPI */}
               <div className="grid grid-cols-3 gap-4">
                 <Card className="border-green-200 bg-green-50">
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-green-600" /><span className="text-xs text-green-700 font-medium">Дохід</span></div>
-                    <div className="text-2xl font-bold text-green-700">{fmt(pnlData.totalIncome)}</div>
-                    <div className="text-xs text-green-600 mt-0.5">грн</div>
+                    <div className="text-xs text-green-700 font-medium mb-1 flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5" />Чистий дохід (Р2000)</div>
+                    <div className="text-2xl font-bold text-green-700">{fmt(pnlData.rows?.find((r:any)=>r.code==="2000")?.value ?? 0)}</div>
                   </CardContent>
                 </Card>
                 <Card className="border-red-200 bg-red-50">
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1"><TrendingDown className="w-4 h-4 text-red-600" /><span className="text-xs text-red-700 font-medium">Витрати</span></div>
-                    <div className="text-2xl font-bold text-red-700">{fmt(pnlData.totalExpenses)}</div>
-                    <div className="text-xs text-red-600 mt-0.5">грн</div>
+                    <div className="text-xs text-red-700 font-medium mb-1 flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5" />Валовий прибуток (Р2090)</div>
+                    <div className="text-2xl font-bold text-red-700">{fmt(pnlData.rows?.find((r:any)=>r.code==="2090")?.value ?? 0)}</div>
                   </CardContent>
                 </Card>
-                <Card className={`border-2 ${pnlData.netProfit >= 0 ? "border-blue-300 bg-blue-50" : "border-orange-300 bg-orange-50"}`}>
+                <Card className={`border-2 ${(pnlData.netProfit ?? 0) >= 0 ? "border-blue-300 bg-blue-50" : "border-orange-300 bg-orange-50"}`}>
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Wallet className={`w-4 h-4 ${pnlData.netProfit >= 0 ? "text-blue-600" : "text-orange-600"}`} />
-                      <span className={`text-xs font-medium ${pnlData.netProfit >= 0 ? "text-blue-700" : "text-orange-700"}`}>
-                        {pnlData.netProfit >= 0 ? "Прибуток" : "Збиток"}
-                      </span>
+                    <div className={`text-xs font-medium mb-1 ${(pnlData.netProfit ?? 0) >= 0 ? "text-blue-700" : "text-orange-700"}`}>
+                      Чистий {(pnlData.netProfit ?? 0) >= 0 ? "прибуток" : "збиток"} (Р2350)
                     </div>
-                    <div className={`text-2xl font-bold ${pnlData.netProfit >= 0 ? "text-blue-700" : "text-orange-700"}`}>
-                      {fmt(Math.abs(pnlData.netProfit))}
+                    <div className={`text-2xl font-bold ${(pnlData.netProfit ?? 0) >= 0 ? "text-blue-700" : "text-orange-700"}`}>
+                      {fmt(Math.abs(pnlData.netProfit ?? 0))}
                     </div>
-                    <div className={`text-xs mt-0.5 ${pnlData.netProfit >= 0 ? "text-blue-600" : "text-orange-600"}`}>грн</div>
                   </CardContent>
                 </Card>
               </div>
 
-              {/* Income table */}
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold text-green-700 flex items-center gap-2"><TrendingUp className="w-4 h-4" /> Доходи (класи 7)</CardTitle></CardHeader>
+                <CardHeader className="pb-2 border-b">
+                  <CardTitle className="text-sm font-bold text-gray-800">
+                    Звіт про фінансові результати — НП(С)БО 1, Форма 2
+                    <span className="ml-2 text-xs font-normal text-gray-400">{MONTHS.find(m=>m[0]===month)?.[1]} {year}</span>
+                  </CardTitle>
+                </CardHeader>
                 <CardContent className="p-0">
                   <Table>
-                    <TableHeader className="bg-green-50">
+                    <TableHeader className="bg-gray-50">
                       <TableRow>
-                        <TableHead className="w-20">Рахунок</TableHead>
-                        <TableHead>Назва</TableHead>
+                        <TableHead className="w-20">Рядок</TableHead>
+                        <TableHead>Стаття</TableHead>
                         <TableHead className="text-right w-40">Сума, грн</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(pnlData.income?.length === 0) ? (
-                        <TableRow><TableCell colSpan={3} className="text-center py-4 text-gray-400 text-sm">Доходи відсутні</TableCell></TableRow>
-                      ) : pnlData.income?.map((r: any, i: number) => (
-                        <TableRow key={i} className="hover:bg-green-50/50">
-                          <TableCell className="font-mono text-sm font-bold text-green-800">{r.code}</TableCell>
-                          <TableCell className="text-xs">{r.name}</TableCell>
-                          <TableCell className="text-right text-sm font-semibold text-green-700">{fmt(r.net)}</TableCell>
-                        </TableRow>
-                      ))}
-                      {pnlData.income?.length > 0 && (
-                        <TableRow className="bg-green-100 border-t border-green-200">
-                          <TableCell colSpan={2} className="text-xs font-bold text-green-800">Разом доходи</TableCell>
-                          <TableCell className="text-right text-sm font-bold text-green-800">{fmt(pnlData.totalIncome)}</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              {/* Expenses table */}
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold text-red-700 flex items-center gap-2"><TrendingDown className="w-4 h-4" /> Витрати (класи 8–9)</CardTitle></CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader className="bg-red-50">
-                      <TableRow>
-                        <TableHead className="w-20">Рахунок</TableHead>
-                        <TableHead>Назва</TableHead>
-                        <TableHead className="text-right w-40">Сума, грн</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(pnlData.expenses?.length === 0) ? (
-                        <TableRow><TableCell colSpan={3} className="text-center py-4 text-gray-400 text-sm">Витрати відсутні</TableCell></TableRow>
-                      ) : pnlData.expenses?.map((r: any, i: number) => (
-                        <TableRow key={i} className="hover:bg-red-50/50">
-                          <TableCell className="font-mono text-sm font-bold text-red-800">{r.code}</TableCell>
-                          <TableCell className="text-xs">{r.name}</TableCell>
-                          <TableCell className="text-right text-sm font-semibold text-red-700">{fmt(Math.abs(r.net))}</TableCell>
-                        </TableRow>
-                      ))}
-                      {pnlData.expenses?.length > 0 && (
-                        <TableRow className="bg-red-100 border-t border-red-200">
-                          <TableCell colSpan={2} className="text-xs font-bold text-red-800">Разом витрати</TableCell>
-                          <TableCell className="text-right text-sm font-bold text-red-800">{fmt(pnlData.totalExpenses)}</TableCell>
-                        </TableRow>
-                      )}
+                      {(() => {
+                        let lastSection = "";
+                        return (pnlData.rows ?? []).map((r: any, i: number) => {
+                          const sectionChanged = r.section !== lastSection;
+                          if (sectionChanged) lastSection = r.section;
+                          return (
+                            <>
+                              {sectionChanged && (
+                                <TableRow key={`sec-${r.section}`} className="bg-gray-100 border-t border-gray-200">
+                                  <TableCell colSpan={3} className="text-[10px] font-bold text-gray-500 uppercase tracking-wide py-1.5 px-4">
+                                    {PNL_SECTIONS[r.section]}
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                              <TableRow key={i} className={`hover:bg-gray-50 ${r.bold ? "bg-blue-50/40" : ""} ${r.final ? "bg-blue-100 border-t-2 border-blue-300" : ""}`}>
+                                <TableCell className={`font-mono text-xs text-center ${r.bold ? "font-bold text-blue-800" : "text-gray-500"}`}>{r.code}</TableCell>
+                                <TableCell className={`text-xs ${r.bold ? "font-semibold text-gray-900" : "text-gray-700"} ${r.final ? "font-bold text-blue-900" : ""}`}>{r.label}</TableCell>
+                                <TableCell className={`text-right font-mono text-sm ${
+                                  r.final ? "font-bold " + ((r.value??0) >= 0 ? "text-blue-800" : "text-red-700") :
+                                  r.bold ? "font-semibold text-gray-800" :
+                                  (r.value ?? 0) >= 0 ? "text-gray-700" : "text-red-600"
+                                }`}>
+                                  {(r.value ?? 0) !== 0 ? fmt(r.value) : "—"}
+                                </TableCell>
+                              </TableRow>
+                            </>
+                          );
+                        });
+                      })()}
                     </TableBody>
                   </Table>
                 </CardContent>
@@ -4316,6 +4318,824 @@ function AccCashTab() {
               <Button onClick={handleAdd} disabled={addLoading} className={form.order_type === "pko" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"}>
                 {addLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
                 Зберегти {form.order_type.toUpperCase()}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── ACC: TOURIST TAX (ТУРИСТИЧНИЙ ЗБІР) ──────────────────────────────────────
+function AccTouristTaxTab() {
+  const now = new Date();
+  const [view, setView]     = useState<"records" | "report">("records");
+  const [year, setYear]     = useState(String(now.getFullYear()));
+  const [month, setMonth]   = useState(String(now.getMonth() + 1));
+  const [showAdd, setShowAdd] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+  const emptyForm = { record_date: format(now,"yyyy-MM-dd"), guest_name:"", check_in: format(now,"yyyy-MM-dd"), check_out: format(now,"yyyy-MM-dd"), nights:"1", rate_per_night:"", notes:"" };
+  const [form, setForm] = useState<any>(emptyForm);
+
+  const recKey  = `tourist-tax?year=${year}&month=${month}`;
+  const repKey  = `tourist-tax/report?year=${year}`;
+  const { data: records,  isLoading: recLoading  } = useAccLedger(recKey,  { enabled: view === "records" });
+  const { data: report,   isLoading: repLoading   } = useAccLedger(repKey,  { enabled: view === "report" });
+
+  const fmt  = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtD = (d: string) => d ? format(new Date(d), "dd.MM.yyyy") : "—";
+
+  const totalAmount  = (Array.isArray(records) ? records : []).reduce((s: number, r: any) => s + Number(r.amount), 0);
+  const totalPaid    = (Array.isArray(records) ? records : []).filter((r:any) => r.is_paid).reduce((s: number, r: any) => s + Number(r.amount), 0);
+  const totalUnpaid  = totalAmount - totalPaid;
+  const totalNights  = (Array.isArray(records) ? records : []).reduce((s: number, r: any) => s + Number(r.nights), 0);
+
+  const handleAdd = async () => {
+    if (!form.check_in || !form.check_out || !form.nights || !form.rate_per_night) {
+      toast({ title: "Заповніть обов'язкові поля", variant: "destructive" }); return;
+    }
+    setAddLoading(true);
+    try {
+      await accFetch("tourist-tax", { method:"POST", body: JSON.stringify({ ...form, nights: +form.nights, rate_per_night: +form.rate_per_night }) });
+      toast({ title: "Запис додано" });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      setShowAdd(false); setForm(emptyForm);
+    } catch(e: any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setAddLoading(false); }
+  };
+
+  const handleTogglePaid = async (id: number, is_paid: boolean) => {
+    try {
+      await accFetch(`tourist-tax/${id}`, { method:"PATCH", body: JSON.stringify({ is_paid: !is_paid }) });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+    } catch(e: any) { toast({ title:"Помилка", description: (e as any).message, variant:"destructive" }); }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Видалити запис?")) return;
+    try {
+      await accFetch(`tourist-tax/${id}`, { method:"DELETE" });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      toast({ title:"Запис видалено" });
+    } catch(e: any) { toast({ title:"Помилка", description: (e as any).message, variant:"destructive" }); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex border rounded-lg overflow-hidden">
+          {(["records","report"] as const).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${view===v ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+              {v==="records" ? "Реєстр" : "Звіт по рокам"}
+            </button>
+          ))}
+        </div>
+        <Select value={year} onValueChange={setYear}>
+          <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>{[2023,2024,2025,2026].map(y=><SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+        </Select>
+        {view === "records" && (
+          <Select value={month} onValueChange={setMonth}>
+            <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>{MONTHS_UK.map((m,i)=><SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
+          </Select>
+        )}
+        <Button size="sm" className="ml-auto h-9 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={() => setShowAdd(true)}>
+          <Plus className="w-3.5 h-3.5" /> Додати запис
+        </Button>
+      </div>
+
+      {view === "records" && (
+        <>
+          <div className="grid grid-cols-4 gap-3">
+            <Card className="border-blue-200 bg-blue-50"><CardContent className="p-3"><div className="text-[10px] text-blue-700 font-medium">Записів</div><div className="text-xl font-bold text-blue-700">{(Array.isArray(records)?records:[]).length}</div></CardContent></Card>
+            <Card className="border-purple-200 bg-purple-50"><CardContent className="p-3"><div className="text-[10px] text-purple-700 font-medium">Нічліг</div><div className="text-xl font-bold text-purple-700">{totalNights}</div></CardContent></Card>
+            <Card className="border-green-200 bg-green-50"><CardContent className="p-3"><div className="text-[10px] text-green-700 font-medium">Сплачено</div><div className="text-xl font-bold text-green-700">{fmt(totalPaid)} грн</div></CardContent></Card>
+            <Card className="border-orange-200 bg-orange-50"><CardContent className="p-3"><div className="text-[10px] text-orange-700 font-medium">Не сплачено</div><div className="text-xl font-bold text-orange-700">{fmt(totalUnpaid)} грн</div></CardContent></Card>
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {recLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead className="w-28">Дата запису</TableHead>
+                      <TableHead>Гість</TableHead>
+                      <TableHead className="w-28">Заїзд</TableHead>
+                      <TableHead className="w-28">Виїзд</TableHead>
+                      <TableHead className="text-right w-20">Ночей</TableHead>
+                      <TableHead className="text-right w-32">Ставка/ніч</TableHead>
+                      <TableHead className="text-right w-32">Сума</TableHead>
+                      <TableHead className="text-center w-24">Статус</TableHead>
+                      <TableHead className="w-16" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(Array.isArray(records) && records.length === 0) ? (
+                      <TableRow><TableCell colSpan={9} className="text-center py-10 text-gray-400 text-sm">
+                        <MapPin className="w-8 h-8 mx-auto mb-2 opacity-30" />Записів за обраний місяць не знайдено
+                      </TableCell></TableRow>
+                    ) : (Array.isArray(records)?records:[]).map((r:any) => (
+                      <TableRow key={r.id} className="hover:bg-gray-50">
+                        <TableCell className="text-xs">{fmtD(r.record_date)}</TableCell>
+                        <TableCell className="text-xs font-medium">{r.guest_name || <span className="text-gray-400">—</span>}</TableCell>
+                        <TableCell className="text-xs">{fmtD(r.check_in)}</TableCell>
+                        <TableCell className="text-xs">{fmtD(r.check_out)}</TableCell>
+                        <TableCell className="text-right text-sm font-semibold">{r.nights}</TableCell>
+                        <TableCell className="text-right text-sm font-mono">{fmt(r.rate_per_night)}</TableCell>
+                        <TableCell className="text-right text-sm font-bold text-blue-700">{fmt(r.amount)}</TableCell>
+                        <TableCell className="text-center">
+                          <button onClick={() => handleTogglePaid(r.id, r.is_paid)}>
+                            <Badge className={r.is_paid ? "bg-green-100 text-green-700 border-green-300 cursor-pointer" : "bg-orange-100 text-orange-700 border-orange-300 cursor-pointer"}>
+                              {r.is_paid ? "Сплачено" : "Не сплачено"}
+                            </Badge>
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-gray-400 hover:text-red-600" onClick={() => handleDelete(r.id)}>
+                            <XCircle className="w-3.5 h-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {view === "report" && (
+        repLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+          <Card>
+            <CardHeader className="pb-2 border-b">
+              <CardTitle className="text-sm font-bold text-gray-800">Річний звіт туристичного збору — {report?.year}</CardTitle>
+              <div className="flex gap-4 text-xs text-gray-500 mt-1">
+                <span>Всього гостей: <b>{report?.total?.guests}</b></span>
+                <span>Всього нічліг: <b>{report?.total?.nights}</b></span>
+                <span>Всього сума: <b>{fmt(report?.total?.amount)} грн</b></span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead>Місяць</TableHead>
+                    <TableHead className="text-right">К-ть гостей</TableHead>
+                    <TableHead className="text-right">Нічліг</TableHead>
+                    <TableHead className="text-right">Нараховано</TableHead>
+                    <TableHead className="text-right text-green-700">Сплачено</TableHead>
+                    <TableHead className="text-right text-orange-700">Не сплачено</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(!report?.months || report.months.length === 0) ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-400 text-sm">Записів за {report?.year} рік не знайдено</TableCell></TableRow>
+                  ) : report.months.map((m:any) => (
+                    <TableRow key={m.month} className="hover:bg-gray-50">
+                      <TableCell className="text-sm font-medium">{MONTHS_UK[m.month-1]}</TableCell>
+                      <TableCell className="text-right text-sm">{m.guests_count}</TableCell>
+                      <TableCell className="text-right text-sm">{m.total_nights}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-semibold">{fmt(m.total_amount)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-green-700">{fmt(m.paid_amount)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-orange-700">{fmt(m.unpaid_amount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )
+      )}
+
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Новий запис туристичного збору</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Дата запису</Label><Input type="date" value={form.record_date} onChange={e=>setForm((f:any)=>({...f,record_date:e.target.value}))} className="mt-1" /></div>
+              <div><Label className="text-xs">ПІБ гостя</Label><Input value={form.guest_name} onChange={e=>setForm((f:any)=>({...f,guest_name:e.target.value}))} className="mt-1" placeholder="Іваненко І.І." /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Дата заїзду *</Label><Input type="date" value={form.check_in} onChange={e=>setForm((f:any)=>({...f,check_in:e.target.value}))} className="mt-1" /></div>
+              <div><Label className="text-xs">Дата виїзду *</Label><Input type="date" value={form.check_out} onChange={e=>setForm((f:any)=>({...f,check_out:e.target.value}))} className="mt-1" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Кількість ночей *</Label><Input type="number" min="1" value={form.nights} onChange={e=>setForm((f:any)=>({...f,nights:e.target.value}))} className="mt-1" /></div>
+              <div><Label className="text-xs">Ставка за ніч, грн *</Label><Input type="number" step="0.01" value={form.rate_per_night} onChange={e=>setForm((f:any)=>({...f,rate_per_night:e.target.value}))} className="mt-1" placeholder="52.00" /></div>
+            </div>
+            {form.nights && form.rate_per_night && (
+              <div className="bg-blue-50 rounded-lg px-3 py-2 text-sm text-blue-700">
+                Сума збору: <strong>{(Number(form.nights)*Number(form.rate_per_night)).toFixed(2)} грн</strong>
+              </div>
+            )}
+            <div><Label className="text-xs">Примітка</Label><Input value={form.notes} onChange={e=>setForm((f:any)=>({...f,notes:e.target.value}))} className="mt-1" /></div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={()=>{setShowAdd(false);setForm(emptyForm);}}>Скасувати</Button>
+              <Button onClick={handleAdd} disabled={addLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+                {addLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />} Зберегти
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── ACC: PAYROLL (ЗАРПЛАТА) ───────────────────────────────────────────────────
+function AccPayrollTab() {
+  const now = new Date();
+  const [view, setView]   = useState<"sheet" | "employees">("sheet");
+  const [year, setYear]   = useState(String(now.getFullYear()));
+  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [showEmpForm, setShowEmpForm] = useState(false);
+  const [showAccrual, setShowAccrual] = useState<any>(null);
+  const [posting, setPosting] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+
+  const sheetKey = `payroll/sheet?year=${year}&month=${month}`;
+  const empKey   = "payroll/employees";
+  const { data: sheet,     isLoading: sheetLoading } = useAccLedger(sheetKey, { enabled: view === "sheet" });
+  const { data: employees, isLoading: empLoading   } = useAccLedger(empKey,   { enabled: true });
+
+  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const emptyEmp = { full_name:"", position:"", ipn:"", base_salary:"", hire_date:"" };
+  const [empForm, setEmpForm] = useState<any>(emptyEmp);
+  const [empLoading2, setEmpLoading2] = useState(false);
+
+  const [accrualForm, setAccrualForm] = useState({ gross_amount:"", accrual_type:"salary", notes:"" });
+  const [accrualLoading, setAccrualLoading] = useState(false);
+
+  const handleAddEmployee = async () => {
+    if (!empForm.full_name || !empForm.base_salary) { toast({ title:"Вкажіть ПІБ та оклад", variant:"destructive" }); return; }
+    setEmpLoading2(true);
+    try {
+      await accFetch("payroll/employees", { method:"POST", body: JSON.stringify({ ...empForm, base_salary: +empForm.base_salary }) });
+      toast({ title:"Співробітника додано" });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+      setShowEmpForm(false); setEmpForm(emptyEmp);
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setEmpLoading2(false); }
+  };
+
+  const handleAddAccrual = async () => {
+    if (!accrualForm.gross_amount) { toast({ title:"Вкажіть суму нарахування", variant:"destructive" }); return; }
+    setAccrualLoading(true);
+    try {
+      await accFetch("payroll/accruals", { method:"POST", body: JSON.stringify({
+        employee_id: showAccrual.employee_id, period_year: +year, period_month: +month,
+        accrual_type: accrualForm.accrual_type, gross_amount: +accrualForm.gross_amount, notes: accrualForm.notes,
+      }) });
+      toast({ title:"Нарахування додано" });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+      setShowAccrual(null); setAccrualForm({ gross_amount:"", accrual_type:"salary", notes:"" });
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setAccrualLoading(false); }
+  };
+
+  const handlePost = async () => {
+    if (!confirm(`Провести зарплату за ${MONTHS_UK[+month-1]} ${year}? Будуть створені проводки 661/641/642/651.`)) return;
+    setPosting(true);
+    try {
+      const res = await accFetch("payroll/post", { method:"POST", body: JSON.stringify({ year:+year, month:+month }) });
+      toast({ title:`Зарплату проведено`, description:`Нараховано: ${fmt(res.gross)} грн, ЄСВ: ${fmt(res.esv)} грн. Створено ${res.entriesCreated} проводок` });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setPosting(false); }
+  };
+
+  const emps: any[] = Array.isArray(employees) ? employees : [];
+  const empList: any[] = sheet?.employees ?? [];
+  const totals = sheet?.totals ?? {};
+  const isPosted = empList.some((e:any) => e.is_posted);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex border rounded-lg overflow-hidden">
+          {(["sheet","employees"] as const).map(v=>(
+            <button key={v} onClick={()=>setView(v)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${view===v?"bg-blue-600 text-white":"bg-white text-gray-600 hover:bg-gray-50"}`}>
+              {v==="sheet"?"Відомість":"Співробітники"}
+            </button>
+          ))}
+        </div>
+        {view === "sheet" && (
+          <>
+            <Select value={year} onValueChange={setYear}>
+              <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>{[2023,2024,2025,2026].map(y=><SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+            </Select>
+            <Select value={month} onValueChange={setMonth}>
+              <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>{MONTHS_UK.map((m,i)=><SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
+            </Select>
+          </>
+        )}
+        <div className="ml-auto flex gap-2">
+          {view === "sheet" && (
+            <Button size="sm" onClick={handlePost} disabled={posting || isPosted || empList.length === 0}
+              className={isPosted ? "bg-green-100 text-green-700 border border-green-300" : "bg-[--mhd-primary] hover:bg-[--mhd-primary]/90"}>
+              {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
+              {isPosted ? "Проведено" : "Провести зарплату"}
+            </Button>
+          )}
+          {view === "employees" && (
+            <Button size="sm" className="h-9 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={()=>setShowEmpForm(true)}>
+              <Plus className="w-3.5 h-3.5" /> Додати співробітника
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* KPI */}
+      {view === "sheet" && (
+        <div className="grid grid-cols-5 gap-3">
+          {[
+            { label:"Нараховано (Гр)",    val: totals.gross, color:"blue" },
+            { label:"ПДФО 18%",           val: totals.pdfo,  color:"red" },
+            { label:"ВЗ 1.5%",            val: totals.vz,    color:"orange" },
+            { label:"ЄСВ 22% (робот.)",   val: totals.esv,   color:"purple" },
+            { label:"До виплати (Нт)",    val: totals.net,   color:"green" },
+          ].map(({label,val,color}) => (
+            <Card key={label} className={`border-${color}-200 bg-${color}-50`}>
+              <CardContent className="p-3">
+                <div className={`text-[10px] text-${color}-700 font-medium mb-0.5`}>{label}</div>
+                <div className={`text-base font-bold text-${color}-700`}>{fmt(val)}</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {view === "sheet" && (
+        <Card>
+          <CardContent className="p-0">
+            {sheetLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead>ПІБ</TableHead>
+                    <TableHead>Посада</TableHead>
+                    <TableHead>ІПН</TableHead>
+                    <TableHead className="text-right w-32 text-blue-700">Нараховано</TableHead>
+                    <TableHead className="text-right w-28 text-red-600">ПДФО 18%</TableHead>
+                    <TableHead className="text-right w-24 text-orange-600">ВЗ 1.5%</TableHead>
+                    <TableHead className="text-right w-28 text-purple-600">ЄСВ 22%</TableHead>
+                    <TableHead className="text-right w-32 text-green-700">До виплати</TableHead>
+                    <TableHead className="text-center w-24">Статус</TableHead>
+                    <TableHead className="w-20" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {empList.length === 0 ? (
+                    <TableRow><TableCell colSpan={10} className="text-center py-10 text-gray-400 text-sm">
+                      <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      Активних співробітників не знайдено. Спочатку додайте їх у вкладці «Співробітники».
+                    </TableCell></TableRow>
+                  ) : empList.map((e:any) => (
+                    <TableRow key={e.employee_id} className="hover:bg-gray-50">
+                      <TableCell className="text-sm font-medium">{e.full_name}</TableCell>
+                      <TableCell className="text-xs text-gray-500">{e.position || "—"}</TableCell>
+                      <TableCell className="text-xs font-mono text-gray-500">{e.ipn || "—"}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-blue-700">{fmt(e.gross_total)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-red-600">{fmt(e.pdfo_total)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-orange-600">{fmt(e.vz_total)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-purple-600">{fmt(e.esv_total)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-green-700">{fmt(e.net_total)}</TableCell>
+                      <TableCell className="text-center">
+                        {e.is_posted
+                          ? <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">Проведено</Badge>
+                          : <Badge variant="outline" className="text-[10px] text-gray-400">Не проведено</Badge>}
+                      </TableCell>
+                      <TableCell>
+                        {!e.is_posted && (
+                          <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-blue-600" onClick={() => setShowAccrual(e)}>
+                            <Plus className="w-3 h-3 mr-0.5" /> Нарахування
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {empList.length > 0 && (
+                    <TableRow className="bg-gray-100 border-t-2 border-gray-300 font-bold text-xs">
+                      <TableCell colSpan={3} className="font-bold text-gray-800">РАЗОМ</TableCell>
+                      <TableCell className="text-right font-bold text-blue-800">{fmt(totals.gross)}</TableCell>
+                      <TableCell className="text-right font-bold text-red-700">{fmt(totals.pdfo)}</TableCell>
+                      <TableCell className="text-right font-bold text-orange-700">{fmt(totals.vz)}</TableCell>
+                      <TableCell className="text-right font-bold text-purple-700">{fmt(totals.esv)}</TableCell>
+                      <TableCell className="text-right font-bold text-green-800">{fmt(totals.net)}</TableCell>
+                      <TableCell colSpan={2} />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {view === "employees" && (
+        <Card>
+          <CardContent className="p-0">
+            {empLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+              <Table>
+                <TableHeader className="bg-gray-50"><TableRow>
+                  <TableHead>ПІБ</TableHead><TableHead>Посада</TableHead>
+                  <TableHead>ІПН</TableHead><TableHead className="text-right w-36">Оклад, грн</TableHead>
+                  <TableHead className="w-28">З дати</TableHead><TableHead className="text-center w-24">Статус</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {emps.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-10 text-gray-400 text-sm">
+                      <UserCheck className="w-8 h-8 mx-auto mb-2 opacity-30" />Співробітників не знайдено. Додайте першого.
+                    </TableCell></TableRow>
+                  ) : emps.map((e:any) => (
+                    <TableRow key={e.id} className="hover:bg-gray-50">
+                      <TableCell className="text-sm font-medium">{e.full_name}</TableCell>
+                      <TableCell className="text-xs text-gray-500">{e.position||"—"}</TableCell>
+                      <TableCell className="text-xs font-mono text-gray-500">{e.ipn||"—"}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-semibold">{fmt(e.base_salary)}</TableCell>
+                      <TableCell className="text-xs">{e.hire_date ? format(new Date(e.hire_date),"dd.MM.yyyy") : "—"}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge className={e.is_active ? "bg-green-100 text-green-700 border-green-200 text-[10px]" : "bg-gray-100 text-gray-500 text-[10px]"}>
+                          {e.is_active ? "Активний" : "Звільнено"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add employee dialog */}
+      <Dialog open={showEmpForm} onOpenChange={setShowEmpForm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Новий співробітник</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div><Label className="text-xs">ПІБ *</Label><Input value={empForm.full_name} onChange={e=>setEmpForm((f:any)=>({...f,full_name:e.target.value}))} className="mt-1" placeholder="Іваненко Іван Іванович" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Посада</Label><Input value={empForm.position} onChange={e=>setEmpForm((f:any)=>({...f,position:e.target.value}))} className="mt-1" placeholder="Адміністратор" /></div>
+              <div><Label className="text-xs">ІПН</Label><Input value={empForm.ipn} onChange={e=>setEmpForm((f:any)=>({...f,ipn:e.target.value}))} className="mt-1" placeholder="1234567890" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Оклад, грн *</Label><Input type="number" step="100" value={empForm.base_salary} onChange={e=>setEmpForm((f:any)=>({...f,base_salary:e.target.value}))} className="mt-1" placeholder="20000" /></div>
+              <div><Label className="text-xs">Дата прийому</Label><Input type="date" value={empForm.hire_date} onChange={e=>setEmpForm((f:any)=>({...f,hire_date:e.target.value}))} className="mt-1" /></div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={()=>{setShowEmpForm(false);setEmpForm(emptyEmp);}}>Скасувати</Button>
+              <Button onClick={handleAddEmployee} disabled={empLoading2} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+                {empLoading2?<Loader2 className="w-4 h-4 animate-spin mr-1"/>:<Plus className="w-4 h-4 mr-1"/>} Зберегти
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add accrual dialog */}
+      <Dialog open={!!showAccrual} onOpenChange={v=>!v&&setShowAccrual(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Нарахування — {showAccrual?.full_name}</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div><Label className="text-xs">Вид нарахування</Label>
+              <Select value={accrualForm.accrual_type} onValueChange={v=>setAccrualForm(f=>({...f,accrual_type:v}))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="salary">Зарплата</SelectItem>
+                  <SelectItem value="bonus">Премія</SelectItem>
+                  <SelectItem value="sick">Лікарняні</SelectItem>
+                  <SelectItem value="vacation">Відпускні</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label className="text-xs">Нараховано (Гр), грн *</Label>
+              <Input type="number" step="0.01" value={accrualForm.gross_amount} onChange={e=>setAccrualForm(f=>({...f,gross_amount:e.target.value}))} className="mt-1" placeholder="20000.00" />
+            </div>
+            {accrualForm.gross_amount && (
+              <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs space-y-1">
+                <div className="flex justify-between"><span>ПДФО 18%:</span><strong>{(+accrualForm.gross_amount * 0.18).toFixed(2)} грн</strong></div>
+                <div className="flex justify-between"><span>ВЗ 1.5%:</span><strong>{(+accrualForm.gross_amount * 0.015).toFixed(2)} грн</strong></div>
+                <div className="flex justify-between"><span>ЄСВ 22% (роб.):</span><strong>{(+accrualForm.gross_amount * 0.22).toFixed(2)} грн</strong></div>
+                <div className="flex justify-between border-t pt-1 font-semibold text-green-700"><span>До виплати:</span><strong>{(+accrualForm.gross_amount * 0.805).toFixed(2)} грн</strong></div>
+              </div>
+            )}
+            <div><Label className="text-xs">Примітка</Label><Input value={accrualForm.notes} onChange={e=>setAccrualForm(f=>({...f,notes:e.target.value}))} className="mt-1" /></div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={()=>setShowAccrual(null)}>Скасувати</Button>
+              <Button onClick={handleAddAccrual} disabled={accrualLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+                {accrualLoading?<Loader2 className="w-4 h-4 animate-spin mr-1"/>:<Calculator className="w-4 h-4 mr-1"/>} Нарахувати
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── ACC: FIXED ASSETS (ОСНОВНІ ЗАСОБИ) ───────────────────────────────────────
+function AccFixedAssetsTab() {
+  const now = new Date();
+  const [view, setView]     = useState<"list" | "report">("list");
+  const [asDate, setAsDate] = useState(format(now,"yyyy-MM-dd"));
+  const [showAdd, setShowAdd] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [deprTarget, setDeprTarget] = useState<any>(null);
+  const [deprYear,   setDeprYear]   = useState(String(now.getFullYear()));
+  const [deprMonth,  setDeprMonth]  = useState(String(now.getMonth()+1));
+  const [deprLoading, setDeprLoading] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+
+  const listKey   = "fixed-assets";
+  const reportKey = `fixed-assets/report?date=${asDate}`;
+  const { data: assets,  isLoading: assetsLoading  } = useAccLedger(listKey,   { enabled: view === "list" });
+  const { data: report,  isLoading: reportLoading   } = useAccLedger(reportKey, { enabled: view === "report" });
+
+  const DEPR_METHODS = [{ v:"straight-line", l:"Прямолінійний" }, { v:"reducing", l:"Зменшення залишку" }];
+  const FA_ACCOUNTS  = [{ v:"101", l:"101 — Земельні ділянки" },{ v:"103", l:"103 — Будинки та споруди" },
+    { v:"104", l:"104 — Машини та обладнання" },{ v:"105", l:"105 — Транспортні засоби" },
+    { v:"106", l:"106 — Інструменти та інвентар" },{ v:"109", l:"109 — Інші основні засоби" }];
+
+  const emptyForm = { name:"", inventory_number:"", account_code:"104", initial_cost:"", liquidation_value:"0", useful_life_months:"60", depreciation_method:"straight-line", start_date:format(now,"yyyy-MM-dd"), category:"", notes:"" };
+  const [form, setForm] = useState<any>(emptyForm);
+
+  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const handleAdd = async () => {
+    if (!form.name || !form.initial_cost || !form.start_date) {
+      toast({ title:"Заповніть обов'язкові поля", variant:"destructive" }); return;
+    }
+    setAddLoading(true);
+    try {
+      await accFetch("fixed-assets", { method:"POST", body: JSON.stringify({
+        ...form, initial_cost: +form.initial_cost, liquidation_value: +form.liquidation_value,
+        useful_life_months: +form.useful_life_months,
+      }) });
+      toast({ title:"Основний засіб додано" });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+      setShowAdd(false); setForm(emptyForm);
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setAddLoading(false); }
+  };
+
+  const handleDepreciate = async () => {
+    if (!deprTarget) return;
+    setDeprLoading(true);
+    try {
+      const res = await accFetch(`fixed-assets/${deprTarget.id}/depreciate`, {
+        method:"POST", body: JSON.stringify({ year:+deprYear, month:+deprMonth }),
+      });
+      toast({ title:`Амортизацію нараховано`, description:`${deprTarget.name}: ${fmt(res.amount)} грн за ${MONTHS_UK[+deprMonth-1]} ${deprYear}` });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+      setDeprTarget(null);
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setDeprLoading(false); }
+  };
+
+  const handleDispose = async (id: number, name: string) => {
+    if (!confirm(`Списати «${name}»?`)) return;
+    try {
+      await accFetch(`fixed-assets/${id}`, { method:"PATCH", body: JSON.stringify({ is_disposed:true, disposed_at: format(now,"yyyy-MM-dd") }) });
+      toast({ title:"ОЗ списано" });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+  };
+
+  const assetList: any[] = Array.isArray(assets) ? assets : [];
+  const repData = report?.rows ?? [];
+  const repTotals = report?.totals ?? {};
+
+  const monthlyDeprPreview = form.initial_cost && form.liquidation_value !== undefined && form.useful_life_months
+    ? ((+form.initial_cost - +form.liquidation_value) / +form.useful_life_months)
+    : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex border rounded-lg overflow-hidden">
+          {(["list","report"] as const).map(v=>(
+            <button key={v} onClick={()=>setView(v)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${view===v?"bg-blue-600 text-white":"bg-white text-gray-600 hover:bg-gray-50"}`}>
+              {v==="list"?"Картки ОЗ":"Відомість залишків"}
+            </button>
+          ))}
+        </div>
+        {view === "report" && (
+          <Input type="date" value={asDate} onChange={e=>setAsDate(e.target.value)} className="w-40 h-9 text-xs" />
+        )}
+        <Button size="sm" className="ml-auto h-9 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={()=>setShowAdd(true)}>
+          <Plus className="w-3.5 h-3.5" /> Додати ОЗ
+        </Button>
+      </div>
+
+      {view === "list" && (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <Card className="border-blue-200 bg-blue-50"><CardContent className="p-3"><div className="text-[10px] text-blue-700 font-medium">ОЗ на обліку</div><div className="text-xl font-bold text-blue-700">{assetList.length} од.</div></CardContent></Card>
+            <Card className="border-gray-200 bg-gray-50"><CardContent className="p-3"><div className="text-[10px] text-gray-700 font-medium">Первісна вартість</div><div className="text-xl font-bold text-gray-700">{fmt(assetList.reduce((s,r)=>s+Number(r.initial_cost),0))} грн</div></CardContent></Card>
+            <Card className="border-green-200 bg-green-50"><CardContent className="p-3"><div className="text-[10px] text-green-700 font-medium">Залишкова вартість</div><div className="text-xl font-bold text-green-700">{fmt(assetList.reduce((s,r)=>s+Number(r.residual_value),0))} грн</div></CardContent></Card>
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {assetsLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead className="w-20">Рах.</TableHead>
+                      <TableHead>Назва об'єкту</TableHead>
+                      <TableHead className="w-28">Інв. №</TableHead>
+                      <TableHead className="w-24">Введено</TableHead>
+                      <TableHead className="w-16 text-center">Міс.</TableHead>
+                      <TableHead className="text-right w-32">Первісна, грн</TableHead>
+                      <TableHead className="text-right w-32">Знос, грн</TableHead>
+                      <TableHead className="text-right w-32">Залишкова, грн</TableHead>
+                      <TableHead className="w-28" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {assetList.length === 0 ? (
+                      <TableRow><TableCell colSpan={9} className="text-center py-10 text-gray-400 text-sm">
+                        <HardDrive className="w-8 h-8 mx-auto mb-2 opacity-30" />Основних засобів не знайдено. Додайте перший об'єкт.
+                      </TableCell></TableRow>
+                    ) : assetList.map((a:any) => (
+                      <TableRow key={a.id} className="hover:bg-gray-50">
+                        <TableCell className="font-mono text-xs font-bold text-blue-800">{a.account_code}</TableCell>
+                        <TableCell className="text-xs font-medium">{a.name}{a.category && <span className="ml-1 text-[10px] text-gray-400">({a.category})</span>}</TableCell>
+                        <TableCell className="text-xs font-mono text-gray-500">{a.inventory_number || "—"}</TableCell>
+                        <TableCell className="text-xs">{a.start_date ? format(new Date(a.start_date),"dd.MM.yyyy") : "—"}</TableCell>
+                        <TableCell className="text-center text-xs text-gray-500">{a.useful_life_months}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{fmt(a.initial_cost)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-red-600">{fmt(a.accumulated_depreciation)}</TableCell>
+                        <TableCell className={`text-right font-mono text-sm font-semibold ${Number(a.residual_value)>0?"text-green-700":"text-gray-400"}`}>{fmt(a.residual_value)}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-blue-600 hover:bg-blue-50" onClick={()=>setDeprTarget(a)}>
+                              <Calculator className="w-3 h-3 mr-0.5" /> Аморт.
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-red-400 hover:bg-red-50 hover:text-red-600" onClick={()=>handleDispose(a.id,a.name)}>
+                              <XCircle className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {view === "report" && (
+        <Card>
+          <CardHeader className="pb-2 border-b">
+            <CardTitle className="text-sm font-bold text-gray-800">Відомість основних засобів станом на {format(new Date(asDate),"dd.MM.yyyy")}</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {reportLoading ? <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div> : (
+              <Table>
+                <TableHeader className="bg-gray-50"><TableRow>
+                  <TableHead className="w-20">Рах.</TableHead><TableHead>Назва</TableHead>
+                  <TableHead className="text-right w-36">Первісна, грн</TableHead>
+                  <TableHead className="text-right w-36">Знос, грн</TableHead>
+                  <TableHead className="text-right w-36">Залишкова, грн</TableHead>
+                  <TableHead className="text-right w-20">Знос, %</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {repData.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-400 text-sm">Основних засобів не знайдено</TableCell></TableRow>
+                  ) : repData.map((a:any) => {
+                    const wearPct = Number(a.initial_cost) > 0 ? (Number(a.accumulated_depreciation)/Number(a.initial_cost)*100).toFixed(1) : "0.0";
+                    return (
+                      <TableRow key={a.id} className="hover:bg-gray-50">
+                        <TableCell className="font-mono text-xs font-bold text-blue-800">{a.account_code}</TableCell>
+                        <TableCell className="text-xs font-medium">{a.name}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{fmt(a.initial_cost)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-red-600">{fmt(a.accumulated_depreciation)}</TableCell>
+                        <TableCell className={`text-right font-mono text-sm font-semibold ${Number(a.residual_value)>0?"text-green-700":"text-gray-400"}`}>{fmt(a.residual_value)}</TableCell>
+                        <TableCell className="text-right text-xs">
+                          <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${+wearPct>80?"bg-red-100 text-red-700":+wearPct>50?"bg-orange-100 text-orange-700":"bg-green-100 text-green-700"}`}>
+                            {wearPct}%
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {repData.length > 0 && (
+                    <TableRow className="bg-gray-100 border-t-2 border-gray-300 font-bold">
+                      <TableCell colSpan={2} className="text-xs font-bold text-gray-800">РАЗОМ</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold">{fmt(repTotals.initial_cost)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-red-700">{fmt(repTotals.accumulated_depreciation)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-green-800">{fmt(repTotals.residual_value)}</TableCell>
+                      <TableCell />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add fixed asset dialog */}
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Новий основний засіб</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div><Label className="text-xs">Назва об'єкту *</Label>
+              <Input value={form.name} onChange={e=>setForm((f:any)=>({...f,name:e.target.value}))} className="mt-1" placeholder="Пральна машина Miele W1" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Рахунок обліку</Label>
+                <Select value={form.account_code} onValueChange={v=>setForm((f:any)=>({...f,account_code:v}))}>
+                  <SelectTrigger className="mt-1 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>{FA_ACCOUNTS.map(a=><SelectItem key={a.v} value={a.v}>{a.l}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">Інвентарний №</Label>
+                <Input value={form.inventory_number} onChange={e=>setForm((f:any)=>({...f,inventory_number:e.target.value}))} className="mt-1" placeholder="ОЗ-001" /></div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label className="text-xs">Первісна вартість *</Label>
+                <Input type="number" step="0.01" value={form.initial_cost} onChange={e=>setForm((f:any)=>({...f,initial_cost:e.target.value}))} className="mt-1" placeholder="50000" /></div>
+              <div><Label className="text-xs">Ліквідаційна вартість</Label>
+                <Input type="number" step="0.01" value={form.liquidation_value} onChange={e=>setForm((f:any)=>({...f,liquidation_value:e.target.value}))} className="mt-1" placeholder="0" /></div>
+              <div><Label className="text-xs">Строк служби (міс.)</Label>
+                <Input type="number" value={form.useful_life_months} onChange={e=>setForm((f:any)=>({...f,useful_life_months:e.target.value}))} className="mt-1" placeholder="60" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Метод амортизації</Label>
+                <Select value={form.depreciation_method} onValueChange={v=>setForm((f:any)=>({...f,depreciation_method:v}))}>
+                  <SelectTrigger className="mt-1 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>{DEPR_METHODS.map(m=><SelectItem key={m.v} value={m.v}>{m.l}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">Дата введення *</Label>
+                <Input type="date" value={form.start_date} onChange={e=>setForm((f:any)=>({...f,start_date:e.target.value}))} className="mt-1" /></div>
+            </div>
+            {monthlyDeprPreview > 0 && (
+              <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700">
+                Щомісячна амортизація (прямолінійний): <strong>{monthlyDeprPreview.toFixed(2)} грн/міс</strong>
+                <span className="ml-2 text-blue-500">• Дт 92 → Кт 131</span>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={()=>{setShowAdd(false);setForm(emptyForm);}}>Скасувати</Button>
+              <Button onClick={handleAdd} disabled={addLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+                {addLoading?<Loader2 className="w-4 h-4 animate-spin mr-1"/>:<Plus className="w-4 h-4 mr-1"/>} Додати ОЗ
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Depreciation dialog */}
+      <Dialog open={!!deprTarget} onOpenChange={v=>!v&&setDeprTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Нарахування амортизації</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div className="bg-gray-50 rounded-lg p-3 text-xs">
+              <div className="font-semibold text-gray-800 mb-1">{deprTarget?.name}</div>
+              <div className="text-gray-500">Залишкова вартість: <strong>{fmt(deprTarget?.residual_value)} грн</strong></div>
+              <div className="text-gray-500">Строк служби: <strong>{deprTarget?.useful_life_months} міс.</strong></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Рік</Label>
+                <Select value={deprYear} onValueChange={setDeprYear}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>{[2023,2024,2025,2026].map(y=><SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">Місяць</Label>
+                <Select value={deprMonth} onValueChange={setDeprMonth}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>{MONTHS_UK.map((m,i)=><SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="text-xs text-gray-500 bg-blue-50 px-3 py-2 rounded">
+              Буде створено проводку: <strong>Дт 92 → Кт 131</strong>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={()=>setDeprTarget(null)}>Скасувати</Button>
+              <Button onClick={handleDepreciate} disabled={deprLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+                {deprLoading?<Loader2 className="w-4 h-4 animate-spin mr-1"/>:<Calculator className="w-4 h-4 mr-1"/>} Нарахувати
               </Button>
             </div>
           </div>
