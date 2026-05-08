@@ -153,7 +153,7 @@ const INTEGRATION_INFO: Record<string, { label: string; desc: string; color: str
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrations"
          | "tax-invoices" | "bas" | "signing" | "archive" | "invoices"
-         | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors" | "acc-vat" | "acc-reports" | "acc-bank";
+         | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors" | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync";
 
 export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -195,6 +195,7 @@ export default function AccountingPage() {
             { id: "acc-vat",       label: "ПДВ",                 icon: Landmark },
             { id: "acc-reports",   label: "Звіти",               icon: BarChart3 },
             { id: "acc-bank",      label: "Банк",                icon: CreditCard },
+            { id: "acc-sync",      label: "Синхронізація",       icon: RefreshCw },
           ] as { id: Tab; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
@@ -225,6 +226,7 @@ export default function AccountingPage() {
         {tab === "acc-vat"        && <AccVatTab />}
         {tab === "acc-reports"    && <AccReportsTab />}
         {tab === "acc-bank"       && <AccBankTab />}
+        {tab === "acc-sync"       && <AccSyncTab />}
       </div>
     </AppLayout>
   );
@@ -3122,6 +3124,279 @@ function AccReportsTab() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ─── ACC: SYNC TAB ────────────────────────────────────────────────────────────
+const SYNC_SOURCES = [
+  {
+    id: "poster",
+    name: "Poster POS",
+    icon: "🖨️",
+    desc: "Щоденна виручка з ресторану/кафе. Дт 361→703 (дохід), Дт 703→6411 (ПДВ), Дт 311/30→361 (оплата).",
+    color: "orange",
+    accent: "bg-orange-50 border-orange-200",
+    badge: "bg-orange-100 text-orange-700",
+    docsLabel: "Документів",
+    endpoint: "poster",
+  },
+  {
+    id: "checkbox",
+    name: "Checkbox ПРРО",
+    icon: "🧾",
+    desc: "Z-звіти з програмного РРО. Дт 30→702 (готівка), Дт 311→702 (безготівка), Дт 702→6411 (ПДВ).",
+    color: "green",
+    accent: "bg-green-50 border-green-200",
+    badge: "bg-green-100 text-green-700",
+    docsLabel: "Z-звітів",
+    endpoint: "checkbox",
+  },
+  {
+    id: "liqpay",
+    name: "LiqPay",
+    icon: "💳",
+    desc: "Онлайн-платежі. Банківська виписка + Дт 311→361 (зарахування від клієнта).",
+    color: "blue",
+    accent: "bg-blue-50 border-blue-200",
+    badge: "bg-blue-100 text-blue-700",
+    docsLabel: "Платежів",
+    endpoint: "liqpay",
+  },
+  {
+    id: "servio",
+    name: "Servio PMS",
+    icon: "🏨",
+    desc: "Виїзди гостей з PMS. Дт 361→703 (виручка проживання), Дт 703→6411 (ПДВ 20%).",
+    color: "purple",
+    accent: "bg-purple-50 border-purple-200",
+    badge: "bg-purple-100 text-purple-700",
+    docsLabel: "Виїздів",
+    endpoint: "servio",
+  },
+] as const;
+
+function AccSyncTab() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const now = new Date();
+  const [dateFrom, setDateFrom] = useState(
+    format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd"),
+  );
+  const [dateTo, setDateTo] = useState(format(now, "yyyy-MM-dd"));
+  const [running, setRunning] = useState<Record<string, boolean>>({});
+  const [lastResult, setLastResult] = useState<Record<string, any>>({});
+
+  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useQuery({
+    queryKey: ["acc-sync-status"],
+    queryFn: () => accFetch("sync/status"),
+    staleTime: 15_000,
+  });
+
+  const { data: logData = [], isLoading: logLoading } = useQuery({
+    queryKey: ["acc-sync-log"],
+    queryFn: () => accFetch("sync/log"),
+    staleTime: 15_000,
+  });
+
+  const fmtNum = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 0 });
+  const fmtAmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const runSync = async (endpoint: string, sourceName: string) => {
+    setRunning(r => ({ ...r, [endpoint]: true }));
+    try {
+      const result = await accFetch(`sync/${endpoint}`, {
+        method: "POST",
+        body: JSON.stringify({ dateFrom, dateTo }),
+      });
+      setLastResult(r => ({ ...r, [endpoint]: result }));
+      qc.invalidateQueries({ queryKey: ["acc-sync-status"] });
+      qc.invalidateQueries({ queryKey: ["acc-sync-log"] });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      qc.invalidateQueries({ queryKey: ["acc-bank"] });
+      toast({
+        title: `${sourceName} — синхронізовано`,
+        description: `Документів: ${result.docsCreated ?? result.bankStatementsCreated ?? 0} · Проводок: ${result.entriesCreated ?? 0} · Сума: ${fmtAmt(result.totalAmount)} грн`,
+      });
+    } catch (e: any) {
+      toast({ title: `Помилка синхронізації ${sourceName}`, description: e.message, variant: "destructive" });
+    } finally {
+      setRunning(r => ({ ...r, [endpoint]: false }));
+    }
+  };
+
+  const syncAll = async () => {
+    for (const src of SYNC_SOURCES) {
+      await runSync(src.endpoint, src.name);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header bar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Синхронізація з зовнішніми системами</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Імпорт продажів і платежів → автоматичні проводки в подвійному обліку</p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-gray-500">Період:</span>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-36 h-8 text-xs" />
+          <span className="text-xs text-gray-400">—</span>
+          <Input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="w-36 h-8 text-xs" />
+          <Button onClick={syncAll}
+            disabled={Object.values(running).some(Boolean)}
+            className="h-8 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+            {Object.values(running).some(Boolean)
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <RefreshCw className="w-3.5 h-3.5" />}
+            Синхронізувати все
+          </Button>
+        </div>
+      </div>
+
+      {/* Source cards */}
+      <div className="grid grid-cols-2 gap-4">
+        {SYNC_SOURCES.map(src => {
+          const st: any = status?.[src.id] || {};
+          const res = lastResult[src.endpoint];
+          const isRunning = running[src.endpoint];
+          return (
+            <Card key={src.id} className={`border ${src.accent} transition-all ${isRunning ? "opacity-80" : ""}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="text-2xl mt-0.5">{src.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-semibold text-sm text-gray-900">{src.name}</span>
+                      {statusLoading ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-gray-400" />
+                      ) : st.connected ? (
+                        <Badge className={`text-[10px] px-1.5 py-0 ${src.badge}`}>Підключено</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-gray-400">Demo-режим</Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 leading-relaxed mb-3">{src.desc}</p>
+
+                    {/* Stats row */}
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div className="bg-white/70 rounded p-2 text-center border border-gray-100">
+                        <div className="text-xs font-bold text-gray-800">{fmtNum(st.totalDocs)}</div>
+                        <div className="text-[10px] text-gray-500">{src.docsLabel}</div>
+                      </div>
+                      <div className="bg-white/70 rounded p-2 text-center border border-gray-100">
+                        <div className="text-xs font-bold text-gray-800">{fmtNum(st.totalEntries)}</div>
+                        <div className="text-[10px] text-gray-500">Проводок</div>
+                      </div>
+                      <div className="bg-white/70 rounded p-2 text-center border border-gray-100">
+                        <div className="text-xs font-bold text-gray-800">{fmtAmt(st.totalAmount)}</div>
+                        <div className="text-[10px] text-gray-500">Сума, грн</div>
+                      </div>
+                    </div>
+
+                    {/* Last sync info */}
+                    {st.lastSync && (
+                      <div className="text-[10px] text-gray-400 mb-2">
+                        Остання синх.: {fmtDate(st.lastSync)}
+                      </div>
+                    )}
+
+                    {/* Last result */}
+                    {res && (
+                      <div className="text-[10px] bg-white/80 border border-gray-100 rounded px-2 py-1 mb-2 text-green-700">
+                        ✓ {res.docsCreated ?? res.bankStatementsCreated ?? 0} док · {res.entriesCreated ?? 0} провод · {fmtAmt(res.totalAmount)} грн
+                        {res.source === "demo" && <span className="text-gray-400 ml-1">(demo)</span>}
+                      </div>
+                    )}
+
+                    <Button
+                      size="sm" variant="outline"
+                      className="h-7 text-xs w-full gap-1.5"
+                      disabled={isRunning}
+                      onClick={() => runSync(src.endpoint, src.name)}>
+                      {isRunning
+                        ? <><Loader2 className="w-3 h-3 animate-spin" /> Синхронізація...</>
+                        : <><RefreshCw className="w-3 h-3" /> Синхронізувати {src.name}</>}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Sync log */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <FileClock className="w-4 h-4" /> Журнал синхронізацій
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {logLoading ? (
+            <div className="py-8 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-gray-400" /></div>
+          ) : (Array.isArray(logData) && logData.length === 0) ? (
+            <div className="py-8 text-center text-gray-400 text-sm">
+              <RefreshCw className="w-7 h-7 mx-auto mb-2 opacity-30" />
+              Синхронізацій ще не було. Натисніть «Синхронізувати все» щоб почати.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead className="w-36">Дата/час</TableHead>
+                  <TableHead className="w-28">Джерело</TableHead>
+                  <TableHead>Діапазон</TableHead>
+                  <TableHead className="text-right w-24">Докум.</TableHead>
+                  <TableHead className="text-right w-24">Провод.</TableHead>
+                  <TableHead className="text-right w-36">Сума, грн</TableHead>
+                  <TableHead className="text-center w-20">Статус</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(Array.isArray(logData) ? logData : []).map((row: any) => (
+                  <TableRow key={row.id} className="hover:bg-gray-50">
+                    <TableCell className="text-xs">{fmtDate(row.sync_date)}</TableCell>
+                    <TableCell>
+                      <span className="text-xs font-medium capitalize">
+                        {row.source === "poster"   ? "🖨️ Poster"   :
+                         row.source === "checkbox" ? "🧾 Checkbox" :
+                         row.source === "liqpay"   ? "💳 LiqPay"   :
+                         row.source === "servio"   ? "🏨 Servio"   : row.source}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-500">
+                      {fmtDate(row.date_from)} — {fmtDate(row.date_to)}
+                    </TableCell>
+                    <TableCell className="text-right text-xs">{row.docs_created}</TableCell>
+                    <TableCell className="text-right text-xs">{row.entries_created}</TableCell>
+                    <TableCell className="text-right text-xs font-medium">{fmtAmt(row.total_amount)}</TableCell>
+                    <TableCell className="text-center">
+                      {row.status === "ok"
+                        ? <Badge className="text-[10px] bg-green-100 text-green-700 border-0">OK</Badge>
+                        : <Badge variant="destructive" className="text-[10px]">Помилка</Badge>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Info box */}
+      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-xs text-blue-800 space-y-1.5">
+        <div className="font-semibold text-sm mb-2 flex items-center gap-2">
+          <Server className="w-4 h-4" /> Як налаштувати реальні підключення
+        </div>
+        <div><span className="font-medium">Poster POS:</span> введіть API-ключ у вкладці Інтеграції → Poster. Ключ генерується в Особистому кабінеті joinposter.com.</div>
+        <div><span className="font-medium">Checkbox ПРРО:</span> вкажіть логін касира, пароль і ліцензійний ключ ПРРО у вкладці Інтеграції → Checkbox.</div>
+        <div><span className="font-medium">LiqPay:</span> додайте LIQPAY_PUBLIC_KEY та LIQPAY_PRIVATE_KEY у налаштуваннях середовища. Підтримується API звіту по транзакціях.</div>
+        <div><span className="font-medium">Servio PMS:</span> вкажіть Base URL сервера Servio та API-ключ у вкладці Інтеграції → Servio.</div>
+        <div className="text-blue-600 pt-1">Без реальних ключів система працює в <strong>demo-режимі</strong> — генерує реалістичні дані для тестування проводок.</div>
+      </div>
     </div>
   );
 }
