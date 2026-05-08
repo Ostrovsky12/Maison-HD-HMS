@@ -173,12 +173,55 @@ async function getAccId(orgId: number, code: string): Promise<number | null> {
   return rows[0]?.id ?? null;
 }
 
+/**
+ * resolveOrgId — повертає organizationId для запиту.
+ * Якщо JWT не містить organizationId (наприклад, новий користувач без організації),
+ * знаходить або автоматично створює організацію і прив'язує до акаунту.
+ */
+async function resolveOrgId(req: any): Promise<number> {
+  if (req.user?.organizationId) return req.user.organizationId;
+
+  const userId = req.user?.userId;
+  if (!userId) throw new Error("Unauthorized: no userId");
+
+  // 1. Спробуємо знайти organization_id в таблиці users
+  const { rows: userRows } = await pool.query(
+    `SELECT organization_id FROM users WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  if (userRows[0]?.organization_id) {
+    req.user.organizationId = userRows[0].organization_id;
+    return userRows[0].organization_id;
+  }
+
+  // 2. Якщо не знайдено — авто-створюємо організацію для цього юзера
+  const email = req.user?.email ?? `user${userId}@maisonhd.com`;
+  const orgName = email.split("@")[0] ?? "My Organization";
+
+  const { rows: orgRows } = await pool.query(
+    `INSERT INTO organizations (name, plan, is_active, created_at, updated_at)
+     VALUES ($1, 'basic', true, NOW(), NOW())
+     RETURNING id`,
+    [orgName],
+  );
+  const newOrgId = orgRows[0].id;
+
+  // 3. Прив'язуємо юзера до нової організації
+  await pool.query(
+    `UPDATE users SET organization_id = $1 WHERE id = $2`,
+    [newOrgId, userId],
+  );
+
+  req.user.organizationId = newOrgId;
+  return newOrgId;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CHART OF ACCOUNTS — план рахунків
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/accounts", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   await seedChart(orgId);
   const { rows } = await pool.query(
     `SELECT a.*, p.code as parent_code
@@ -191,7 +234,7 @@ router.get("/accounts", async (req: any, res) => {
 });
 
 router.post("/accounts", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { code, name, type, class: cls, parent_id, description } = req.body;
   if (!code || !name || !type) return res.status(400).json({ error: "code, name, type required" });
   const { rows } = await pool.query(
@@ -203,7 +246,7 @@ router.post("/accounts", async (req: any, res) => {
 });
 
 router.patch("/accounts/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { name, description, is_active } = req.body;
   const { rows } = await pool.query(
     `UPDATE acc_accounts SET
@@ -217,7 +260,7 @@ router.patch("/accounts/:id", async (req: any, res) => {
 });
 
 router.delete("/accounts/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows: used } = await pool.query(
     `SELECT COUNT(*) as cnt FROM acc_entries
      WHERE organization_id=$1 AND (debit_account_id=$2 OR credit_account_id=$2)`,
@@ -237,7 +280,7 @@ router.delete("/accounts/:id", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/contractors", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { type, search, active } = req.query;
   let q = `SELECT * FROM acc_contractors WHERE organization_id=$1`;
   const p: any[] = [orgId];
@@ -250,7 +293,7 @@ router.get("/contractors", async (req: any, res) => {
 });
 
 router.post("/contractors", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { name, edrpou, ipn, vat_number, contractor_type, address, bank_name, bank_account, mfo, notes } = req.body;
   if (!name) return res.status(400).json({ error: "name required" });
   const { rows } = await pool.query(
@@ -265,7 +308,7 @@ router.post("/contractors", async (req: any, res) => {
 });
 
 router.patch("/contractors/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const f = req.body;
   const cols = ["name","edrpou","ipn","vat_number","contractor_type","address","bank_name","bank_account","mfo","notes","is_active"];
   const sets: string[] = []; const p: any[] = [req.params.id, orgId];
@@ -282,7 +325,7 @@ router.patch("/contractors/:id", async (req: any, res) => {
 });
 
 router.delete("/contractors/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   await pool.query(
     `UPDATE acc_contractors SET is_active=false WHERE id=$1 AND organization_id=$2`,
     [req.params.id, orgId],
@@ -295,7 +338,7 @@ router.delete("/contractors/:id", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/periods", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows } = await pool.query(
     `SELECT * FROM acc_periods WHERE organization_id=$1 ORDER BY year DESC, month DESC`,
     [orgId],
@@ -304,7 +347,7 @@ router.get("/periods", async (req: any, res) => {
 });
 
 router.post("/periods/:id/close", requireRole("admin", "owner"), async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows } = await pool.query(
     `UPDATE acc_periods SET status='closed', closed_at=NOW(), closed_by=$1
      WHERE id=$2 AND organization_id=$3 RETURNING *`,
@@ -315,7 +358,7 @@ router.post("/periods/:id/close", requireRole("admin", "owner"), async (req: any
 });
 
 router.post("/periods/:id/reopen", requireRole("admin", "owner"), async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows } = await pool.query(
     `UPDATE acc_periods SET status='open', closed_at=NULL, closed_by=NULL
      WHERE id=$1 AND organization_id=$2 RETURNING *`,
@@ -329,7 +372,7 @@ router.post("/periods/:id/reopen", requireRole("admin", "owner"), async (req: an
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/documents", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { type, status, from, to, contractor_id, limit = 50, offset = 0 } = req.query;
   let q = `SELECT d.*, c.name as contractor_name
            FROM acc_documents d
@@ -348,7 +391,7 @@ router.get("/documents", async (req: any, res) => {
 });
 
 router.get("/documents/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows: docs } = await pool.query(
     `SELECT d.*, c.name as contractor_name, c.edrpou, c.vat_number, c.bank_account, c.mfo
      FROM acc_documents d LEFT JOIN acc_contractors c ON c.id=d.contractor_id
@@ -373,7 +416,7 @@ router.get("/documents/:id", async (req: any, res) => {
 });
 
 router.post("/documents", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const userId = req.user.userId;
   const { doc_type, doc_number, doc_date, contractor_id, description,
           currency = "UAH", vat_rate = 20, items = [], linked_doc_id } = req.body;
@@ -419,7 +462,7 @@ router.post("/documents", async (req: any, res) => {
 });
 
 router.patch("/documents/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows: chk } = await pool.query(
     `SELECT status FROM acc_documents WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId],
   );
@@ -467,7 +510,7 @@ router.patch("/documents/:id", async (req: any, res) => {
 
 // Провести документ — автоматично створює проводки
 router.post("/documents/:id/post", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const userId = req.user.userId;
 
   const { rows: docs } = await pool.query(
@@ -528,7 +571,7 @@ router.post("/documents/:id/post", async (req: any, res) => {
 });
 
 router.post("/documents/:id/cancel", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows } = await pool.query(
     `UPDATE acc_documents SET status='cancelled', updated_at=NOW()
      WHERE id=$1 AND organization_id=$2 AND status='draft' RETURNING *`,
@@ -539,7 +582,7 @@ router.post("/documents/:id/cancel", async (req: any, res) => {
 });
 
 router.delete("/documents/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows } = await pool.query(
     `SELECT status FROM acc_documents WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId],
   );
@@ -554,7 +597,7 @@ router.delete("/documents/:id", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/entries", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { from, to, account_code, limit = 100, offset = 0 } = req.query;
   let q = `SELECT e.*,
              da.code as debit_code,  da.name as debit_name,
@@ -576,7 +619,7 @@ router.get("/entries", async (req: any, res) => {
 });
 
 router.post("/entries", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const userId = req.user.userId;
   const { entry_date, debit_account_id, credit_account_id, amount, description, currency = "UAH" } = req.body;
   if (!entry_date || !debit_account_id || !credit_account_id || !amount)
@@ -593,7 +636,7 @@ router.post("/entries", async (req: any, res) => {
 });
 
 router.delete("/entries/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows } = await pool.query(
     `SELECT is_manual FROM acc_entries WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId],
   );
@@ -608,7 +651,7 @@ router.delete("/entries/:id", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/vat", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month, type } = req.query;
   let q = `SELECT v.*, c.name as contractor_name, d.doc_number
            FROM acc_vat_records v
@@ -626,7 +669,7 @@ router.get("/vat", async (req: any, res) => {
 
 // Додаток Д5 — розшифровка кредиту по контрагентах (BEFORE /declaration to avoid routing conflict)
 router.get("/vat/declaration/d5", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month } = req.query;
   const { rows } = await pool.query(`
     SELECT
@@ -651,7 +694,7 @@ router.get("/vat/declaration/d5", async (req: any, res) => {
 
 // Повна декларація з ПДВ (всі рядки форми 0110)
 router.get("/vat/declaration", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month } = req.query;
 
   // Get issued/received by vat_rate
@@ -729,7 +772,7 @@ router.get("/vat/declaration", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/month-close/preview", requireRole("admin", "owner"), async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month } = req.query;
   if (!year || !month) return res.status(400).json({ error: "year and month required" });
   await seedChart(orgId);
@@ -790,7 +833,7 @@ router.get("/month-close/preview", requireRole("admin", "owner"), async (req: an
 });
 
 router.post("/month-close/execute", requireRole("admin", "owner"), async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const userId = req.user.userId;
   const { year, month } = req.body;
   if (!year || !month) return res.status(400).json({ error: "year and month required" });
@@ -866,7 +909,7 @@ router.post("/month-close/execute", requireRole("admin", "owner"), async (req: a
 });
 
 router.post("/month-close/undo", requireRole("admin", "owner"), async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month } = req.body;
   if (!year || !month) return res.status(400).json({ error: "year and month required" });
   const yr = Number(year), mo = Number(month);
@@ -890,7 +933,7 @@ router.post("/month-close/undo", requireRole("admin", "owner"), async (req: any,
 // ОСВ — Оборотно-сальдова відомість
 // ОСВ — Оборотно-сальдова відомість з вхідним сальдо
 router.get("/reports/trial-balance", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   let { from, to, year, month } = req.query as Record<string, string>;
   await seedChart(orgId);
   // Support year/month OR from/to
@@ -951,7 +994,7 @@ router.get("/reports/trial-balance", async (req: any, res) => {
 
 // Звіт про фінансові результати (НП(С)БО 1, Форма 2)
 router.get("/reports/profit-loss", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month, from, to } = req.query as Record<string, string>;
 
   // Build date conditions
@@ -1037,7 +1080,7 @@ router.get("/reports/profit-loss", async (req: any, res) => {
 
 // Баланс (Форма 1, НП(С)БО 1)
 router.get("/reports/balance-sheet", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { date } = req.query;
   const { rows } = await pool.query(
     `WITH bal AS (
@@ -1074,7 +1117,7 @@ router.get("/reports/balance-sheet", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/bank", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { from, to, reconciled } = req.query;
   let q = `SELECT b.*, c.name as contractor_name
            FROM acc_bank_statements b
@@ -1090,7 +1133,7 @@ router.get("/bank", async (req: any, res) => {
 });
 
 router.post("/bank", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { bank_account, statement_date, description, amount, contractor_id, external_id } = req.body;
   const { rows } = await pool.query(
     `INSERT INTO acc_bank_statements (organization_id,bank_account,statement_date,description,amount,contractor_id,external_id)
@@ -1101,7 +1144,7 @@ router.post("/bank", async (req: any, res) => {
 });
 
 router.post("/bank/import", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { rows: data } = req.body;
   if (!Array.isArray(data)) return res.status(400).json({ error: "rows must be array" });
   let imported = 0;
@@ -1117,7 +1160,7 @@ router.post("/bank/import", async (req: any, res) => {
 });
 
 router.patch("/bank/:id/reconcile", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { contractor_id, document_id } = req.body;
   const { rows } = await pool.query(
     `UPDATE acc_bank_statements SET is_reconciled=true,
@@ -1134,7 +1177,7 @@ router.patch("/bank/:id/reconcile", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/reports/account-card", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { code, from, to } = req.query;
   if (!code) return res.status(400).json({ error: "code required" });
   await seedChart(orgId);
@@ -1213,7 +1256,7 @@ async function ensureCashTable() {
 }
 
 router.get("/cash", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   await ensureCashTable();
   const { from, to, type } = req.query;
   let q = `SELECT o.*, c.name as contractor_name
@@ -1229,7 +1272,7 @@ router.get("/cash", async (req: any, res) => {
 });
 
 router.post("/cash", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const userId = req.user.userId;
   await ensureCashTable();
   const { order_type, order_number, order_date, amount, description,
@@ -1270,7 +1313,7 @@ router.post("/cash", async (req: any, res) => {
 });
 
 router.delete("/cash/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   await ensureCashTable();
   const { rows } = await pool.query(
     `SELECT entry_id FROM acc_cash_orders WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId],
@@ -1282,7 +1325,7 @@ router.delete("/cash/:id", async (req: any, res) => {
 });
 
 router.get("/cash/book", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   await ensureCashTable();
   const { from, to } = req.query;
   const dateFrom = from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
@@ -1349,7 +1392,7 @@ async function ensureBasImportTable() {
 // Preview: parse incoming entries array and resolve account IDs
 router.post("/import/bas-xml/preview", async (req: any, res) => {
   try {
-    const orgId = req.user.organizationId;
+    const orgId = await resolveOrgId(req);
     await seedChart(orgId);
     const { entries = [] } = req.body;
     if (!Array.isArray(entries) || entries.length === 0)
@@ -1388,7 +1431,7 @@ router.post("/import/bas-xml/preview", async (req: any, res) => {
 // Confirm import: save valid entries to acc_entries
 router.post("/import/bas-xml/confirm", async (req: any, res) => {
   try {
-    const orgId = req.user.organizationId;
+    const orgId = await resolveOrgId(req);
     const userId = req.user.userId;
     await ensureBasImportTable();
     await seedChart(orgId);
@@ -1457,7 +1500,7 @@ router.post("/import/bas-xml/confirm", async (req: any, res) => {
 router.get("/import/bas-xml/history", async (req: any, res) => {
   try {
     await ensureBasImportTable();
-    const orgId = req.user.organizationId;
+    const orgId = await resolveOrgId(req);
     const { rows } = await pool.query(
       `SELECT * FROM acc_bas_imports WHERE organization_id=$1 ORDER BY imported_at DESC LIMIT 50`,
       [orgId],
@@ -1467,7 +1510,7 @@ router.get("/import/bas-xml/history", async (req: any, res) => {
 });
 
 router.post("/import/contractors", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { contractors } = req.body;
   if (!Array.isArray(contractors)) return res.status(400).json({ error: "contractors must be array" });
   let imported = 0;
@@ -1489,7 +1532,7 @@ router.post("/import/contractors", async (req: any, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get("/dashboard", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   await seedChart(orgId);
   const now = new Date();
   const year = now.getFullYear();
@@ -1572,7 +1615,7 @@ async function ensureTouristTaxTable() {
 
 router.get("/tourist-tax", async (req: any, res) => {
   await ensureTouristTaxTable();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { from, to, year, month } = req.query as Record<string, string>;
   let where = "WHERE organization_id=$1";
   const params: any[] = [orgId];
@@ -1589,7 +1632,7 @@ router.get("/tourist-tax", async (req: any, res) => {
 
 router.post("/tourist-tax", async (req: any, res) => {
   await ensureTouristTaxTable();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { record_date, guest_name, check_in, check_out, nights, rate_per_night, notes } = req.body;
   if (!record_date || !check_in || !check_out || !nights || rate_per_night == null)
     return res.status(400).json({ error: "Missing required fields" });
@@ -1602,7 +1645,7 @@ router.post("/tourist-tax", async (req: any, res) => {
 });
 
 router.patch("/tourist-tax/:id", async (req: any, res) => {
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { id } = req.params;
   const { is_paid, rate_per_night, nights, notes, guest_name, check_in, check_out } = req.body;
   await pool.query(
@@ -1617,14 +1660,15 @@ router.patch("/tourist-tax/:id", async (req: any, res) => {
 });
 
 router.delete("/tourist-tax/:id", requireRole("admin","owner"), async (req: any, res) => {
-  await pool.query(`DELETE FROM acc_tourist_tax WHERE id=$1 AND organization_id=$2`, [req.params.id, req.user.organizationId]);
+  const orgId = await resolveOrgId(req);
+  await pool.query(`DELETE FROM acc_tourist_tax WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId]);
   res.json({ ok: true });
 });
 
 // Monthly report: nights, guests, total collected
 router.get("/tourist-tax/report", async (req: any, res) => {
   await ensureTouristTaxTable();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year } = req.query as Record<string, string>;
   const y = parseInt(year ?? new Date().getFullYear().toString());
   const { rows } = await pool.query(
@@ -1692,16 +1736,17 @@ async function ensurePayrollTables() {
 
 router.get("/payroll/employees", async (req: any, res) => {
   await ensurePayrollTables();
+  const orgId = await resolveOrgId(req);
   const { rows } = await pool.query(
     `SELECT * FROM acc_payroll_employees WHERE organization_id=$1 ORDER BY full_name`,
-    [req.user.organizationId],
+    [orgId],
   );
   res.json(rows);
 });
 
 router.post("/payroll/employees", async (req: any, res) => {
   await ensurePayrollTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { full_name, position, ipn, base_salary, hire_date, notes } = req.body;
   if (!full_name) return res.status(400).json({ error: "full_name required" });
   const { rows } = await pool.query(
@@ -1713,6 +1758,7 @@ router.post("/payroll/employees", async (req: any, res) => {
 });
 
 router.patch("/payroll/employees/:id", async (req: any, res) => {
+  const orgId = await resolveOrgId(req);
   const { full_name, position, ipn, base_salary, hire_date, is_active, notes } = req.body;
   await pool.query(
     `UPDATE acc_payroll_employees SET
@@ -1720,20 +1766,21 @@ router.patch("/payroll/employees/:id", async (req: any, res) => {
        base_salary=COALESCE($6,base_salary), hire_date=COALESCE($7::date,hire_date),
        is_active=COALESCE($8,is_active), notes=COALESCE($9,notes)
      WHERE id=$1 AND organization_id=$2`,
-    [req.params.id, req.user.organizationId, full_name||null, position||null, ipn||null,
+    [req.params.id, orgId, full_name||null, position||null, ipn||null,
      base_salary ? parseFloat(base_salary) : null, hire_date||null, is_active??null, notes||null],
   );
   res.json({ ok: true });
 });
 
 router.delete("/payroll/employees/:id", requireRole("admin","owner"), async (req: any, res) => {
-  await pool.query(`DELETE FROM acc_payroll_employees WHERE id=$1 AND organization_id=$2`, [req.params.id, req.user.organizationId]);
+  const orgId = await resolveOrgId(req);
+  await pool.query(`DELETE FROM acc_payroll_employees WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId]);
   res.json({ ok: true });
 });
 
 router.get("/payroll/accruals", async (req: any, res) => {
   await ensurePayrollTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month } = req.query as Record<string, string>;
   const params: any[] = [orgId];
   let where = "WHERE a.organization_id=$1";
@@ -1750,7 +1797,7 @@ router.get("/payroll/accruals", async (req: any, res) => {
 
 router.post("/payroll/accruals", async (req: any, res) => {
   await ensurePayrollTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { employee_id, period_year, period_month, accrual_type, gross_amount, notes } = req.body;
   if (!employee_id || !period_year || !period_month || !gross_amount)
     return res.status(400).json({ error: "Missing required fields" });
@@ -1769,7 +1816,7 @@ router.post("/payroll/accruals", async (req: any, res) => {
 // Відомість нарахування зарплати за місяць
 router.get("/payroll/sheet", async (req: any, res) => {
   await ensurePayrollTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month } = req.query as Record<string, string>;
   const y = parseInt(year ?? new Date().getFullYear().toString());
   const m = parseInt(month ?? (new Date().getMonth() + 1).toString());
@@ -1802,7 +1849,7 @@ router.get("/payroll/sheet", async (req: any, res) => {
 // Провести зарплату (створити проводки 661/641/642/651)
 router.post("/payroll/post", requireRole("admin","owner"), async (req: any, res) => {
   await ensurePayrollTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { year, month } = req.body;
   const y = parseInt(year), m = parseInt(month);
   if (!y || !m) return res.status(400).json({ error: "year and month required" });
@@ -1902,7 +1949,7 @@ async function ensureFixedAssetsTables() {
 
 router.get("/fixed-assets", async (req: any, res) => {
   await ensureFixedAssetsTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { include_disposed } = req.query;
   const { rows } = await pool.query(
     `SELECT fa.*,
@@ -1918,7 +1965,7 @@ router.get("/fixed-assets", async (req: any, res) => {
 
 router.post("/fixed-assets", async (req: any, res) => {
   await ensureFixedAssetsTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { name, inventory_number, account_code, initial_cost, liquidation_value, useful_life_months, depreciation_method, start_date, category, notes } = req.body;
   if (!name || !initial_cost || !start_date) return res.status(400).json({ error: "name, initial_cost, start_date required" });
   const { rows } = await pool.query(
@@ -1931,6 +1978,7 @@ router.post("/fixed-assets", async (req: any, res) => {
 });
 
 router.patch("/fixed-assets/:id", async (req: any, res) => {
+  const orgId = await resolveOrgId(req);
   const { name, inventory_number, account_code, useful_life_months, depreciation_method, category, notes, is_disposed, disposed_at } = req.body;
   await pool.query(
     `UPDATE acc_fixed_assets SET
@@ -1940,7 +1988,7 @@ router.patch("/fixed-assets/:id", async (req: any, res) => {
        notes=COALESCE($9,notes), is_disposed=COALESCE($10,is_disposed),
        disposed_at=COALESCE($11::date,disposed_at)
      WHERE id=$1 AND organization_id=$2`,
-    [req.params.id, req.user.organizationId, name||null, inventory_number||null, account_code||null,
+    [req.params.id, orgId, name||null, inventory_number||null, account_code||null,
      useful_life_months ? parseInt(useful_life_months) : null, depreciation_method||null, category||null,
      notes||null, is_disposed??null, disposed_at||null],
   );
@@ -1948,14 +1996,15 @@ router.patch("/fixed-assets/:id", async (req: any, res) => {
 });
 
 router.delete("/fixed-assets/:id", requireRole("admin","owner"), async (req: any, res) => {
-  await pool.query(`DELETE FROM acc_fixed_assets WHERE id=$1 AND organization_id=$2`, [req.params.id, req.user.organizationId]);
+  const orgId = await resolveOrgId(req);
+  await pool.query(`DELETE FROM acc_fixed_assets WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId]);
   res.json({ ok: true });
 });
 
 // Нарахування амортизації за місяць для одного ОЗ
 router.post("/fixed-assets/:id/depreciate", requireRole("admin","owner"), async (req: any, res) => {
   await ensureFixedAssetsTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const assetId = parseInt(req.params.id);
   const { year, month } = req.body;
   const y = parseInt(year), m = parseInt(month);
@@ -2009,7 +2058,7 @@ router.post("/fixed-assets/:id/depreciate", requireRole("admin","owner"), async 
 // Відомість по ОЗ (усі активи з залишковою вартістю)
 router.get("/fixed-assets/report", async (req: any, res) => {
   await ensureFixedAssetsTables();
-  const orgId = req.user.organizationId;
+  const orgId = await resolveOrgId(req);
   const { date } = req.query as Record<string, string>;
   const { rows } = await pool.query(
     `SELECT fa.*,
