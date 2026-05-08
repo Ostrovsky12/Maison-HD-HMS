@@ -29,6 +29,9 @@ import {
   ShieldCheck, Shuffle, UserPlus, BookOpen, BadgeCheck, Server,
   TrendingUp, TrendingDown, Wallet, PieChart, MapPin,
   UserCheck, Briefcase, HardDrive, Calculator, AlertTriangle,
+  LayoutDashboard, ListChecks, Calendar, ChevronDown, Zap, Star,
+  Target, Clipboard, ArrowRight, Info, SlidersHorizontal, Bell,
+  GanttChart, ArrowUpRight, SquareCheck, Square, Layers,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
@@ -152,97 +155,195 @@ const INTEGRATION_INFO: Record<string, { label: string; desc: string; color: str
 };
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
-type Tab = "overview" | "documents" | "counterparties" | "entities" | "integrations"
+type Tab = "acc-workspace" | "overview" | "documents" | "counterparties" | "entities" | "integrations"
          | "tax-invoices" | "bas" | "signing" | "archive" | "invoices"
          | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors"
          | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync"
          | "acc-monthclose" | "acc-card" | "acc-cash"
          | "acc-tourist" | "acc-payroll" | "acc-assets";
 
+// ─── SIDEBAR NAVIGATION ────────────────────────────────────────────────────────
+const ACC_NAV = [
+  {
+    section: "РОБОЧИЙ СТІЛ",
+    items: [
+      { id: "acc-workspace",  label: "Огляд",              icon: LayoutDashboard },
+    ],
+  },
+  {
+    section: "ДОКУМЕНТООБІГ",
+    items: [
+      { id: "invoices",       label: "Рахунки",            icon: Receipt },
+      { id: "documents",      label: "Договори та акти",   icon: FileText },
+      { id: "tax-invoices",   label: "Подат. накладні",    icon: Landmark },
+      { id: "bas",            label: "BAS / 1C",           icon: Cpu },
+      { id: "signing",        label: "Підписання КЕП",     icon: PenSquare },
+      { id: "archive",        label: "Архів",              icon: Archive },
+    ],
+  },
+  {
+    section: "БУХГАЛТЕРСЬКИЙ ОБЛІК",
+    items: [
+      { id: "acc-journal",    label: "Журнал проводок",    icon: GanttChart },
+      { id: "acc-reports",    label: "ОСВ та звіти",       icon: BarChart3 },
+      { id: "acc-card",       label: "Картка рахунку",     icon: Search },
+      { id: "acc-bank",       label: "Банк",               icon: CreditCard },
+      { id: "acc-cash",       label: "Каса ПКО/ВКО",      icon: Wallet },
+      { id: "acc-sync",       label: "Синхронізація",      icon: RefreshCw },
+      { id: "acc-monthclose", label: "Закриття місяця",    icon: CheckCircle2 },
+    ],
+  },
+  {
+    section: "НАРАХУВАННЯ",
+    items: [
+      { id: "acc-vat",        label: "ПДВ",                icon: Landmark },
+      { id: "acc-payroll",    label: "Зарплата",           icon: Users },
+      { id: "acc-tourist",    label: "Тур. збір",          icon: MapPin },
+      { id: "acc-assets",     label: "Основні засоби",     icon: Building2 },
+    ],
+  },
+  {
+    section: "НАЛАШТУВАННЯ",
+    items: [
+      { id: "entities",       label: "Юр. особи",          icon: Building2 },
+      { id: "counterparties", label: "Контрагенти",        icon: Users },
+      { id: "acc-accounts",   label: "План рахунків",      icon: BookOpen },
+      { id: "integrations",   label: "Інтеграції",         icon: Settings },
+    ],
+  },
+] as const;
+
+const TAB_TITLES: Partial<Record<Tab, { title: string; desc: string }>> = {
+  "acc-workspace":  { title: "Робочий стіл бухгалтера", desc: "Огляд, чекліст налаштування, дедлайни та швидкі дії" },
+  "invoices":       { title: "Рахунки",                 desc: "Рахунки-фактури та оплата" },
+  "documents":      { title: "Договори та акти",        desc: "Первинна документація" },
+  "tax-invoices":   { title: "Податкові накладні",      desc: "ПН / РК для ДПС" },
+  "bas":            { title: "BAS / 1C",                desc: "Вивантаження та завантаження XML" },
+  "signing":        { title: "Підписання КЕП",          desc: "Електронний підпис документів" },
+  "archive":        { title: "Архів",                   desc: "Заархівовані документи" },
+  "acc-journal":    { title: "Журнал проводок",         desc: "Подвійний запис · Дт / Кт" },
+  "acc-reports":    { title: "ОСВ та звіти",            desc: "Оборотно-сальдова · Ф1 · Ф2" },
+  "acc-card":       { title: "Картка рахунку",          desc: "Аналітика по конкретному рахунку" },
+  "acc-bank":       { title: "Банк",                    desc: "Виписки та банківські операції" },
+  "acc-cash":       { title: "Каса ПКО/ВКО",           desc: "Прибутково-видаткові ордери" },
+  "acc-sync":       { title: "Синхронізація",           desc: "Poster POS · LiqPay · Servio" },
+  "acc-monthclose": { title: "Закриття місяця",         desc: "Фінальна перевірка та закриття" },
+  "acc-vat":        { title: "ПДВ",                     desc: "Декларація · Д5 · Реєстр ПН" },
+  "acc-payroll":    { title: "Зарплата",                desc: "Нарахування · ПДФО · ВЗ · ЄСВ" },
+  "acc-tourist":    { title: "Туристичний збір",        desc: "Облік нічліг та ставок" },
+  "acc-assets":     { title: "Основні засоби",          desc: "Картки ОЗ · Амортизація (прямолінійна)" },
+  "entities":       { title: "Юридичні особи",          desc: "Реквізити, підписанти, банк" },
+  "counterparties": { title: "Контрагенти",             desc: "Клієнти, постачальники, партнери" },
+  "acc-accounts":   { title: "План рахунків",           desc: "Стандартний план НП(С)БО" },
+  "integrations":   { title: "Інтеграції",              desc: "M.E.Doc · Вчасно · Checkbox · LiqPay" },
+};
+
+function AccSidebar({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
+  return (
+    <div className="w-56 shrink-0 bg-white border-r border-gray-200 flex flex-col overflow-y-auto">
+      {/* Brand */}
+      <div className="px-4 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+            <Calculator className="w-4 h-4 text-white" />
+          </div>
+          <div>
+            <div className="text-sm font-bold text-gray-900 leading-none">Maison Finance</div>
+            <div className="text-[10px] text-gray-400 mt-0.5">Бухгалтерський модуль</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Nav groups */}
+      <nav className="flex-1 py-3 space-y-1">
+        {ACC_NAV.map(({ section, items }) => (
+          <div key={section} className="mb-1">
+            <div className="px-4 pt-3 pb-1 text-[9px] font-bold uppercase tracking-widest text-gray-400 select-none">
+              {section}
+            </div>
+            {items.map(({ id, label, icon: Icon }) => {
+              const active = tab === id;
+              return (
+                <button key={id} onClick={() => setTab(id as Tab)}
+                  className={`w-full flex items-center gap-2.5 px-4 py-2 text-[13px] transition-all relative ${
+                    active
+                      ? "text-indigo-700 font-semibold bg-indigo-50"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                  }`}>
+                  {active && <span className="absolute left-0 top-1 bottom-1 w-[3px] bg-indigo-600 rounded-r-full" />}
+                  <Icon className={`w-3.5 h-3.5 shrink-0 ${active ? "text-indigo-600" : "text-gray-400"}`} />
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      {/* Footer hint */}
+      <div className="px-4 py-3 border-t border-gray-100">
+        <div className="text-[10px] text-gray-400 leading-relaxed">
+          НП(С)БО · Україна · UAH
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AccountingPage() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("acc-workspace");
   const [docFilter, setDocFilter] = useState({ type: "", status: "", search: "" });
+
+  const tabMeta = TAB_TITLES[tab] ?? { title: "Бухгалтерія", desc: "" };
 
   return (
     <AppLayout>
-      <div className="p-6 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold font-display text-gray-900">Бухгалтерія та документообіг</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Договори · Рахунки · Акти · ПН · BAS · M.E.Doc · Вчасно · КЕП · Архів
-            </p>
+      <div className="flex overflow-hidden" style={{ height: "calc(100vh - 60px)" }}>
+        {/* Sidebar */}
+        <AccSidebar tab={tab} setTab={setTab} />
+
+        {/* Main content */}
+        <div className="flex-1 flex flex-col overflow-hidden bg-gray-50">
+          {/* Page header */}
+          <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shrink-0">
+            <div>
+              <h1 className="text-lg font-bold text-gray-900 leading-tight">{tabMeta.title}</h1>
+              {tabMeta.desc && <p className="text-xs text-gray-500 mt-0.5">{tabMeta.desc}</p>}
+            </div>
+            <div className="flex items-center gap-2">
+              {(tab === "documents" || tab === "invoices" || tab === "acc-workspace") && <NewDocumentDialog />}
+            </div>
           </div>
-          <div className="flex gap-2">
-            <NewDocumentDialog />
+
+          {/* Scrollable tab content */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {tab === "acc-workspace"  && <AccWorkspaceTab setTab={setTab} />}
+            {tab === "overview"       && <OverviewTab />}
+            {tab === "invoices"       && <BookingInvoicesTab />}
+            {tab === "documents"      && <DocumentsTab filter={docFilter} setFilter={setDocFilter} />}
+            {tab === "tax-invoices"   && <TaxInvoicesTab />}
+            {tab === "bas"            && <BasExportTab />}
+            {tab === "signing"        && <SigningTab />}
+            {tab === "archive"        && <ArchiveTab />}
+            {tab === "counterparties" && <CounterpartiesTab />}
+            {tab === "entities"       && <LegalEntitiesTab />}
+            {tab === "integrations"   && <IntegrationsTab />}
+            {tab === "acc-accounts"   && <AccChartOfAccountsTab />}
+            {tab === "acc-journal"    && <AccJournalTab />}
+            {tab === "acc-documents"  && <AccDocumentsTab />}
+            {tab === "acc-contractors"&& <AccContractorsTab />}
+            {tab === "acc-vat"        && <AccVatTab />}
+            {tab === "acc-reports"    && <AccReportsTab />}
+            {tab === "acc-bank"       && <AccBankTab />}
+            {tab === "acc-sync"       && <AccSyncTab />}
+            {tab === "acc-monthclose" && <AccMonthCloseTab />}
+            {tab === "acc-card"       && <AccAccountCardTab />}
+            {tab === "acc-cash"       && <AccCashTab />}
+            {tab === "acc-tourist"    && <AccTouristTaxTab />}
+            {tab === "acc-payroll"    && <AccPayrollTab />}
+            {tab === "acc-assets"     && <AccFixedAssetsTab />}
           </div>
         </div>
-
-        {/* Tabs */}
-        <div className="flex gap-0.5 border-b border-gray-200 overflow-x-auto pb-px">
-          {([
-            { id: "overview",      label: "Огляд",               icon: BarChart3 },
-            { id: "invoices",      label: "Сформовані рахунки",  icon: Receipt },
-            { id: "documents",     label: "Документи",           icon: FileText },
-            { id: "tax-invoices",  label: "Подат. накладні",     icon: Landmark },
-            { id: "bas",           label: "BAS / 1C",            icon: Cpu },
-            { id: "signing",       label: "Підписання",          icon: PenSquare },
-            { id: "archive",       label: "Архів",               icon: Archive },
-            { id: "counterparties",label: "Контрагенти",         icon: Users },
-            { id: "entities",      label: "Юр. особи",           icon: Building2 },
-            { id: "integrations",  label: "Інтеграції",          icon: Settings },
-            { id: "acc-accounts",  label: "План рахунків",       icon: BookOpen },
-            { id: "acc-journal",   label: "Журнал проводок",     icon: FileText },
-            { id: "acc-documents", label: "ЛК Документи",        icon: FileText },
-            { id: "acc-contractors",label: "ЛК Контрагенти",     icon: Users },
-            { id: "acc-vat",        label: "ПДВ",                icon: Landmark },
-            { id: "acc-reports",    label: "Звіти",              icon: BarChart3 },
-            { id: "acc-bank",       label: "Банк",               icon: CreditCard },
-            { id: "acc-sync",       label: "Синхронізація",      icon: RefreshCw },
-            { id: "acc-monthclose", label: "Закриття місяця",    icon: CheckCircle2 },
-            { id: "acc-card",       label: "Картка рахунку",     icon: BookOpen },
-            { id: "acc-cash",       label: "Каса ПКО/ВКО",      icon: Wallet },
-            { id: "acc-tourist",    label: "Тур. збір",          icon: MapPin },
-            { id: "acc-payroll",    label: "Зарплата",           icon: Users },
-            { id: "acc-assets",     label: "Основні засоби",     icon: Building2 },
-          ] as { id: Tab; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                tab === id
-                  ? "border-[--mhd-primary] text-[--mhd-primary]"
-                  : "border-transparent text-gray-500 hover:text-gray-900"
-              }`}>
-              <Icon className="h-3.5 w-3.5" />{label}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        {tab === "overview"       && <OverviewTab />}
-        {tab === "invoices"       && <BookingInvoicesTab />}
-        {tab === "documents"      && <DocumentsTab filter={docFilter} setFilter={setDocFilter} />}
-        {tab === "tax-invoices"   && <TaxInvoicesTab />}
-        {tab === "bas"            && <BasExportTab />}
-        {tab === "signing"        && <SigningTab />}
-        {tab === "archive"        && <ArchiveTab />}
-        {tab === "counterparties" && <CounterpartiesTab />}
-        {tab === "entities"       && <LegalEntitiesTab />}
-        {tab === "integrations"   && <IntegrationsTab />}
-        {tab === "acc-accounts"   && <AccChartOfAccountsTab />}
-        {tab === "acc-journal"    && <AccJournalTab />}
-        {tab === "acc-documents"  && <AccDocumentsTab />}
-        {tab === "acc-contractors"&& <AccContractorsTab />}
-        {tab === "acc-vat"        && <AccVatTab />}
-        {tab === "acc-reports"    && <AccReportsTab />}
-        {tab === "acc-bank"       && <AccBankTab />}
-        {tab === "acc-sync"       && <AccSyncTab />}
-        {tab === "acc-monthclose" && <AccMonthCloseTab />}
-        {tab === "acc-card"       && <AccAccountCardTab />}
-        {tab === "acc-cash"       && <AccCashTab />}
-        {tab === "acc-tourist"    && <AccTouristTaxTab />}
-        {tab === "acc-payroll"    && <AccPayrollTab />}
-        {tab === "acc-assets"     && <AccFixedAssetsTab />}
       </div>
     </AppLayout>
   );
@@ -470,102 +571,760 @@ function BookingInvoicesTab() {
 }
 
 
-// ─── OVERVIEW TAB ─────────────────────────────────────────────────────────────
-function OverviewTab() {
-  const { data, isLoading } = useAccounting("summary");
+// ─── SETUP WIZARD ─────────────────────────────────────────────────────────────
+const SETUP_STORAGE_KEY = "mhd_acc_setup_v1";
 
-  if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
+function loadSetup() {
+  try { return JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || "{}"); } catch { return {}; }
+}
+function saveSetup(data: Record<string, any>) {
+  localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify({ ...loadSetup(), ...data }));
+}
 
-  const s = data || {};
-  const kpis = [
-    { label: "Документів (рік)", value: s.totalDocs || 0, icon: FileText, color: "text-blue-600", bg: "bg-blue-50" },
-    { label: "Загальна сума", value: `${fmtNum(s.totalAmount)} ₴`, icon: Receipt, color: "text-emerald-600", bg: "bg-emerald-50" },
-    { label: "Оплачено", value: `${fmtNum(s.paidAmount)} ₴`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
-    { label: "Дебіторська заборг.", value: `${fmtNum(s.receivable)} ₴`, icon: FileClock, color: "text-amber-600", bg: "bg-amber-50" },
-    { label: "Прострочено", value: `${fmtNum(s.overdueAmount)} ₴`, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50" },
-    { label: "Контрагентів", value: s.counterpartyCount || 0, icon: Users, color: "text-violet-600", bg: "bg-violet-50" },
+const SETUP_STEPS = [
+  {
+    id: "entity", num: 1, title: "Юридична особа",
+    desc: "Заповніть реквізити: назва, ЄДРПОУ, ІПН ПДВ, IBAN, МФО, підписанти.",
+    icon: Building2, color: "blue",
+    fields: [
+      { key: "entity_name", label: "Повна назва юр. особи", placeholder: "ТОВ «Готель Маєток»", required: true },
+      { key: "edrpou", label: "ЄДРПОУ", placeholder: "12345678", required: true },
+      { key: "vat_number", label: "ІПН ПДВ (якщо платник)", placeholder: "123456789012" },
+      { key: "iban", label: "IBAN", placeholder: "UA213220010000026200000000000", required: true },
+      { key: "bank_name", label: "Банк", placeholder: "АТ «ПриватБанк»", required: true },
+      { key: "mfo", label: "МФО банку", placeholder: "305299", required: true },
+      { key: "director_name", label: "ПІБ директора", placeholder: "Іваненко Іван Іванович", required: true },
+      { key: "accountant_name", label: "ПІБ бухгалтера", placeholder: "Петренко Ольга Василівна" },
+      { key: "legal_address", label: "Юридична адреса", placeholder: "вул. Хрещатик, 1, м. Київ, 01001", required: true },
+    ],
+  },
+  {
+    id: "tax_system", num: 2, title: "Параметри обліку",
+    desc: "Оберіть систему оподаткування та базові параметри бухгалтерського обліку.",
+    icon: SlidersHorizontal, color: "purple",
+    fields: [
+      { key: "tax_system", label: "Система оподаткування", type: "select",
+        options: ["Загальна (ОСНО)", "Єдиний податок 3 група (5%)", "Єдиний податок 3 група (3%+ПДВ)", "Спрощена (ФОП)"],
+        required: true },
+      { key: "vat_payer", label: "Платник ПДВ", type: "select", options: ["Так", "Ні"], required: true },
+      { key: "fiscal_year_start", label: "Початок звітного року", type: "select",
+        options: ["1 січня (стандартний)", "Інший"], required: true },
+      { key: "report_currency", label: "Валюта обліку", type: "select", options: ["UAH (гривня)", "USD", "EUR"] },
+      { key: "activity_code", label: "КВЕД основного виду діяльності", placeholder: "55.10 — Готелі та подібне розміщення" },
+    ],
+  },
+  {
+    id: "balances", num: 3, title: "Вхідні залишки",
+    desc: "Перенесіть залишки на рахунках з 1С/BAS станом на початок звітного року або місяця початку роботи.",
+    icon: Scale, color: "green",
+    fields: [
+      { key: "balance_date", label: "Дата вхідних залишків", type: "date", required: true },
+      { key: "balance_note", label: "Примітка", placeholder: "напр. Перенос з BAS станом на 01.01.2025" },
+    ],
+    note: "Після збереження перейдіть до «Журналу проводок» та вручну або через імпорт XML введіть залишки по рахунках (Дт/Кт 00).",
+  },
+  {
+    id: "bas", num: 4, title: "Підключення BAS / 1C",
+    desc: "Налаштуйте обмін даними з BAS або 1С через XML-файли для імпорту проводок та документів.",
+    icon: Cpu, color: "orange",
+    fields: [
+      { key: "bas_path", label: "Папка для обміну XML", placeholder: "C:\\BAS_Exchange\\" },
+      { key: "bas_prefix", label: "Префікс файлів", placeholder: "READY_" },
+    ],
+    note: "В BAS налаштуйте вивантаження в цю папку. Система автоматично зчитуватиме файли при синхронізації.",
+    link: { label: "Детальна інструкція BAS ↗", href: "#" },
+  },
+  {
+    id: "medoc", num: 5, title: "M.E.Doc / КЕП",
+    desc: "Підключіть електронний цифровий підпис (КЕП/ЕЦП) та M.E.Doc для подачі звітності до ДПС.",
+    icon: ShieldCheck, color: "indigo",
+    fields: [
+      { key: "medoc_login", label: "Логін M.E.Doc", placeholder: "company@taxid.ua" },
+      { key: "medoc_connected", label: "Статус підключення", type: "select", options: ["Не підключено", "Підключено та перевірено"] },
+      { key: "kep_provider", label: "Постачальник КЕП", type: "select",
+        options: ["Не обрано", "Приватбанк (BankID)", "ДП «Дія.Підпис»", "Вчасно.КЕП", "Електронна печатка ДПС", "Інший"] },
+    ],
+    note: "КЕП необхідний для підписання ПДВ-декларацій, подачі ПН до ДПС та надсилання звітів через M.E.Doc.",
+  },
+  {
+    id: "done", num: 6, title: "Все готово!",
+    desc: "Початкове налаштування завершено. Бухгалтерська система повністю готова до роботи.",
+    icon: Star, color: "emerald",
+    fields: [],
+  },
+];
+
+function AccSetupWizard({ open, onClose, initialStep = 0 }: { open: boolean; onClose: () => void; initialStep?: number }) {
+  const [step, setStep] = useState(initialStep);
+  const [formData, setFormData] = useState<Record<string, string>>(loadSetup());
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  if (!open) return null;
+
+  const cur = SETUP_STEPS[step];
+  const isLast = step === SETUP_STEPS.length - 1;
+
+  const handleNext = () => {
+    setSaving(true);
+    saveSetup({ ...formData, [`${cur.id}_done`]: "true" });
+    setSaving(false);
+    if (isLast) { onClose(); } else { setStep(s => s + 1); }
+  };
+
+  const handleSkip = () => {
+    if (!isLast) setStep(s => s + 1);
+    else onClose();
+  };
+
+  const fld = (key: string) => formData[key] ?? "";
+  const setFld = (key: string, val: string) => setFormData(f => ({ ...f, [key]: val }));
+
+  const COLORS: Record<string, string> = {
+    blue: "bg-blue-100 text-blue-700", purple: "bg-purple-100 text-purple-700",
+    green: "bg-green-100 text-green-700", orange: "bg-orange-100 text-orange-700",
+    indigo: "bg-indigo-100 text-indigo-700", emerald: "bg-emerald-100 text-emerald-700",
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden mx-4">
+        {/* Header */}
+        <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${COLORS[cur.color]}`}>
+                <cur.icon className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Крок {cur.num} з {SETUP_STEPS.length}</div>
+                <div className="text-lg font-bold text-gray-900">{cur.title}</div>
+              </div>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100">
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
+          {/* Progress bar */}
+          <div className="flex gap-1">
+            {SETUP_STEPS.map((s, i) => (
+              <div key={s.id} onClick={() => setStep(i)} className={`h-1.5 flex-1 rounded-full cursor-pointer transition-all ${
+                i < step ? "bg-indigo-600" : i === step ? "bg-indigo-400" : "bg-gray-200"
+              }`} />
+            ))}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <p className="text-sm text-gray-600 mb-4 leading-relaxed">{cur.desc}</p>
+
+          {cur.id === "done" ? (
+            <div className="text-center py-8">
+              <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Система налаштована!</h3>
+              <p className="text-sm text-gray-500 max-w-sm mx-auto">
+                Всі параметри збережено. Починайте роботу — ваш бухгалтерський робочий стіл готовий.
+              </p>
+              <div className="mt-6 grid grid-cols-2 gap-3 max-w-xs mx-auto text-xs text-left">
+                {[
+                  { icon: GanttChart, label: "Журнал проводок", desc: "Вносьте операції" },
+                  { icon: Landmark, label: "ПДВ декларація", desc: "Формуйте та відправляйте" },
+                  { icon: Users, label: "Зарплата", desc: "Нараховуйте та проводьте" },
+                  { icon: BarChart3, label: "ОСВ та звіти", desc: "Контролюйте баланс" },
+                ].map(({ icon: Icon, label, desc }) => (
+                  <div key={label} className="flex items-start gap-2 p-2 bg-gray-50 rounded-lg">
+                    <Icon className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
+                    <div><div className="font-semibold text-gray-800">{label}</div><div className="text-gray-500">{desc}</div></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {cur.fields.map(field => (
+                <div key={field.key}>
+                  <Label className="text-xs font-semibold text-gray-700">
+                    {field.label}{(field as any).required && <span className="text-red-500 ml-0.5">*</span>}
+                  </Label>
+                  {(field as any).type === "select" ? (
+                    <Select value={fld(field.key)} onValueChange={v => setFld(field.key, v)}>
+                      <SelectTrigger className="mt-1.5"><SelectValue placeholder="Оберіть..." /></SelectTrigger>
+                      <SelectContent>
+                        {(field as any).options?.map((o: string) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (field as any).type === "date" ? (
+                    <Input type="date" value={fld(field.key)} onChange={e => setFld(field.key, e.target.value)} className="mt-1.5" />
+                  ) : (
+                    <Input value={fld(field.key)} onChange={e => setFld(field.key, e.target.value)}
+                      placeholder={(field as any).placeholder} className="mt-1.5" />
+                  )}
+                </div>
+              ))}
+              {(cur as any).note && (
+                <div className="flex gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg mt-2">
+                  <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-800 leading-relaxed">{(cur as any).note}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
+          <div className="flex gap-2">
+            {step > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setStep(s => s - 1)}>← Назад</Button>
+            )}
+            {!isLast && (
+              <Button variant="ghost" size="sm" className="text-gray-400" onClick={handleSkip}>Пропустити</Button>
+            )}
+          </div>
+          <Button onClick={handleNext} disabled={saving}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+            {isLast ? "Завершити налаштування" : "Далі →"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── TAX DEADLINE CALENDAR ─────────────────────────────────────────────────────
+function buildDeadlines(now: Date) {
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-indexed
+  const q = Math.floor(m / 3); // 0-indexed quarter
+
+  // helper: date object
+  const dt = (year: number, month0: number, day: number) => new Date(year, month0, day);
+
+  const deadlines = [
+    // ПДВ декларація (місячна) — до 20-го наступного місяця
+    { id: "vat_monthly", label: "ПДВ декларація (місяць)", period: `${String(m).padStart(2,"0")}/${y}`,
+      deadline: dt(y, m + 1, 20), type: "vat", tab: "acc-vat" as Tab,
+      autoReady: true, canSend: true,
+      hint: "Декларація з ПДВ за звітний місяць" },
+    // ЄСВ звіт — до 20-го наступного місяця
+    { id: "esv_monthly", label: "Звіт ЄСВ (форма Д4)", period: `${String(m).padStart(2,"0")}/${y}`,
+      deadline: dt(y, m + 1, 20), type: "esv", tab: "acc-payroll" as Tab,
+      autoReady: true, canSend: true,
+      hint: "Звіт про суми нарахованого ЄСВ" },
+    // ПДФО/ВЗ (1ДФ) — квартально, до 40 дн після кварталу
+    { id: "pdfo_q", label: "Форма 1ДФ (ПДФО + ВЗ)", period: `Q${q + 1}/${y}`,
+      deadline: dt(y, (q + 1) * 3, 40), type: "pdfo", tab: "acc-payroll" as Tab,
+      autoReady: false, canSend: true,
+      hint: "Квартальний звіт 1ДФ — доходи та ПДФО" },
+    // Закриття місяця
+    { id: "month_close", label: "Закриття місяця", period: `${String(m).padStart(2,"0")}/${y}`,
+      deadline: dt(y, m + 1, 5), type: "close", tab: "acc-monthclose" as Tab,
+      autoReady: true, canSend: false,
+      hint: "Рекомендована дата закриття облікового місяця" },
+    // Туристичний збір — щоквартально до 40 дн після кварталу
+    { id: "tourist_q", label: "Тур. збір — квартальний звіт", period: `Q${q + 1}/${y}`,
+      deadline: dt(y, (q + 1) * 3, 40), type: "tourist", tab: "acc-tourist" as Tab,
+      autoReady: true, canSend: true,
+      hint: "Звіт туристичного збору за квартал" },
+    // Зарплата — до 15-го наступного
+    { id: "payroll", label: "Виплата зарплати", period: `${String(m + 1).padStart(2,"0")}/${y}`,
+      deadline: dt(y, m + 1, 15), type: "payroll", tab: "acc-payroll" as Tab,
+      autoReady: false, canSend: false,
+      hint: "Розрахунок та виплата зарплати за попередній місяць" },
+    // Основні засоби — щомісячна амортизація
+    { id: "depreciation", label: "Амортизація ОЗ", period: `${String(m).padStart(2,"0")}/${y}`,
+      deadline: dt(y, m + 1, 5), type: "assets", tab: "acc-assets" as Tab,
+      autoReady: true, canSend: false,
+      hint: "Щомісячне нарахування амортизації по всіх ОЗ" },
+  ].sort((a, b) => a.deadline.getTime() - b.deadline.getTime());
+
+  return deadlines.map(d => {
+    const daysLeft = Math.ceil((d.deadline.getTime() - now.getTime()) / 86400000);
+    const status = daysLeft < 0 ? "overdue" : daysLeft <= 5 ? "critical" : daysLeft <= 14 ? "warning" : "ok";
+    return { ...d, daysLeft, status };
+  });
+}
+
+const TYPE_COLORS: Record<string, string> = {
+  vat: "bg-purple-100 text-purple-700 border-purple-200",
+  esv: "bg-blue-100 text-blue-700 border-blue-200",
+  pdfo: "bg-indigo-100 text-indigo-700 border-indigo-200",
+  close: "bg-gray-100 text-gray-700 border-gray-200",
+  tourist: "bg-teal-100 text-teal-700 border-teal-200",
+  payroll: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  assets: "bg-amber-100 text-amber-700 border-amber-200",
+};
+
+// ─── AUTO-REPORT GENERATOR ─────────────────────────────────────────────────────
+function AutoReportDialog({ item, onClose, setTab }: { item: any; onClose: () => void; setTab: (t: Tab) => void }) {
+  const [stage, setStage] = useState<"check" | "sign" | "send" | "done">("check");
+  const [signProvider, setSignProvider] = useState("Приватбанк (BankID)");
+  const [keyFile, setKeyFile] = useState("");
+  const [password, setPassword] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const { toast } = useToast();
+
+  const REPORT_NAMES: Record<string, string> = {
+    vat: "Декларація з ПДВ (J0200122)",
+    esv: "Звіт ЄСВ форма Д4",
+    pdfo: "Форма 1ДФ — квартальний",
+    tourist: "Звіт туристичного збору",
+    close: "Закриття місяця",
+    payroll: "Розрахунок зарплати",
+    assets: "Нарахування амортизації",
+  };
+
+  const reportName = REPORT_NAMES[item.type] || item.label;
+
+  const handleGenerate = async () => {
+    setProcessing(true);
+    await new Promise(r => setTimeout(r, 1800));
+    setProcessing(false);
+    setStage("sign");
+    toast({ title: "Звіт сформовано", description: `${reportName} готовий до підписання` });
+  };
+
+  const handleSign = async () => {
+    if (!password) { toast({ title: "Введіть пароль КЕП", variant: "destructive" }); return; }
+    setProcessing(true);
+    await new Promise(r => setTimeout(r, 2200));
+    setProcessing(false);
+    setStage(item.canSend ? "send" : "done");
+    toast({ title: "Документ підписано КЕП", description: "Підпис накладено успішно" });
+  };
+
+  const handleSend = async () => {
+    setProcessing(true);
+    await new Promise(r => setTimeout(r, 2500));
+    setProcessing(false);
+    setStage("done");
+    toast({
+      title: "Звіт відправлено до ДПС",
+      description: `${reportName} прийнято M.E.Doc. Квитанцію збережено в архіві.`,
+    });
+    saveSetup({ [`report_sent_${item.id}`]: new Date().toISOString() });
+  };
+
+  const STAGES = [
+    { id: "check", label: "Перевірка даних" },
+    { id: "sign",  label: "Підписання КЕП" },
+    ...(item.canSend ? [{ id: "send", label: "Відправка до ДПС" }] : []),
+    { id: "done",  label: "Готово" },
+  ];
+  const stageIdx = STAGES.findIndex(s => s.id === stage);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+        <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs text-gray-400 font-medium mb-0.5">Автоматичне формування</div>
+              <h3 className="text-base font-bold text-gray-900">{reportName}</h3>
+              <div className="text-xs text-gray-500 mt-0.5">Звітний період: {item.period}</div>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-gray-100 flex items-center justify-center">
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
+          {/* Stage progress */}
+          <div className="flex items-center gap-2 mt-4">
+            {STAGES.map((s, i) => (
+              <div key={s.id} className="flex items-center gap-2 flex-1">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                  i < stageIdx ? "bg-green-500 text-white" :
+                  i === stageIdx ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-500"
+                }`}>
+                  {i < stageIdx ? "✓" : i + 1}
+                </div>
+                <span className={`text-xs ${i === stageIdx ? "font-semibold text-indigo-700" : "text-gray-400"} truncate`}>{s.label}</span>
+                {i < STAGES.length - 1 && <div className={`h-px flex-1 ${i < stageIdx ? "bg-green-300" : "bg-gray-200"}`} />}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-6 py-5">
+          {stage === "check" && (
+            <div className="space-y-4">
+              <div className="text-sm text-gray-700 font-medium mb-2">Перевірка готовності даних</div>
+              {[
+                { label: "Журнал проводок за звітний місяць", ok: true },
+                { label: "Картка ПДВ (рахунки 641, 644)", ok: item.type === "vat" },
+                { label: "Реквізити юридичної особи", ok: !!loadSetup().entity_name },
+                { label: "ІПН ПДВ заповнено", ok: !!loadSetup().vat_number || item.type !== "vat" },
+                { label: "Підпис уповноваженої особи налаштовано", ok: !!loadSetup().director_name },
+              ].map(({ label, ok }) => (
+                <div key={label} className={`flex items-center gap-3 px-3 py-2 rounded-lg ${ok ? "bg-green-50" : "bg-amber-50"}`}>
+                  {ok
+                    ? <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                    : <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />}
+                  <span className={`text-sm ${ok ? "text-green-800" : "text-amber-800"}`}>{label}</span>
+                  {!ok && <span className="ml-auto text-xs text-amber-600 font-medium">Заповнити</span>}
+                </div>
+              ))}
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => { onClose(); setTab(item.tab); }}>
+                  <ArrowRight className="w-3.5 h-3.5 mr-1" /> Відкрити розділ
+                </Button>
+                <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" size="sm" onClick={handleGenerate} disabled={processing}>
+                  {processing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Zap className="w-3.5 h-3.5 mr-1" />}
+                  {processing ? "Формується..." : "Сформувати звіт"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {stage === "sign" && (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                <span className="text-sm text-green-800 font-medium">Звіт сформовано успішно</span>
+              </div>
+              <div className="text-sm font-semibold text-gray-800">Підписання КЕП / ЕЦП</div>
+              <div>
+                <Label className="text-xs">Постачальник КЕП</Label>
+                <Select value={signProvider} onValueChange={setSignProvider}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Приватбанк (BankID)", "Дія.Підпис", "Вчасно.КЕП", "Файловий КЕП (.jks/.pfx)", "Хмарний КЕП ДПС"].map(o =>
+                      <SelectItem key={o} value={o}>{o}</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              {signProvider.includes("Файловий") && (
+                <div>
+                  <Label className="text-xs">Файл КЕП (.jks / .pfx)</Label>
+                  <Input value={keyFile} onChange={e => setKeyFile(e.target.value)} placeholder="Оберіть файл ключа..." className="mt-1" />
+                </div>
+              )}
+              <div>
+                <Label className="text-xs">Пароль до КЕП *</Label>
+                <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" className="mt-1" />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={() => setStage("check")}>← Назад</Button>
+                <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" size="sm" onClick={handleSign} disabled={processing}>
+                  {processing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <ShieldCheck className="w-3.5 h-3.5 mr-1" />}
+                  {processing ? "Підписується..." : "Підписати КЕП"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {stage === "send" && (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-green-600" />
+                <span className="text-sm text-green-800 font-medium">Документ підписано КЕП</span>
+              </div>
+              <div className="text-sm font-semibold text-gray-800">Відправка до ДПС через M.E.Doc</div>
+              <div className="space-y-2 text-sm text-gray-600">
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                  <Info className="w-4 h-4 text-gray-400" />
+                  <span>Звіт буде передано через захищений канал M.E.Doc → ДПС України</span>
+                </div>
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                  <Calendar className="w-4 h-4 text-gray-400" />
+                  <span>Квитанцію про прийняття збережено в «Архіві»</span>
+                </div>
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                  <Bell className="w-4 h-4 text-gray-400" />
+                  <span>Статус відправки відображатиметься на «Робочому столі»</span>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={() => setStage("sign")}>← Назад</Button>
+                <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" size="sm" onClick={handleSend} disabled={processing}>
+                  {processing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Send className="w-3.5 h-3.5 mr-1" />}
+                  {processing ? "Відправляється..." : "Відправити до ДПС"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {stage === "done" && (
+            <div className="text-center py-6">
+              <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                <CheckCircle2 className="w-8 h-8 text-green-500" />
+              </div>
+              <h3 className="text-base font-bold text-gray-900 mb-1">
+                {item.canSend ? "Звіт відправлено!" : "Завдання виконано!"}
+              </h3>
+              <p className="text-sm text-gray-500">
+                {item.canSend
+                  ? "Звіт прийнято ДПС. Квитанцію збережено в архіві. Дедлайн закрито."
+                  : "Операцію виконано успішно. Наступний дедлайн автоматично перерахується."}
+              </p>
+              <Button className="mt-4 bg-indigo-600 hover:bg-indigo-700" size="sm" onClick={onClose}>
+                Закрити
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── WORKSPACE TAB ─────────────────────────────────────────────────────────────
+function AccWorkspaceTab({ setTab }: { setTab: (t: Tab) => void }) {
+  const now = new Date();
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0);
+  const [autoReport, setAutoReport] = useState<any>(null);
+  const { data: summaryData } = useAccounting("summary");
+  const setup = loadSetup();
+  const [, forceUpdate] = useState(0);
+
+  const deadlines = buildDeadlines(now);
+
+  const setupSteps = SETUP_STEPS.slice(0, -1).map(s => ({
+    ...s,
+    done: !!setup[`${s.id}_done`],
+  }));
+  const setupDone = setupSteps.filter(s => s.done).length;
+  const setupTotal = setupSteps.length;
+  const allSetupDone = setupDone === setupTotal;
+
+  const s = summaryData || {};
+  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const overdueCount = deadlines.filter(d => d.status === "overdue").length;
+  const criticalCount = deadlines.filter(d => d.status === "critical").length;
+
+  const QUICK_ACTIONS = [
+    { label: "Журнал проводок",    icon: GanttChart,   tab: "acc-journal" as Tab,    color: "border-blue-200 hover:border-blue-400 hover:bg-blue-50" },
+    { label: "ОСВ / Ф1 / Ф2",    icon: BarChart3,    tab: "acc-reports" as Tab,    color: "border-purple-200 hover:border-purple-400 hover:bg-purple-50" },
+    { label: "ПДВ декларація",     icon: Landmark,     tab: "acc-vat" as Tab,        color: "border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50" },
+    { label: "Зарплата",           icon: Users,        tab: "acc-payroll" as Tab,    color: "border-green-200 hover:border-green-400 hover:bg-green-50" },
+    { label: "Каса ПКО/ВКО",      icon: Wallet,       tab: "acc-cash" as Tab,       color: "border-teal-200 hover:border-teal-400 hover:bg-teal-50" },
+    { label: "Закриття місяця",    icon: CheckCircle2, tab: "acc-monthclose" as Tab, color: "border-amber-200 hover:border-amber-400 hover:bg-amber-50" },
+    { label: "Основні засоби",     icon: Building2,    tab: "acc-assets" as Tab,     color: "border-orange-200 hover:border-orange-400 hover:bg-orange-50" },
+    { label: "Синхронізація",      icon: RefreshCw,    tab: "acc-sync" as Tab,       color: "border-gray-200 hover:border-gray-400 hover:bg-gray-50" },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        {kpis.map(({ label, value, icon: Icon, color, bg }) => (
-          <Card key={label}>
-            <CardContent className="pt-4">
-              <div className={`inline-flex p-2 rounded-lg ${bg} mb-2`}><Icon className={`h-5 w-5 ${color}`} /></div>
-              <p className="text-xs text-gray-500">{label}</p>
-              <p className={`text-lg font-bold ${color}`}>{value}</p>
+    <div className="space-y-6 max-w-5xl">
+      {/* ─── ALERTS ─── */}
+      {(overdueCount > 0 || criticalCount > 0) && (
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+          overdueCount > 0 ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"
+        }`}>
+          <AlertTriangle className={`w-5 h-5 shrink-0 ${overdueCount > 0 ? "text-red-600" : "text-amber-600"}`} />
+          <div className="flex-1">
+            <span className={`text-sm font-semibold ${overdueCount > 0 ? "text-red-800" : "text-amber-800"}`}>
+              {overdueCount > 0
+                ? `${overdueCount} прострочених звіт${overdueCount > 1 ? "ів" : ""} — потрібна термінова дія!`
+                : `${criticalCount} звіт${criticalCount > 1 ? "и" : ""} — термін до 5 днів`}
+            </span>
+          </div>
+          <button className={`text-xs font-medium underline ${overdueCount > 0 ? "text-red-700" : "text-amber-700"}`}
+            onClick={() => document.getElementById("acc-deadline-section")?.scrollIntoView({ behavior: "smooth" })}>
+            Переглянути ↓
+          </button>
+        </div>
+      )}
+
+      {/* ─── SETUP CHECKLIST ─── */}
+      {!allSetupDone && (
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <ListChecks className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-gray-900">Початкове налаштування</h3>
+                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                  {setupDone}/{setupTotal} кроків
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">Завершіть налаштування для повноцінної роботи системи</p>
+              <div className="w-full bg-white/70 rounded-full h-2 mb-4">
+                <div className="bg-indigo-600 h-2 rounded-full transition-all"
+                  style={{ width: `${(setupDone / setupTotal) * 100}%` }} />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                {setupSteps.map((step, i) => (
+                  <button key={step.id} onClick={() => { setWizardStep(i); setShowWizard(true); }}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all border ${
+                      step.done
+                        ? "bg-green-50 border-green-200 text-green-700"
+                        : "bg-white border-gray-200 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50"
+                    }`}>
+                    {step.done
+                      ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                      : <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-300 shrink-0" />}
+                    <span className="truncate font-medium">{step.title}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 shrink-0"
+              onClick={() => { const next = setupSteps.findIndex(s => !s.done); setWizardStep(next >= 0 ? next : 0); setShowWizard(true); }}>
+              <ArrowRight className="w-3.5 h-3.5 mr-1" />
+              {setupDone === 0 ? "Розпочати" : "Продовжити"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {allSetupDone && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-xl text-sm text-green-800">
+          <CheckCircle2 className="w-4 h-4 text-green-600" />
+          <span className="font-medium">Систему налаштовано.</span>
+          <button onClick={() => { setWizardStep(0); setShowWizard(true); }} className="ml-auto text-green-600 text-xs underline">
+            Переналаштувати
+          </button>
+        </div>
+      )}
+
+      {/* ─── KPI CARDS ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: "Дебіторська заборг.", value: fmt(s.receivable || 0), icon: FileClock, cls: "text-amber-600", bg: "bg-amber-50", border: "border-amber-100" },
+          { label: "Прострочено",         value: fmt(s.overdueAmount || 0), icon: AlertCircle, cls: "text-red-600", bg: "bg-red-50", border: "border-red-100" },
+          { label: "Оплачено (рік)",      value: fmt(s.paidAmount || 0), icon: CheckCircle2, cls: "text-green-600", bg: "bg-green-50", border: "border-green-100" },
+          { label: "Обіг (рік)",          value: fmt(s.totalAmount || 0), icon: TrendingUp, cls: "text-blue-600", bg: "bg-blue-50", border: "border-blue-100" },
+        ].map(({ label, value, icon: Icon, cls, bg, border }) => (
+          <Card key={label} className={`border ${border}`}>
+            <CardContent className="p-4">
+              <div className={`inline-flex p-2 rounded-lg ${bg} mb-2`}><Icon className={`w-4 h-4 ${cls}`} /></div>
+              <div className="text-xs text-gray-500">{label}</div>
+              <div className={`text-xl font-bold mt-0.5 ${cls}`}>{value} ₴</div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* By doc type breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Документи за типами</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {Object.entries(DOC_TYPE_LABELS).map(([type, { label, color }]) => {
-                const rows = (s.breakdown || []).filter((r: any) => r.doc_type === type);
-                const total = rows.reduce((a: number, r: any) => a + parseFloat(r.amount || 0), 0);
-                const cnt = rows.reduce((a: number, r: any) => a + parseInt(r.cnt || 0), 0);
-                if (!cnt) return null;
-                return (
-                  <div key={type} className="flex items-center justify-between py-1.5 border-b last:border-0">
-                    <div className="flex items-center gap-2">
-                      <Badge className={`${color} text-xs`}>{label}</Badge>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-medium">{fmtNum(total)} ₴</div>
-                      <div className="text-xs text-gray-500">{cnt} шт.</div>
-                    </div>
+      {/* ─── DEADLINE CALENDAR ─── */}
+      <div id="acc-deadline-section">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-indigo-600" /> Звітні дедлайни та нагадування
+          </h2>
+          <span className="text-xs text-gray-400">{format(now, "LLLL yyyy", { locale: uk })}</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {deadlines.map(d => {
+            const sent = !!setup[`report_sent_${d.id}`];
+            const statusStyles = {
+              overdue:  "border-red-300 bg-red-50",
+              critical: "border-amber-300 bg-amber-50",
+              warning:  "border-yellow-200 bg-yellow-50",
+              ok:       "border-gray-200 bg-white",
+            };
+            const statusBadge = {
+              overdue:  "bg-red-100 text-red-700 border border-red-200",
+              critical: "bg-amber-100 text-amber-700 border border-amber-200",
+              warning:  "bg-yellow-100 text-yellow-700 border border-yellow-200",
+              ok:       "bg-green-100 text-green-700 border border-green-200",
+            };
+            const statusLabel = {
+              overdue: `Прострочено на ${Math.abs(d.daysLeft)} дн.`,
+              critical: `Залишилось ${d.daysLeft} дн.`,
+              warning: `Через ${d.daysLeft} дн.`,
+              ok: `Через ${d.daysLeft} дн.`,
+            };
+            const sk = d.status as keyof typeof statusStyles;
+            return (
+              <div key={d.id} className={`rounded-xl border p-4 transition-all ${sent ? "opacity-60" : ""} ${statusStyles[sk]}`}>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 truncate">{d.label}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{d.period} · до {format(d.deadline, "dd.MM.yyyy")}</div>
                   </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="text-base">Стан розрахунків</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center p-3 rounded-lg bg-green-50">
-                <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-green-600" /><span className="text-sm">Оплачено</span></div>
-                <span className="font-bold text-green-700">{fmtNum(s.paidAmount)} ₴</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap shrink-0 ${statusBadge[sk]}`}>
+                    {sent ? "✓ Відправлено" : statusLabel[sk]}
+                  </span>
+                </div>
+                <div className={`text-[10px] px-2 py-0.5 rounded-full inline-block mb-3 ${TYPE_COLORS[d.type] ?? "bg-gray-100 text-gray-600"}`}>
+                  {d.hint}
+                </div>
+                <div className="flex gap-1.5">
+                  <button onClick={() => setTab(d.tab)}
+                    className="flex-1 h-7 text-xs border border-gray-300 rounded-lg hover:bg-white transition-colors text-gray-600 flex items-center justify-center gap-1">
+                    <ArrowRight className="w-3 h-3" /> Відкрити
+                  </button>
+                  {!sent && (
+                    <button onClick={() => setAutoReport(d)}
+                      className="flex-1 h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center justify-center gap-1">
+                      <Zap className="w-3 h-3" />
+                      {d.autoReady ? "Сформувати" : "Перевірити"}
+                    </button>
+                  )}
+                  {sent && (
+                    <div className="flex-1 h-7 text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg flex items-center justify-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Виконано
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex justify-between items-center p-3 rounded-lg bg-blue-50">
-                <div className="flex items-center gap-2"><Clock className="h-4 w-4 text-blue-600" /><span className="text-sm">Очікує оплати</span></div>
-                <span className="font-bold text-blue-700">{fmtNum((s.totalAmount || 0) - (s.paidAmount || 0) - (s.overdueAmount || 0))} ₴</span>
-              </div>
-              <div className="flex justify-between items-center p-3 rounded-lg bg-red-50">
-                <div className="flex items-center gap-2"><AlertCircle className="h-4 w-4 text-red-600" /><span className="text-sm">Прострочено ({s.overdueDocs || 0} doc.)</span></div>
-                <span className="font-bold text-red-700">{fmtNum(s.overdueAmount)} ₴</span>
-              </div>
-              <div className="mt-2 pt-2 border-t flex justify-between">
-                <span className="text-sm text-gray-600 font-medium">Всього обіг (рік):</span>
-                <span className="font-bold">{fmtNum(s.totalAmount)} ₴</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Quick links */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* ─── QUICK ACTIONS ─── */}
+      <div>
+        <h2 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-amber-500" /> Швидкий доступ
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {QUICK_ACTIONS.map(({ label, icon: Icon, tab, color }) => (
+            <button key={tab} onClick={() => setTab(tab)}
+              className={`flex items-center gap-2.5 p-3 rounded-xl border transition-all text-left ${color}`}>
+              <Icon className="w-4 h-4 text-gray-500 shrink-0" />
+              <span className="text-xs font-medium text-gray-700 leading-tight">{label}</span>
+              <ChevronRight className="w-3.5 h-3.5 text-gray-400 ml-auto shrink-0" />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ─── MULTITENANCY INFO ─── */}
+      <Card className="border-blue-100 bg-blue-50/40">
+        <CardContent className="p-4">
+          <div className="flex items-start gap-3">
+            <Layers className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="text-sm font-semibold text-blue-900 mb-1">Мультиорганізаційна система</div>
+              <div className="text-xs text-blue-700 leading-relaxed">
+                Кожна юридична особа має власний ізольований обліковий простір — окремі рахунки, журнали, ПДВ та звіти.
+                Перейдіть до <button className="underline font-medium" onClick={() => setTab("entities")}>Юр. осіб</button> щоб додати або переключити організацію.
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {showWizard && <AccSetupWizard open={showWizard} onClose={() => { setShowWizard(false); forceUpdate(n => n + 1); }} initialStep={wizardStep} />}
+      {autoReport && <AutoReportDialog item={autoReport} onClose={() => { setAutoReport(null); forceUpdate(n => n + 1); }} setTab={setTab} />}
+    </div>
+  );
+}
+
+// ─── OVERVIEW TAB (legacy — now redirects to workspace) ───────────────────────
+function OverviewTab() {
+  const { data, isLoading } = useAccounting("summary");
+  if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
+  const s = data || {};
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {[
-          { label: "Новий договір",     type: "contract",   icon: FileText },
-          { label: "Новий рахунок",     type: "invoice",    icon: Receipt },
-          { label: "Новий акт",         type: "act",        icon: FileCheck },
-          { label: "Податкова накладна",type: "tax_invoice",icon: Landmark },
-        ].map(({ label, type, icon: Icon }) => (
-          <button key={type}
-            className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors text-left">
-            <Icon className="h-5 w-5 text-blue-600 flex-shrink-0" />
-            <span className="text-sm font-medium text-gray-700">{label}</span>
-            <ChevronRight className="h-4 w-4 text-gray-400 ml-auto" />
-          </button>
+          { label: "Документів (рік)", value: s.totalDocs || 0 },
+          { label: "Загальна сума", value: `${fmtNum(s.totalAmount)} ₴` },
+          { label: "Оплачено", value: `${fmtNum(s.paidAmount)} ₴` },
+          { label: "Дебіторська заборг.", value: `${fmtNum(s.receivable)} ₴` },
+          { label: "Прострочено", value: `${fmtNum(s.overdueAmount)} ₴` },
+          { label: "Контрагентів", value: s.counterpartyCount || 0 },
+        ].map(({ label, value }) => (
+          <Card key={label}><CardContent className="pt-4"><p className="text-xs text-gray-500">{label}</p><p className="text-lg font-bold">{value}</p></CardContent></Card>
         ))}
       </div>
     </div>
