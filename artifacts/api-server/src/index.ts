@@ -580,6 +580,17 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_cashbox_sessions_org_status ON cashbox_sessions (organization_id, status);
   `);
 
+  // Migrate: add missing columns to fb_items
+  await db.execute(sql`
+    ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS tech_card       JSONB;
+    ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS tax_group_id    INTEGER;
+    ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS price_happy     NUMERIC(10,2);
+    ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS is_stop_list    BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS image_url  TEXT;
+    ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS description TEXT;
+    ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS color       VARCHAR(20);
+  `);
+
   // Migrate: add missing columns to cashbox_sessions (production catch-up)
   await db.execute(sql`
     ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS legal_entity_id  INTEGER;

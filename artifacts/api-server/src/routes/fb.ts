@@ -307,6 +307,7 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
       vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
       volume_l, excise_group,
       station, legal_entity_id, ingredient_id,
+      is_stop_list, tech_card, tax_group_id, price_happy,
     } = req.body;
     const db_ = (db as any).$client;
     // ingredient_id can be explicitly null to clear the link
@@ -314,6 +315,12 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
       ? (ingredient_id ?? null)
       : undefined;
     const imageUrlVal = req.body.hasOwnProperty("imageUrl") ? (imageUrl ?? null) : undefined;
+    const stopListVal = req.body.hasOwnProperty("is_stop_list") ? (is_stop_list ?? false) : undefined;
+    const techCardVal = req.body.hasOwnProperty("tech_card") ? (tech_card ?? null) : undefined;
+    const taxGroupVal = req.body.hasOwnProperty("tax_group_id") ? (tax_group_id ?? null) : undefined;
+    const priceHappyVal = req.body.hasOwnProperty("price_happy") ? (price_happy ?? null) : undefined;
+    const allergensVal = req.body.hasOwnProperty("allergens") ? (allergens ?? null) : undefined;
+    const tagsVal = req.body.hasOwnProperty("tags") ? (tags ?? null) : undefined;
     const r = await db_.query(
       `UPDATE fb_items SET
          name               = COALESCE($1, name),
@@ -336,6 +343,12 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
          image_url          = CASE WHEN $22::boolean THEN $21 ELSE image_url END,
          volume_l           = COALESCE($23, volume_l),
          excise_group       = COALESCE($24, excise_group),
+         is_stop_list       = CASE WHEN $26 = TRUE THEN $25 ELSE is_stop_list END,
+         tech_card          = CASE WHEN $28 = TRUE THEN $27::jsonb ELSE tech_card END,
+         tax_group_id       = CASE WHEN $30 = TRUE THEN $29::int ELSE tax_group_id END,
+         price_happy        = CASE WHEN $32 = TRUE THEN $31::numeric ELSE price_happy END,
+         allergens          = CASE WHEN $34 = TRUE THEN $33::jsonb ELSE allergens END,
+         tags               = CASE WHEN $36 = TRUE THEN $35::jsonb ELSE tags END,
          updated_at         = NOW()
        WHERE id = $18 AND organization_id = $19 RETURNING *`,
       [name||null, description||null, price??null, categoryId||null, cookMinutes??null,
@@ -348,7 +361,20 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
        imageUrlVal ?? null,
        imageUrlVal !== undefined,
        volume_l != null ? volume_l : null,
-       excise_group || null]
+       excise_group || null,
+       stopListVal ?? false,
+       stopListVal !== undefined,
+       techCardVal ? JSON.stringify(techCardVal) : null,
+       techCardVal !== undefined,
+       taxGroupVal ?? null,
+       taxGroupVal !== undefined,
+       priceHappyVal ?? null,
+       priceHappyVal !== undefined,
+       allergensVal ? JSON.stringify(allergensVal) : null,
+       allergensVal !== undefined,
+       tagsVal ? JSON.stringify(tagsVal) : null,
+       tagsVal !== undefined,
+      ]
     );
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
     res.json({ item: r.rows[0] });
