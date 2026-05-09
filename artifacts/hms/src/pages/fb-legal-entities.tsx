@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -133,7 +133,7 @@ function EntityDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
 
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
-  useState(() => {
+  useEffect(() => {
     if (editing) {
       setForm({
         name: editing.name || "", shortName: editing.short_name || "", fullName: editing.full_name || "",
@@ -153,7 +153,7 @@ function EntityDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
     }
     setCheckboxResult(null);
     setTab("main");
-  });
+  }, [editing]);
 
   const save = useMutation({
     mutationFn: (body: any) => editing
