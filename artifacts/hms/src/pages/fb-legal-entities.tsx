@@ -12,11 +12,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
   Building2, Plus, Pencil, Trash2, CheckCircle2, XCircle, AlertCircle,
-  CreditCard, Shield, ChevronDown, ChevronUp,
+  CreditCard, Shield, ChevronDown, ChevronUp, Landmark, Receipt,
 } from "lucide-react";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api";
@@ -123,10 +122,18 @@ function EntityCard({ entity, onEdit, onDelete }: { entity: LegalEntity; onEdit:
   );
 }
 
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-2 pb-1 border-b">
+      <span className="text-primary">{icon}</span>
+      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{title}</span>
+    </div>
+  );
+}
+
 function EntityDialog({ open, onOpenChange, editing }: { open: boolean; onOpenChange: (v: boolean) => void; editing: LegalEntity | null }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [tab, setTab] = useState("main");
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [checkboxTesting, setCheckboxTesting] = useState(false);
   const [checkboxResult, setCheckboxResult] = useState<{ ok?: boolean; cashier_name?: string; shift_status?: string; error?: string } | null>(null);
@@ -134,6 +141,7 @@ function EntityDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
   useEffect(() => {
+    if (!open) return;
     if (editing) {
       setForm({
         name: editing.name || "", shortName: editing.short_name || "", fullName: editing.full_name || "",
@@ -152,8 +160,7 @@ function EntityDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
       setForm({ ...EMPTY_FORM });
     }
     setCheckboxResult(null);
-    setTab("main");
-  }, [editing]);
+  }, [open, editing]);
 
   const save = useMutation({
     mutationFn: (body: any) => editing
@@ -185,166 +192,160 @@ function EntityDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
           <DialogTitle>{editing ? "Редагувати юр. особу" : "Нова юридична особа"}</DialogTitle>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={setTab} className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid grid-cols-4 shrink-0">
-            <TabsTrigger value="main" className="text-xs">Основне</TabsTrigger>
-            <TabsTrigger value="bank" className="text-xs">Банк</TabsTrigger>
-            <TabsTrigger value="prro" className="text-xs">ПРРО</TabsTrigger>
-            <TabsTrigger value="liqpay" className="text-xs">LiqPay</TabsTrigger>
-          </TabsList>
+        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
 
-          <div className="flex-1 overflow-y-auto py-3">
-            <TabsContent value="main" className="space-y-3 mt-0">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">Назва *</Label>
-                  <Input className="mt-1" value={form.name} onChange={e => set("name", e.target.value)} placeholder="ФОП Іваненко І.І." />
-                </div>
-                <div>
-                  <Label className="text-xs">Тип</Label>
-                  <Select value={form.type} onValueChange={v => set("type", v)}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fop">ФОП</SelectItem>
-                      <SelectItem value="tov">ТОВ</SelectItem>
-                      <SelectItem value="pp">ПП</SelectItem>
-                      <SelectItem value="other">Інше</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">{form.type === "fop" ? "ІПН (РНОКПП)" : "ЄДРПОУ"}</Label>
-                  <Input className="mt-1 font-mono" value={form.type === "fop" ? form.ipn : form.edrpou} onChange={e => set(form.type === "fop" ? "ipn" : "edrpou", e.target.value)} placeholder={form.type === "fop" ? "3012345678" : "12345678"} />
-                </div>
-                <div>
-                  <Label className="text-xs">Номер ПДВ</Label>
-                  <Input className="mt-1 font-mono" value={form.vatNumber} onChange={e => set("vatNumber", e.target.value)} disabled={!form.isVatPayer} placeholder="123456789" />
-                </div>
-              </div>
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <Switch checked={form.isVatPayer} onCheckedChange={v => set("isVatPayer", v)} />
-                  <Label className="text-xs">Платник ПДВ</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={form.handlesAlcohol} onCheckedChange={v => set("handlesAlcohol", v)} />
-                  <Label className="text-xs">Торгує алкоголем</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={form.isDefault} onCheckedChange={v => set("isDefault", v)} />
-                  <Label className="text-xs">Основна</Label>
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">Юридична адреса</Label>
-                <Input className="mt-1" value={form.legalAddress} onChange={e => set("legalAddress", e.target.value)} placeholder="вул. Хрещатик, 1, м. Київ, 01001" />
-              </div>
-              <div>
-                <Label className="text-xs">Фактична адреса</Label>
-                <Input className="mt-1" value={form.actualAddress} onChange={e => set("actualAddress", e.target.value)} placeholder="Якщо відрізняється від юридичної" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">Директор / ФОП</Label>
-                  <Input className="mt-1" value={form.director} onChange={e => set("director", e.target.value)} />
-                </div>
-                <div>
-                  <Label className="text-xs">Бухгалтер</Label>
-                  <Input className="mt-1" value={form.accountant} onChange={e => set("accountant", e.target.value)} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">Телефон</Label>
-                  <Input className="mt-1" value={form.phone} onChange={e => set("phone", e.target.value)} />
-                </div>
-                <div>
-                  <Label className="text-xs">Email</Label>
-                  <Input className="mt-1 lowercase" value={form.email} onChange={e => set("email", e.target.value)} />
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">Примітки</Label>
-                <Input className="mt-1" value={form.notes} onChange={e => set("notes", e.target.value)} />
-              </div>
-            </TabsContent>
-
-            <TabsContent value="bank" className="space-y-3 mt-0">
-              <div>
-                <Label className="text-xs">IBAN</Label>
-                <Input className="mt-1 font-mono text-xs" value={form.iban} onChange={e => set("iban", e.target.value)} placeholder="UA21 3996 5100 0002 6007 2335 6600 1" />
-              </div>
-              <div>
-                <Label className="text-xs">Банк</Label>
-                <Input className="mt-1" value={form.bank} onChange={e => set("bank", e.target.value)} placeholder="АТ «ПриватБанк»" />
-              </div>
-              <div>
-                <Label className="text-xs">МФО</Label>
-                <Input className="mt-1 font-mono" value={form.mfo} onChange={e => set("mfo", e.target.value)} placeholder="305299" maxLength={6} />
-              </div>
-            </TabsContent>
-
-            <TabsContent value="prro" className="space-y-3 mt-0">
-              <div className="flex items-center gap-2 mb-1">
-                <Switch checked={form.prroEnabled} onCheckedChange={v => set("prroEnabled", v)} />
-                <Label className="text-xs font-semibold">Підключити Checkbox ПРРО</Label>
-              </div>
-              {form.prroEnabled && (
-                <>
-                  <div>
-                    <Label className="text-xs">Логін (email) касира в Checkbox</Label>
-                    <Input className="mt-1" value={form.checkboxLogin} onChange={e => set("checkboxLogin", e.target.value)} placeholder="касир@email.com" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Пароль (залиште порожнім, щоб не змінювати)</Label>
-                    <Input className="mt-1" type="password" value={form.checkboxPassword} onChange={e => set("checkboxPassword", e.target.value)} />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Ключ ліцензії (License Key)</Label>
-                    <Input className="mt-1 font-mono text-xs" value={form.checkboxLicenseKey} onChange={e => set("checkboxLicenseKey", e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-                  </div>
-                  <Button variant="outline" size="sm" onClick={testCheckbox} disabled={checkboxTesting}>
-                    <Shield className="w-3.5 h-3.5 mr-1" />
-                    {checkboxTesting ? "Перевірка..." : "Перевірити з'єднання"}
-                  </Button>
-                  {checkboxResult && (
-                    <div className={`text-xs p-2.5 rounded-lg ${checkboxResult.ok ? "bg-green-500/10 text-green-700" : "bg-red-500/10 text-red-700"}`}>
-                      {checkboxResult.ok ? (
-                        <><CheckCircle2 className="inline w-3.5 h-3.5 mr-1" />Підключено · Касир: {checkboxResult.cashier_name} · Зміна: {checkboxResult.shift_status}</>
-                      ) : (
-                        <><XCircle className="inline w-3.5 h-3.5 mr-1" />{checkboxResult.error || "Помилка з'єднання"}</>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-              {!form.prroEnabled && (
-                <div className="rounded-lg border border-dashed p-4 text-xs text-muted-foreground">
-                  Увімкніть ПРРО щоб прив'язати Checkbox до цієї юридичної особи. Кожна юр. особа має власну касу та ліцензійний ключ.
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="liqpay" className="space-y-3 mt-0">
-              <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 text-xs text-blue-700 dark:text-blue-400">
-                <CreditCard className="inline w-3.5 h-3.5 mr-1" />
-                LiqPay прив'язується окремо до кожної юридичної особи. Гроші надходять безпосередньо на рахунок ФОП або ТОВ.
-              </div>
-              <div>
-                <Label className="text-xs">Public Key</Label>
-                <Input className="mt-1 font-mono text-xs" value={form.liqpayPublicKey} onChange={e => set("liqpayPublicKey", e.target.value)} placeholder="sandbox_i..." />
-              </div>
-              <div>
-                <Label className="text-xs">Private Key (зашифровується)</Label>
-                <Input className="mt-1 font-mono text-xs" type="password" value={form.liqpayPrivateKey} onChange={e => set("liqpayPrivateKey", e.target.value)} placeholder="sandbox_..." />
-              </div>
-            </TabsContent>
+          {/* ── Основна інформація ── */}
+          <SectionHeader icon={<Building2 className="w-3.5 h-3.5" />} title="Основна інформація" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Назва *</Label>
+              <Input className="mt-1" value={form.name} onChange={e => set("name", e.target.value)} placeholder="ФОП Іваненко І.І." />
+            </div>
+            <div>
+              <Label className="text-xs">Тип</Label>
+              <Select value={form.type} onValueChange={v => set("type", v)}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fop">ФОП</SelectItem>
+                  <SelectItem value="tov">ТОВ</SelectItem>
+                  <SelectItem value="pp">ПП</SelectItem>
+                  <SelectItem value="other">Інше</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        </Tabs>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">{form.type === "fop" ? "ІПН (РНОКПП)" : "ЄДРПОУ"}</Label>
+              <Input className="mt-1 font-mono" value={form.type === "fop" ? form.ipn : form.edrpou} onChange={e => set(form.type === "fop" ? "ipn" : "edrpou", e.target.value)} placeholder={form.type === "fop" ? "3012345678" : "12345678"} />
+            </div>
+            <div>
+              <Label className="text-xs">Номер ПДВ</Label>
+              <Input className="mt-1 font-mono" value={form.vatNumber} onChange={e => set("vatNumber", e.target.value)} disabled={!form.isVatPayer} placeholder="123456789" />
+            </div>
+          </div>
+          <div className="flex items-center gap-6 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Switch checked={form.isVatPayer} onCheckedChange={v => set("isVatPayer", v)} />
+              <Label className="text-xs">Платник ПДВ</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={form.handlesAlcohol} onCheckedChange={v => set("handlesAlcohol", v)} />
+              <Label className="text-xs">Торгує алкоголем</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={form.isDefault} onCheckedChange={v => set("isDefault", v)} />
+              <Label className="text-xs">Основна</Label>
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Юридична адреса</Label>
+            <Input className="mt-1" value={form.legalAddress} onChange={e => set("legalAddress", e.target.value)} placeholder="вул. Хрещатик, 1, м. Київ, 01001" />
+          </div>
+          <div>
+            <Label className="text-xs">Фактична адреса</Label>
+            <Input className="mt-1" value={form.actualAddress} onChange={e => set("actualAddress", e.target.value)} placeholder="Якщо відрізняється від юридичної" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Директор / ФОП</Label>
+              <Input className="mt-1" value={form.director} onChange={e => set("director", e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Бухгалтер</Label>
+              <Input className="mt-1" value={form.accountant} onChange={e => set("accountant", e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Телефон</Label>
+              <Input className="mt-1" value={form.phone} onChange={e => set("phone", e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Email</Label>
+              <Input className="mt-1 lowercase" value={form.email} onChange={e => set("email", e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Примітки</Label>
+            <Input className="mt-1" value={form.notes} onChange={e => set("notes", e.target.value)} />
+          </div>
 
-        <DialogFooter className="shrink-0">
+          {/* ── Банківські реквізити ── */}
+          <SectionHeader icon={<Landmark className="w-3.5 h-3.5" />} title="Банківські реквізити" />
+          <div>
+            <Label className="text-xs">IBAN</Label>
+            <Input className="mt-1 font-mono text-xs" value={form.iban} onChange={e => set("iban", e.target.value)} placeholder="UA21 3996 5100 0002 6007 2335 6600 1" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Банк</Label>
+              <Input className="mt-1" value={form.bank} onChange={e => set("bank", e.target.value)} placeholder="АТ «ПриватБанк»" />
+            </div>
+            <div>
+              <Label className="text-xs">МФО</Label>
+              <Input className="mt-1 font-mono" value={form.mfo} onChange={e => set("mfo", e.target.value)} placeholder="305299" maxLength={6} />
+            </div>
+          </div>
+
+          {/* ── ПРРО / Checkbox ── */}
+          <SectionHeader icon={<Receipt className="w-3.5 h-3.5" />} title="ПРРО / Checkbox" />
+          <div className="flex items-center gap-2">
+            <Switch checked={form.prroEnabled} onCheckedChange={v => set("prroEnabled", v)} />
+            <Label className="text-xs font-semibold">Підключити Checkbox ПРРО</Label>
+          </div>
+          {form.prroEnabled ? (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Логін (email) касира в Checkbox</Label>
+                <Input className="mt-1" value={form.checkboxLogin} onChange={e => set("checkboxLogin", e.target.value)} placeholder="касир@email.com" />
+              </div>
+              <div>
+                <Label className="text-xs">Пароль (залиште порожнім, щоб не змінювати)</Label>
+                <Input className="mt-1" type="password" value={form.checkboxPassword} onChange={e => set("checkboxPassword", e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Ключ ліцензії (License Key)</Label>
+                <Input className="mt-1 font-mono text-xs" value={form.checkboxLicenseKey} onChange={e => set("checkboxLicenseKey", e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+              </div>
+              <Button variant="outline" size="sm" onClick={testCheckbox} disabled={checkboxTesting}>
+                <Shield className="w-3.5 h-3.5 mr-1" />
+                {checkboxTesting ? "Перевірка..." : "Перевірити з'єднання"}
+              </Button>
+              {checkboxResult && (
+                <div className={`text-xs p-2.5 rounded-lg ${checkboxResult.ok ? "bg-green-500/10 text-green-700" : "bg-red-500/10 text-red-700"}`}>
+                  {checkboxResult.ok ? (
+                    <><CheckCircle2 className="inline w-3.5 h-3.5 mr-1" />Підключено · Касир: {checkboxResult.cashier_name} · Зміна: {checkboxResult.shift_status}</>
+                  ) : (
+                    <><XCircle className="inline w-3.5 h-3.5 mr-1" />{checkboxResult.error || "Помилка з'єднання"}</>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+              Увімкніть ПРРО щоб прив'язати Checkbox до цієї юридичної особи.
+            </div>
+          )}
+
+          {/* ── LiqPay ── */}
+          <SectionHeader icon={<CreditCard className="w-3.5 h-3.5" />} title="LiqPay" />
+          <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 text-xs text-blue-700 dark:text-blue-400">
+            <CreditCard className="inline w-3.5 h-3.5 mr-1" />
+            LiqPay прив'язується окремо до кожної юридичної особи. Гроші надходять безпосередньо на рахунок ФОП або ТОВ.
+          </div>
+          <div>
+            <Label className="text-xs">Public Key</Label>
+            <Input className="mt-1 font-mono text-xs" value={form.liqpayPublicKey} onChange={e => set("liqpayPublicKey", e.target.value)} placeholder="sandbox_i..." />
+          </div>
+          <div className="pb-2">
+            <Label className="text-xs">Private Key (зашифровується)</Label>
+            <Input className="mt-1 font-mono text-xs" type="password" value={form.liqpayPrivateKey} onChange={e => set("liqpayPrivateKey", e.target.value)} placeholder="sandbox_..." />
+          </div>
+
+        </div>
+
+        <DialogFooter className="shrink-0 pt-2 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Скасувати</Button>
           <Button onClick={() => save.mutate(form)} disabled={save.isPending || !form.name}>
             {save.isPending ? "Збереження..." : "Зберегти"}
