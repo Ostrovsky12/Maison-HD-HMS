@@ -27,10 +27,10 @@ async function apiFetch(path: string, opts?: RequestInit) {
 
 // ─── QR URL builder ───────────────────────────────────────────────────────────
 function buildQrUrl(tableId: number, tableNo: string): string {
-  // Point to room-concierge with table param
+  // Point to room-concierge guest-menu page with table ID
   const base = window.location.origin;
   const rcBase = base + (import.meta.env.BASE_URL || "").replace(/hms\/?$/, "room-concierge");
-  return `${rcBase}?table=${encodeURIComponent(tableNo)}&tid=${tableId}`;
+  return `${rcBase}/guest-menu?tid=${tableId}`;
 }
 
 interface Table {

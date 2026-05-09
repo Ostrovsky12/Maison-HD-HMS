@@ -24,6 +24,7 @@ import FbQrCodes from "@/pages/fb-qr";
 import FbAdminPin from "@/pages/fb-admin-pin";
 import FbStaff from "@/pages/fb-staff";
 import FbOutlets from "@/pages/fb-outlets";
+import FbCashier from "@/pages/fb-cashier";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,6 +82,7 @@ function Router() {
       <Route path="/fb/admin-pin"><ProtectedRoute component={FbAdminPin} /></Route>
       <Route path="/fb/staff"><ProtectedRoute component={FbStaff} /></Route>
       <Route path="/fb/outlets"><ProtectedRoute component={FbOutlets} /></Route>
+      <Route path="/fb/cashier"><ProtectedRoute component={FbCashier} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>
