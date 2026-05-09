@@ -1,12 +1,37 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable } from "@workspace/db";
 import { eq, and, desc, asc, sql, gte, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { createFiscalReceipt, buildCheckboxGoods, toCheckboxPaymentType } from "../services/checkbox.js";
 
 const router = Router();
-const getOrg = (req: any) => req.user?.organizationId;
+const getOrg = (req: any): number | null => req.user?.organizationId ?? null;
+
+// ── resolveOrgId — auto-creates org if user has none (mirrors acc-ledger.ts) ─
+async function resolveOrgId(req: any): Promise<number> {
+  if (req.user?.organizationId) return req.user.organizationId;
+  const userId = req.user?.userId;
+  if (!userId) throw new Error("Unauthorized: no userId");
+  const { rows: uRows } = await pool.query(
+    `SELECT organization_id FROM users WHERE id = $1 LIMIT 1`, [userId],
+  );
+  if (uRows[0]?.organization_id) {
+    req.user.organizationId = uRows[0].organization_id;
+    return uRows[0].organization_id;
+  }
+  const email = req.user?.email ?? `user${userId}@maisonhd.com`;
+  const orgName = email.split("@")[0] ?? "My Organization";
+  const { rows: oRows } = await pool.query(
+    `INSERT INTO organizations (name, slug, plan, is_active, created_at, updated_at)
+     VALUES ($1, $2, 'basic', true, NOW(), NOW()) RETURNING id`,
+    [orgName, orgName.toLowerCase().replace(/[^a-z0-9]/g, "-") + "-" + userId],
+  );
+  const newOrgId = oRows[0].id;
+  await pool.query(`UPDATE users SET organization_id = $1 WHERE id = $2`, [newOrgId, userId]);
+  req.user.organizationId = newOrgId;
+  return newOrgId;
+}
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 const CASHIER_ROLES = ["cashier", "manager", "owner", "super_admin"];
@@ -21,7 +46,8 @@ const checkRole = (req: any, res: any, allowed: string[]): boolean => {
 };
 
 // ─── Demo seed ────────────────────────────────────────────────────────────────
-async function seedDemo(orgId: number) {
+async function seedDemo(orgId: number | null) {
+  if (!orgId) return;
   const ex = await db.select({ id: fbCategoriesTable.id }).from(fbCategoriesTable).where(eq(fbCategoriesTable.organizationId, orgId)).limit(1);
   if (ex.length > 0) return;
 
@@ -111,7 +137,7 @@ async function seedDemo(orgId: number) {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 router.get("/stats", requireAuth, async (req: any, res) => {
   try {
-    const orgId = getOrg(req);
+    const orgId = await resolveOrgId(req);
     await seedDemo(orgId);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -152,7 +178,7 @@ router.get("/stats", requireAuth, async (req: any, res) => {
 // ─── Categories ───────────────────────────────────────────────────────────────
 router.get("/categories", requireAuth, async (req: any, res) => {
   try {
-    const orgId = getOrg(req);
+    const orgId = await resolveOrgId(req);
     await seedDemo(orgId);
     const cats = await db.select().from(fbCategoriesTable).where(eq(fbCategoriesTable.organizationId, orgId)).orderBy(asc(fbCategoriesTable.sortOrder));
     res.json({ categories: cats });
@@ -161,7 +187,7 @@ router.get("/categories", requireAuth, async (req: any, res) => {
 
 router.post("/categories", requireAuth, async (req: any, res) => {
   try {
-    const orgId = getOrg(req);
+    const orgId = await resolveOrgId(req);
     const [cat] = await db.insert(fbCategoriesTable).values({ ...req.body, organizationId: orgId }).returning();
     res.json({ category: cat });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -632,10 +658,33 @@ router.patch("/order-items/:id", requireAuth, async (req: any, res) => {
 // CASHBOX SESSION — POS Каса
 // ══════════════════════════════════════════════════════════════════════════════
 
+// GET legal entities available for cashbox sessions (used by shift-open dialog)
+router.get("/cashbox/legal-entities", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const db_ = (db as any).$client;
+    // Return legal entities with current open session info
+    const r = await db_.query(
+      `SELECT le.*,
+              cs.id         AS session_id,
+              cs.cashbox_name AS session_cashbox_name,
+              cs.opened_at  AS session_opened_at,
+              cs.status     AS session_status
+       FROM legal_entities le
+       LEFT JOIN cashbox_sessions cs ON cs.legal_entity_id = le.id
+         AND cs.organization_id = $1 AND cs.status = 'open'
+       WHERE le.organization_id = $1 AND le.is_active = true
+       ORDER BY le.is_default DESC, le.name ASC`,
+      [orgId]
+    );
+    res.json({ legalEntities: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // GET current open session(s)
 router.get("/cashbox/session", requireAuth, async (req: any, res) => {
   try {
-    const orgId = getOrg(req);
+    const orgId = await resolveOrgId(req);
     const db_ = (db as any).$client;
     const r = await db_.query(
       `SELECT cs.*, u.name AS cashier_name,
@@ -653,7 +702,7 @@ router.get("/cashbox/session", requireAuth, async (req: any, res) => {
 // POST open session
 router.post("/cashbox/session", requireAuth, async (req: any, res) => {
   try {
-    const orgId = getOrg(req);
+    const orgId = await resolveOrgId(req);
     if (!checkRole(req, res, CASHIER_ROLES)) return;
     const cashierId = req.user?.userId;
     const { openingBalance = 0, cashboxName = "Каса 1", legalEntityId = null } = req.body;

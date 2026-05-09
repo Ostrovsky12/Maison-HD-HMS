@@ -555,6 +555,50 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_acc_bank_org ON acc_bank_statements (organization_id, statement_date DESC);
   `);
 
+  // ── F&B / POS tables ────────────────────────────────────────────────────────
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS cashbox_sessions (
+      id               SERIAL PRIMARY KEY,
+      organization_id  INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+      property_id      INTEGER,
+      business_unit_id INTEGER,
+      cashbox_name     VARCHAR(100) NOT NULL DEFAULT 'Каса 1',
+      cashier_id       INTEGER REFERENCES users(id),
+      opened_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      closed_at        TIMESTAMPTZ,
+      opening_balance  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      closing_balance  NUMERIC(10,2),
+      cash_in          NUMERIC(10,2) NOT NULL DEFAULT 0,
+      cash_out         NUMERIC(10,2) NOT NULL DEFAULT 0,
+      expected_balance NUMERIC(10,2) NOT NULL DEFAULT 0,
+      discrepancy      NUMERIC(10,2),
+      status           VARCHAR(20) NOT NULL DEFAULT 'open',
+      notes            TEXT,
+      legal_entity_id  INTEGER,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cashbox_sessions_org_status ON cashbox_sessions (organization_id, status);
+  `);
+
+  // Migrate: add missing columns to cashbox_sessions (production catch-up)
+  await db.execute(sql`
+    ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS legal_entity_id  INTEGER;
+    ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS expected_balance  NUMERIC(10,2) DEFAULT 0;
+    ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS opened_at         TIMESTAMPTZ   DEFAULT NOW();
+    ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS cash_in           NUMERIC(10,2) DEFAULT 0;
+    ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS cash_out          NUMERIC(10,2) DEFAULT 0;
+    ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS discrepancy       NUMERIC(10,2);
+    ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS closing_balance   NUMERIC(10,2);
+  `);
+
+  // Migrate: normalise null expected_balance to 0 so arithmetic never returns null
+  await db.execute(sql`
+    UPDATE cashbox_sessions SET expected_balance = opening_balance
+    WHERE expected_balance IS NULL AND opening_balance IS NOT NULL;
+    UPDATE cashbox_sessions SET cash_in  = 0 WHERE cash_in  IS NULL;
+    UPDATE cashbox_sessions SET cash_out = 0 WHERE cash_out IS NULL;
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (

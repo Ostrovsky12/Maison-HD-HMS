@@ -12,7 +12,7 @@ import {
   Banknote, Smartphone, UtensilsCrossed, Loader2, Table2, FileText,
   StickyNote, ArrowLeft, ScanBarcode, Camera, Keyboard, Archive,
   AlertTriangle, CheckCircle2, ChevronRight, Flame, BookOpen,
-  PlusCircle, Circle, Search,
+  PlusCircle, Circle, Search, KeyRound,
 } from "lucide-react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -41,7 +41,8 @@ type MenuItem  = {
   categoryName?: string; categoryEmoji?: string;
   excisePerUnit?: number; requiresStamp?: boolean; imageUrl?: string;
 };
-type Session   = { id: number; cashboxName: string; cashierName?: string; openedAt: string };
+type Session   = { id: number; cashboxName: string; cashierName?: string; openedAt: string; entityName?: string; entityShortName?: string; entityType?: string };
+type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default: boolean; session_id?: number; session_cashbox_name?: string; session_opened_at?: string };
 type PaidOrder = { id: number; tableNumber?: string; tableLocation?: string; guestName?: string; guestCount?: number; status: string; totalAmount: string; paidAmount?: string; createdAt: string; openedAt: string };
 type Course    = 1 | 2 | 3;
 type OrderLine = {
@@ -1127,13 +1128,14 @@ function OrderScreen({ table, order, lines, categories, menuItems, onBack, onAdd
 }
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
-function HomeScreen({ tables, session, loading, onSelectTable, onCreateTable, onRefresh, menuItems, onToggleItem }: {
-  tables: Table[]; session: Session | null; loading: boolean;
+function HomeScreen({ tables, session, sessions, loading, onSelectTable, onCreateTable, onRefresh, menuItems, onToggleItem, onOpenShift }: {
+  tables: Table[]; session: Session | null; sessions: Session[]; loading: boolean;
   onSelectTable: (t: Table) => void;
   onCreateTable: () => void;
   onRefresh: () => void;
   menuItems: MenuItem[];
   onToggleItem: (id: number, available: boolean) => void;
+  onOpenShift: () => void;
 }) {
   const [showArchive,   setShowArchive]   = useState(false);
   const [showStopList,  setShowStopList]  = useState(false);
@@ -1156,16 +1158,22 @@ function HomeScreen({ tables, session, loading, onSelectTable, onCreateTable, on
             <p className="text-base font-bold text-white capitalize">
               {format(new Date(), "EEEE, d MMMM", { locale: uk })}
             </p>
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-xs text-white/40">Офіціант:</span>
               <span className="text-xs font-semibold text-indigo-300">{userName}</span>
-              {session ? (
-                <span className="flex items-center gap-1 text-[10px] text-emerald-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Зміна {session.cashboxName} · {format(new Date(session.openedAt), "HH:mm")}
-                </span>
+              {sessions.length > 0 ? (
+                sessions.map(s => (
+                  <span key={s.id} className="flex items-center gap-1 text-[10px] text-emerald-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {s.entityShortName || s.cashboxName} · {format(new Date(s.openedAt), "HH:mm")}
+                  </span>
+                ))
               ) : (
-                <span className="text-[10px] text-amber-400/70">Зміна не відкрита</span>
+                <button onClick={onOpenShift}
+                  className="flex items-center gap-1 text-[10px] text-amber-400/80 hover:text-amber-300 transition-colors">
+                  <KeyRound className="w-3 h-3" />
+                  Відкрити зміну
+                </button>
               )}
             </div>
           </div>
@@ -1174,6 +1182,21 @@ function HomeScreen({ tables, session, loading, onSelectTable, onCreateTable, on
           </button>
         </div>
       </div>
+
+      {/* No-session banner */}
+      {sessions.length === 0 && (
+        <button onClick={onOpenShift}
+          className="mx-4 mt-3 shrink-0 flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 hover:bg-amber-500/15 transition-colors text-left">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
+            <KeyRound className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-amber-300">Зміну не відкрито</p>
+            <p className="text-[10px] text-amber-400/60">Натисніть, щоб відкрити касову зміну</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-amber-400/50 shrink-0" />
+        </button>
+      )}
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
@@ -1267,7 +1290,9 @@ export default function WaiterStationPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [menuItems,  setMenuItems]  = useState<MenuItem[]>([]);
   const [session,    setSession]    = useState<Session | null>(null);
+  const [sessions,   setSessions]   = useState<Session[]>([]);
   const [loading,    setLoading]    = useState(true);
+  const [showShiftOpen, setShowShiftOpen] = useState(false);
 
   const [screen,        setScreen]        = useState<"home" | "order">("home");
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
@@ -1291,7 +1316,14 @@ export default function WaiterStationPage() {
       setTables(t.tables || []);
       setCategories((c.categories || []).sort((a: Category, b: Category) => a.sortOrder - b.sortOrder));
       setMenuItems(m.items || []);
-      setSession(s.session || null);
+      const allSessions: Session[] = (s.sessions || (s.session ? [s.session] : [])).map((x: any) => ({
+        id: x.id, cashboxName: x.cashbox_name ?? x.cashboxName ?? "Каса",
+        cashierName: x.cashier_name ?? x.cashierName,
+        openedAt: x.opened_at ?? x.openedAt,
+        entityName: x.entity_name, entityShortName: x.entity_short_name, entityType: x.entity_type,
+      }));
+      setSessions(allSessions);
+      setSession(allSessions[0] || null);
     } catch { /* silent */ }
     setLoading(false);
   }, []);
@@ -1464,12 +1496,13 @@ export default function WaiterStationPage() {
       <div className="h-[calc(100vh-57px)] flex flex-col bg-[#12141f] overflow-hidden">
         {screen === "home" ? (
           <HomeScreen
-            tables={tables} session={session} loading={loading}
+            tables={tables} session={session} sessions={sessions} loading={loading}
             onSelectTable={handleSelectTable}
             onCreateTable={() => setShowNewTable(true)}
             onRefresh={load}
             menuItems={menuItems}
             onToggleItem={toggleItem}
+            onOpenShift={() => setShowShiftOpen(true)}
           />
         ) : selectedTable ? (
           <OrderScreen
@@ -1503,8 +1536,224 @@ export default function WaiterStationPage() {
             </DialogContent>
           </Dialog>
         )}
+
+        {/* Shift open dialog */}
+        {showShiftOpen && (
+          <ShiftOpenDialog
+            onClose={() => setShowShiftOpen(false)}
+            onComplete={load}
+          />
+        )}
       </div>
     </AppLayout>
+  );
+}
+
+// ── ShiftOpenDialog — відкриття зміни по кожній юридичній особі ──────────────
+function ShiftOpenDialog({ onClose, onComplete }: { onClose: () => void; onComplete: () => void }) {
+  const { toast } = useToast();
+  const [entities,   setEntities]   = useState<LegalEntity[]>([]);
+  const [step,       setStep]       = useState<"loading" | "step" | "done">("loading");
+  const [stepIdx,    setStepIdx]    = useState(0);
+  const [cashName,   setCashName]   = useState("");
+  const [cashBal,    setCashBal]    = useState("0");
+  const [submitting, setSubmitting] = useState(false);
+  const [openedCount, setOpenedCount] = useState(0);
+
+  // Fetch legal entities that don't have open sessions yet
+  useEffect(() => {
+    apiFetch("/fb/cashbox/legal-entities")
+      .then(r => r.json())
+      .then(d => {
+        const all: LegalEntity[] = d.legalEntities || [];
+        // Only show entities without an already-open session
+        const pending = all.filter(e => !e.session_id);
+        setEntities(pending);
+        if (pending.length === 0) {
+          setStep("done");
+        } else {
+          const first = pending[0];
+          setCashName(`Каса ${first.short_name || first.type || "1"}`);
+          setCashBal("0");
+          setStep("step");
+        }
+      })
+      .catch(() => {
+        // If no legal entities configured — open a generic session
+        setEntities([]);
+        setCashName("Каса 1");
+        setCashBal("0");
+        setStep("step");
+      });
+  }, []);
+
+  const currentEntity = entities[stepIdx] ?? null;
+
+  const handleOpenSession = async () => {
+    setSubmitting(true);
+    try {
+      const body: any = {
+        openingBalance: parseFloat(cashBal) || 0,
+        cashboxName: cashName.trim() || "Каса 1",
+        legalEntityId: currentEntity?.id ?? null,
+      };
+      const r = await apiFetch("/fb/cashbox/session", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok && r.status !== 409) {
+        toast({ title: "Помилка відкриття зміни", description: d.error || "Невідома помилка", variant: "destructive" });
+        setSubmitting(false);
+        return;
+      }
+      // 409 = already open — treat as success for this entity
+      setOpenedCount(c => c + 1);
+      goNextStep();
+    } catch (e: any) {
+      toast({ title: "Помилка", description: e.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const goNextStep = () => {
+    const nextIdx = stepIdx + 1;
+    if (entities.length === 0 || nextIdx >= entities.length) {
+      setStep("done");
+    } else {
+      const next = entities[nextIdx];
+      setCashName(`Каса ${next.short_name || next.type || nextIdx + 1}`);
+      setCashBal("0");
+      setStepIdx(nextIdx);
+    }
+  };
+
+  const handleSkip = () => goNextStep();
+
+  const typeLabel: Record<string, string> = { ФОП: "ФОП", ТОВ: "ТОВ", ПП: "ПП", FOP: "ФОП", TOV: "ТОВ" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-sm bg-[#1a1d2e] rounded-t-3xl border-t border-white/10 pb-safe">
+
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 rounded-full bg-white/15" />
+        </div>
+
+        {step === "loading" && (
+          <div className="flex flex-col items-center justify-center py-14 gap-3">
+            <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+            <p className="text-sm text-white/50">Завантаження...</p>
+          </div>
+        )}
+
+        {step === "step" && (
+          <div className="px-5 pb-6">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-5 pt-2">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-white/30 mb-0.5">
+                  {entities.length > 0
+                    ? `Крок ${stepIdx + 1} з ${entities.length}`
+                    : "Відкриття зміни"}
+                </p>
+                <h2 className="text-lg font-bold text-white">Відкрити зміну</h2>
+              </div>
+              <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/6 flex items-center justify-center">
+                <X className="w-4 h-4 text-white/40" />
+              </button>
+            </div>
+
+            {/* Entity card */}
+            {currentEntity && (
+              <div className="bg-indigo-500/10 border border-indigo-500/25 rounded-2xl px-4 py-3 mb-5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+                    <FileText className="w-4 h-4 text-indigo-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-indigo-300">
+                      {typeLabel[currentEntity.type] || currentEntity.type}
+                      {currentEntity.is_default && <span className="ml-1.5 text-[9px] bg-indigo-500/30 text-indigo-400 rounded px-1 py-0.5 uppercase tracking-wide">За замовч.</span>}
+                    </p>
+                    <p className="text-sm font-bold text-white leading-tight">{currentEntity.short_name || currentEntity.name}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Cashbox name */}
+            <div className="mb-4">
+              <p className="text-[10px] uppercase tracking-widest text-white/30 mb-2">Назва каси</p>
+              <input
+                value={cashName}
+                onChange={e => setCashName(e.target.value)}
+                placeholder="Каса 1"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm text-white placeholder:text-white/20 outline-none focus:border-indigo-500/50 transition-colors"
+              />
+            </div>
+
+            {/* Opening balance */}
+            <div className="mb-6">
+              <p className="text-[10px] uppercase tracking-widest text-white/30 mb-2">Залишок готівки в касі на початок зміни</p>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40 text-sm font-semibold">₴</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={cashBal}
+                  onChange={e => setCashBal(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-3 py-3 text-sm text-white placeholder:text-white/20 outline-none focus:border-indigo-500/50 transition-colors text-right text-lg font-bold"
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              {entities.length > 1 && (
+                <button onClick={handleSkip} disabled={submitting}
+                  className="flex-1 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-sm text-white/50 hover:bg-white/10 transition-colors">
+                  Пропустити
+                </button>
+              )}
+              <button onClick={handleOpenSession} disabled={submitting}
+                className="flex-[2] flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors disabled:opacity-60">
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Відкрити
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "done" && (
+          <div className="px-5 pb-8 pt-2">
+            <div className="flex flex-col items-center justify-center py-8 gap-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/15 flex items-center justify-center">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-white mb-1">
+                  {openedCount > 0 ? "Зміну відкрито!" : "Зміна вже активна"}
+                </p>
+                <p className="text-sm text-white/40">
+                  {openedCount > 0
+                    ? `Відкрито ${openedCount} ${openedCount === 1 ? "касу" : "каси"}`
+                    : "Всі зміни вже відкриті"}
+                </p>
+              </div>
+              <button onClick={() => { onComplete(); onClose(); }}
+                className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors">
+                Почати роботу
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
