@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 // ─── API helper ───────────────────────────────────────────────────────────────
-const API = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api/fb";
+const API = "/api/fb";
 async function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("hms_token");
   const r = await fetch(`${API}${path}`, {

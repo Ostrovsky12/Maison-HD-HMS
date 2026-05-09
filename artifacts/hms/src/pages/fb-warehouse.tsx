@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 // ─── API helper ───────────────────────────────────────────────────────────────
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api/fb/warehouse";
+const BASE = "/api/fb/warehouse";
 
 async function api(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("hms_token");

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, Button, Badge } from "@/compo
 import { useAuth } from "@/hooks/use-auth";
 import { Download, Upload, CheckCircle, XCircle, AlertCircle, RefreshCw, FileJson } from "lucide-react";
 
-const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API_BASE = "";
 
 type ImportStatus = "idle" | "fetching" | "success" | "error";
 

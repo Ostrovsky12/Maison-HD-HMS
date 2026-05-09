@@ -100,7 +100,7 @@ const CATEGORY_EMOJIS = ["🍳","🍲","🍖","🥗","🍰","🥤","🍸","🍕"
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
-const API = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API = "";
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("hms_token");

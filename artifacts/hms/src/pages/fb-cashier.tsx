@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Bell, CheckCircle2, XCircle, Clock, ShoppingBag, RefreshCw, Wifi, Printer, ChefHat, Wine } from "lucide-react";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const API = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api/fb";
+const API = "/api/fb";
 async function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("hms_token");
   const r = await fetch(`${API}${path}`, {

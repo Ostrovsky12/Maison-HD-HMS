@@ -3,7 +3,7 @@ import { Badge, Button } from "@/components/ui/shared";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { QrCode, CreditCard, X, ExternalLink, Loader2 } from "lucide-react";
 
-const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API_BASE = "";
 const getToken = () => localStorage.getItem("hms_token") || "";
 
 const STATUS_UA: Record<string, string> = {

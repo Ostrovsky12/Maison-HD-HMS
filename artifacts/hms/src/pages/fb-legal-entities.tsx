@@ -18,7 +18,7 @@ import {
   CreditCard, Shield, ChevronDown, ChevronUp, Landmark, Receipt,
 } from "lucide-react";
 
-const API = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api";
+const API = "/api";
 function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("hms_token");
   return fetch(`${API}${path}`, {

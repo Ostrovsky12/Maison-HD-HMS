@@ -464,7 +464,7 @@ export default function LivingGuests() {
 
   const { data: bookings = [], isLoading, refetch } = useListBookings();
 
-  const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const API_BASE = "";
   const getToken = () => localStorage.getItem("hms_token") || "";
 
   const today = new Date().toISOString().split("T")[0];
