@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../lib/auth.js";
 import { db } from "@workspace/db";
+import { createHash } from "crypto";
 
 const router = Router();
 const getOrg = (req: any): number => (req as any).user?.organizationId;
@@ -281,6 +282,85 @@ router.delete("/printers/:id", requireAuth, async (req, res) => {
       `UPDATE fb_printers SET is_active = false, updated_at = NOW() WHERE id = $1 AND organization_id = $2`,
       [id, orgId]
     );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN PIN
+// ══════════════════════════════════════════════════════════════════
+
+async function ensureAdminPinTable() {
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS fb_admin_pins (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL UNIQUE,
+      pin_hash        VARCHAR(255) NOT NULL,
+      actions         TEXT[] NOT NULL DEFAULT ARRAY['cancel_order','apply_discount','open_shift','delete_item'],
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+ensureAdminPinTable().catch(console.error);
+
+// Simple hash — use SHA-256 via Node crypto (imported at top)
+function hashPin(pin: string): string {
+  return createHash("sha256").update(`maison-hd-pin:${pin}`).digest("hex");
+}
+
+// GET current PIN config (never returns the hash)
+router.get("/admin-pin", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    const r = await pool().query(
+      `SELECT id, actions, created_at, updated_at FROM fb_admin_pins WHERE organization_id = $1`,
+      [orgId]
+    );
+    if (!r.rows.length) return res.json({ pin: null });
+    res.json({ pin: { ...r.rows[0], is_set: true } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST set/update PIN
+router.post("/admin-pin", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { pin, actions } = req.body;
+    if (!pin || !/^\d{4,6}$/.test(pin)) return res.status(400).json({ error: "PIN має бути від 4 до 6 цифр" });
+    const hash = hashPin(pin);
+    const acts = Array.isArray(actions) ? actions : ["cancel_order", "apply_discount", "open_shift", "delete_item"];
+    await pool().query(`
+      INSERT INTO fb_admin_pins (organization_id, pin_hash, actions)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (organization_id)
+      DO UPDATE SET pin_hash = $2, actions = $3, updated_at = NOW()
+    `, [orgId, hash, acts]);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST verify PIN (used by POS/front-office)
+router.post("/admin-pin/verify", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { pin } = req.body;
+    if (!pin) return res.status(400).json({ error: "pin required" });
+    const r = await pool().query(
+      `SELECT pin_hash, actions FROM fb_admin_pins WHERE organization_id = $1`,
+      [orgId]
+    );
+    if (!r.rows.length) return res.json({ valid: false, reason: "no_pin_set" });
+    const valid = r.rows[0].pin_hash === hashPin(pin);
+    res.json({ valid, actions: valid ? r.rows[0].actions : [] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE remove PIN
+router.delete("/admin-pin", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    await pool().query(`DELETE FROM fb_admin_pins WHERE organization_id = $1`, [orgId]);
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

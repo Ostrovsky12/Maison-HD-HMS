@@ -8,7 +8,7 @@ import {
   ChevronRight, ChevronLeft, ChevronDown,
   Home, Search, Info, ShoppingBag, BarChart2,
   Wrench, FileText, MessageSquare, UtensilsCrossed,
-  Building2, Percent, CreditCard, BookOpen, Shield, Warehouse,
+  Building2, Percent, CreditCard, BookOpen, Shield, Warehouse, FileDown, QrCode, ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -77,6 +77,9 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/settings", label: "ПДВ / Оплата / Принтери", icon: Percent },
       { href: "/fb/menu", label: "Меню", icon: BookOpen },
       { href: "/fb/warehouse", label: "Склад", icon: Warehouse },
+      { href: "/fb/import", label: "Імпорт з Poster", icon: FileDown },
+      { href: "/fb/qr", label: "QR-меню столів", icon: QrCode },
+      { href: "/fb/admin-pin", label: "Admin PIN", icon: ShieldCheck },
     ],
   },
   {
