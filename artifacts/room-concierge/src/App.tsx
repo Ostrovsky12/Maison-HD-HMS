@@ -7,6 +7,8 @@ import NotFound from "@/pages/not-found";
 import Terminal from "@/pages/terminal";
 import Setup from "@/pages/setup";
 import AdminPanel from "@/pages/admin";
+import Bill from "@/pages/bill";
+import Pay from "@/pages/pay";
 
 const queryClient = new QueryClient();
 
@@ -16,6 +18,8 @@ function Router() {
       <Route path="/" component={Terminal} />
       <Route path="/setup" component={Setup} />
       <Route path="/admin-panel" component={AdminPanel} />
+      <Route path="/bill/:orderId" component={Bill} />
+      <Route path="/pay/:orderId" component={Pay} />
       <Route component={NotFound} />
     </Switch>
   );

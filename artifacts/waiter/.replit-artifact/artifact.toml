@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/waiter/"
+title = "Мобільний Офіціант — Maison HD"
+version = "1.0.0"
+id = "artifacts/waiter"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/waiter/" ]
+localPort = 22602
+
+[services.development]
+run = "pnpm --filter @workspace/waiter run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/waiter", "run", "build" ]
+publicDir = "artifacts/waiter/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22602"
+BASE_PATH = "/waiter/"

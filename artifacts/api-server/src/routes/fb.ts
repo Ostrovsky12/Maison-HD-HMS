@@ -1564,5 +1564,34 @@ router.put("/ai-waiter-settings", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Public bill endpoint (no auth required) ──────────────────────────────────
+router.get("/public/bill/:orderId", async (req, res) => {
+  const orderId = parseInt(req.params.orderId);
+  if (isNaN(orderId)) return res.status(400).json({ error: "Invalid order id" });
+  try {
+    const orderRows = await pool.query(
+      `SELECT o.*, t.number as table_number, t.location as table_location
+       FROM fb_orders o
+       LEFT JOIN fb_tables t ON o.table_id = t.id
+       WHERE o.id = $1 LIMIT 1`,
+      [orderId]
+    );
+    if (!orderRows.rows.length) return res.status(404).json({ error: "Order not found" });
+    const order = orderRows.rows[0];
+
+    const itemRows = await pool.query(
+      `SELECT oi.*, fi.name, fi.description, fi.image_url, fc.name as category_name
+       FROM fb_order_items oi
+       JOIN fb_items fi ON oi.item_id = fi.id
+       LEFT JOIN fb_categories fc ON fi.category_id = fc.id
+       WHERE oi.order_id = $1 AND oi.status != 'cancelled'
+       ORDER BY oi.created_at ASC`,
+      [orderId]
+    );
+
+    res.json({ order, items: itemRows.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
 
