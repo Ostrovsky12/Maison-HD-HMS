@@ -7,7 +7,8 @@ import {
   Sparkles, Hotel, ClipboardList, Download, BedDouble,
   ChevronRight, ChevronLeft, ChevronDown,
   Home, Search, Info, ShoppingBag, BarChart2,
-  Wrench, FileText, MessageSquare,
+  Wrench, FileText, MessageSquare, UtensilsCrossed,
+  Building2, Percent, CreditCard,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -64,6 +65,15 @@ const NAV_GROUPS: NavGroup[] = [
     icon: BarChart2,
     items: [
       { href: "/reports", label: "Статистика", icon: FileText },
+    ],
+  },
+  {
+    id: "fb",
+    label: "F&B",
+    icon: UtensilsCrossed,
+    items: [
+      { href: "/fb/legal-entities", label: "Юр. особи", icon: Building2 },
+      { href: "/fb/settings", label: "ПДВ / Оплата / Принтери", icon: Percent },
     ],
   },
   {

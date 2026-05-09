@@ -14,6 +14,8 @@ import Guests from "@/pages/guests";
 import Units from "@/pages/units";
 import ImportPage from "@/pages/import";
 import LivingGuests from "@/pages/living-guests";
+import FbLegalEntities from "@/pages/fb-legal-entities";
+import FbSettings from "@/pages/fb-settings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,6 +63,8 @@ function Router() {
       <Route path="/units"><ProtectedRoute component={Units} /></Route>
       <Route path="/import"><ProtectedRoute component={ImportPage} /></Route>
       <Route path="/living"><ProtectedRoute component={LivingGuests} /></Route>
+      <Route path="/fb/legal-entities"><ProtectedRoute component={FbLegalEntities} /></Route>
+      <Route path="/fb/settings"><ProtectedRoute component={FbSettings} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>
