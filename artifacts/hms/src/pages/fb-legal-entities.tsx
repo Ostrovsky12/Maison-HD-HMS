@@ -180,7 +180,7 @@ function EntityDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onInteractOutside={e => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>{editing ? "Редагувати юр. особу" : "Нова юридична особа"}</DialogTitle>
         </DialogHeader>
