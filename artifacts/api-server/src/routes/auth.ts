@@ -113,4 +113,33 @@ router.post("/logout", requireAuth, (_req, res) => {
   res.json({ success: true, message: "Logged out" });
 });
 
+// ── Admin: upsert user (protected by SUPER_ADMIN_PASSWORD) ────────────────────
+router.post("/admin-upsert-user", async (req, res) => {
+  const pw = req.headers["x-admin-password"] || req.body?.adminPassword;
+  if (!pw || pw !== process.env["SUPER_ADMIN_PASSWORD"]) {
+    res.status(401).json({ error: "Unauthorized" }); return;
+  }
+  const { email, password, role, organizationId, name } = req.body;
+  if (!email || !password) {
+    res.status(400).json({ error: "email and password required" }); return;
+  }
+  try {
+    const passwordHash = await hashPassword(password);
+    const [user] = await db.insert(usersTable).values({
+      email,
+      passwordHash,
+      name: name || email.split("@")[0],
+      role: role || "owner",
+      organizationId: organizationId || null,
+      isActive: true,
+    } as any).onConflictDoUpdate({
+      target: usersTable.email,
+      set: { passwordHash, role: role || "owner", organizationId: organizationId || null, isActive: true },
+    }).returning();
+    res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, organizationId: user.organizationId } });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;
