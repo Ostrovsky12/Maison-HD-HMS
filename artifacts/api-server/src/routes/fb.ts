@@ -1544,6 +1544,7 @@ router.get("/ai-waiter-settings", requireAuth, async (req: any, res) => {
 router.put("/ai-waiter-settings", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
+    if (!orgId) return res.status(403).json({ error: "Для збереження потрібна організація. Увійдіть як власник або менеджер організації." });
     const { waiter_name, personality, promo_text, greeting_text, language_hint } = req.body;
     const db_ = (db as any).$client;
     const r = await db_.query(`
