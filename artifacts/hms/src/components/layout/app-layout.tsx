@@ -255,7 +255,7 @@ function LegendPanel({ collapsed }: { collapsed: boolean }) {
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user, logout, isLoading } = useAuth();
-  const [isDark, setIsDark] = useState(true);
+  const [isDark, setIsDark] = useState(() => localStorage.getItem("hms_theme") === "dark");
   const [collapsed, setCollapsed] = useState(false);
 
   // Which groups are open — start with the group that has the active route
@@ -280,8 +280,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }, [location]);
 
   useEffect(() => {
-    if (isDark) document.documentElement.classList.remove("light");
-    else document.documentElement.classList.add("light");
+    if (isDark) {
+      document.documentElement.classList.remove("light");
+      localStorage.setItem("hms_theme", "dark");
+    } else {
+      document.documentElement.classList.add("light");
+      localStorage.setItem("hms_theme", "light");
+    }
   }, [isDark]);
 
   const toggleGroup = useCallback((id: string) => {
