@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { QRCodeCanvas } from "qrcode.react";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -94,8 +94,13 @@ function TableDialog({ open, onClose, initial, onSave }: {
   initial?: Partial<Table>; onSave: (d: any) => void;
 }) {
   const blank = { number: "", capacity: 2, location: "" };
-  const [form, setForm] = useState<any>(initial || blank);
+  const [form, setForm] = useState<any>(blank);
   const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  // Reset form every time the dialog opens with fresh data
+  useEffect(() => {
+    if (open) setForm(initial ? { ...initial } : { ...blank });
+  }, [open, initial]);
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
