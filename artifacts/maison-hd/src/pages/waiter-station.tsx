@@ -1,18 +1,23 @@
+/**
+ * Waiter Station v2 — Станція офіціанта / бармена / касира
+ * Оптимізовано для швидкого введення замовлень
+ */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Plus, Minus, X, Search, RefreshCw, Users, Clock, Receipt,
-  CreditCard, Banknote, ChevronRight, UtensilsCrossed, Loader2,
-  Table2, FileText, Smartphone, StickyNote, CheckCircle2,
-  ArrowLeft, ChevronLeft, ScanBarcode, Camera, Keyboard,
+  Plus, Minus, X, RefreshCw, Users, Clock, Receipt, CreditCard,
+  Banknote, Smartphone, UtensilsCrossed, Loader2, Table2, FileText,
+  StickyNote, ArrowLeft, ScanBarcode, Camera, Keyboard, Archive,
+  AlertTriangle, CheckCircle2, ChevronRight, Flame, BookOpen,
+  PlusCircle, Circle, Search,
 } from "lucide-react";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
 
-// ── API ───────────────────────────────────────────────────────────────────────
+// ── API ─────────────────────────────────────────────────────────────────────
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API  = BASE.replace(/\/maison-hd$/, "") + "/api";
 const tok  = () => localStorage.getItem("hms_token") || "";
@@ -22,97 +27,306 @@ const apiFetch = (path: string, opts: RequestInit = {}) =>
     headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) },
   });
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-type Table       = { id: number; number: string; location: string; capacity: number; status: string; currentOrderId?: number };
-type Category    = { id: number; name: string; icon?: string; sortOrder: number };
-type MenuItem    = { id: number; name: string; price: number; category_id: number; is_available: boolean; description?: string; is_alcohol?: boolean; image_url?: string; imageUrl?: string };
-type OrderItem   = { id?: number; item_id: number; name: string; price: number; quantity: number; total_price: number; notes?: string; is_alcohol?: boolean };
-type Order       = { id: number; tableId?: number; orderType: string; guestName?: string; guestCount?: number; status: string; totalAmount: number; items?: OrderItem[]; openedAt?: string };
-type LegalEntity = { id: number; name: string; short_name?: string; type: string; is_default?: boolean; handles_alcohol?: boolean };
-
-function fmt(n: number | string | undefined | null) { return `₴${Number(n || 0).toFixed(0)}`; }
-function fmtDec(n: number | string | undefined | null) { return `₴${Number(n || 0).toFixed(2)}`; }
-function itemImg(item: MenuItem): string | undefined { return item.imageUrl || item.image_url; }
-
-function elapsed(iso?: string) {
-  if (!iso) return "";
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (diff < 60) return `${diff} хв`;
-  return `${Math.floor(diff / 60)}год ${diff % 60}хв`;
-}
-
-const STATUS_STYLE: Record<string, { bg: string; border: string; dot: string; label: string; text: string }> = {
-  free:     { bg: "bg-emerald-500/10", border: "border-emerald-500/30", dot: "bg-emerald-400", label: "Вільний",  text: "text-emerald-300" },
-  occupied: { bg: "bg-rose-500/10",    border: "border-rose-500/30",    dot: "bg-rose-400",    label: "Зайнятий", text: "text-rose-300"    },
-  reserved: { bg: "bg-amber-500/10",   border: "border-amber-500/30",   dot: "bg-amber-400",   label: "Резерв",   text: "text-amber-300"   },
+// ── Types ───────────────────────────────────────────────────────────────────
+type Table = {
+  id: number; number: string; capacity: number; location: string;
+  status: string; currentOrderId?: number;
+  orderGuestName?: string; orderTotal?: string; orderStatus?: string;
+};
+type Category  = { id: number; name: string; emoji?: string; sortOrder: number };
+type MenuItem  = {
+  id: number; name: string; price: string | number; categoryId: number;
+  isAvailable: boolean; description?: string; isAlcohol?: boolean;
+  isVegetarian?: boolean; isPopular?: boolean;
+  categoryName?: string; categoryEmoji?: string;
+  excisePerUnit?: number; requiresStamp?: boolean; imageUrl?: string;
+};
+type Session   = { id: number; cashboxName: string; cashierName?: string; openedAt: string };
+type PaidOrder = { id: number; tableNumber?: string; tableLocation?: string; guestName?: string; guestCount?: number; status: string; totalAmount: string; paidAmount?: string; createdAt: string; openedAt: string };
+type Course    = 1 | 2 | 3;
+type OrderLine = {
+  localId: string;
+  id?: number;
+  itemId: number;
+  name: string;
+  price: number;
+  qty: number;
+  totalPrice: number;
+  course: Course;
+  doneness?: string;
+  modifiers: string[];
+  notes?: string;
+  isAlcohol?: boolean;
+  excisePerUnit?: number;
+  exciseConfirmed: boolean;
+  sent: boolean;
 };
 
+// ── Constants ────────────────────────────────────────────────────────────────
+const DONENESS = ["Blue", "Rare", "Medium Rare", "Medium", "Medium Well", "Well Done"];
+const MEAT_KW  = ["стейк", "тел", "ялов", "ягн", "свин", "баран", "бург", "котл", "шашл", "барбек", "гриль", "риб", "форел", "лосос", "тунец", "філе"];
+const PORTIONS = [{ label: "1 порц.", value: 1 }, { label: "1.5", value: 1.5 }, { label: "1.8", value: 1.8 }, { label: "0.5", value: 0.5 }];
+const MODIFIERS_PRESET = ["Без цибулі", "Без часнику", "Без глютену", "Екстра сир", "Гострий соус", "Лимон окремо", "Добре просмажити"];
 const PAYMENT_METHODS = [
-  { key: "cash",   label: "Готівка", icon: Banknote,   color: "bg-emerald-500/15 border-emerald-500/30 text-emerald-300" },
-  { key: "card",   label: "Картка",  icon: CreditCard, color: "bg-blue-500/15 border-blue-500/30 text-blue-300"          },
-  { key: "liqpay", label: "LiqPay",  icon: Smartphone, color: "bg-amber-500/15 border-amber-500/30 text-amber-300"       },
+  { key: "cash",   label: "Готівка", icon: Banknote,   color: "bg-emerald-500/15 border-emerald-400/40 text-emerald-300" },
+  { key: "card",   label: "Картка",  icon: CreditCard, color: "bg-blue-500/15 border-blue-400/40 text-blue-300"         },
+  { key: "liqpay", label: "LiqPay",  icon: Smartphone, color: "bg-amber-500/15 border-amber-400/40 text-amber-300"      },
 ];
 
-const TIP_OPTIONS = [0, 5, 7, 10, 15];
-
-// ── CAT EMOJI MAP ──────────────────────────────────────────────────────────────
-const CAT_EMOJI: Record<string, string> = {
-  "сніданки": "🍳", "супи": "🍲", "салати": "🥗", "закуски": "🍢",
-  "основні": "🍖", "десерти": "🍰", "напої": "☕", "бар": "🍷",
-  "піца": "🍕", "паста": "🍝", "бургери": "🍔", "морепродукти": "🦐",
-};
-function catEmoji(name: string): string {
-  const key = name.toLowerCase();
-  for (const k of Object.keys(CAT_EMOJI)) {
-    if (key.includes(k)) return CAT_EMOJI[k];
-  }
-  return "🍽️";
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function uid() { return Math.random().toString(36).slice(2); }
+function fmt(n: number | string | null | undefined) { return `₴${Number(n || 0).toFixed(0)}`; }
+function fmtDec(n: number | string | null | undefined) { return `₴${Number(n || 0).toFixed(2)}`; }
+function elapsed(iso?: string) {
+  if (!iso) return "";
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 60 ? `${m} хв` : `${Math.floor(m / 60)}г ${m % 60}хв`;
+}
+function isMeat(name: string) { return MEAT_KW.some(k => name.toLowerCase().includes(k)); }
+function buildNotes(line: Omit<OrderLine, "sent" | "localId" | "id">): string {
+  const parts: string[] = [];
+  if (line.course > 1) parts.push(`[П${line.course}]`);
+  if (line.doneness)   parts.push(`[${line.doneness}]`);
+  if (line.modifiers.length) parts.push(line.modifiers.join(", "));
+  if (line.notes)      parts.push(line.notes);
+  return parts.join(" ").trim();
+}
+function getUserName(): string {
+  try {
+    const tok = localStorage.getItem("hms_token") || "";
+    if (!tok) return "Офіціант";
+    const p = JSON.parse(atob(tok.split(".")[1]));
+    return p.name || p.email?.split("@")[0] || "Офіціант";
+  } catch { return "Офіціант"; }
 }
 
-// ── Open Table Dialog ─────────────────────────────────────────────────────────
-function OpenTableDialog({ table, onConfirm, onClose }: {
-  table: Table; onConfirm: (guestCount: number, guestName: string) => void; onClose: () => void;
+// ── ItemOptionsDialog ────────────────────────────────────────────────────────
+function ItemOptionsDialog({ item, onAdd, onClose }: {
+  item: MenuItem;
+  onAdd: (line: Omit<OrderLine, "localId" | "id" | "sent" | "exciseConfirmed">) => void;
+  onClose: () => void;
 }) {
-  const [count, setCount] = useState(table.capacity || 2);
-  const [name,  setName]  = useState("");
+  const [course,    setCourse]    = useState<Course>(1);
+  const [doneness,  setDoneness]  = useState<string | undefined>();
+  const [portion,   setPortion]   = useState(1);
+  const [modifiers, setModifiers] = useState<string[]>([]);
+  const [notes,     setNotes]     = useState("");
+  const [customMod, setCustomMod] = useState("");
+  const showDoneness = isMeat(item.name);
+  const basePrice = Number(item.price);
+
+  const toggleMod = (m: string) => setModifiers(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]);
+  const addCustomMod = () => {
+    const v = customMod.trim();
+    if (v && !modifiers.includes(v)) { setModifiers(p => [...p, v]); }
+    setCustomMod("");
+  };
+
+  const handleAdd = () => {
+    onAdd({
+      itemId: item.id, name: item.name, price: basePrice,
+      qty: portion, totalPrice: +(basePrice * portion).toFixed(2),
+      course, doneness, modifiers, notes: notes || undefined,
+      isAlcohol: !!item.isAlcohol, excisePerUnit: item.excisePerUnit,
+    });
+    onClose();
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-sm max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-white flex items-center gap-2 text-base">
+            <UtensilsCrossed className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span className="truncate">{item.name}</span>
+            {item.isAlcohol && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded shrink-0">🍺 Алкоголь</span>}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-5 py-1">
+          {/* Course */}
+          <div>
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2 flex items-center gap-1">
+              <BookOpen className="w-3 h-3" /> Подача
+            </p>
+            <div className="flex gap-2">
+              {([1, 2, 3] as Course[]).map(c => (
+                <button key={c} onClick={() => setCourse(c)}
+                  className={`flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-all ${
+                    course === c
+                      ? "bg-indigo-600 border-indigo-500 text-white"
+                      : "bg-white/5 border-white/10 text-white/50 hover:bg-white/10"
+                  }`}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Doneness (meat only) */}
+          {showDoneness && (
+            <div>
+              <p className="text-xs text-white/40 uppercase tracking-wide mb-2 flex items-center gap-1">
+                <Flame className="w-3 h-3 text-orange-400" /> Ступінь прожарки
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {DONENESS.map(d => (
+                  <button key={d} onClick={() => setDoneness(prev => prev === d ? undefined : d)}
+                    className={`py-2 rounded-xl border text-xs font-medium transition-all ${
+                      doneness === d
+                        ? "bg-orange-500/30 border-orange-400/60 text-orange-200"
+                        : "bg-white/5 border-white/10 text-white/45 hover:bg-white/8"
+                    }`}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Portion */}
+          <div>
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Кількість / порція</p>
+            <div className="flex gap-2">
+              {PORTIONS.map(p => (
+                <button key={p.value} onClick={() => setPortion(p.value)}
+                  className={`flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-all ${
+                    portion === p.value
+                      ? "bg-emerald-600/40 border-emerald-400/60 text-emerald-200"
+                      : "bg-white/5 border-white/10 text-white/50 hover:bg-white/10"
+                  }`}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Modifiers */}
+          <div>
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Модифікатори</p>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {MODIFIERS_PRESET.map(m => (
+                <button key={m} onClick={() => toggleMod(m)}
+                  className={`px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                    modifiers.includes(m)
+                      ? "bg-indigo-500/30 border-indigo-400/50 text-indigo-200"
+                      : "bg-white/5 border-white/10 text-white/40 hover:bg-white/8"
+                  }`}>
+                  {m}
+                </button>
+              ))}
+            </div>
+            {modifiers.filter(m => !MODIFIERS_PRESET.includes(m)).map(m => (
+              <span key={m} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-xs mr-1 mb-1">
+                {m}
+                <button onClick={() => setModifiers(p => p.filter(x => x !== m))}><X className="w-2.5 h-2.5" /></button>
+              </span>
+            ))}
+            <div className="flex gap-1.5 mt-1.5">
+              <input value={customMod} onChange={e => setCustomMod(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addCustomMod()}
+                placeholder="Свій модифікатор..."
+                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50" />
+              <button onClick={addCustomMod}
+                className="w-8 h-8 bg-indigo-600/40 hover:bg-indigo-600/70 rounded-xl flex items-center justify-center transition-colors">
+                <Plus className="w-3.5 h-3.5 text-indigo-300" />
+              </button>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2 flex items-center gap-1">
+              <StickyNote className="w-3 h-3 text-amber-400" /> Нотатка
+            </p>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Без цибулі, алергія, побажання..."
+              rows={2}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50 resize-none" />
+          </div>
+
+          {/* Summary */}
+          <div className="flex items-center justify-between bg-white/4 rounded-xl px-4 py-2.5 border border-white/6">
+            <span className="text-sm text-white/60">{portion} × {fmt(basePrice)}</span>
+            <span className="text-lg font-bold text-indigo-300">{fmtDec(basePrice * portion)}</span>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} className="text-white/40">Скасувати</Button>
+          <Button onClick={handleAdd} className="bg-indigo-600 hover:bg-indigo-500 text-white flex-1">
+            <Plus className="w-4 h-4 mr-1.5" /> Додати до замовлення
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── NewTableDialog ────────────────────────────────────────────────────────────
+function NewTableDialog({ onConfirm, onClose }: {
+  onConfirm: (number: string, guests: number, notes: string, location: string) => void;
+  onClose: () => void;
+}) {
+  const [number,   setNumber]   = useState("");
+  const [guests,   setGuests]   = useState(2);
+  const [notes,    setNotes]    = useState("");
+  const [location, setLocation] = useState("Основний зал");
+  const LOCATIONS = ["Основний зал", "VIP-зона", "Тераса", "Бар", "Зимовий сад"];
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
-            <Table2 className="w-4 h-4 text-indigo-400" />
-            Стіл #{table.number}
-            <span className="text-white/40 text-xs font-normal ml-1">· {table.location}</span>
+            <Table2 className="w-4 h-4 text-indigo-400" /> Новий стіл
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-5 py-2">
           <div>
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Номер столу *</p>
+            <input value={number} onChange={e => setNumber(e.target.value)} placeholder="1, 2, VIP-1, Б-3..."
+              autoFocus
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-2xl font-bold text-white placeholder:text-white/20 outline-none focus:border-indigo-500/50 text-center tracking-widest" />
+          </div>
+          <div>
             <p className="text-xs text-white/40 uppercase tracking-wide mb-3">Кількість гостей</p>
             <div className="flex items-center justify-center gap-6">
-              <button onClick={() => setCount(c => Math.max(1, c - 1))}
-                className="w-12 h-12 rounded-xl bg-white/8 hover:bg-white/15 flex items-center justify-center transition-colors text-white/70">
-                <Minus className="w-5 h-5" />
+              <button onClick={() => setGuests(g => Math.max(1, g - 1))}
+                className="w-12 h-12 rounded-xl bg-white/8 hover:bg-white/14 flex items-center justify-center transition-colors">
+                <Minus className="w-5 h-5 text-white/60" />
               </button>
-              <span className="text-4xl font-bold text-white w-12 text-center">{count}</span>
-              <button onClick={() => setCount(c => Math.min(20, c + 1))}
+              <span className="text-5xl font-bold text-white w-12 text-center">{guests}</span>
+              <button onClick={() => setGuests(g => Math.min(40, g + 1))}
                 className="w-12 h-12 rounded-xl bg-indigo-600/60 hover:bg-indigo-600 flex items-center justify-center transition-colors">
                 <Plus className="w-5 h-5 text-white" />
               </button>
             </div>
           </div>
           <div>
-            <p className="text-xs text-white/40 uppercase tracking-wide mb-2">{"Ім'я гостя (опційно)"}</p>
-            <input
-              value={name} onChange={e => setName(e.target.value)}
-              placeholder="Прізвище або нік..."
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50"
-            />
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Зона</p>
+            <div className="flex flex-wrap gap-1.5">
+              {LOCATIONS.map(l => (
+                <button key={l} onClick={() => setLocation(l)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                    location === l
+                      ? "bg-indigo-600/40 border-indigo-400/60 text-indigo-200"
+                      : "bg-white/5 border-white/10 text-white/40 hover:bg-white/8"
+                  }`}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Примітка (опційно)</p>
+            <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="День народження, алергії, побажання..."
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} className="text-white/50 hover:text-white">Скасувати</Button>
-          <Button onClick={() => onConfirm(count, name)} className="bg-indigo-600 hover:bg-indigo-500 text-white">
-            Відкрити стіл
+          <Button variant="ghost" onClick={onClose} className="text-white/40">Скасувати</Button>
+          <Button disabled={!number.trim()} onClick={() => onConfirm(number.trim(), guests, notes, location)}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white flex-1">
+            <Plus className="w-4 h-4 mr-1.5" /> Відкрити стіл
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -120,79 +334,188 @@ function OpenTableDialog({ table, onConfirm, onClose }: {
   );
 }
 
-// ── Item Note Dialog ──────────────────────────────────────────────────────────
-function ItemNoteDialog({ item, onSave, onClose }: {
-  item: OrderItem; onSave: (notes: string) => void; onClose: () => void;
+// ── StopListDialog ───────────────────────────────────────────────────────────
+function StopListDialog({ items, onToggle, onClose }: {
+  items: MenuItem[]; onToggle: (id: number, available: boolean) => void; onClose: () => void;
 }) {
-  const [note, setNote] = useState(item.notes || "");
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="text-white text-sm flex items-center gap-2">
-            <StickyNote className="w-4 h-4 text-amber-400" /> Нотатка до позиції
-          </DialogTitle>
-        </DialogHeader>
-        <p className="text-xs text-white/50">{item.name}</p>
-        <textarea
-          value={note} onChange={e => setNote(e.target.value)}
-          placeholder="Без цибулі, добре прожарити, алергени..."
-          rows={3}
-          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50 resize-none"
-          autoFocus
-        />
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => { onSave(""); onClose(); }} className="text-white/40">Очистити</Button>
-          <Button onClick={() => { onSave(note); onClose(); }} className="bg-amber-600 hover:bg-amber-500">
-            Зберегти нотатку
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+  const [search, setSearch] = useState("");
+  const filtered = items.filter(i => !search || i.name.toLowerCase().includes(search.toLowerCase()));
+  const available   = filtered.filter(i => i.isAvailable);
+  const unavailable = filtered.filter(i => !i.isAvailable);
 
-// ── Pre-check Dialog ──────────────────────────────────────────────────────────
-function PrecheckDialog({ order, items, onClose, onPay }: {
-  order: Order; items: OrderItem[]; onClose: () => void; onPay: () => void;
-}) {
-  const total = items.reduce((s, i) => s + i.total_price, 0);
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-sm">
+      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-md max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
-            <Receipt className="w-4 h-4 text-indigo-400" /> Предчек
-            <span className="text-white/40 text-xs font-normal ml-1">Стіл #{order.tableId}</span>
+            <AlertTriangle className="w-4 h-4 text-amber-400" /> Стоп-лист
+            <span className="text-xs text-white/30 font-normal ml-auto">{unavailable.length} зупинено</span>
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-1 max-h-72 overflow-y-auto">
-          {items.map((item, i) => (
-            <div key={i} className="flex items-center justify-between py-2 border-b border-white/6">
+        <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 h-9 shrink-0">
+          <Search className="w-3.5 h-3.5 text-white/30" />
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Пошук страви..."
+            className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none" />
+        </div>
+        <div className="flex-1 overflow-y-auto space-y-1 min-h-0">
+          {unavailable.length > 0 && (
+            <div>
+              <p className="text-[10px] text-amber-400/70 uppercase tracking-wider px-1 py-2 font-semibold">Зупинено ({unavailable.length})</p>
+              {unavailable.map(item => (
+                <div key={item.id} className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/8 border border-red-500/15 mb-1">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white/70 line-through truncate">{item.name}</p>
+                    <p className="text-xs text-white/30">{item.categoryName}</p>
+                  </div>
+                  <button onClick={() => onToggle(item.id, true)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-medium hover:bg-emerald-500/30 transition-colors">
+                    Розблокувати
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {available.length > 0 && (
+            <div>
+              <p className="text-[10px] text-white/30 uppercase tracking-wider px-1 py-2 font-semibold">Доступні ({available.length})</p>
+              {available.map(item => (
+                <div key={item.id} className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/3 hover:bg-white/6 mb-1 group transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white/80 truncate">{item.name}</p>
+                    <p className="text-xs text-white/30">{item.categoryName}</p>
+                  </div>
+                  <button onClick={() => onToggle(item.id, false)}
+                    className="px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-400/25 text-red-300 text-xs font-medium hover:bg-red-500/25 transition-colors opacity-0 group-hover:opacity-100">
+                    Зупинити
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose} className="w-full bg-white/8 hover:bg-white/14 text-white/70">Закрити</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── ArchiveDialog ─────────────────────────────────────────────────────────────
+function ArchiveDialog({ onClose }: { onClose: () => void }) {
+  const [date,   setDate]   = useState(format(new Date(), "yyyy-MM-dd"));
+  const [orders, setOrders] = useState<PaidOrder[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch("/fb/orders?status=billed");
+      const d = await r.json();
+      const all: PaidOrder[] = d.orders || [];
+      setOrders(all.filter(o => (o.openedAt || o.createdAt || "").startsWith(date)));
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [date]);
+
+  const totalRevenue = orders.reduce((s, o) => s + Number(o.paidAmount || o.totalAmount || 0), 0);
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-md max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-white flex items-center gap-2">
+            <Archive className="w-4 h-4 text-indigo-400" /> Архів чеків
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex gap-2 shrink-0">
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/50" />
+          <button onClick={load} className="w-9 h-9 bg-white/5 hover:bg-white/10 rounded-xl flex items-center justify-center transition-colors">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin text-white/40" /> : <RefreshCw className="w-4 h-4 text-white/40" />}
+          </button>
+        </div>
+        {orders.length > 0 && (
+          <div className="flex items-center justify-between bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-4 py-2 shrink-0">
+            <span className="text-xs text-indigo-300">{orders.length} чеків за {format(new Date(date + "T12:00"), "d MMMM", { locale: uk })}</span>
+            <span className="text-sm font-bold text-indigo-200">{fmtDec(totalRevenue)}</span>
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
+          {loading && <div className="py-8 text-center"><Loader2 className="w-6 h-6 animate-spin text-white/30 mx-auto" /></div>}
+          {!loading && orders.length === 0 && (
+            <div className="py-12 text-center text-white/25 text-sm">Чеків за цей день не знайдено</div>
+          )}
+          {orders.map(o => (
+            <div key={o.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/4 border border-white/6">
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white/85 truncate">{item.name}</p>
-                {item.notes && <p className="text-[10px] text-amber-400/70 truncate">{item.notes}</p>}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-white/80">Чек #{o.id}</span>
+                  {o.tableNumber && <span className="text-xs bg-white/8 px-1.5 py-0.5 rounded text-white/40">Стіл {o.tableNumber}</span>}
+                </div>
+                {o.guestName && <p className="text-xs text-white/35 truncate">{o.guestName}</p>}
+                <p className="text-[10px] text-white/25">
+                  {format(new Date(o.openedAt || o.createdAt), "HH:mm", { locale: uk })}
+                  {o.guestCount ? ` · ${o.guestCount} гостей` : ""}
+                </p>
               </div>
-              <div className="shrink-0 text-right ml-3">
-                <p className="text-xs text-white/40">{item.quantity} × {fmt(item.price)}</p>
-                <p className="text-sm font-medium text-white">{fmt(item.total_price)}</p>
+              <div className="text-right shrink-0">
+                <p className="text-sm font-bold text-emerald-300">{fmtDec(o.paidAmount || o.totalAmount)}</p>
+                <span className="text-[9px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded font-medium">Оплачено</span>
               </div>
             </div>
           ))}
         </div>
-        <div className="border-t border-white/10 pt-3">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-white/60">Разом</span>
-            <span className="text-2xl font-bold text-indigo-300">{fmtDec(total)}</span>
-          </div>
-          <p className="text-[10px] text-white/30 mt-1 text-center">
-            {format(new Date(), "dd MMMM yyyy · HH:mm", { locale: uk })}
-          </p>
+        <DialogFooter>
+          <Button onClick={onClose} className="w-full bg-white/8 hover:bg-white/14 text-white/70">Закрити</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── PrecheckDialog ───────────────────────────────────────────────────────────
+function PrecheckDialog({ table, lines, onClose, onPay }: {
+  table: Table; lines: OrderLine[]; onClose: () => void; onPay: () => void;
+}) {
+  const total = lines.reduce((s, l) => s + l.totalPrice, 0);
+  const byDate = format(new Date(), "dd MMMM yyyy", { locale: uk });
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-xs">
+        <DialogHeader>
+          <DialogTitle className="text-white flex items-center gap-2 text-sm">
+            <Receipt className="w-4 h-4 text-indigo-400" /> Передчек — Стіл #{table.number}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="text-center text-xs text-white/30 mb-3">
+          <p>{table.location} · {byDate}</p>
         </div>
+        <div className="divide-y divide-white/6 max-h-72 overflow-y-auto">
+          {lines.map((l, i) => (
+            <div key={i} className="flex items-start justify-between py-2.5 gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white/85 leading-snug">{l.name}</p>
+                {l.doneness && <p className="text-[9px] text-orange-400/70">{l.doneness}</p>}
+                {l.modifiers.length > 0 && <p className="text-[9px] text-indigo-400/60">{l.modifiers.join(", ")}</p>}
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-xs text-white/35">{l.qty} × {fmt(l.price)}</p>
+                <p className="text-sm font-medium text-white">{fmt(l.totalPrice)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-white/10 pt-3 flex items-center justify-between">
+          <span className="text-sm text-white/50">{lines.reduce((s, l) => s + l.qty, 0)} позицій</span>
+          <span className="text-2xl font-bold text-indigo-300">{fmtDec(total)}</span>
+        </div>
+        <p className="text-[10px] text-white/20 text-center">Передчек — не фіскальний документ</p>
         <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onClose} className="text-white/50">Закрити</Button>
+          <Button variant="ghost" onClick={onClose} className="text-white/40">Закрити</Button>
           <Button onClick={onPay} className="bg-emerald-600 hover:bg-emerald-500 flex-1">
-            <CreditCard className="w-4 h-4 mr-2" /> Перейти до оплати
+            <CreditCard className="w-4 h-4 mr-2" /> До оплати
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -200,48 +523,29 @@ function PrecheckDialog({ order, items, onClose, onPay }: {
   );
 }
 
-// ── Payment Dialog ─────────────────────────────────────────────────────────────
-function PaymentDialog({ order, items, legalEntities, onPaid, onClose }: {
-  order: Order; items: OrderItem[]; legalEntities: LegalEntity[];
-  onPaid: () => void; onClose: () => void;
+// ── PaymentDialog ─────────────────────────────────────────────────────────────
+function PaymentDialog({ orderId, total, onPaid, onClose }: {
+  orderId: number; total: number; onPaid: () => void; onClose: () => void;
 }) {
   const { toast } = useToast();
-  const [method,   setMethod]   = useState("cash");
-  const [given,    setGiven]    = useState("");
-  const [tipPct,   setTipPct]   = useState(0);
-  const [loading,  setLoading]  = useState(false);
-  const [entityId, setEntityId] = useState<number | null>(
-    legalEntities.find(e => e.is_default)?.id ?? legalEntities[0]?.id ?? null
-  );
-
-  const hasAlcohol = items.some(i => i.is_alcohol);
-  const total    = items.reduce((s, i) => s + i.total_price, 0);
+  const [method,  setMethod]  = useState("cash");
+  const [given,   setGiven]   = useState("");
+  const [tipPct,  setTipPct]  = useState(0);
+  const [loading, setLoading] = useState(false);
   const tipAmt   = Math.round(total * tipPct) / 100;
   const finalAmt = total + tipAmt;
   const change   = method === "cash" && Number(given) > finalAmt ? Number(given) - finalAmt : 0;
   const canPay   = method !== "cash" || !given || Number(given) >= finalAmt;
 
-  useEffect(() => {
-    if (!legalEntities.length) return;
-    const alcoholEntity = legalEntities.find(e => e.handles_alcohol);
-    const defaultEntity = legalEntities.find(e => e.is_default) || legalEntities[0];
-    setEntityId((hasAlcohol && alcoholEntity ? alcoholEntity : defaultEntity)?.id ?? null);
-  }, [hasAlcohol, legalEntities]);
-
   const pay = async () => {
     setLoading(true);
     try {
-      const body: any = {
-        paymentMethod: method,
-        paidAmount: Number(given) || finalAmt,
-        tipPct: tipPct || undefined,
-        tip: tipAmt || undefined,
-        legalEntityId: entityId,
-      };
-      const r = await apiFetch(`/fb/orders/${order.id}/pay`, { method: "POST", body: JSON.stringify(body) });
+      const body: any = { paymentMethod: method, paidAmount: Number(given) || finalAmt };
+      if (tipPct) { body.tipPct = tipPct; body.tip = tipAmt; }
+      const r = await apiFetch(`/fb/orders/${orderId}/pay`, { method: "POST", body: JSON.stringify(body) });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Помилка оплати");
-      toast({ title: "✅ Оплата прийнята", description: `${fmtDec(finalAmt)} · ${method === "cash" ? "Готівка" : method === "card" ? "Картка" : "LiqPay"}` });
+      if (!r.ok) throw new Error(d.error || "Помилка");
+      toast({ title: "✅ Оплата прийнята", description: fmtDec(finalAmt) });
       onPaid();
     } catch (e: any) {
       toast({ title: "Помилка", description: e.message, variant: "destructive" });
@@ -262,26 +566,24 @@ function PaymentDialog({ order, items, legalEntities, onPaid, onClose }: {
               const Icon = pm.icon;
               return (
                 <button key={pm.key} onClick={() => setMethod(pm.key)}
-                  className={`flex flex-col items-center gap-1 py-3 rounded-xl border transition-all text-xs font-medium ${
+                  className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border text-xs font-medium transition-all ${
                     method === pm.key ? pm.color : "bg-white/5 border-white/10 text-white/40 hover:bg-white/8"
                   }`}>
-                  <Icon className="w-5 h-5" />{pm.label}
+                  <Icon className="w-5 h-5" /> {pm.label}
                 </button>
               );
             })}
           </div>
           {method === "cash" && (
-            <div className="space-y-2">
-              <p className="text-xs text-white/40 uppercase tracking-wide">Отримано від гостя</p>
-              <input
-                type="number" value={given} onChange={e => setGiven(e.target.value)}
+            <div>
+              <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Отримано від гостя</p>
+              <input type="number" value={given} onChange={e => setGiven(e.target.value)}
                 placeholder={fmtDec(finalAmt)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-lg text-white placeholder:text-white/25 outline-none focus:border-emerald-500/50 font-mono"
-              />
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xl text-white font-mono outline-none focus:border-emerald-500/50" />
               {change > 0 && (
-                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
+                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mt-2">
                   <span className="text-sm text-emerald-300/70">Решта</span>
-                  <span className="text-lg font-bold text-emerald-300">{fmtDec(change)}</span>
+                  <span className="text-xl font-bold text-emerald-300">{fmtDec(change)}</span>
                 </div>
               )}
             </div>
@@ -289,42 +591,22 @@ function PaymentDialog({ order, items, legalEntities, onPaid, onClose }: {
           <div>
             <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Чайові</p>
             <div className="flex gap-1.5">
-              {TIP_OPTIONS.map(pct => (
+              {[0, 5, 7, 10, 15].map(pct => (
                 <button key={pct} onClick={() => setTipPct(pct)}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
                     tipPct === pct ? "bg-indigo-600 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"
-                  }`}>
-                  {pct === 0 ? "Немає" : `${pct}%`}
-                </button>
+                  }`}>{pct === 0 ? "Немає" : `${pct}%`}</button>
               ))}
             </div>
-            {tipPct > 0 && <p className="text-xs text-white/40 mt-1 text-right">+{fmtDec(tipAmt)} чайових</p>}
+            {tipPct > 0 && <p className="text-xs text-indigo-300/60 mt-1 text-right">+{fmtDec(tipAmt)} чайових</p>}
           </div>
-          {legalEntities.length > 1 && (
-            <div>
-              <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Юридична особа</p>
-              <div className="flex gap-2">
-                {legalEntities.map(e => (
-                  <button key={e.id} onClick={() => setEntityId(e.id)}
-                    className={`flex-1 py-2 rounded-xl border text-xs font-medium transition-all ${
-                      entityId === e.id
-                        ? "bg-indigo-600/30 border-indigo-500/50 text-indigo-300"
-                        : "bg-white/5 border-white/10 text-white/40 hover:bg-white/8"
-                    }`}>
-                    {e.short_name || e.name}
-                    {e.handles_alcohol && <span className="ml-1 text-[9px] opacity-60">🍷</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="bg-white/4 rounded-xl px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-white/60">До оплати</span>
+          <div className="bg-white/4 rounded-xl px-4 py-3 flex items-center justify-between border border-white/6">
+            <span className="text-sm text-white/50">До оплати</span>
             <span className="text-2xl font-bold text-white">{fmtDec(finalAmt)}</span>
           </div>
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onClose} className="text-white/50" disabled={loading}>Скасувати</Button>
+          <Button variant="ghost" onClick={onClose} className="text-white/40" disabled={loading}>Скасувати</Button>
           <Button onClick={pay} disabled={!canPay || loading} className="bg-emerald-600 hover:bg-emerald-500 flex-1">
             {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
             Провести оплату
@@ -335,1083 +617,801 @@ function PaymentDialog({ order, items, legalEntities, onPaid, onClose }: {
   );
 }
 
-// ── Barcode Scanner Dialog ────────────────────────────────────────────────────
-function BarcodeScanDialog({ onFound, onClose }: {
-  onFound: (item: MenuItem) => void;
+// ── ExciseDialog ──────────────────────────────────────────────────────────────
+function ExciseDialog({ lines, onConfirm, onClose }: {
+  lines: OrderLine[];
+  onConfirm: (confirmed: string[]) => void;
   onClose: () => void;
 }) {
-  const { toast } = useToast();
-  const videoRef  = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef    = useRef<number>(0);
-
-  const [mode,      setMode]      = useState<"camera" | "manual">("camera");
+  const alcoholLines = lines.filter(l => l.isAlcohol);
+  const [mode,       setMode]       = useState<"camera" | "manual">("manual");
   const [manualCode, setManualCode] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [camError,  setCamError]  = useState<string | null>(null);
-  const [lastCode,  setLastCode]  = useState<string | null>(null);
-  const [foundItem, setFoundItem] = useState<MenuItem | null>(null);
+  const [scanned,    setScanned]    = useState<Record<string, boolean>>({});
+  const { toast } = useToast();
+  const videoRef   = useRef<HTMLVideoElement>(null);
+  const streamRef  = useRef<MediaStream | null>(null);
+  const rafRef     = useRef<number>(0);
 
-  const hasBarcodeDetector = typeof window !== "undefined" && "BarcodeDetector" in window;
+  const markAll = () => {
+    const updated: Record<string, boolean> = {};
+    alcoholLines.forEach(l => { updated[l.localId] = true; });
+    setScanned(updated);
+  };
 
-  // ── Lookup by code ──────────────────────────────────────────────────────────
-  const lookupCode = useCallback(async (code: string) => {
-    const clean = code.trim();
-    if (!clean || clean === lastCode) return;
-    setLastCode(clean);
-    setSearching(true);
-    try {
-      const r = await apiFetch(`/fb/items/lookup?code=${encodeURIComponent(clean)}`);
-      const d = await r.json();
-      if (!r.ok) {
-        toast({ title: "Товар не знайдено", description: `Код: ${clean}`, variant: "destructive" });
-        setTimeout(() => setLastCode(null), 2000);
-        return;
-      }
-      setFoundItem(d.item);
-    } catch {
-      toast({ title: "Помилка пошуку", variant: "destructive" });
-    } finally { setSearching(false); }
-  }, [lastCode]);
+  const markOne = (localId: string) => setScanned(prev => ({ ...prev, [localId]: !prev[localId] }));
 
-  // ── Camera scanning ─────────────────────────────────────────────────────────
+  const handleManual = () => {
+    if (!manualCode.trim()) return;
+    toast({ title: `Акциз підтверджено: ${manualCode}` });
+    // mark first unconfirmed
+    const unconfirmed = alcoholLines.find(l => !scanned[l.localId]);
+    if (unconfirmed) setScanned(prev => ({ ...prev, [unconfirmed.localId]: true }));
+    setManualCode("");
+  };
+
+  // Camera scanning
   useEffect(() => {
-    if (mode !== "camera" || !hasBarcodeDetector) return;
-
+    if (mode !== "camera") return;
+    const hasBD = typeof window !== "undefined" && "BarcodeDetector" in window;
+    if (!hasBD) return;
     let stopped = false;
     (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        const detector = new (window as any).BarcodeDetector({
-          formats: ["ean_13", "ean_8", "code_128", "code_39", "itf", "upc_a", "upc_e", "qr_code"],
-        });
-
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        const detector = new (window as any).BarcodeDetector({ formats: ["ean_13", "ean_8", "code_128"] });
         const detect = async () => {
           if (stopped || !videoRef.current) return;
           try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0) {
-              const code = barcodes[0].rawValue;
-              lookupCode(code);
+            const codes = await detector.detect(videoRef.current);
+            if (codes.length) {
+              const code = codes[0].rawValue;
+              toast({ title: `Акциз: ${code}` });
+              const unconfirmed = alcoholLines.find(l => !scanned[l.localId]);
+              if (unconfirmed) setScanned(prev => ({ ...prev, [unconfirmed.localId]: true }));
             }
-          } catch { /* frame not ready */ }
+          } catch { /* noop */ }
           rafRef.current = requestAnimationFrame(detect);
         };
         rafRef.current = requestAnimationFrame(detect);
-      } catch (e: any) {
-        if (!stopped) setCamError(e.message || "Немає доступу до камери");
-      }
+      } catch { /* noop */ }
     })();
+    return () => { stopped = true; cancelAnimationFrame(rafRef.current); streamRef.current?.getTracks().forEach(t => t.stop()); };
+  }, [mode]);
 
-    return () => {
-      stopped = true;
-      cancelAnimationFrame(rafRef.current);
-      streamRef.current?.getTracks().forEach(t => t.stop());
-    };
-  }, [mode, hasBarcodeDetector, lookupCode]);
-
-  // ── Confirm found item ──────────────────────────────────────────────────────
-  const confirmItem = () => {
-    if (!foundItem) return;
-    onFound(foundItem);
-    onClose();
-  };
+  const allConfirmed = alcoholLines.every(l => scanned[l.localId]);
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-md p-0 overflow-hidden">
-        <DialogHeader className="px-4 pt-4 pb-0">
+      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-sm">
+        <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
-            <ScanBarcode className="w-4 h-4 text-indigo-400" />
-            Сканування УКЗЕД / штрих-коду
+            <ScanBarcode className="w-4 h-4 text-amber-400" /> Акциз / УКЗЕД
           </DialogTitle>
         </DialogHeader>
+        <p className="text-xs text-white/40 text-center mb-2">Підтвердіть відкорковування для кожної позиції алкоголю</p>
 
-        {/* Mode toggle */}
-        <div className="flex gap-1 px-4 pt-3">
-          <button onClick={() => { setMode("camera"); setLastCode(null); setFoundItem(null); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${mode === "camera" ? "bg-indigo-600 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
-            <Camera className="w-3.5 h-3.5" /> Камера
-          </button>
-          <button onClick={() => { setMode("manual"); setLastCode(null); setFoundItem(null); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${mode === "manual" ? "bg-indigo-600 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
-            <Keyboard className="w-3.5 h-3.5" /> Ввести вручну
-          </button>
-        </div>
-
-        <div className="px-4 py-3 space-y-3">
-          {/* Camera view */}
-          {mode === "camera" && (
-            <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
-              {!hasBarcodeDetector ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/40 text-sm text-center px-4">
-                  <ScanBarcode className="w-8 h-8 mb-2 opacity-30" />
-                  <p>BarcodeDetector недоступний у цьому браузері</p>
-                  <p className="text-xs mt-1 text-white/25">Використайте Chrome або перейдіть до ручного введення</p>
-                </div>
-              ) : camError ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/40 text-sm text-center px-4">
-                  <Camera className="w-8 h-8 mb-2 opacity-30" />
-                  <p>{camError}</p>
-                  <button onClick={() => { setCamError(null); setMode("camera"); }}
-                    className="mt-2 px-3 py-1 bg-white/8 rounded-lg text-xs">Спробувати знову</button>
-                </div>
-              ) : (
-                <>
-                  <video ref={videoRef} muted playsInline className="w-full h-full object-cover" />
-                  {/* Scan zone overlay */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-3/4 h-20 relative">
-                      <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-indigo-400 rounded-tl" />
-                      <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-indigo-400 rounded-tr" />
-                      <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-indigo-400 rounded-bl" />
-                      <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-indigo-400 rounded-br" />
-                      <div className="absolute inset-x-0 top-1/2 h-0.5 bg-indigo-400/60 animate-pulse" />
-                    </div>
-                  </div>
-                  {searching && (
-                    <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                      <div className="bg-black/60 rounded-full px-3 py-1 flex items-center gap-2 text-xs text-white">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Пошук...
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Manual input */}
-          {mode === "manual" && (
-            <div className="space-y-2">
-              <p className="text-xs text-white/40">Введіть код УКЗЕД або акцизний марки:</p>
-              <div className="flex gap-2">
-                <input
-                  value={manualCode}
-                  onChange={e => setManualCode(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") lookupCode(manualCode); }}
-                  placeholder="напр. 2203001000"
-                  autoFocus
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50 font-mono tracking-wider"
-                />
-                <button onClick={() => lookupCode(manualCode)} disabled={searching || !manualCode}
-                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-xl transition-colors">
-                  {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                </button>
-              </div>
-              <p className="text-[10px] text-white/20">
-                Код УКЗЕД прив'язується до товару в меню F{"&"}B → Меню → картка товару
-              </p>
-            </div>
-          )}
-
-          {/* Found item preview */}
-          {foundItem && (
-            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 flex items-center gap-3">
-              {(foundItem.imageUrl || foundItem.image_url) ? (
-                <img src={foundItem.imageUrl || foundItem.image_url} alt={foundItem.name}
-                  className="w-14 h-14 rounded-lg object-cover shrink-0" />
-              ) : (
-                <div className="w-14 h-14 rounded-lg bg-white/8 flex items-center justify-center text-2xl shrink-0">🍷</div>
-              )}
+        {/* Alcohol lines */}
+        <div className="space-y-1.5 mb-3">
+          {alcoholLines.map(l => (
+            <div key={l.localId} onClick={() => markOne(l.localId)}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${
+                scanned[l.localId]
+                  ? "bg-emerald-500/15 border-emerald-400/30 text-emerald-200"
+                  : "bg-amber-500/10 border-amber-400/20 text-white/70 hover:bg-amber-500/15"
+              }`}>
+              {scanned[l.localId]
+                ? <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                : <Circle className="w-5 h-5 text-amber-400/50 shrink-0" />}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">{foundItem.name}</p>
-                <p className="text-xs text-emerald-300 font-bold">₴{Number(foundItem.price).toFixed(0)}</p>
-                {foundItem.uktzed_code && (
-                  <p className="text-[10px] text-white/30 font-mono mt-0.5">УКЗЕД: {foundItem.uktzed_code}</p>
-                )}
+                <p className="text-sm truncate">{l.name}</p>
+                <p className="text-[10px] text-white/30">{l.qty} × {l.isAlcohol ? "алкоголь" : ""}</p>
               </div>
-              <button onClick={confirmItem}
-                className="shrink-0 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-semibold text-white flex items-center gap-1 transition-colors">
-                <Plus className="w-3.5 h-3.5" /> Додати
-              </button>
             </div>
-          )}
+          ))}
         </div>
 
-        <DialogFooter className="px-4 pb-4">
-          <Button variant="ghost" onClick={onClose} className="text-white/50">Закрити</Button>
+        <button onClick={markAll} className="w-full py-2 text-xs text-indigo-300 hover:text-indigo-200 text-center transition-colors">
+          Підтвердити всі ({alcoholLines.length})
+        </button>
+
+        {/* Mode tabs */}
+        <div className="flex gap-1 mb-2">
+          {[{ key: "manual", icon: Keyboard, label: "Ввести код" }, { key: "camera", icon: Camera, label: "Камера" }].map(m => (
+            <button key={m.key} onClick={() => setMode(m.key as any)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                mode === m.key ? "bg-indigo-600 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"
+              }`}>
+              <m.icon className="w-3.5 h-3.5" /> {m.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "manual" ? (
+          <div className="flex gap-2">
+            <input value={manualCode} onChange={e => setManualCode(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleManual()}
+              placeholder="Введіть код акцизу..."
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/50" />
+            <button onClick={handleManual} className="w-10 h-10 bg-indigo-600/40 hover:bg-indigo-600/70 rounded-xl flex items-center justify-center transition-colors">
+              <ChevronRight className="w-4 h-4 text-indigo-300" />
+            </button>
+          </div>
+        ) : (
+          <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+            <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-48 h-20 border-2 border-amber-400/60 rounded-lg" />
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="gap-2 mt-2">
+          <Button variant="ghost" onClick={onClose} className="text-white/40">Скасувати</Button>
+          <Button disabled={!allConfirmed} onClick={() => onConfirm(alcoholLines.map(l => l.localId))}
+            className="bg-emerald-600 hover:bg-emerald-500 flex-1 disabled:opacity-40">
+            <CheckCircle2 className="w-4 h-4 mr-2" /> Підтверджено · Відправити
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ── Tables Full-Screen View ────────────────────────────────────────────────────
-function TablesView({ tables, orders, loading, onSelect }: {
-  tables: Table[]; orders: Order[]; loading: boolean;
-  onSelect: (t: Table) => void;
+// ── OrderScreen ────────────────────────────────────────────────────────────────
+function OrderScreen({ table, order, lines, categories, menuItems, onBack, onAddLine, onRemoveLine, onChangeQty, onSend, onPay, sending }: {
+  table: Table; order: { id: number; openedAt?: string; guestCount: number } | null;
+  lines: OrderLine[]; categories: Category[]; menuItems: MenuItem[];
+  onBack: () => void;
+  onAddLine: (line: Omit<OrderLine, "localId" | "id" | "sent" | "exciseConfirmed">) => void;
+  onRemoveLine: (localId: string) => void;
+  onChangeQty: (localId: string, delta: number) => void;
+  onSend: () => void; onPay: () => void; sending: boolean;
 }) {
-  const sections = [...new Set(tables.map(t => t.location))].sort();
-  const [activeSection, setActiveSection] = useState<string>("all");
-  const visible  = activeSection === "all" ? tables : tables.filter(t => t.location === activeSection);
-  const orderMap = Object.fromEntries(orders.map(o => [o.tableId, o]));
+  const { toast } = useToast();
+  const [selectedCat,    setSelectedCat]    = useState<number | "all">("all");
+  const [menuSearch,     setMenuSearch]     = useState("");
+  const [optionsFor,     setOptionsFor]     = useState<MenuItem | null>(null);
+  const [showPrecheck,   setShowPrecheck]   = useState(false);
+  const [showPayment,    setShowPayment]    = useState(false);
+  const [showExcise,     setShowExcise]     = useState(false);
+  const [exciseConfirmedIds, setExciseConfirmedIds] = useState<string[]>([]);
+
+  const sentLines   = lines.filter(l => l.sent);
+  const unsentLines = lines.filter(l => !l.sent);
+  const total = lines.reduce((s, l) => s + l.totalPrice, 0);
+  const alcoholUnsent = unsentLines.filter(l => l.isAlcohol && !exciseConfirmedIds.includes(l.localId));
+  const hasAlcohol    = unsentLines.some(l => l.isAlcohol);
+
+  const filteredItems = menuItems.filter(i =>
+    i.isAvailable &&
+    (selectedCat === "all" || i.categoryId === selectedCat) &&
+    (!menuSearch || i.name.toLowerCase().includes(menuSearch.toLowerCase()))
+  );
+
+  const handleSendClick = () => {
+    if (unsentLines.length === 0) { toast({ title: "Немає нових позицій для відправки", variant: "destructive" }); return; }
+    if (alcoholUnsent.length > 0) { setShowExcise(true); return; }
+    onSend();
+  };
+
+  const handleExciseConfirm = (confirmedIds: string[]) => {
+    setExciseConfirmedIds(prev => [...new Set([...prev, ...confirmedIds])]);
+    setShowExcise(false);
+    onSend();
+  };
 
   return (
     <div className="flex flex-col h-full bg-[#12141f]">
-      {/* Stats bar */}
-      <div className="flex gap-3 px-4 py-3 border-b border-white/6 shrink-0">
-        {[
-          { label: "Вільних",  count: tables.filter(t => t.status === "free").length,     color: "text-emerald-400" },
-          { label: "Зайнятих", count: tables.filter(t => t.status === "occupied").length,  color: "text-rose-400"    },
-          { label: "Резервів", count: tables.filter(t => t.status === "reserved").length,  color: "text-amber-400"   },
-        ].map(s => (
-          <div key={s.label} className="flex items-center gap-1.5">
-            <span className={`text-lg font-bold ${s.color}`}>{s.count}</span>
-            <span className="text-xs text-white/30">{s.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Section tabs */}
-      {sections.length > 1 && (
-        <div className="px-4 py-2 flex gap-2 overflow-x-auto scrollbar-none shrink-0 border-b border-white/5">
-          <button onClick={() => setActiveSection("all")}
-            className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${activeSection === "all" ? "bg-indigo-600 text-white" : "bg-white/6 text-white/35 hover:bg-white/10"}`}>
-            Всі зали
-          </button>
-          {sections.map(s => (
-            <button key={s} onClick={() => setActiveSection(s)}
-              className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${activeSection === s ? "bg-indigo-600 text-white" : "bg-white/6 text-white/35 hover:bg-white/10"}`}>
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Tables grid */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {loading ? (
-          <div className="flex items-center justify-center h-48">
-            <Loader2 className="w-8 h-8 animate-spin text-white/20" />
-          </div>
-        ) : visible.length === 0 ? (
-          <div className="text-center py-20 text-white/20">
-            <Table2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Столи не налаштовані</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {visible.map(table => {
-              const st  = STATUS_STYLE[table.status] || STATUS_STYLE.free;
-              const ord = orderMap[table.id];
-              return (
-                <button key={table.id} onClick={() => onSelect(table)}
-                  className={`relative text-left rounded-2xl border p-4 transition-all hover:brightness-110 active:scale-95 ${st.bg} ${st.border}`}>
-                  <div className={`absolute top-3 right-3 w-2.5 h-2.5 rounded-full ${st.dot}`} />
-                  <p className="text-lg font-bold text-white mb-0.5">#{table.number}</p>
-                  <p className="text-[10px] text-white/35 mb-2">{table.location}</p>
-                  {table.status === "occupied" && ord ? (
-                    <>
-                      <div className="flex items-center gap-1 mb-1">
-                        <Users className="w-3 h-3 text-white/30" />
-                        <span className="text-xs text-white/45">{ord.guestCount || "?"} гостей</span>
-                      </div>
-                      <p className={`text-base font-bold ${st.text}`}>{fmt(ord.totalAmount)}</p>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <Clock className="w-2.5 h-2.5 text-white/20" />
-                        <span className="text-[10px] text-white/30">{elapsed(ord.openedAt)}</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      <Users className="w-3 h-3 text-white/20" />
-                      <span className="text-xs text-white/30">{table.capacity} місць</span>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Check Panel (Left) ────────────────────────────────────────────────────────
-function CheckPanel({ table, order, items, onChangeQty, onNoteItem, onPrecheck, onPay, onSend, sending, onBack }: {
-  table: Table; order: Order | null; items: OrderItem[];
-  onChangeQty: (itemId: number, delta: number) => void;
-  onNoteItem: (item: OrderItem) => void;
-  onPrecheck: () => void; onPay: () => void;
-  onSend: () => void; sending: boolean;
-  onBack: () => void;
-}) {
-  const total   = items.reduce((s, i) => s + i.total_price, 0);
-  const unsaved = items.some(i => !i.id);
-  const qty     = items.reduce((s, i) => s + i.quantity, 0);
-
-  return (
-    <div className="flex flex-col h-full bg-[#1a1d2e] border-r border-white/6">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-3 border-b border-white/8 shrink-0">
-        <button onClick={onBack}
-          className="w-8 h-8 rounded-xl bg-white/6 hover:bg-white/12 flex items-center justify-center transition-colors shrink-0">
-          <ChevronLeft className="w-4 h-4 text-white/50" />
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/6 bg-[#1a1d2e] shrink-0">
+        <button onClick={onBack} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+          <ArrowLeft className="w-4 h-4 text-white/60" />
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-white">Стіл #{table.number}</span>
-            <span className="text-[10px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full">{table.location}</span>
+            <span className="text-base font-bold text-white">Стіл #{table.number}</span>
+            <span className="text-xs text-white/30 bg-white/6 px-2 py-0.5 rounded-lg">{table.location}</span>
           </div>
-          {order && (
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[10px] text-white/30">Чек #{order.id}</span>
-              {order.guestCount && (
-                <span className="text-[10px] text-white/25">· {order.guestCount} гостей</span>
-              )}
-              {order.openedAt && (
-                <span className="text-[10px] text-white/20">· {elapsed(order.openedAt)}</span>
-              )}
-            </div>
-          )}
+          <div className="flex items-center gap-2 text-[10px] text-white/35">
+            {order?.guestCount && <span><Users className="w-2.5 h-2.5 inline mr-0.5" />{order.guestCount} гостей</span>}
+            {order?.openedAt && <span><Clock className="w-2.5 h-2.5 inline mr-0.5" />{elapsed(order.openedAt)}</span>}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs text-white/30">Сума</p>
+          <p className="text-base font-bold text-white">{fmt(total)}</p>
         </div>
       </div>
 
-      {/* Column headers */}
-      {items.length > 0 && (
-        <div className="grid grid-cols-[1fr_28px_52px_52px] gap-1 px-3 py-2 border-b border-white/5 shrink-0">
-          <span className="text-[10px] text-white/25 uppercase tracking-wide">Найменування</span>
-          <span className="text-[10px] text-white/25 uppercase tracking-wide text-center">К-ть</span>
-          <span className="text-[10px] text-white/25 uppercase tracking-wide text-right">Ціна</span>
-          <span className="text-[10px] text-white/25 uppercase tracking-wide text-right">Всього</span>
-        </div>
-      )}
-
-      {/* Items */}
-      <div className="flex-1 overflow-y-auto">
-        {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-white/15 px-4">
-            <UtensilsCrossed className="w-10 h-10" />
-            <p className="text-sm text-center">Додайте страви з меню праворуч</p>
+      {/* Order items (top ~40%) */}
+      <div className="flex-[2] overflow-y-auto border-b border-white/6 min-h-0">
+        {lines.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-white/20 gap-2">
+            <UtensilsCrossed className="w-8 h-8" />
+            <p className="text-sm">Оберіть страви з меню нижче</p>
           </div>
         ) : (
-          <div className="divide-y divide-white/4">
-            {items.map((item, idx) => (
-              <div key={idx} className={`grid grid-cols-[1fr_28px_52px_52px] gap-1 items-center px-3 py-2.5 group ${!item.id ? "opacity-60" : ""}`}>
-                {/* Name */}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1">
-                    <p className="text-xs text-white/85 leading-tight truncate">{item.name}</p>
-                    <button onClick={() => onNoteItem(item)}
-                      className={`shrink-0 w-4 h-4 rounded flex items-center justify-center transition-all ${
-                        item.notes
-                          ? "text-amber-400 opacity-100"
-                          : "text-white/20 opacity-0 group-hover:opacity-100"
-                      }`}>
-                      <StickyNote className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
-                  {item.notes && (
-                    <p className="text-[9px] text-amber-400/60 truncate mt-0.5">{item.notes}</p>
-                  )}
+          <div>
+            {/* Unsent items */}
+            {unsentLines.length > 0 && (
+              <div>
+                <div className="px-3 py-1.5 bg-indigo-500/5">
+                  <p className="text-[10px] text-indigo-400/70 uppercase tracking-wide font-semibold">Нові позиції ({unsentLines.length})</p>
                 </div>
-
-                {/* Qty with inline controls */}
-                <div className="flex items-center justify-center">
-                  <div className="relative group/qty">
-                    <span className="text-sm font-bold text-white group-hover/qty:opacity-0 transition-opacity">{item.quantity}</span>
-                    <div className="absolute inset-0 flex items-center justify-center gap-0.5 opacity-0 group-hover/qty:opacity-100 transition-opacity">
-                      <button onClick={() => onChangeQty(item.item_id, -1)}
-                        className="w-3 h-5 bg-red-500/20 hover:bg-red-500/40 rounded flex items-center justify-center">
-                        <Minus className="w-2 h-2 text-red-300" />
+                {unsentLines.map(line => (
+                  <div key={line.localId} className="flex items-center gap-2 px-3 py-2.5 border-b border-white/5 bg-indigo-500/4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-medium text-white/90 truncate">{line.name}</p>
+                        {line.course > 1 && <span className="text-[9px] bg-indigo-500/25 text-indigo-300 px-1.5 py-0.5 rounded font-bold shrink-0">П{line.course}</span>}
+                        {line.doneness && <span className="text-[9px] bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded shrink-0">{line.doneness}</span>}
+                        {line.isAlcohol && <span className="text-[9px] text-amber-400 shrink-0">🍺</span>}
+                      </div>
+                      {line.modifiers.length > 0 && <p className="text-[10px] text-indigo-400/60 truncate">{line.modifiers.join(" · ")}</p>}
+                      {line.notes && <p className="text-[10px] text-amber-400/60 truncate">{line.notes}</p>}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => onChangeQty(line.localId, -1)}
+                        className="w-6 h-6 rounded-full bg-white/6 hover:bg-white/12 flex items-center justify-center">
+                        <Minus className="w-2.5 h-2.5 text-white/50" />
                       </button>
-                      <button onClick={() => onChangeQty(item.item_id, 1)}
-                        className="w-3 h-5 bg-indigo-500/20 hover:bg-indigo-500/40 rounded flex items-center justify-center">
-                        <Plus className="w-2 h-2 text-indigo-300" />
+                      <span className="w-6 text-center text-xs font-bold text-white">
+                        {line.qty % 1 !== 0 ? line.qty.toFixed(1) : line.qty}
+                      </span>
+                      <button onClick={() => onChangeQty(line.localId, 1)}
+                        className="w-6 h-6 rounded-full bg-white/6 hover:bg-white/12 flex items-center justify-center">
+                        <Plus className="w-2.5 h-2.5 text-white/50" />
                       </button>
                     </div>
+                    <span className="text-sm font-semibold text-indigo-300 w-14 text-right shrink-0">{fmt(line.totalPrice)}</span>
+                    <button onClick={() => onRemoveLine(line.localId)}
+                      className="w-5 h-5 rounded-full bg-red-500/15 hover:bg-red-500/30 flex items-center justify-center shrink-0">
+                      <X className="w-2.5 h-2.5 text-red-400" />
+                    </button>
                   </div>
-                </div>
-
-                {/* Price */}
-                <p className="text-xs text-white/40 text-right">{fmt(item.price)}</p>
-
-                {/* Total */}
-                <p className="text-xs font-semibold text-white/85 text-right">{fmt(item.total_price)}</p>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="shrink-0 border-t border-white/8 px-3 pt-3 pb-3 space-y-2.5">
-        {/* Send to kitchen */}
-        {unsaved && (
-          <button onClick={onSend} disabled={sending}
-            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors">
-            {sending
-              ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <ChevronRight className="w-4 h-4" />}
-            Відправити на кухню
-          </button>
-        )}
-
-        {/* Totals */}
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-white/35">{qty} позицій</div>
-          <div className="text-right">
-            <div className="text-[10px] text-white/30">Всього</div>
-            <div className="text-lg font-bold text-white leading-tight">{fmtDec(total)}</div>
-          </div>
-        </div>
-
-        {/* Action buttons */}
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={onPrecheck}
-            className="py-2.5 rounded-xl bg-white/8 hover:bg-white/12 text-white/60 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors">
-            <FileText className="w-3.5 h-3.5" /> Предчек
-          </button>
-          <button onClick={onPay}
-            className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors">
-            <CreditCard className="w-3.5 h-3.5" /> Оплатити
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── POS Menu Panel (Right) ────────────────────────────────────────────────────
-function PosMenuPanel({ categories, items, onAddItem, onScan }: {
-  categories: Category[]; items: MenuItem[]; onAddItem: (item: MenuItem) => void;
-  onScan: () => void;
-}) {
-  const [catId,  setCatId]  = useState<number | null>(null);
-  const [search, setSearch] = useState("");
-
-  // Build category → first item image map
-  const catImageMap: Record<number, string | undefined> = {};
-  for (const item of items) {
-    if (!catImageMap[item.category_id]) {
-      const img = itemImg(item);
-      if (img) catImageMap[item.category_id] = img;
-    }
-  }
-
-  const filteredItems = items.filter(i =>
-    i.is_available &&
-    (catId === null || i.category_id === catId) &&
-    (!search || i.name.toLowerCase().includes(search.toLowerCase()))
-  );
-
-  const showCategoryGrid = catId === null && !search;
-  const selectedCat = categories.find(c => c.id === catId);
-
-  return (
-    <div className="flex flex-col h-full bg-[#12141f]">
-      {/* Top bar: search + scan button */}
-      <div className="px-3 pt-3 pb-2 shrink-0 space-y-2">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 h-9">
-            <Search className="w-3.5 h-3.5 text-white/25 shrink-0" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Пошук страви або напою..."
-              className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none"
-            />
-            {search && (
-              <button onClick={() => setSearch("")}>
-                <X className="w-3.5 h-3.5 text-white/30" />
-              </button>
+            )}
+            {/* Sent items */}
+            {sentLines.length > 0 && (
+              <div>
+                <div className="px-3 py-1.5 bg-white/3">
+                  <p className="text-[10px] text-white/30 uppercase tracking-wide font-semibold">На кухні / барі ({sentLines.length})</p>
+                </div>
+                {sentLines.map(line => (
+                  <div key={line.localId} className="flex items-center gap-2 px-3 py-2 border-b border-white/4 opacity-60">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs text-white/60 truncate">{line.name}</p>
+                        {line.course > 1 && <span className="text-[8px] bg-white/10 text-white/40 px-1 py-0.5 rounded">П{line.course}</span>}
+                        {line.doneness && <span className="text-[8px] text-orange-400/50">{line.doneness}</span>}
+                      </div>
+                    </div>
+                    <span className="text-xs text-white/40 shrink-0">{line.qty % 1 !== 0 ? line.qty.toFixed(1) : line.qty} × {fmt(line.price)}</span>
+                    <span className="text-xs font-medium text-white/50 w-12 text-right shrink-0">{fmt(line.totalPrice)}</span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-          <button onClick={onScan}
-            title="Сканувати УКЗЕД / штрих-код"
-            className="h-9 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 flex items-center gap-1.5 text-indigo-300 transition-colors shrink-0">
-            <ScanBarcode className="w-4 h-4" />
-            <span className="text-xs font-medium hidden lg:inline">УКЗЕД</span>
-          </button>
-        </div>
+        )}
+      </div>
 
+      {/* Menu (bottom ~60%) */}
+      <div className="flex-[3] flex flex-col overflow-hidden min-h-0">
+        {/* Search */}
+        <div className="flex items-center gap-2 px-3 pt-2 pb-1 shrink-0">
+          <div className="flex-1 flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-xl px-2.5 h-8">
+            <Search className="w-3.5 h-3.5 text-white/30 shrink-0" />
+            <input value={menuSearch} onChange={e => setMenuSearch(e.target.value)}
+              placeholder="Пошук страви..."
+              className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none" />
+          </div>
+        </div>
         {/* Category pills */}
-        <div className="flex gap-1.5 overflow-x-auto scrollbar-none">
-          <button onClick={() => { setCatId(null); setSearch(""); }}
-            className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${catId === null && !search ? "bg-indigo-500 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
-            Всі товари
-          </button>
-          {categories.map(c => (
-            <button key={c.id} onClick={() => { setCatId(c.id); setSearch(""); }}
-              className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${catId === c.id ? "bg-indigo-500 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
-              {c.icon && <span className="mr-1">{c.icon}</span>}{c.name}
+        <div className="flex gap-1.5 overflow-x-auto px-3 pb-2 scrollbar-none shrink-0">
+          <button onClick={() => setSelectedCat("all")}
+            className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+              selectedCat === "all" ? "bg-indigo-600 text-white" : "bg-white/6 text-white/50 hover:bg-white/10"
+            }`}>Всі</button>
+          {categories.map(cat => (
+            <button key={cat.id} onClick={() => setSelectedCat(cat.id)}
+              className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors whitespace-nowrap ${
+                selectedCat === cat.id ? "bg-indigo-600 text-white" : "bg-white/6 text-white/50 hover:bg-white/10"
+              }`}>
+              {cat.emoji && <span className="mr-1">{cat.emoji}</span>}{cat.name}
             </button>
           ))}
         </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-3 pb-3">
-        {/* Category photo grid (main view) */}
-        {showCategoryGrid ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-4">
-            {categories.map(cat => {
-              const img = catImageMap[cat.id];
-              const emoji = cat.icon || catEmoji(cat.name);
-              const catItems = items.filter(i => i.is_available && i.category_id === cat.id);
-              return (
-                <button key={cat.id} onClick={() => setCatId(cat.id)}
-                  className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-white/5 border border-white/8 hover:border-indigo-500/40 transition-all group active:scale-95">
-                  {img ? (
-                    <img src={img} alt={cat.name} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-4xl">{emoji}</div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-2.5">
-                    <p className="text-sm font-semibold text-white leading-tight">{cat.name}</p>
-                    {catItems.length > 0 && (
-                      <p className="text-[10px] text-white/50 mt-0.5">{catItems.length} позицій</p>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {/* Items below categories or when category selected / search active */}
-        {!showCategoryGrid || true ? (
-          <>
-            {/* Category header when drilled into */}
-            {catId !== null && !search && selectedCat && (
-              <div className="flex items-center gap-2 mb-3">
-                <button onClick={() => setCatId(null)}
-                  className="w-7 h-7 rounded-lg bg-white/6 hover:bg-white/12 flex items-center justify-center transition-colors">
-                  <ArrowLeft className="w-3.5 h-3.5 text-white/50" />
-                </button>
-                <span className="text-sm font-semibold text-white/80">{selectedCat.name}</span>
-                <span className="text-xs text-white/30">({filteredItems.length})</span>
-              </div>
-            )}
-
-            {filteredItems.length === 0 && !showCategoryGrid ? (
-              <div className="text-center py-12 text-white/20 text-sm">Нічого не знайдено</div>
-            ) : (
-              <div className={`grid gap-2 ${showCategoryGrid ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4" : "grid-cols-2 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"}`}>
-                {(showCategoryGrid ? [] : filteredItems).map(item => {
-                  const img = itemImg(item);
-                  return (
-                    <button key={item.id} onClick={() => onAddItem(item)}
-                      className="text-left rounded-2xl bg-white/4 hover:bg-white/8 border border-white/6 hover:border-indigo-500/30 overflow-hidden transition-all group active:scale-95">
-                      {img ? (
-                        <div className="w-full aspect-[4/3] overflow-hidden bg-white/5">
-                          <img src={img} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                        </div>
-                      ) : (
-                        <div className="w-full aspect-[4/3] bg-white/5 flex items-center justify-center text-3xl">🍽️</div>
-                      )}
-                      <div className="p-2">
-                        <p className="text-xs font-medium text-white/85 leading-tight mb-1 line-clamp-2">{item.name}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-bold text-indigo-300">{fmt(item.price)}</span>
-                          <div className="w-5 h-5 rounded-full bg-indigo-500/20 group-hover:bg-indigo-500/50 flex items-center justify-center transition-colors">
-                            <Plus className="w-3 h-3 text-indigo-300" />
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-// ── Mobile: Menu Panel (standard, used in tab) ─────────────────────────────────
-function MobileMenuPanel({ categories, items, onAddItem, disabled, onScan }: {
-  categories: Category[]; items: MenuItem[]; onAddItem: (item: MenuItem) => void;
-  disabled?: boolean; onScan?: () => void;
-}) {
-  const [catId,  setCatId]  = useState<number | "all">("all");
-  const [search, setSearch] = useState("");
-
-  const filtered = items.filter(i =>
-    i.is_available &&
-    (catId === "all" || i.category_id === catId) &&
-    (!search || i.name.toLowerCase().includes(search.toLowerCase()))
-  );
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="px-3 pt-3 pb-2 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 h-9">
-            <Search className="w-3.5 h-3.5 text-white/25 shrink-0" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Пошук..." className="flex-1 bg-transparent text-sm text-white placeholder:text-white/25 outline-none" />
-            {search && <button onClick={() => setSearch("")}><X className="w-3 h-3 text-white/30" /></button>}
-          </div>
-          {onScan && (
-            <button onClick={onScan}
-              className="h-9 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 flex items-center justify-center text-indigo-300 transition-colors shrink-0">
-              <ScanBarcode className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto scrollbar-none shrink-0">
-        <button onClick={() => setCatId("all")}
-          className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${catId === "all" ? "bg-indigo-500 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
-          Всі
-        </button>
-        {categories.map(c => (
-          <button key={c.id} onClick={() => setCatId(c.id)}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${catId === c.id ? "bg-indigo-500 text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
-            {c.icon && <span className="mr-1">{c.icon}</span>}{c.name}
-          </button>
-        ))}
-      </div>
-      <div className="flex-1 overflow-y-auto px-3 pb-3">
-        {filtered.length === 0 ? (
-          <div className="text-center py-12 text-white/25 text-sm">Нічого не знайдено</div>
-        ) : (
+        {/* Items grid */}
+        <div className="flex-1 overflow-y-auto px-3 pb-2 min-h-0">
           <div className="grid grid-cols-2 gap-2">
-            {filtered.map(item => {
-              const img = itemImg(item);
-              return (
-                <button key={item.id} onClick={() => !disabled && onAddItem(item)} disabled={disabled}
-                  className={`text-left rounded-2xl bg-white/4 hover:bg-white/8 border border-white/6 overflow-hidden transition-all group ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}>
-                  {img ? (
-                    <div className="w-full aspect-[4/3] overflow-hidden bg-white/5">
-                      <img src={img} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    </div>
-                  ) : (
-                    <div className="w-full aspect-[4/3] bg-white/5 flex items-center justify-center text-3xl">🍽️</div>
-                  )}
-                  <div className="p-2.5">
-                    <p className="text-xs font-medium text-white/85 leading-tight mb-1">{item.name}</p>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-indigo-300">{fmt(item.price)}</span>
-                      <div className="w-5 h-5 rounded-full bg-indigo-500/20 flex items-center justify-center">
-                        <Plus className="w-3 h-3 text-indigo-300" />
-                      </div>
-                    </div>
+            {filteredItems.map(item => (
+              <button key={item.id} onClick={() => setOptionsFor(item)}
+                className="flex flex-col gap-1 p-3 rounded-xl bg-white/5 hover:bg-white/9 border border-white/8 hover:border-indigo-500/30 transition-all text-left active:scale-95">
+                <div className="flex items-start justify-between gap-1">
+                  <p className="text-sm font-medium text-white/90 leading-tight flex-1">{item.name}</p>
+                  <div className="flex flex-col items-end gap-0.5 shrink-0">
+                    {item.isAlcohol  && <span className="text-[8px] text-amber-400">🍺</span>}
+                    {item.isVegetarian && <span className="text-[8px] text-emerald-400">🌱</span>}
+                    {item.isPopular  && <span className="text-[8px] text-rose-400">🔥</span>}
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Mobile Order Panel ────────────────────────────────────────────────────────
-function MobileOrderPanel({ table, order, items, onChangeQty, onNoteItem, onPrecheck, onPay, onSend, sending }: {
-  table: Table | null; order: Order | null; items: OrderItem[];
-  onChangeQty: (itemId: number, delta: number) => void;
-  onNoteItem: (item: OrderItem) => void;
-  onPrecheck: () => void; onPay: () => void;
-  onSend: () => void; sending: boolean;
-}) {
-  const total   = items.reduce((s, i) => s + i.total_price, 0);
-  const unsaved = items.some(i => !i.id);
-  if (!table) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-white/20">
-        <Table2 className="w-12 h-12" />
-        <p className="text-sm">Оберіть стіл</p>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 py-2.5 border-b border-white/6 shrink-0">
-        <p className="text-sm font-bold text-white">Стіл #{table.number}</p>
-        {order && <p className="text-[10px] text-white/30">Чек #{order.id}</p>}
-      </div>
-      {items.length > 0 && (
-        <div className="grid grid-cols-[1fr_28px_52px_52px] gap-1 px-3 py-1.5 border-b border-white/5 shrink-0">
-          <span className="text-[9px] text-white/25 uppercase">Найменування</span>
-          <span className="text-[9px] text-white/25 uppercase text-center">К-ть</span>
-          <span className="text-[9px] text-white/25 uppercase text-right">Ціна</span>
-          <span className="text-[9px] text-white/25 uppercase text-right">Всього</span>
-        </div>
-      )}
-      <div className="flex-1 overflow-y-auto">
-        {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-white/20">
-            <UtensilsCrossed className="w-8 h-8 mb-2" />
-            <p className="text-sm">Додайте страви з меню</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-white/4">
-            {items.map((item, idx) => (
-              <div key={idx} className="grid grid-cols-[1fr_28px_52px_52px] gap-1 items-center px-3 py-2.5">
-                <div className="min-w-0">
-                  <p className="text-xs text-white/85 truncate">{item.name}</p>
-                  {item.notes && <p className="text-[9px] text-amber-400/60">{item.notes}</p>}
                 </div>
-                <div className="flex flex-col items-center gap-0.5">
-                  <button onClick={() => onChangeQty(item.item_id, 1)}
-                    className="w-4 h-4 bg-indigo-500/20 hover:bg-indigo-500/40 rounded flex items-center justify-center">
-                    <Plus className="w-2 h-2 text-indigo-300" />
-                  </button>
-                  <span className="text-xs font-bold text-white">{item.quantity}</span>
-                  <button onClick={() => onChangeQty(item.item_id, -1)}
-                    className="w-4 h-4 bg-red-500/20 hover:bg-red-500/40 rounded flex items-center justify-center">
-                    <Minus className="w-2 h-2 text-red-300" />
-                  </button>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-indigo-300">{fmt(item.price)}</span>
+                  <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                    <Plus className="w-3 h-3 text-indigo-300" />
+                  </div>
                 </div>
-                <p className="text-xs text-white/40 text-right">{fmt(item.price)}</p>
-                <p className="text-xs font-semibold text-white/85 text-right">{fmt(item.total_price)}</p>
-              </div>
+              </button>
             ))}
+            {filteredItems.length === 0 && (
+              <div className="col-span-2 py-8 text-center text-white/25 text-sm">Нічого не знайдено</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer actions */}
+      <div className="px-3 py-3 border-t border-white/6 bg-[#1a1d2e] shrink-0 space-y-2">
+        <div className="flex items-center justify-between text-xs text-white/40">
+          <span>{lines.reduce((s, l) => s + l.qty, 0)} позицій</span>
+          <span className="font-semibold text-white/70">{fmtDec(total)}</span>
+        </div>
+        <div className="flex gap-2">
+          {hasAlcohol && (
+            <button onClick={() => setShowExcise(true)}
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-amber-500/15 border border-amber-400/25 text-amber-300 text-xs font-medium hover:bg-amber-500/25 transition-colors shrink-0">
+              <ScanBarcode className="w-4 h-4" /> Акциз
+            </button>
+          )}
+          <button onClick={() => setShowPrecheck(true)} disabled={lines.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-white/8 border border-white/10 text-white/60 text-xs font-medium hover:bg-white/12 transition-colors disabled:opacity-30 shrink-0">
+            <FileText className="w-4 h-4" /> Передчек
+          </button>
+          {unsentLines.length > 0 && (
+            <button onClick={handleSendClick} disabled={sending}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors disabled:opacity-50">
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
+              Відправити {unsentLines.length > 0 ? `(${unsentLines.length})` : ""}
+            </button>
+          )}
+          {sentLines.length > 0 && unsentLines.length === 0 && (
+            <button onClick={onPay}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors">
+              <CreditCard className="w-4 h-4" /> Оплатити
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Dialogs */}
+      {optionsFor && <ItemOptionsDialog item={optionsFor} onAdd={onAddLine} onClose={() => setOptionsFor(null)} />}
+      {showPrecheck && <PrecheckDialog table={table} lines={lines} onClose={() => setShowPrecheck(false)} onPay={() => { setShowPrecheck(false); setShowPayment(true); }} />}
+      {showPayment && order && <PaymentDialog orderId={order.id} total={total} onPaid={() => { setShowPayment(false); onPay(); }} onClose={() => setShowPayment(false)} />}
+      {showExcise && <ExciseDialog lines={unsentLines} onConfirm={handleExciseConfirm} onClose={() => setShowExcise(false)} />}
+    </div>
+  );
+}
+
+// ── HomeScreen ────────────────────────────────────────────────────────────────
+function HomeScreen({ tables, session, loading, onSelectTable, onCreateTable, onRefresh, menuItems, onToggleItem }: {
+  tables: Table[]; session: Session | null; loading: boolean;
+  onSelectTable: (t: Table) => void;
+  onCreateTable: () => void;
+  onRefresh: () => void;
+  menuItems: MenuItem[];
+  onToggleItem: (id: number, available: boolean) => void;
+}) {
+  const [showArchive,   setShowArchive]   = useState(false);
+  const [showStopList,  setShowStopList]  = useState(false);
+  const userName = getUserName();
+  const occupied = tables.filter(t => t.status === "occupied");
+  const free     = tables.filter(t => t.status === "free");
+
+  const TABLE_S: Record<string, { bg: string; border: string; dot: string; text: string; label: string }> = {
+    free:     { bg: "bg-emerald-500/8",  border: "border-emerald-500/20", dot: "bg-emerald-400", text: "text-emerald-300", label: "Вільний" },
+    occupied: { bg: "bg-rose-500/12",    border: "border-rose-500/25",    dot: "bg-rose-400",    text: "text-rose-300",    label: "Зайнятий" },
+    reserved: { bg: "bg-amber-500/10",   border: "border-amber-500/22",   dot: "bg-amber-400",   text: "text-amber-300",   label: "Резерв" },
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-[#12141f]">
+      {/* Header bar */}
+      <div className="px-4 py-3 border-b border-white/6 bg-[#1a1d2e] shrink-0">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-base font-bold text-white capitalize">
+              {format(new Date(), "EEEE, d MMMM", { locale: uk })}
+            </p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-white/40">Офіціант:</span>
+              <span className="text-xs font-semibold text-indigo-300">{userName}</span>
+              {session ? (
+                <span className="flex items-center gap-1 text-[10px] text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Зміна {session.cashboxName} · {format(new Date(session.openedAt), "HH:mm")}
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-400/70">Зміна не відкрита</span>
+              )}
+            </div>
+          </div>
+          <button onClick={onRefresh} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin text-white/40" /> : <RefreshCw className="w-4 h-4 text-white/30" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+        {/* Open tables */}
+        {occupied.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-white/40">
+                Відкриті столи
+                <span className="ml-2 bg-rose-500/25 text-rose-300 text-[9px] px-1.5 py-0.5 rounded font-bold">{occupied.length}</span>
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {occupied.map(t => {
+                const s = TABLE_S[t.status] || TABLE_S.free;
+                return (
+                  <button key={t.id} onClick={() => onSelectTable(t)}
+                    className={`relative p-4 rounded-2xl border text-left transition-all active:scale-95 hover:brightness-110 ${s.bg} ${s.border}`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <span className="text-xl font-bold text-white">#{t.number}</span>
+                      <span className={`w-2 h-2 rounded-full ${s.dot} animate-pulse`} />
+                    </div>
+                    <p className="text-xs text-white/40 mb-0.5">{t.location}</p>
+                    {t.orderGuestName && <p className="text-xs text-white/60 truncate">{t.orderGuestName}</p>}
+                    {t.orderTotal && <p className="text-base font-bold text-white/85 mt-1">{fmt(t.orderTotal)}</p>}
+                    <span className={`text-[9px] font-semibold uppercase tracking-wide ${s.text}`}>{s.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Free tables (smaller) */}
+        {free.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-white/25 mb-2">Вільні столи</p>
+            <div className="flex flex-wrap gap-2">
+              {free.map(t => (
+                <button key={t.id} onClick={() => onSelectTable(t)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/6 border border-emerald-500/15 hover:bg-emerald-500/12 transition-colors active:scale-95">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span className="text-sm font-semibold text-emerald-200">#{t.number}</span>
+                  <span className="text-xs text-white/30">{t.capacity} міс.</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tables.length === 0 && !loading && (
+          <div className="flex flex-col items-center justify-center py-16 text-white/20 gap-3">
+            <Table2 className="w-12 h-12" />
+            <p className="text-sm">Столів не знайдено. Створіть перший.</p>
           </div>
         )}
       </div>
-      {items.length > 0 && (
-        <div className="px-4 py-3 border-t border-white/8 shrink-0 space-y-2">
-          {unsaved && (
-            <button onClick={onSend} disabled={sending}
-              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors">
-              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
-              Відправити на кухню
-            </button>
-          )}
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-white/35">{items.reduce((s, i) => s + i.quantity, 0)} позицій</span>
-            <span className="text-lg font-bold text-white">{fmtDec(total)}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={onPrecheck}
-              className="py-2.5 rounded-xl bg-white/8 hover:bg-white/12 text-white/60 text-xs flex items-center justify-center gap-1.5 transition-colors">
-              <FileText className="w-3.5 h-3.5" /> Предчек
-            </button>
-            <button onClick={onPay}
-              className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors">
-              <CreditCard className="w-3.5 h-3.5" /> Оплатити
-            </button>
-          </div>
+
+      {/* Bottom toolbar */}
+      <div className="px-4 py-3 border-t border-white/6 bg-[#1a1d2e] shrink-0">
+        <div className="flex gap-2">
+          <button onClick={() => setShowArchive(true)}
+            className="flex-1 flex flex-col items-center gap-1 py-3 rounded-xl bg-white/6 border border-white/10 hover:bg-white/10 transition-colors">
+            <Archive className="w-5 h-5 text-indigo-400" />
+            <span className="text-[10px] text-white/50 font-medium">Архів чеків</span>
+          </button>
+          <button onClick={() => setShowStopList(true)}
+            className="flex-1 flex flex-col items-center gap-1 py-3 rounded-xl bg-white/6 border border-white/10 hover:bg-white/10 transition-colors">
+            <AlertTriangle className="w-5 h-5 text-amber-400" />
+            <span className="text-[10px] text-white/50 font-medium">Стоп-лист</span>
+          </button>
+          <button onClick={onCreateTable}
+            className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 transition-colors">
+            <PlusCircle className="w-5 h-5 text-white" />
+            <span className="text-sm font-semibold text-white">Новий стіл</span>
+          </button>
         </div>
-      )}
+      </div>
+
+      {showArchive  && <ArchiveDialog onClose={() => setShowArchive(false)} />}
+      {showStopList && <StopListDialog items={menuItems} onToggle={onToggleItem} onClose={() => setShowStopList(false)} />}
     </div>
   );
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
-type MobileTab = "tables" | "menu" | "order";
-
 export default function WaiterStationPage() {
   const { toast } = useToast();
 
-  const [tables,        setTables]        = useState<Table[]>([]);
-  const [categories,    setCategories]    = useState<Category[]>([]);
-  const [menuItems,     setMenuItems]     = useState<MenuItem[]>([]);
-  const [orders,        setOrders]        = useState<Order[]>([]);
-  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
-  const [loading,       setLoading]       = useState(true);
+  const [tables,     setTables]     = useState<Table[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [menuItems,  setMenuItems]  = useState<MenuItem[]>([]);
+  const [session,    setSession]    = useState<Session | null>(null);
+  const [loading,    setLoading]    = useState(true);
 
+  const [screen,        setScreen]        = useState<"home" | "order">("home");
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
-  const [currentOrder,  setCurrentOrder]  = useState<Order | null>(null);
-  const [orderItems,    setOrderItems]    = useState<OrderItem[]>([]);
+  const [currentOrder,  setCurrentOrder]  = useState<{ id: number; openedAt?: string; guestCount: number } | null>(null);
+  const [orderLines,    setOrderLines]    = useState<OrderLine[]>([]);
   const [sending,       setSending]       = useState(false);
 
-  const [openTableFor, setOpenTableFor] = useState<Table | null>(null);
-  const [noteItem,     setNoteItem]     = useState<OrderItem | null>(null);
-  const [showPrecheck, setShowPrecheck] = useState(false);
-  const [showPayment,  setShowPayment]  = useState(false);
-  const [showScanner,  setShowScanner]  = useState(false);
-
-  const [mobileTab, setMobileTab] = useState<MobileTab>("tables");
+  const [showNewTable,       setShowNewTable]       = useState(false);
+  const [showOpenTableFor,   setShowOpenTableFor]   = useState<Table | null>(null);
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const [t, c, m, o, le] = await Promise.all([
+      const [t, c, m, s] = await Promise.all([
         apiFetch("/fb/tables").then(r => r.json()),
         apiFetch("/fb/categories").then(r => r.json()),
         apiFetch("/fb/items").then(r => r.json()),
-        apiFetch("/fb/orders?status=open").then(r => r.json()),
-        apiFetch("/legal-entities").then(r => r.json()),
+        apiFetch("/fb/cashbox/session").then(r => r.json()).catch(() => ({ session: null })),
       ]);
       setTables(t.tables || []);
-      setCategories(c.categories || []);
+      setCategories((c.categories || []).sort((a: Category, b: Category) => a.sortOrder - b.sortOrder));
       setMenuItems(m.items || []);
-      setOrders(o.orders || []);
-      setLegalEntities(le.legalEntities || []);
+      setSession(s.session || null);
     } catch { /* silent */ }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  // Auto-refresh tables+orders every 30s
   useEffect(() => {
     const iv = setInterval(() => {
       apiFetch("/fb/tables").then(r => r.json()).then(d => setTables(d.tables || [])).catch(() => {});
-      apiFetch("/fb/orders?status=open").then(r => r.json()).then(d => setOrders(d.orders || [])).catch(() => {});
     }, 30000);
     return () => clearInterval(iv);
   }, []);
 
-  // Auto-refresh menu every 5 min
-  useEffect(() => {
-    const iv = setInterval(() => {
-      Promise.all([
-        apiFetch("/fb/categories").then(r => r.json()),
-        apiFetch("/fb/items").then(r => r.json()),
-      ]).then(([c, m]) => {
-        setCategories(c.categories || []);
-        setMenuItems(m.items || []);
-      }).catch(() => {});
-    }, 5 * 60 * 1000);
-    return () => clearInterval(iv);
-  }, []);
-
-  // ── Select table ──────────────────────────────────────────────────────────
+  // ── Select existing table ─────────────────────────────────────────────────
   const handleSelectTable = async (table: Table) => {
     if (table.status === "free") {
-      setOpenTableFor(table);
+      setShowOpenTableFor(table);
       return;
     }
     setSelectedTable(table);
-    setMobileTab("order");
     if (table.currentOrderId) {
       try {
-        const r = await apiFetch(`/fb/orders/${table.currentOrderId}`).then(r => r.json());
-        if (r.order) {
-          setCurrentOrder(r.order);
-          setOrderItems((r.order.items || []).map((i: any) => ({
-            id: i.id, item_id: i.item_id, name: i.name,
-            price: Number(i.price), quantity: i.quantity,
-            total_price: Number(i.total_price), notes: i.notes, is_alcohol: !!i.is_alcohol,
+        const r = await apiFetch(`/fb/orders/${table.currentOrderId}`);
+        const d = await r.json();
+        if (d.order) {
+          setCurrentOrder({ id: d.order.id, openedAt: d.order.openedAt, guestCount: d.order.guestCount || 1 });
+          setOrderLines((d.order.items || []).map((i: any) => ({
+            localId: uid(), id: i.id, itemId: i.itemId || i.item_id,
+            name: i.name, price: Number(i.price),
+            qty: Number(i.quantity), totalPrice: Number(i.totalPrice || i.total_price),
+            course: 1 as Course, modifiers: [], notes: i.notes,
+            isAlcohol: !!i.isAlcohol, excisePerUnit: Number(i.excisePerUnit || 0),
+            exciseConfirmed: false, sent: true,
           })));
         }
       } catch { toast({ title: "Помилка завантаження замовлення", variant: "destructive" }); }
+    } else {
+      setCurrentOrder(null);
+      setOrderLines([]);
     }
+    setScreen("order");
   };
 
-  // ── Open table ────────────────────────────────────────────────────────────
-  const handleOpenTable = async (guestCount: number, guestName: string) => {
-    if (!openTableFor) return;
+  // ── Open free existing table ───────────────────────────────────────────────
+  const handleOpenExistingTable = async (table: Table, guestCount: number, guestName: string) => {
+    setShowOpenTableFor(null);
     try {
       const r = await apiFetch("/fb/orders", {
         method: "POST",
-        body: JSON.stringify({ tableId: openTableFor.id, orderType: "dine_in", guestCount, guestName }),
+        body: JSON.stringify({ tableId: table.id, orderType: "dine_in", guestCount, guestName }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      setCurrentOrder(d.order);
-      setOrderItems([]);
-      setSelectedTable({ ...openTableFor, status: "occupied", currentOrderId: d.order.id });
-      setTables(prev => prev.map(t => t.id === openTableFor.id
-        ? { ...t, status: "occupied", currentOrderId: d.order.id } : t));
-      setOpenTableFor(null);
-      setMobileTab("menu");
-      toast({ title: `Стіл #${openTableFor.number} відкрито · ${guestCount} гостей` });
-    } catch (e: any) {
-      toast({ title: "Помилка", description: e.message, variant: "destructive" });
-    }
+      setCurrentOrder({ id: d.order.id, openedAt: d.order.openedAt, guestCount });
+      setOrderLines([]);
+      setSelectedTable({ ...table, status: "occupied", currentOrderId: d.order.id });
+      setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: "occupied", currentOrderId: d.order.id } : t));
+      setScreen("order");
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
   };
 
-  // ── Add item ──────────────────────────────────────────────────────────────
-  const addItem = (item: MenuItem) => {
-    if (!selectedTable) { toast({ title: "Спочатку оберіть стіл", variant: "destructive" }); return; }
-    setOrderItems(prev => {
-      const ex = prev.find(i => i.item_id === item.id);
-      if (ex) return prev.map(i => i.item_id === item.id
-        ? { ...i, quantity: i.quantity + 1, total_price: (i.quantity + 1) * i.price } : i);
-      return [...prev, {
-        item_id: item.id, name: item.name, price: Number(item.price),
-        quantity: 1, total_price: Number(item.price), is_alcohol: !!item.is_alcohol,
-      }];
-    });
-    setMobileTab("order");
+  // ── Create new table + open order ────────────────────────────────────────
+  const handleCreateTable = async (number: string, guests: number, notes: string, location: string) => {
+    setShowNewTable(false);
+    try {
+      const tr = await apiFetch("/fb/tables", {
+        method: "POST",
+        body: JSON.stringify({ number, capacity: guests, location, notes, status: "free" }),
+      });
+      const td = await tr.json();
+      if (!tr.ok) throw new Error(td.error);
+      const table: Table = td.table;
+      // Now open order
+      const or = await apiFetch("/fb/orders", {
+        method: "POST",
+        body: JSON.stringify({ tableId: table.id, orderType: "dine_in", guestCount: guests, notes }),
+      });
+      const od = await or.json();
+      if (!or.ok) throw new Error(od.error);
+      setTables(prev => [...prev, { ...table, status: "occupied", currentOrderId: od.order.id }]);
+      setSelectedTable({ ...table, status: "occupied", currentOrderId: od.order.id });
+      setCurrentOrder({ id: od.order.id, openedAt: od.order.openedAt, guestCount: guests });
+      setOrderLines([]);
+      setScreen("order");
+      toast({ title: `Стіл #${number} відкрито · ${guests} гостей` });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
   };
 
-  // ── Change qty ────────────────────────────────────────────────────────────
-  const changeQty = (itemId: number, delta: number) => {
-    setOrderItems(prev => prev
-      .map(i => i.item_id === itemId ? { ...i, quantity: Math.max(0, i.quantity + delta), total_price: Math.max(0, i.quantity + delta) * i.price } : i)
-      .filter(i => i.quantity > 0));
+  // ── Add line to order ─────────────────────────────────────────────────────
+  const addLine = (line: Omit<OrderLine, "localId" | "id" | "sent" | "exciseConfirmed">) => {
+    setOrderLines(prev => [...prev, { ...line, localId: uid(), sent: false, exciseConfirmed: false }]);
   };
 
-  // ── Save note ─────────────────────────────────────────────────────────────
-  const saveNote = (note: string) => {
-    if (!noteItem) return;
-    setOrderItems(prev => prev.map(i => i.item_id === noteItem.item_id ? { ...i, notes: note || undefined } : i));
-  };
+  const removeLine = (localId: string) => setOrderLines(prev => prev.filter(l => l.localId !== localId));
+  const changeQty  = (localId: string, delta: number) => setOrderLines(prev =>
+    prev.map(l => l.localId === localId
+      ? { ...l, qty: Math.max(0.5, l.qty + delta), totalPrice: Math.max(0.5, l.qty + delta) * l.price }
+      : l
+    ).filter(l => l.qty > 0)
+  );
 
-  // ── Send to kitchen ───────────────────────────────────────────────────────
+  // ── Send to kitchen/bar ───────────────────────────────────────────────────
   const sendOrder = async () => {
-    if (!currentOrder || !selectedTable) return;
-    const unsaved = orderItems.filter(i => !i.id);
-    if (unsaved.length === 0) return;
+    if (!currentOrder) {
+      // Create order first
+      if (!selectedTable) return;
+      try {
+        const r = await apiFetch("/fb/orders", {
+          method: "POST",
+          body: JSON.stringify({ tableId: selectedTable.id, orderType: "dine_in", guestCount: 1 }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        setCurrentOrder({ id: d.order.id, openedAt: d.order.openedAt, guestCount: 1 });
+        await sendLines(d.order.id);
+      } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+      return;
+    }
+    await sendLines(currentOrder.id);
+  };
+
+  const sendLines = async (orderId: number) => {
+    const unsent = orderLines.filter(l => !l.sent);
+    if (unsent.length === 0) return;
     setSending(true);
     try {
-      await Promise.all(unsaved.map(item =>
-        apiFetch(`/fb/orders/${currentOrder.id}/items`, {
+      await Promise.all(unsent.map(line => {
+        const notes = buildNotes(line);
+        const qty   = Math.round(line.qty * 100) / 100;
+        return apiFetch(`/fb/orders/${orderId}/items`, {
           method: "POST",
-          body: JSON.stringify({ itemId: item.item_id, quantity: item.quantity, notes: item.notes }),
-        })
-      ));
-      const r = await apiFetch(`/fb/orders/${currentOrder.id}`).then(r => r.json());
-      if (r.order) {
-        setCurrentOrder(r.order);
-        setOrderItems((r.order.items || []).map((i: any) => ({
-          id: i.id, item_id: i.item_id, name: i.name,
-          price: Number(i.price), quantity: i.quantity,
-          total_price: Number(i.total_price), notes: i.notes, is_alcohol: !!i.is_alcohol,
-        })));
-      }
-      await load();
-      toast({ title: `✅ ${unsaved.length} поз. відправлено на кухню / бар` });
+          body: JSON.stringify({ itemId: line.itemId, quantity: qty, notes: notes || undefined }),
+        });
+      }));
+      setOrderLines(prev => prev.map(l => l.sent ? l : { ...l, sent: true }));
+      toast({ title: `✅ ${unsent.length} поз. відправлено на кухню / бар` });
+      load();
     } catch (e: any) {
-      toast({ title: "Помилка", description: e.message, variant: "destructive" });
+      toast({ title: "Помилка відправки", description: e.message, variant: "destructive" });
     } finally { setSending(false); }
   };
 
   // ── After payment ─────────────────────────────────────────────────────────
   const afterPayment = () => {
-    setShowPayment(false);
+    setScreen("home");
     setSelectedTable(null);
     setCurrentOrder(null);
-    setOrderItems([]);
-    setMobileTab("tables");
+    setOrderLines([]);
     load();
-    toast({ title: "✅ Стіл закрито, замовлення завершено" });
+    toast({ title: "✅ Стіл закрито. Оплата прийнята." });
   };
 
-  const handleBack = () => {
+  // ── Toggle stop-list item ─────────────────────────────────────────────────
+  const toggleItem = async (id: number, available: boolean) => {
+    try {
+      await apiFetch(`/fb/items/${id}`, { method: "PATCH", body: JSON.stringify({ isAvailable: available }) });
+      setMenuItems(prev => prev.map(i => i.id === id ? { ...i, isAvailable: available } : i));
+    } catch { toast({ title: "Помилка оновлення", variant: "destructive" }); }
+  };
+
+  // ── Go back to home ───────────────────────────────────────────────────────
+  const goBack = () => {
+    setScreen("home");
     setSelectedTable(null);
     setCurrentOrder(null);
-    setOrderItems([]);
-    setMobileTab("tables");
+    setOrderLines([]);
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <AppLayout>
-      <div className="flex flex-col h-full bg-[#12141f] text-white overflow-hidden">
+      <div className="h-[calc(100vh-57px)] flex flex-col bg-[#12141f] overflow-hidden">
+        {screen === "home" ? (
+          <HomeScreen
+            tables={tables} session={session} loading={loading}
+            onSelectTable={handleSelectTable}
+            onCreateTable={() => setShowNewTable(true)}
+            onRefresh={load}
+            menuItems={menuItems}
+            onToggleItem={toggleItem}
+          />
+        ) : selectedTable ? (
+          <OrderScreen
+            table={selectedTable} order={currentOrder}
+            lines={orderLines} categories={categories} menuItems={menuItems}
+            onBack={goBack} onAddLine={addLine} onRemoveLine={removeLine}
+            onChangeQty={changeQty} onSend={sendOrder} onPay={afterPayment} sending={sending}
+          />
+        ) : null}
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/6 shrink-0 bg-[#1a1d2e]">
-          <div className="flex items-center gap-2">
-            <UtensilsCrossed className="w-4 h-4 text-indigo-400" />
-            <span className="text-sm font-semibold text-white">Станція офіціанта</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-white/30" />}
-            <button onClick={() => load()}
-              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
-              <RefreshCw className="w-3.5 h-3.5 text-white/40" />
-            </button>
-          </div>
-        </div>
+        {/* New table dialog */}
+        {showNewTable && (
+          <NewTableDialog onConfirm={handleCreateTable} onClose={() => setShowNewTable(false)} />
+        )}
 
-        {/* ── DESKTOP ─────────────────────────────────────────────────────── */}
-        <div className="hidden md:flex flex-1 overflow-hidden">
-          {selectedTable ? (
-            // POS view: Check (left) + Menu (right)
-            <>
-              <div className="w-[38%] shrink-0 overflow-hidden flex flex-col">
-                <CheckPanel
-                  table={selectedTable} order={currentOrder} items={orderItems}
-                  onChangeQty={changeQty} onNoteItem={item => setNoteItem(item)}
-                  onPrecheck={() => setShowPrecheck(true)} onPay={() => setShowPayment(true)}
-                  onSend={sendOrder} sending={sending} onBack={handleBack}
-                />
-              </div>
-              <div className="flex-1 overflow-hidden flex flex-col">
-                <PosMenuPanel categories={categories} items={menuItems} onAddItem={addItem} onScan={() => setShowScanner(true)} />
-              </div>
-            </>
-          ) : (
-            // Tables view: full screen
-            <div className="flex-1 overflow-hidden">
-              <TablesView tables={tables} orders={orders} loading={loading} onSelect={handleSelectTable} />
-            </div>
-          )}
-        </div>
-
-        {/* ── MOBILE ──────────────────────────────────────────────────────── */}
-        <div className="md:hidden flex-1 overflow-hidden flex flex-col">
-          <div className="flex-1 overflow-hidden">
-            {mobileTab === "tables" && (
-              <TablesView tables={tables} orders={orders} loading={loading} onSelect={handleSelectTable} />
-            )}
-            {mobileTab === "menu" && (
-              <MobileMenuPanel categories={categories} items={menuItems} onAddItem={addItem}
-                disabled={!selectedTable} onScan={() => setShowScanner(true)} />
-            )}
-            {mobileTab === "order" && (
-              <MobileOrderPanel
-                table={selectedTable} order={currentOrder} items={orderItems}
-                onChangeQty={changeQty} onNoteItem={item => setNoteItem(item)}
-                onPrecheck={() => setShowPrecheck(true)} onPay={() => setShowPayment(true)}
-                onSend={sendOrder} sending={sending}
+        {/* Open existing free table dialog (reuse New table style) */}
+        {showOpenTableFor && (
+          <Dialog open onOpenChange={() => setShowOpenTableFor(null)}>
+            <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-sm">
+              <DialogHeader>
+                <DialogTitle className="text-white flex items-center gap-2">
+                  <Table2 className="w-4 h-4 text-emerald-400" /> Стіл #{showOpenTableFor.number}
+                  <span className="text-white/30 text-xs font-normal">· {showOpenTableFor.location}</span>
+                </DialogTitle>
+              </DialogHeader>
+              <OpenFreeTableForm
+                table={showOpenTableFor}
+                onConfirm={(g, n) => handleOpenExistingTable(showOpenTableFor, g, n)}
+                onClose={() => setShowOpenTableFor(null)}
               />
-            )}
-          </div>
-
-          {/* Bottom tab bar */}
-          <div className="border-t border-white/6 bg-[#1a1d2e] flex shrink-0">
-            {([
-              { key: "tables", icon: Table2,          label: "Столи"      },
-              { key: "menu",   icon: UtensilsCrossed,  label: "Меню"       },
-              { key: "order",  icon: Receipt,           label: "Замовлення" },
-            ] as { key: MobileTab; icon: any; label: string }[]).map(tab => {
-              const Icon = tab.icon;
-              const isActive = mobileTab === tab.key;
-              const badge = tab.key === "order" ? orderItems.reduce((s, i) => s + i.quantity, 0) : 0;
-              return (
-                <button key={tab.key} onClick={() => setMobileTab(tab.key)}
-                  className={`flex-1 py-3 flex flex-col items-center gap-1 transition-colors relative ${isActive ? "text-indigo-400" : "text-white/30"}`}>
-                  <div className="relative">
-                    <Icon className="w-5 h-5" />
-                    {badge > 0 && (
-                      <span className="absolute -top-1.5 -right-2 bg-rose-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                        {badge}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[10px] font-medium">{tab.label}</span>
-                  {isActive && <div className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-indigo-500 rounded-full" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
-
-      {/* Dialogs */}
-      {openTableFor && (
-        <OpenTableDialog table={openTableFor} onConfirm={handleOpenTable} onClose={() => setOpenTableFor(null)} />
-      )}
-      {noteItem && (
-        <ItemNoteDialog item={noteItem} onSave={saveNote} onClose={() => setNoteItem(null)} />
-      )}
-      {showPrecheck && currentOrder && (
-        <PrecheckDialog order={currentOrder} items={orderItems}
-          onClose={() => setShowPrecheck(false)}
-          onPay={() => { setShowPrecheck(false); setShowPayment(true); }} />
-      )}
-      {showPayment && currentOrder && (
-        <PaymentDialog order={currentOrder} items={orderItems} legalEntities={legalEntities}
-          onPaid={afterPayment} onClose={() => setShowPayment(false)} />
-      )}
-      {showScanner && (
-        <BarcodeScanDialog
-          onFound={item => { addItem(item); }}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
     </AppLayout>
+  );
+}
+
+// ── OpenFreeTableForm (inline small form) ─────────────────────────────────────
+function OpenFreeTableForm({ table, onConfirm, onClose }: {
+  table: Table; onConfirm: (guests: number, name: string) => void; onClose: () => void;
+}) {
+  const [guests, setGuests] = useState(table.capacity || 2);
+  const [name,   setName]   = useState("");
+  return (
+    <div className="space-y-5 py-2">
+      <div>
+        <p className="text-xs text-white/40 uppercase tracking-wide mb-3">Кількість гостей</p>
+        <div className="flex items-center justify-center gap-6">
+          <button onClick={() => setGuests(g => Math.max(1, g - 1))}
+            className="w-12 h-12 rounded-xl bg-white/8 hover:bg-white/14 flex items-center justify-center">
+            <Minus className="w-5 h-5 text-white/60" />
+          </button>
+          <span className="text-5xl font-bold text-white w-12 text-center">{guests}</span>
+          <button onClick={() => setGuests(g => Math.min(40, g + 1))}
+            className="w-12 h-12 rounded-xl bg-indigo-600/60 hover:bg-indigo-600 flex items-center justify-center">
+            <Plus className="w-5 h-5 text-white" />
+          </button>
+        </div>
+      </div>
+      <div>
+        <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Ім'я гостя (опційно)</p>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Прізвище або нік..."
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-indigo-500/50" />
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" onClick={onClose} className="text-white/40">Скасувати</Button>
+        <Button onClick={() => onConfirm(guests, name)} className="bg-emerald-600 hover:bg-emerald-500 text-white flex-1">
+          <CheckCircle2 className="w-4 h-4 mr-1.5" /> Відкрити стіл
+        </Button>
+      </DialogFooter>
+    </div>
   );
 }
