@@ -22,6 +22,8 @@ import FbWarehouse from "@/pages/fb-warehouse";
 import FbImport from "@/pages/fb-import";
 import FbQrCodes from "@/pages/fb-qr";
 import FbAdminPin from "@/pages/fb-admin-pin";
+import FbStaff from "@/pages/fb-staff";
+import FbOutlets from "@/pages/fb-outlets";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -77,6 +79,8 @@ function Router() {
       <Route path="/fb/import"><ProtectedRoute component={FbImport} /></Route>
       <Route path="/fb/qr"><ProtectedRoute component={FbQrCodes} /></Route>
       <Route path="/fb/admin-pin"><ProtectedRoute component={FbAdminPin} /></Route>
+      <Route path="/fb/staff"><ProtectedRoute component={FbStaff} /></Route>
+      <Route path="/fb/outlets"><ProtectedRoute component={FbOutlets} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>

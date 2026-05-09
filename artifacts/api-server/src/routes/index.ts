@@ -75,6 +75,8 @@ import journeyStepsRouter from "./journey-steps.js";
 import roomConciergeRouter from "./room-concierge.js";
 import accLedgerRouter from "./acc-ledger.js";
 import accSyncRouter from "./acc-sync.js";
+import fbStaffRouter from "./fb-staff.js";
+import fbOutletsRouter from "./fb-outlets.js";
 
 const router: IRouter = Router();
 
@@ -153,6 +155,8 @@ router.use("/journey-steps", journeyStepsRouter);
 router.use("/room-concierge", roomConciergeRouter);
 router.use("/acc", accLedgerRouter);
 router.use("/acc/sync", accSyncRouter);
+router.use("/fb/staff", fbStaffRouter);
+router.use("/fb/outlets", fbOutletsRouter);
 router.use("/", storageRouter);
 
 export default router;
