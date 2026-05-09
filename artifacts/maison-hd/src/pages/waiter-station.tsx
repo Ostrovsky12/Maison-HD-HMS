@@ -476,48 +476,177 @@ function ArchiveDialog({ onClose }: { onClose: () => void }) {
 }
 
 // ── PrecheckDialog ───────────────────────────────────────────────────────────
-function PrecheckDialog({ table, lines, onClose, onPay }: {
-  table: Table; lines: OrderLine[]; onClose: () => void; onPay: () => void;
+// Формат передчеку відповідно до практики ресторанного документообігу в Україні.
+// Передчек НЕ є фіскальним документом — це інформаційний документ для гостя.
+// Фіскальний чек видається РРО/ПРРО при фактичному розрахунку.
+type OrgInfo = { name?: string; address?: string; phone?: string; email?: string };
+
+function fmtUah(n: number): string {
+  return n.toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function PrecheckDialog({ table, order, lines, waiterName, onClose, onPay }: {
+  table: Table;
+  order: { id: number; openedAt?: string; guestCount: number } | null;
+  lines: OrderLine[];
+  waiterName: string;
+  onClose: () => void;
+  onPay: () => void;
 }) {
-  const total = lines.reduce((s, l) => s + l.totalPrice, 0);
-  const byDate = format(new Date(), "dd MMMM yyyy", { locale: uk });
+  const [org, setOrg] = useState<OrgInfo>({});
+
+  useEffect(() => {
+    apiFetch("/organizations/me")
+      .then(r => r.json())
+      .then(d => setOrg({ name: d.name, address: d.address, phone: d.phone, email: d.email }))
+      .catch(() => {});
+  }, []);
+
+  const now   = new Date();
+  const dateStr = format(now, "dd.MM.yyyy");
+  const timeStr = format(now, "HH:mm");
+  const total   = lines.reduce((s, l) => s + l.totalPrice, 0);
+  const totalQty = lines.reduce((s, l) => s + l.qty, 0);
+
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-xs">
-        <DialogHeader>
-          <DialogTitle className="text-white flex items-center gap-2 text-sm">
-            <Receipt className="w-4 h-4 text-indigo-400" /> Передчек — Стіл #{table.number}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="text-center text-xs text-white/30 mb-3">
-          <p>{table.location} · {byDate}</p>
+      <DialogContent className="bg-[#1a1d2e] border-white/10 text-white max-w-sm p-0 overflow-hidden">
+        {/* Title bar */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/8">
+          <div className="flex items-center gap-2">
+            <Receipt className="w-4 h-4 text-indigo-400" />
+            <span className="text-sm font-semibold text-white">Передчек — Стіл #{table.number}</span>
+          </div>
+          <button onClick={onClose} className="w-6 h-6 flex items-center justify-center text-white/30 hover:text-white/60 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <div className="divide-y divide-white/6 max-h-72 overflow-y-auto">
-          {lines.map((l, i) => (
-            <div key={i} className="flex items-start justify-between py-2.5 gap-2">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-white/85 leading-snug">{l.name}</p>
-                {l.doneness && <p className="text-[9px] text-orange-400/70">{l.doneness}</p>}
-                {l.modifiers.length > 0 && <p className="text-[9px] text-indigo-400/60">{l.modifiers.join(", ")}</p>}
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-xs text-white/35">{l.qty} × {fmt(l.price)}</p>
-                <p className="text-sm font-medium text-white">{fmt(l.totalPrice)}</p>
-              </div>
+
+        {/* Receipt body — cream/paper look */}
+        <div className="bg-[#fafaf7] text-[#1a1a1a] mx-4 my-3 rounded-lg overflow-hidden shadow-inner">
+          <div
+            className="px-5 py-4 font-mono text-[11px] leading-relaxed max-h-[65vh] overflow-y-auto"
+            style={{ fontFamily: "'Courier New', 'Courier', monospace" }}
+          >
+            {/* ── Шапка закладу ── */}
+            <div className="text-center mb-3">
+              <p className="font-bold text-[13px] uppercase tracking-wider leading-tight">
+                {org.name || "Заклад харчування"}
+              </p>
+              {org.address && <p className="text-[10px] text-[#555] mt-0.5">{org.address}</p>}
+              {org.phone   && <p className="text-[10px] text-[#555]">Тел.: {org.phone}</p>}
             </div>
-          ))}
+
+            {/* ── Роздільник ── */}
+            <p className="border-t border-dashed border-[#aaa] my-2" />
+
+            {/* ── Заголовок документа ── */}
+            <div className="text-center mb-2">
+              <p className="font-bold text-[13px] tracking-[0.2em] uppercase">П Е Р Е Д Ч Е К</p>
+              <p className="text-[9px] text-[#888] mt-0.5 uppercase tracking-wide">
+                Не є фіскальним документом
+              </p>
+            </div>
+
+            {/* ── Роздільник ── */}
+            <p className="border-t border-dashed border-[#aaa] my-2" />
+
+            {/* ── Реквізити замовлення ── */}
+            <table className="w-full text-[10px] mb-1" style={{ borderCollapse: "collapse" }}>
+              <tbody>
+                <tr>
+                  <td className="text-[#666] pr-2 whitespace-nowrap">Стіл:</td>
+                  <td className="font-semibold">#{table.number}</td>
+                  <td className="text-[#666] pl-3 pr-2 whitespace-nowrap">Зона:</td>
+                  <td className="text-right">{table.location}</td>
+                </tr>
+                <tr>
+                  <td className="text-[#666] pr-2 whitespace-nowrap">Дата:</td>
+                  <td className="font-semibold">{dateStr}</td>
+                  <td className="text-[#666] pl-3 pr-2 whitespace-nowrap">Час:</td>
+                  <td className="text-right font-semibold">{timeStr}</td>
+                </tr>
+                <tr>
+                  <td className="text-[#666] pr-2 whitespace-nowrap">Гостей:</td>
+                  <td>{order?.guestCount ?? "—"}</td>
+                  <td className="text-[#666] pl-3 pr-2 whitespace-nowrap">Офіціант:</td>
+                  <td className="text-right truncate max-w-[80px]">{waiterName}</td>
+                </tr>
+                {order?.id && (
+                  <tr>
+                    <td className="text-[#666] pr-2 whitespace-nowrap">Замовлення:</td>
+                    <td colSpan={3} className="font-semibold">#{order.id}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {/* ── Роздільник ── */}
+            <p className="border-t border-[#aaa] my-2" />
+
+            {/* ── Шапка таблиці позицій ── */}
+            <div className="flex text-[9px] text-[#888] uppercase tracking-wide font-semibold mb-1">
+              <span className="w-5 shrink-0">#</span>
+              <span className="flex-1">Найменування</span>
+              <span className="w-8 text-center shrink-0">К-сть</span>
+              <span className="w-14 text-right shrink-0">Ціна</span>
+              <span className="w-16 text-right shrink-0">Сума</span>
+            </div>
+            <p className="border-t border-dashed border-[#bbb] mb-1" />
+
+            {/* ── Позиції (без модифікаторів та прожарки) ── */}
+            {lines.map((l, i) => (
+              <div key={l.localId} className="flex items-start text-[11px] mb-1 gap-0.5">
+                <span className="w-5 text-[#888] shrink-0">{i + 1}.</span>
+                <span className="flex-1 leading-snug break-words pr-1">{l.name}</span>
+                <span className="w-8 text-center shrink-0 text-[#555]">
+                  {l.qty % 1 !== 0 ? l.qty.toFixed(1) : l.qty}
+                </span>
+                <span className="w-14 text-right shrink-0 text-[#555]">{fmtUah(l.price)}</span>
+                <span className="w-16 text-right shrink-0 font-semibold">{fmtUah(l.totalPrice)}</span>
+              </div>
+            ))}
+
+            {/* ── Роздільник ── */}
+            <p className="border-t border-[#aaa] mt-2 mb-2" />
+
+            {/* ── Підсумок ── */}
+            <div className="flex justify-between items-baseline text-[11px] mb-0.5">
+              <span className="text-[#666]">Кількість позицій:</span>
+              <span>{lines.length} ({totalQty % 1 !== 0 ? totalQty.toFixed(1) : totalQty} одиниць)</span>
+            </div>
+            <div className="flex justify-between items-baseline mt-1">
+              <span className="font-bold text-[13px] uppercase tracking-wide">РАЗОМ:</span>
+              <span className="font-bold text-[15px]">{fmtUah(total)} грн</span>
+            </div>
+
+            {/* ── Роздільник ── */}
+            <p className="border-t border-dashed border-[#aaa] my-3" />
+
+            {/* ── Нижній колонтитул ── */}
+            <div className="text-center text-[9px] text-[#888] leading-relaxed">
+              <p>Дякуємо за відвідування!</p>
+              <p>Фіскальний чек видається при оплаті.</p>
+              <p className="mt-1 text-[8px] text-[#bbb]">
+                Документ сформовано {dateStr} о {timeStr}
+              </p>
+            </div>
+          </div>
+
+          {/* Tear edge effect */}
+          <div className="h-2 bg-[#fafaf7]"
+            style={{ backgroundImage: "repeating-linear-gradient(90deg, #fafaf7 0px, #fafaf7 8px, #e8e8e2 8px, #e8e8e2 10px)" }} />
         </div>
-        <div className="border-t border-white/10 pt-3 flex items-center justify-between">
-          <span className="text-sm text-white/50">{lines.reduce((s, l) => s + l.qty, 0)} позицій</span>
-          <span className="text-2xl font-bold text-indigo-300">{fmtDec(total)}</span>
-        </div>
-        <p className="text-[10px] text-white/20 text-center">Передчек — не фіскальний документ</p>
-        <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onClose} className="text-white/40">Закрити</Button>
-          <Button onClick={onPay} className="bg-emerald-600 hover:bg-emerald-500 flex-1">
+
+        {/* Action buttons */}
+        <div className="flex gap-2 px-4 pb-4">
+          <Button variant="ghost" onClick={onClose} className="text-white/40 hover:text-white/60">
+            Закрити
+          </Button>
+          <Button onClick={onPay} className="bg-emerald-600 hover:bg-emerald-500 text-white flex-1">
             <CreditCard className="w-4 h-4 mr-2" /> До оплати
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -990,7 +1119,7 @@ function OrderScreen({ table, order, lines, categories, menuItems, onBack, onAdd
 
       {/* Dialogs */}
       {optionsFor && <ItemOptionsDialog item={optionsFor} onAdd={onAddLine} onClose={() => setOptionsFor(null)} />}
-      {showPrecheck && <PrecheckDialog table={table} lines={lines} onClose={() => setShowPrecheck(false)} onPay={() => { setShowPrecheck(false); setShowPayment(true); }} />}
+      {showPrecheck && <PrecheckDialog table={table} order={order} lines={lines} waiterName={getUserName()} onClose={() => setShowPrecheck(false)} onPay={() => { setShowPrecheck(false); setShowPayment(true); }} />}
       {showPayment && order && <PaymentDialog orderId={order.id} total={total} onPaid={() => { setShowPayment(false); onPay(); }} onClose={() => setShowPayment(false)} />}
       {showExcise && <ExciseDialog lines={unsentLines} onConfirm={handleExciseConfirm} onClose={() => setShowExcise(false)} />}
     </div>
