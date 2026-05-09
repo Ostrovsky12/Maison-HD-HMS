@@ -73,6 +73,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: UtensilsCrossed,
     items: [
       { href: "/fb/legal-entities", label: "Юр. особи", icon: Building2 },
+      { href: "/fb/prro", label: "ПРРО / Зміни", icon: Shield },
       { href: "/fb/settings", label: "ПДВ / Оплата / Принтери", icon: Percent },
     ],
   },
