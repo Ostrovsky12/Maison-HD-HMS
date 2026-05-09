@@ -8,8 +8,78 @@ import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
 
+// ── Helper: map item station → printer type ───────────────────────────────────
+function stationToPrinterType(station: string | null): "kitchen" | "bar" {
+  if (!station) return "kitchen";
+  const s = station.toLowerCase();
+  if (s.startsWith("bar")) return "bar";
+  return "kitchen";
+}
+
+// ── Helper: create print jobs after order acceptance ─────────────────────────
+async function createPrintJobs(
+  orgId: number,
+  orderId: number,
+  tableNumber: string | null,
+  tableLocation: string | null,
+  guestName: string | null,
+) {
+  // Fetch items with station info from fb_items
+  const { rows: orderItems } = await pool.query(
+    `SELECT oi.id, oi.name, oi.quantity, oi.price, oi.total_price, oi.notes,
+            COALESCE(fi.station, 'kitchen_general') AS station
+     FROM fb_order_items oi
+     LEFT JOIN fb_items fi ON fi.id = oi.item_id
+     WHERE oi.order_id = $1`,
+    [orderId],
+  );
+  if (!orderItems.length) return;
+
+  // Group by printer_type
+  const groups: Record<string, typeof orderItems> = {};
+  for (const item of orderItems) {
+    const pt = stationToPrinterType(item.station);
+    if (!groups[pt]) groups[pt] = [];
+    groups[pt].push(item);
+  }
+
+  // Fetch available printers for this org
+  const { rows: printers } = await pool.query(
+    `SELECT id, type FROM fb_printers
+     WHERE organization_id = $1 AND is_active = true AND type IN ('kitchen','bar','receipt')`,
+    [orgId],
+  );
+
+  const printerByType: Record<string, number | null> = {};
+  for (const p of printers) {
+    if (!printerByType[p.type]) printerByType[p.type] = p.id;
+  }
+
+  // Create one print job per printer type that has items
+  for (const [printerType, items] of Object.entries(groups)) {
+    const printerId = printerByType[printerType] || null;
+    await pool.query(
+      `INSERT INTO fb_print_jobs
+         (organization_id, order_id, printer_id, printer_type, station,
+          status, table_number, table_location, guest_name, items_json)
+       VALUES ($1,$2,$3,$4,$5,'queued',$6,$7,$8,$9)`,
+      [
+        orgId, orderId, printerId, printerType,
+        items[0]?.station || printerType,
+        tableNumber, tableLocation, guestName,
+        JSON.stringify(items.map(i => ({
+          name: i.name,
+          quantity: Number(i.quantity),
+          price: Number(i.price),
+          total: Number(i.total_price),
+          notes: i.notes || null,
+        }))),
+      ],
+    );
+  }
+}
+
 // ─── GET /fb/public/guest-menu?tid=<tableId> ─────────────────────────────────
-// Returns org info + full menu by table ID. No auth required.
 router.get("/public/guest-menu", async (req, res) => {
   const { tid } = req.query;
   if (!tid) return res.status(400).json({ error: "tid required" });
@@ -49,7 +119,6 @@ router.get("/public/guest-menu", async (req, res) => {
 });
 
 // ─── POST /fb/public/guest-orders ────────────────────────────────────────────
-// Guest places order from QR menu. Creates order with status 'new_guest'.
 router.post("/public/guest-orders", async (req, res) => {
   const { tableId, items, guestName, guestCount, notes } = req.body;
   if (!tableId || !Array.isArray(items) || !items.length) {
@@ -64,7 +133,6 @@ router.post("/public/guest-orders", async (req, res) => {
     if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
     const orgId = tableRows[0].organization_id;
 
-    // Create order with new_guest status (cashier must accept before kitchen sees it)
     const { rows: orderRows } = await pool.query(
       `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, status, notes, opened_at)
        VALUES ($1, $2, 'dine_in', $3, $4, 'new_guest', $5, NOW())
@@ -73,13 +141,11 @@ router.post("/public/guest-orders", async (req, res) => {
     );
     const order = orderRows[0];
 
-    // Mark table as occupied
     await pool.query(
       `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2`,
       [order.id, tableId],
     );
 
-    // Insert order items
     for (const item of items) {
       const { rows: itemRows } = await pool.query(
         `SELECT name, price FROM fb_items WHERE id = $1 AND organization_id = $2 LIMIT 1`,
@@ -96,7 +162,6 @@ router.post("/public/guest-orders", async (req, res) => {
       );
     }
 
-    // Recalc total
     await pool.query(
       `UPDATE fb_orders SET total_amount = (
          SELECT COALESCE(SUM(total_price::numeric), 0) FROM fb_order_items WHERE order_id = $1
@@ -112,7 +177,6 @@ router.post("/public/guest-orders", async (req, res) => {
 });
 
 // ─── GET /fb/public/pending-orders ───────────────────────────────────────────
-// Returns all new_guest orders waiting for cashier acceptance. Auth required.
 router.get("/public/pending-orders", requireAuth, async (req: any, res) => {
   const orgId = req.user?.organizationId;
   try {
@@ -140,7 +204,7 @@ router.get("/public/pending-orders", requireAuth, async (req: any, res) => {
 });
 
 // ─── PATCH /fb/public/guest-orders/:id/accept ────────────────────────────────
-// Cashier accepts the QR order → status becomes 'open', visible to kitchen.
+// Cashier accepts → status 'open', creates print jobs for kitchen/bar printers
 router.patch("/public/guest-orders/:id/accept", requireAuth, async (req: any, res) => {
   const orgId = req.user?.organizationId;
   const orderId = parseInt(req.params.id);
@@ -148,10 +212,19 @@ router.patch("/public/guest-orders/:id/accept", requireAuth, async (req: any, re
     const { rows } = await pool.query(
       `UPDATE fb_orders SET status = 'open', updated_at = NOW()
        WHERE id = $1 AND organization_id = $2 AND status = 'new_guest'
-       RETURNING *`,
+       RETURNING *, (SELECT number FROM fb_tables WHERE id = fb_orders.table_id) AS table_number,
+                   (SELECT location FROM fb_tables WHERE id = fb_orders.table_id) AS table_location`,
       [orderId, orgId],
     );
     if (!rows[0]) return res.status(404).json({ error: "Order not found or already processed" });
+
+    // Async — don't block the response on print job creation errors
+    createPrintJobs(
+      orgId, orderId,
+      rows[0].table_number, rows[0].table_location,
+      rows[0].guest_name,
+    ).catch(err => console.error("[print-jobs] Failed to create print jobs:", err));
+
     res.json({ order: rows[0] });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -159,7 +232,6 @@ router.patch("/public/guest-orders/:id/accept", requireAuth, async (req: any, re
 });
 
 // ─── PATCH /fb/public/guest-orders/:id/reject ────────────────────────────────
-// Cashier rejects the QR order → cancelled, table freed.
 router.patch("/public/guest-orders/:id/reject", requireAuth, async (req: any, res) => {
   const orgId = req.user?.organizationId;
   const orderId = parseInt(req.params.id);
@@ -178,6 +250,71 @@ router.patch("/public/guest-orders/:id/reject", requireAuth, async (req: any, re
       );
     }
     res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /fb/public/print-jobs ───────────────────────────────────────────────
+// Returns queued print jobs. Used by local print bridge agent.
+// Auth: Bearer token (same HMS token)
+router.get("/public/print-jobs", requireAuth, async (req: any, res) => {
+  const orgId = req.user?.organizationId;
+  const { status = "queued" } = req.query;
+  try {
+    const { rows } = await pool.query(
+      `SELECT pj.id, pj.order_id, pj.printer_id, pj.printer_type, pj.station,
+              pj.status, pj.table_number, pj.table_location, pj.guest_name,
+              pj.items_json, pj.created_at,
+              fp.name AS printer_name, fp.ip_address, fp.port,
+              fp.driver, fp.connection, fp.paper_width, fp.print_copies
+       FROM fb_print_jobs pj
+       LEFT JOIN fb_printers fp ON fp.id = pj.printer_id
+       WHERE pj.organization_id = $1 AND pj.status = $2
+       ORDER BY pj.created_at ASC`,
+      [orgId, status],
+    );
+    res.json({ printJobs: rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── PATCH /fb/public/print-jobs/:id/done ────────────────────────────────────
+// Local print bridge marks a job as printed or failed.
+router.patch("/public/print-jobs/:id/done", requireAuth, async (req: any, res) => {
+  const orgId = req.user?.organizationId;
+  const jobId = parseInt(req.params.id);
+  const { error: errMsg } = req.body;
+  const status = errMsg ? "failed" : "done";
+  try {
+    const { rows } = await pool.query(
+      `UPDATE fb_print_jobs SET status = $1, error_msg = $2, printed_at = NOW()
+       WHERE id = $3 AND organization_id = $4 RETURNING id, status`,
+      [status, errMsg || null, jobId, orgId],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Job not found" });
+    res.json({ job: rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /fb/public/print-jobs/by-order/:orderId ─────────────────────────────
+// HMS cashier polls this to show print status badges per order.
+router.get("/public/print-jobs/by-order/:orderId", requireAuth, async (req: any, res) => {
+  const orgId = req.user?.organizationId;
+  const orderId = parseInt(req.params.orderId);
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, printer_type, station, status, error_msg, created_at, printed_at,
+              (SELECT name FROM fb_printers WHERE id = pj.printer_id) AS printer_name
+       FROM fb_print_jobs pj
+       WHERE organization_id = $1 AND order_id = $2
+       ORDER BY printer_type ASC`,
+      [orgId, orderId],
+    );
+    res.json({ printJobs: rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

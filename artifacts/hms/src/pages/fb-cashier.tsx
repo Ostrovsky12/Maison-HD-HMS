@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
-import { Bell, CheckCircle2, XCircle, Clock, ShoppingBag, RefreshCw, Wifi } from "lucide-react";
+import { Bell, CheckCircle2, XCircle, Clock, ShoppingBag, RefreshCw, Wifi, Printer, ChefHat, Wine } from "lucide-react";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const API = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api/fb";
@@ -33,6 +33,7 @@ function playAlert() {
   } catch {}
 }
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface OrderItem { id: number; name: string; quantity: number; price: string; total_price: string; notes?: string; }
 interface GuestOrder {
   id: number; status: string; guest_name: string; guest_count: number;
@@ -40,12 +41,49 @@ interface GuestOrder {
   table_number?: string; table_location?: string;
   items: OrderItem[];
 }
+interface PrintJob {
+  id: number; printer_type: string; station: string; status: string;
+  printer_name?: string; error_msg?: string; printed_at?: string;
+}
+interface AcceptedOrder extends GuestOrder {
+  printJobs?: PrintJob[];
+  acceptedAt: Date;
+}
 
 function timeAgo(dateStr: string) {
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
   if (diff < 60) return `${diff} сек тому`;
   if (diff < 3600) return `${Math.floor(diff / 60)} хв тому`;
   return `${Math.floor(diff / 3600)} год тому`;
+}
+
+// ─── Print Job Badge ──────────────────────────────────────────────────────────
+const PRINTER_TYPE_INFO: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+  kitchen: { label: "Кухня", icon: <ChefHat className="w-3 h-3" />, color: "orange" },
+  bar:     { label: "Бар",   icon: <Wine     className="w-3 h-3" />, color: "purple" },
+  receipt: { label: "Чек",   icon: <Printer  className="w-3 h-3" />, color: "blue"   },
+};
+const STATUS_STYLE: Record<string, string> = {
+  queued:   "bg-yellow-50 text-yellow-700 border-yellow-200",
+  printing: "bg-blue-50 text-blue-700 border-blue-200",
+  done:     "bg-green-50 text-green-700 border-green-200",
+  failed:   "bg-red-50 text-red-700 border-red-200",
+};
+const STATUS_LABEL: Record<string, string> = {
+  queued: "очікує", printing: "друкує", done: "надруковано", failed: "помилка",
+};
+
+function PrintJobBadge({ job }: { job: PrintJob }) {
+  const info = PRINTER_TYPE_INFO[job.printer_type] || { label: job.printer_type, icon: <Printer className="w-3 h-3" />, color: "gray" };
+  const style = STATUS_STYLE[job.status] || STATUS_STYLE.queued;
+  return (
+    <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-medium ${style}`} title={job.printer_name ? `Принтер: ${job.printer_name}` : undefined}>
+      {info.icon}
+      <span>{info.label}</span>
+      <span className="opacity-60">·</span>
+      <span>{STATUS_LABEL[job.status] || job.status}</span>
+    </div>
+  );
 }
 
 // ─── Single Order Card ────────────────────────────────────────────────────────
@@ -63,9 +101,7 @@ function OrderAlert({ order, onAccept, onReject, accepting }: {
 
   return (
     <div className="bg-white border-2 border-amber-400 rounded-2xl shadow-xl overflow-hidden animate-pulse-border">
-      {/* Top accent */}
       <div className="h-1.5 bg-gradient-to-r from-amber-400 via-orange-400 to-amber-400" />
-
       <div className="p-5">
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
@@ -75,13 +111,9 @@ function OrderAlert({ order, onAccept, onReject, accepting }: {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-gray-900 text-lg">
-                  Стіл {order.table_number || "—"}
-                </span>
+                <span className="font-bold text-gray-900 text-lg">Стіл {order.table_number || "—"}</span>
                 {order.table_location && (
-                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                    {order.table_location}
-                  </span>
+                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{order.table_location}</span>
                 )}
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-500 mt-0.5">
@@ -147,12 +179,62 @@ function OrderAlert({ order, onAccept, onReject, accepting }: {
   );
 }
 
+// ─── Accepted Card (Right Panel) ──────────────────────────────────────────────
+function AcceptedCard({ order, onJobsUpdate }: { order: AcceptedOrder; onJobsUpdate: (orderId: number, jobs: PrintJob[]) => void }) {
+  useEffect(() => {
+    // Poll print job status every 4s while any job is still queued/printing
+    const needsPoll = !order.printJobs || order.printJobs.some(j => j.status === "queued" || j.status === "printing");
+    if (!needsPoll) return;
+    const t = setInterval(async () => {
+      try {
+        const data = await apiFetch(`/public/print-jobs/by-order/${order.id}`);
+        onJobsUpdate(order.id, data.printJobs || []);
+        if ((data.printJobs || []).every((j: PrintJob) => j.status === "done" || j.status === "failed")) {
+          clearInterval(t);
+        }
+      } catch {}
+    }, 4000);
+    return () => clearInterval(t);
+  }, [order.id, order.printJobs, onJobsUpdate]);
+
+  const jobs = order.printJobs || [];
+  const allDone = jobs.length > 0 && jobs.every(j => j.status === "done");
+  const hasFailed = jobs.some(j => j.status === "failed");
+
+  return (
+    <div className={`bg-white rounded-xl p-3 border ${hasFailed ? "border-red-100" : allDone ? "border-green-100" : "border-amber-100"}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-semibold text-sm text-gray-800">Стіл {order.table_number}</span>
+        <span className="text-xs font-bold text-green-600">{parseFloat(order.total_amount || "0").toFixed(0)} ₴</span>
+      </div>
+      <div className="text-xs text-gray-500 space-y-0.5 mb-2">
+        {order.items.map(it => (
+          <div key={it.id}>{it.quantity}× {it.name}</div>
+        ))}
+      </div>
+      {/* Print job badges */}
+      {jobs.length > 0 ? (
+        <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-gray-100">
+          {jobs.map(job => <PrintJobBadge key={job.id} job={job} />)}
+        </div>
+      ) : (
+        <div className="text-[10px] text-gray-400 mt-1.5 flex items-center gap-1">
+          <Printer className="w-3 h-3" />
+          <span>Очікуємо підтвердження принтера...</span>
+        </div>
+      )}
+      <div className="text-[10px] text-gray-400 mt-1">
+        {order.acceptedAt.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function FbCashier() {
   const [orders, setOrders] = useState<GuestOrder[]>([]);
-  const [accepted, setAccepted] = useState<GuestOrder[]>([]);
+  const [accepted, setAccepted] = useState<AcceptedOrder[]>([]);
   const [accepting, setAccepting] = useState<number | null>(null);
-  const [lastCount, setLastCount] = useState(0);
   const [lastPoll, setLastPoll] = useState<Date | null>(null);
   const [connected, setConnected] = useState(true);
   const knownIds = useRef<Set<number>>(new Set());
@@ -164,20 +246,16 @@ export default function FbCashier() {
       setOrders(incoming);
       setConnected(true);
       setLastPoll(new Date());
-
-      // Play sound for truly new orders
       const newOnes = incoming.filter(o => !knownIds.current.has(o.id));
       if (newOnes.length > 0) {
         playAlert();
         newOnes.forEach(o => knownIds.current.add(o.id));
       }
-      setLastCount(incoming.length);
     } catch {
       setConnected(false);
     }
   }, []);
 
-  // Poll every 3 seconds
   useEffect(() => {
     fetchOrders();
     const t = setInterval(fetchOrders, 3000);
@@ -189,7 +267,17 @@ export default function FbCashier() {
     try {
       await apiFetch(`/public/guest-orders/${id}/accept`, { method: "PATCH" });
       const acceptedOrder = orders.find(o => o.id === id);
-      if (acceptedOrder) setAccepted(prev => [acceptedOrder, ...prev].slice(0, 20));
+      if (acceptedOrder) {
+        // Fetch initial print jobs after short delay (jobs created async)
+        const newEntry: AcceptedOrder = { ...acceptedOrder, printJobs: [], acceptedAt: new Date() };
+        setAccepted(prev => [newEntry, ...prev].slice(0, 30));
+        setTimeout(async () => {
+          try {
+            const data = await apiFetch(`/public/print-jobs/by-order/${id}`);
+            setAccepted(prev => prev.map(o => o.id === id ? { ...o, printJobs: data.printJobs || [] } : o));
+          } catch {}
+        }, 800);
+      }
       setOrders(prev => prev.filter(o => o.id !== id));
       knownIds.current.delete(id);
     } catch (e: any) {
@@ -212,6 +300,10 @@ export default function FbCashier() {
       setAccepting(null);
     }
   };
+
+  const handleJobsUpdate = useCallback((orderId: number, jobs: PrintJob[]) => {
+    setAccepted(prev => prev.map(o => o.id === orderId ? { ...o, printJobs: jobs } : o));
+  }, []);
 
   return (
     <AppLayout>
@@ -256,11 +348,10 @@ export default function FbCashier() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="flex gap-4 h-full">
+        <div className="flex-1 overflow-hidden">
+          <div className="flex h-full">
             {/* Pending orders — LEFT PANEL */}
             <div className="flex-1 p-5 overflow-y-auto">
-              {/* Big alert banner */}
               {orders.length > 0 && (
                 <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center shrink-0 animate-bounce">
@@ -270,7 +361,9 @@ export default function FbCashier() {
                     <div className="font-bold text-amber-800 text-sm">
                       {orders.length === 1 ? "Нове замовлення!" : `${orders.length} нових замовлень!`}
                     </div>
-                    <div className="text-amber-600 text-xs">Прийміть замовлення — тоді кухня та бар отримають завдання</div>
+                    <div className="text-amber-600 text-xs">
+                      Прийміть — система надрукує завдання на кухонний та барний принтери
+                    </div>
                   </div>
                 </div>
               )}
@@ -282,6 +375,11 @@ export default function FbCashier() {
                   </div>
                   <p className="font-semibold text-muted-foreground">Нових замовлень немає</p>
                   <p className="text-sm text-muted-foreground/70 mt-1">Оновлення кожні 3 секунди</p>
+                  <div className="mt-6 flex items-center gap-4 text-xs text-muted-foreground/60">
+                    <div className="flex items-center gap-1"><ChefHat className="w-3.5 h-3.5" /> Кухонний принтер</div>
+                    <div className="flex items-center gap-1"><Wine className="w-3.5 h-3.5" /> Барний принтер</div>
+                    <div className="flex items-center gap-1"><Printer className="w-3.5 h-3.5" /> Чековий принтер</div>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4 max-w-xl">
@@ -300,28 +398,14 @@ export default function FbCashier() {
 
             {/* Accepted orders log — RIGHT PANEL */}
             {accepted.length > 0 && (
-              <div className="w-72 border-l bg-muted/20 p-4 overflow-y-auto shrink-0">
+              <div className="w-80 border-l bg-muted/20 p-4 overflow-y-auto shrink-0">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
                   <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
                   Прийнято ({accepted.length})
                 </div>
                 <div className="space-y-2">
                   {accepted.map(o => (
-                    <div key={o.id} className="bg-white rounded-xl p-3 border border-green-100">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-semibold text-sm text-gray-800">Стіл {o.table_number}</span>
-                        <span className="text-xs font-bold text-green-600">{parseFloat(o.total_amount || "0").toFixed(0)} ₴</span>
-                      </div>
-                      <div className="text-xs text-gray-500 space-y-0.5">
-                        {o.items.map(it => (
-                          <div key={it.id}>{it.quantity}× {it.name}</div>
-                        ))}
-                      </div>
-                      <div className="text-[10px] text-gray-400 mt-1.5 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-green-500" />
-                        Передано на кухню/бар
-                      </div>
-                    </div>
+                    <AcceptedCard key={o.id} order={o} onJobsUpdate={handleJobsUpdate} />
                   ))}
                 </div>
               </div>
