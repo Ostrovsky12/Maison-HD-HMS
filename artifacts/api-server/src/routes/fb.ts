@@ -6,7 +6,7 @@ import { requireAuth } from "../lib/auth.js";
 import { createFiscalReceipt, buildCheckboxGoods, toCheckboxPaymentType } from "../services/checkbox.js";
 
 const router = Router();
-const getOrg = (req: any): number | null => req.user?.organizationId ?? null;
+const getOrg = (req: any): number => req.user?.organizationId;
 
 // ── resolveOrgId — auto-creates org if user has none (mirrors acc-ledger.ts) ─
 async function resolveOrgId(req: any): Promise<number> {
@@ -32,6 +32,17 @@ async function resolveOrgId(req: any): Promise<number> {
   req.user.organizationId = newOrgId;
   return newOrgId;
 }
+
+// ── Middleware: ensure every FB request has a valid organizationId ─────────────
+// This fixes super_admin (organizationId=null in JWT) by looking up or creating an org.
+router.use(requireAuth, async (req: any, res: any, next: any) => {
+  try {
+    await resolveOrgId(req);
+    next();
+  } catch (e: any) {
+    res.status(401).json({ error: e.message });
+  }
+});
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 const CASHIER_ROLES = ["cashier", "manager", "owner", "super_admin"];
