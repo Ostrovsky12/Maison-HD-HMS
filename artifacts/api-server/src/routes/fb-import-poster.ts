@@ -5,7 +5,14 @@ import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
 router.use(requireAuth);
-const org = (req: any): number => req.user.organizationId;
+function getOrgId(req: any, body?: any): number | null {
+  // Regular users always have organizationId in JWT
+  if (req.user.organizationId) return req.user.organizationId;
+  // Super admin can pass orgId explicitly in request body
+  const fromBody = body?.orgId ?? req.body?.orgId;
+  if (fromBody) return Number(fromBody);
+  return null;
+}
 
 // ─── Poster API helper ────────────────────────────────────────────────────────
 async function posterFetch(account: string, method: string, token: string): Promise<any> {
@@ -126,7 +133,8 @@ router.post("/execute", async (req, res) => {
       };
     };
     if (!account || !token) return res.status(400).json({ error: "account і token обов'язкові" });
-    const orgId = org(req);
+    const orgId = getOrgId(req, req.body);
+    if (!orgId) return res.status(400).json({ error: "Не вдалось визначити організацію. Увійдіть як власник або менеджер." });
 
     // Fetch from Poster
     const [rawCats, rawProducts] = await Promise.all([

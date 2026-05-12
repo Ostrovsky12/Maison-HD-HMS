@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -327,6 +328,7 @@ function StepResult({ result, onReset, onGoMenu }: { result: any; onReset: () =>
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function FbImport() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [step, setStep] = useState(0);
   const [account, setAccount] = useState("");
@@ -335,7 +337,7 @@ export default function FbImport() {
   const [result, setResult] = useState<any>(null);
 
   const execute = useMutation({
-    mutationFn: (opts: any) => api("/execute", { account, token, options: opts }),
+    mutationFn: (opts: any) => api("/execute", { account, token, options: opts, orgId: user?.organizationId ?? undefined }),
     onSuccess: (data) => { setResult(data); setStep(3); },
     onError: (e: any) => toast({ title: "Помилка імпорту", description: e.message, variant: "destructive" }),
   });
