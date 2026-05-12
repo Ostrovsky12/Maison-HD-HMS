@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,7 +286,7 @@ function StepOptions({ data, onNext, onBack }: { data: PreviewData; onNext: (opt
 }
 
 // ─── Step 4: Result ───────────────────────────────────────────────────────────
-function StepResult({ result, onReset }: { result: any; onReset: () => void }) {
+function StepResult({ result, onReset, onGoMenu }: { result: any; onReset: () => void; onGoMenu: () => void }) {
   const { stats } = result;
   return (
     <div className="max-w-md mx-auto text-center space-y-6">
@@ -315,7 +316,7 @@ function StepResult({ result, onReset }: { result: any; onReset: () => void }) {
       </div>
       <div className="flex gap-3 justify-center">
         <Button variant="outline" onClick={onReset}><RefreshCw className="w-4 h-4 mr-1" /> Новий імпорт</Button>
-        <Button onClick={() => window.location.href = (import.meta.env.BASE_URL + "fb/menu").replace("//", "/")}>
+        <Button onClick={onGoMenu}>
           <Utensils className="w-4 h-4 mr-1" /> Перейти до меню
         </Button>
       </div>
@@ -326,6 +327,7 @@ function StepResult({ result, onReset }: { result: any; onReset: () => void }) {
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function FbImport() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [step, setStep] = useState(0);
   const [account, setAccount] = useState("");
   const [token, setToken] = useState("");
@@ -383,7 +385,7 @@ export default function FbImport() {
               </div>
             </div>
           )}
-          {step === 3 && result && <StepResult result={result} onReset={reset} />}
+          {step === 3 && result && <StepResult result={result} onReset={reset} onGoMenu={() => setLocation("/fb/menu")} />}
         </div>
       </div>
     </AppLayout>

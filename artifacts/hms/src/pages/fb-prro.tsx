@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -341,6 +342,7 @@ function ShiftsHistory({ entityId, entityName }: { entityId: number; entityName:
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function FbPrroPage() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const qc = useQueryClient();
 
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -405,7 +407,7 @@ export default function FbPrroPage() {
             <p className="text-xs text-muted-foreground mt-1 mb-4">
               Перейдіть до «Юр. особи» та увімкніть ПРРО (Checkbox) для кожної юр. особи.
             </p>
-            <Button size="sm" variant="outline" onClick={() => window.location.href = import.meta.env.BASE_URL + "fb/legal-entities"}>
+            <Button size="sm" variant="outline" onClick={() => setLocation("/fb/legal-entities")}>
               Налаштувати юр. особи
             </Button>
           </div>
