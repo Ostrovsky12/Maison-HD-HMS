@@ -218,6 +218,7 @@ router.get('/tables', async (req, res) => {
     const result = await db.execute(sql`
       SELECT rt.*,
         ro.id AS current_order_id, ro.guest_name AS current_guest, ro.guest_count, ro.total AS current_total, ro.status AS order_status,
+        ro.waiter_user_id AS current_waiter_user_id,
         rr.guest_name AS reservation_guest, rr.reservation_time, rr.guest_count AS reservation_guests
       FROM restaurant_tables rt
       LEFT JOIN restaurant_orders ro ON ro.table_id = rt.id AND ro.status NOT IN ('paid','cancelled')
