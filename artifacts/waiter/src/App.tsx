@@ -37,6 +37,7 @@ function Router() {
       <Route path="/order/:orderId"><ProtectedRoute component={Order} /></Route>
       <Route path="/menu/:orderId"><ProtectedRoute component={MenuPage} /></Route>
       <Route path="/new-order/:tableId"><ProtectedRoute component={NewOrder} /></Route>
+      <Route path="/new-order"><ProtectedRoute component={NewOrder} /></Route>
       <Route path="/"><Redirect to="/tables" /></Route>
       <Route component={NotFound} />
     </Switch>
