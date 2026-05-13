@@ -46,6 +46,11 @@ import FbPositions from "@/pages/fb-positions";
 import FbRegisters from "@/pages/fb-registers";
 import FbSessions from "@/pages/fb-sessions";
 import FbIntegrations from "@/pages/fb-integrations";
+import FbApps from "@/pages/fb-apps";
+import FbStopList from "@/pages/fb-stop-list";
+import FbPrintCards from "@/pages/fb-print-cards";
+import FbPostie from "@/pages/fb-postie";
+import FbDeliveryBot from "@/pages/fb-delivery-bot";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -127,6 +132,11 @@ function Router() {
       <Route path="/fb/packaging"><ProtectedRoute component={FbPackaging} /></Route>
       <Route path="/fb/receipts"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/fb/suppliers"><ProtectedRoute component={FbWarehouse} /></Route>
+      <Route path="/fb/apps"><ProtectedRoute component={FbApps} /></Route>
+      <Route path="/fb/stop-list"><ProtectedRoute component={FbStopList} /></Route>
+      <Route path="/fb/print-cards"><ProtectedRoute component={FbPrintCards} /></Route>
+      <Route path="/fb/postie"><ProtectedRoute component={FbPostie} /></Route>
+      <Route path="/fb/delivery-bot"><ProtectedRoute component={FbDeliveryBot} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>

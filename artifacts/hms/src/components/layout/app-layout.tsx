@@ -13,6 +13,7 @@ import {
   PackageX, ArrowRightLeft, BarChart, ClipboardCheck, Package2,
   Megaphone, Star, Ban, Users2 as UsersGroup,
   Lock, Monitor, Puzzle,
+  Printer, XCircle, Cpu, Bot,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -126,6 +127,20 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/registers", label: "Каси", icon: Monitor },
       { href: "/fb/outlets", label: "Заклади", icon: Store },
       { href: "/fb/integrations", label: "Інтеграції", icon: Puzzle },
+    ],
+  },
+  {
+    id: "fb-apps",
+    label: "Застосунки F&B",
+    icon: Puzzle,
+    items: [
+      { href: "/fb/apps", label: "Усі застосунки", icon: Puzzle },
+      { href: "/fb/print-cards", label: "Друк тех. карток і НФ", icon: Printer },
+      { href: "/fb/stop-list", label: "Стоп-лист на касі", icon: XCircle },
+      { href: "/fb/qr", label: "Poster QR", icon: QrCode },
+      { href: "/fb/prro", label: "ПРРО", icon: Shield },
+      { href: "/fb/postie", label: "Postie AI Assistant", icon: Cpu },
+      { href: "/fb/delivery-bot", label: "Poster Delivery Bot", icon: Bot },
     ],
   },
   {
