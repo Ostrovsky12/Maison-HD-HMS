@@ -1895,5 +1895,21 @@ router.get("/analytics/waiters", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Tax Groups (for item editor) ────────────────────────────────────────────
+router.get("/settings/tax-groups", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    const { rows } = await db_.query(
+      `SELECT id, name, code, rate, is_excise, uktzed, description, is_active, is_default
+       FROM fb_tax_groups
+       WHERE organization_id = $1 AND is_active = true
+       ORDER BY name`,
+      [orgId]
+    );
+    res.json({ taxGroups: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
 

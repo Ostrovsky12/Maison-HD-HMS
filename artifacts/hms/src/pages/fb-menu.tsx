@@ -585,7 +585,7 @@ export default function FbMenu() {
   // Queries
   const { data: catsData } = useQuery({ queryKey: ["fb-categories"], queryFn: () => apiFetch("/api/fb/categories") });
   const { data: itemsData, isLoading: itemsLoading } = useQuery({
-    queryKey: ["fb-items", selectedCatId], queryFn: () => apiFetch("/api/fb/items" + (selectedCatId ? `?categoryId=${selectedCatId}` : "")),
+    queryKey: ["fb-items"], queryFn: () => apiFetch("/api/fb/items"),
   });
   const { data: taxData } = useQuery({ queryKey: ["fb-tax-groups"], queryFn: () => apiFetch("/api/fb/settings/tax-groups") });
 
@@ -596,13 +596,18 @@ export default function FbMenu() {
   // Auto-select first category
   useEffect(() => { if (categories.length && selectedCatId === null) setSelectedCatId(categories[0].id); }, [categories]);
 
-  // Filtered items
+  // Filtered items (always from full list, filter client-side)
   const items = allItems.filter(item => {
+    const catId = (item as any).category_id ?? item.categoryId;
+    if (selectedCatId && catId !== selectedCatId) return false;
     if (search && !item.name.toLowerCase().includes(search.toLowerCase()) && !(item.description || "").toLowerCase().includes(search.toLowerCase())) return false;
-    if (filter === "available" && !item.isAvailable) return false;
+    const isAvail = (item as any).is_available ?? item.isAvailable;
+    const isPop   = (item as any).is_popular   ?? item.isPopular;
+    const isVeg   = (item as any).is_vegetarian ?? item.isVegetarian;
+    if (filter === "available" && !isAvail) return false;
     if (filter === "stop" && !item.is_stop_list) return false;
-    if (filter === "popular" && !item.isPopular) return false;
-    if (filter === "vegetarian" && !item.isVegetarian) return false;
+    if (filter === "popular" && !isPop) return false;
+    if (filter === "vegetarian" && !isVeg) return false;
     return true;
   });
 
@@ -710,7 +715,7 @@ export default function FbMenu() {
                 onClick={() => setSelectedCatId(cat.id)}>
                 <span className="text-base">{cat.emoji}</span>
                 <span className="flex-1 truncate">{cat.name}</span>
-                <span className="text-xs text-muted-foreground">{allItems.filter(i => i.categoryId === cat.id).length}</span>
+                <span className="text-xs text-muted-foreground">{allItems.filter(i => ((i as any).category_id ?? i.categoryId) === cat.id).length}</span>
                 <div className="absolute right-1 opacity-0 group-hover:opacity-100 flex gap-0.5 bg-background border rounded shadow-sm">
                   <button className="p-1 hover:bg-muted rounded" onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: cat }); }} title="Редагувати">
                     <Pencil className="w-3 h-3" />

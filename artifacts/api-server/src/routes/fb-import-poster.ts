@@ -260,7 +260,10 @@ router.post("/execute", async (req, res) => {
       const pid = productCategoryId(p);
       const catNameRaw = String(p.category_name ?? "").toLowerCase();
       const catId = posterCatToHmsId[pid] ?? catNameToHmsId[catNameRaw] ?? null;
-      const photoUrl = options.import_photos !== false ? (p.photo || null) : null;
+      const rawPhoto = p.photo || null;
+      const photoUrl = options.import_photos !== false && rawPhoto
+        ? (rawPhoto.startsWith("http") ? rawPhoto : `https://joinposter.com${rawPhoto}`)
+        : null;
       const name = String(p.product_name ?? p.name ?? "");
       if (!name) continue;
 
@@ -339,7 +342,10 @@ router.post("/execute", async (req, res) => {
         const catId_ = String(d.category_id ?? "");
         const catName_ = catById[catId_] || "";
         const catId = posterCatToHmsId[catId_] ?? catNameToHmsId[catName_.toLowerCase()] ?? null;
-        const photoUrl = options.import_photos !== false ? (d.photo || null) : null;
+        const rawPhotoD = d.photo || null;
+        const photoUrl = options.import_photos !== false && rawPhotoD
+          ? (rawPhotoD.startsWith("http") ? rawPhotoD : `https://joinposter.com${rawPhotoD}`)
+          : null;
         const name = String(d.dish_name ?? d.name ?? "");
         if (!name) continue;
         const yieldQty = parseFloat(d.out || "1") || 1;
