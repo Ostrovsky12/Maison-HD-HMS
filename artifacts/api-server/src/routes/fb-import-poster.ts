@@ -271,14 +271,14 @@ router.post("/execute", async (req, res) => {
       if (existing && !options.overwrite_existing) { stats.items_skipped++; continue; }
       if (existing && options.overwrite_existing) {
         await db.execute(sql`
-          UPDATE fb_items SET price = ${price}, photo_url = COALESCE(${photoUrl}, photo_url),
+          UPDATE fb_items SET price = ${price}, image_url = COALESCE(${photoUrl}, image_url),
             category_id = COALESCE(${catId}, category_id), is_available = true, updated_at = NOW()
           WHERE id = ${existing.id}
         `);
         stats.items_updated++;
       } else {
         await db.execute(sql`
-          INSERT INTO fb_items (organization_id, category_id, name, price, photo_url, is_available, station)
+          INSERT INTO fb_items (organization_id, category_id, name, price, image_url, is_available, station)
           VALUES (${orgId}, ${catId}, ${name}, ${price}, ${photoUrl}, true, ${"kitchen_general"})
         `);
         stats.items_created++;
@@ -356,7 +356,7 @@ router.post("/execute", async (req, res) => {
           stats.dishes_skipped++;
         } else if (existing && options.overwrite_existing) {
           await db.execute(sql`
-            UPDATE fb_items SET price = ${price}, photo_url = COALESCE(${photoUrl}, photo_url),
+            UPDATE fb_items SET price = ${price}, image_url = COALESCE(${photoUrl}, image_url),
               category_id = COALESCE(${catId}, category_id), updated_at = NOW()
             WHERE id = ${existing.id}
           `);
@@ -364,7 +364,7 @@ router.post("/execute", async (req, res) => {
           stats.dishes_updated++;
         } else {
           const r = await db.execute(sql`
-            INSERT INTO fb_items (organization_id, category_id, name, price, photo_url, is_available, station)
+            INSERT INTO fb_items (organization_id, category_id, name, price, image_url, is_available, station)
             VALUES (${orgId}, ${catId}, ${name}, ${price}, ${photoUrl}, true, ${"kitchen_general"})
             RETURNING id
           `);
