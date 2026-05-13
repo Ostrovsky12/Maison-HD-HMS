@@ -78,6 +78,7 @@ import accSyncRouter from "./acc-sync.js";
 import fbStaffRouter from "./fb-staff.js";
 import fbOutletsRouter from "./fb-outlets.js";
 import fbGuestRouter from "./fb-guest.js";
+import fbMarketingRouter from "./fb-marketing.js";
 
 const router: IRouter = Router();
 
@@ -158,6 +159,7 @@ router.use("/acc", accLedgerRouter);
 router.use("/acc/sync", accSyncRouter);
 router.use("/fb/staff", fbStaffRouter);
 router.use("/fb/outlets", fbOutletsRouter);
+router.use("/fb/marketing", fbMarketingRouter);
 router.use("/fb", fbGuestRouter);
 router.use("/", storageRouter);
 

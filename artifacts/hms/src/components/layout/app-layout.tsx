@@ -11,6 +11,7 @@ import {
   Building2, Percent, CreditCard, BookOpen, Shield, Warehouse, FileDown, QrCode, ShieldCheck,
   Users2, Store, Bell, TrendingUp, Receipt, Package, FlaskConical, Clock,
   PackageX, ArrowRightLeft, BarChart, ClipboardCheck, Package2,
+  Megaphone, Star, Ban, Users2 as UsersGroup,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -101,6 +102,18 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/suppliers", label: "Постачальники", icon: Users2 },
       { href: "/fb/warehouses", label: "Склади", icon: Warehouse },
       { href: "/fb/packaging", label: "Фасування", icon: Package },
+    ],
+  },
+  {
+    id: "fb-marketing",
+    label: "Маркетинг F&B",
+    icon: Megaphone,
+    items: [
+      { href: "/fb/clients", label: "Клієнти", icon: Users2 },
+      { href: "/fb/client-groups", label: "Групи клієнтів", icon: UsersGroup },
+      { href: "/fb/loyalty", label: "Програми лояльності", icon: Star },
+      { href: "/fb/exceptions", label: "Винятки", icon: Ban },
+      { href: "/fb/promotions", label: "Акції", icon: Megaphone },
     ],
   },
   {
