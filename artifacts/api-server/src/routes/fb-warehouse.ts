@@ -1420,5 +1420,330 @@ router.delete("/inventory/:id", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// WAREHOUSES / СКЛАДИ  |  TRANSFERS / ПЕРЕМІЩЕННЯ  |  PACKAGING / ФАСУВАННЯ
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureWarehouseTables(client: any) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS fb_warehouses (
+      id SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL,
+      name VARCHAR(100) NOT NULL,
+      address TEXT,
+      notes TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS fb_transfers (
+      id SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL,
+      from_location VARCHAR(150),
+      to_location VARCHAR(150),
+      transfer_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      status VARCHAR(20) NOT NULL DEFAULT 'draft',
+      notes TEXT,
+      total_amount NUMERIC(12,2) DEFAULT 0,
+      created_by INT,
+      confirmed_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS fb_transfer_items (
+      id SERIAL PRIMARY KEY,
+      transfer_id INT NOT NULL REFERENCES fb_transfers(id) ON DELETE CASCADE,
+      ingredient_id INT REFERENCES fb_ingredients(id),
+      name VARCHAR(255) NOT NULL,
+      quantity NUMERIC(12,3) NOT NULL,
+      unit VARCHAR(20) NOT NULL DEFAULT 'кг',
+      cost_per_unit NUMERIC(10,4) DEFAULT 0,
+      total_cost NUMERIC(12,2) DEFAULT 0
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS fb_packaging (
+      id SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL,
+      name VARCHAR(100) NOT NULL,
+      unit VARCHAR(20) NOT NULL DEFAULT 'шт',
+      quantity NUMERIC(12,3) DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+// ─── Склади ───────────────────────────────────────────────────────────────────
+router.get("/warehouses-list", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const r = await db_.query(
+      `SELECT * FROM fb_warehouses WHERE organization_id=$1 ORDER BY name`, [org(req)]
+    );
+    res.json({ warehouses: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/warehouses-list", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const { name, address, notes } = req.body;
+    if (!name) return res.status(400).json({ error: "Назва обов'язкова" });
+    const r = await db_.query(
+      `INSERT INTO fb_warehouses (organization_id, name, address, notes) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [org(req), name, address || null, notes || null]
+    );
+    res.json({ warehouse: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/warehouses-list/:id", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const { name, address, notes, is_active } = req.body;
+    await db_.query(
+      `UPDATE fb_warehouses SET
+         name=COALESCE($1,name), address=COALESCE($2,address),
+         notes=COALESCE($3,notes), is_active=COALESCE($4,is_active)
+       WHERE id=$5 AND organization_id=$6`,
+      [name ?? null, address ?? null, notes ?? null, is_active ?? null, req.params.id, org(req)]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/warehouses-list/:id", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await db_.query(
+      `DELETE FROM fb_warehouses WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Переміщення ─────────────────────────────────────────────────────────────
+router.get("/transfers", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const r = await db_.query(`
+      SELECT t.*, COUNT(ti.id)::int AS item_count
+      FROM fb_transfers t
+      LEFT JOIN fb_transfer_items ti ON ti.transfer_id = t.id
+      WHERE t.organization_id = $1
+      GROUP BY t.id
+      ORDER BY t.transfer_date DESC, t.created_at DESC
+    `, [org(req)]);
+    res.json({ transfers: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/transfers/:id", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `SELECT * FROM fb_transfers WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    const items = await db_.query(`
+      SELECT ti.*, i.name AS ingredient_name
+      FROM fb_transfer_items ti
+      LEFT JOIN fb_ingredients i ON i.id = ti.ingredient_id
+      WHERE ti.transfer_id=$1
+    `, [req.params.id]);
+    res.json({ transfer: r.rows[0], items: items.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/transfers", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const { from_location, to_location, transfer_date, notes, items } = req.body;
+    if (!items?.length) return res.status(400).json({ error: "Потрібні позиції" });
+    const tr = await db_.query(
+      `INSERT INTO fb_transfers (organization_id, from_location, to_location, transfer_date, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [org(req), from_location || null, to_location || null,
+       transfer_date || new Date().toISOString().slice(0,10), notes || null, uid(req)]
+    );
+    const transfer = tr.rows[0];
+    let total = 0;
+    for (const item of items) {
+      const totalCost = (parseFloat(item.quantity) || 0) * (parseFloat(item.cost_per_unit) || 0);
+      total += totalCost;
+      await db_.query(
+        `INSERT INTO fb_transfer_items (transfer_id, ingredient_id, name, quantity, unit, cost_per_unit, total_cost)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [transfer.id, item.ingredient_id || null, item.name,
+         item.quantity, item.unit || 'кг', item.cost_per_unit || 0, totalCost]
+      );
+    }
+    await db_.query(`UPDATE fb_transfers SET total_amount=$1 WHERE id=$2`, [total, transfer.id]);
+    res.json({ transfer: { ...transfer, total_amount: total } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/transfers/:id/confirm", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const tr = await db_.query(
+      `SELECT * FROM fb_transfers WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]
+    );
+    if (!tr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    if (tr.rows[0].status === "confirmed") return res.status(400).json({ error: "Вже підтверджено" });
+    await db_.query(
+      `UPDATE fb_transfers SET status='confirmed', confirmed_at=NOW() WHERE id=$1`, [req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/transfers/:id", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const tr = await db_.query(
+      `SELECT status FROM fb_transfers WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]
+    );
+    if (!tr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
+    if (tr.rows[0].status === "confirmed") return res.status(400).json({ error: "Не можна видалити підтверджене переміщення" });
+    await db_.query(`DELETE FROM fb_transfers WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Фасування ────────────────────────────────────────────────────────────────
+router.get("/packaging", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const r = await db_.query(
+      `SELECT * FROM fb_packaging WHERE organization_id=$1 ORDER BY name`, [org(req)]
+    );
+    res.json({ packaging: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/packaging", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const { name, unit, quantity } = req.body;
+    if (!name) return res.status(400).json({ error: "Назва обов'язкова" });
+    const r = await db_.query(
+      `INSERT INTO fb_packaging (organization_id, name, unit, quantity) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [org(req), name, unit || 'шт', quantity || 0]
+    );
+    res.json({ packaging: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/packaging/:id", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const { name, unit, quantity } = req.body;
+    await db_.query(
+      `UPDATE fb_packaging SET
+         name=COALESCE($1,name), unit=COALESCE($2,unit), quantity=COALESCE($3,quantity)
+       WHERE id=$4 AND organization_id=$5`,
+      [name ?? null, unit ?? null, quantity ?? null, req.params.id, org(req)]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/packaging/:id", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await db_.query(
+      `DELETE FROM fb_packaging WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Звіт за рухом ────────────────────────────────────────────────────────────
+router.get("/movement-report", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    const orgId = org(req);
+    const from = (req.query.from as string) || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const to = (req.query.to as string) || new Date().toISOString().slice(0, 10);
+
+    const receipts = await db_.query(`
+      SELECT ri.ingredient_id,
+             COALESCE(SUM(ri.quantity),0)::numeric                     AS qty,
+             COALESCE(SUM(ri.quantity * ri.price_per_unit),0)::numeric AS amt
+      FROM fb_stock_receipt_items ri
+      JOIN fb_stock_receipts sr ON sr.id = ri.receipt_id
+      WHERE sr.organization_id=$1 AND sr.status='confirmed'
+        AND sr.receipt_date BETWEEN $2 AND $3
+        AND ri.ingredient_id IS NOT NULL
+      GROUP BY ri.ingredient_id
+    `, [orgId, from, to]);
+
+    const writeoffs = await db_.query(`
+      SELECT wi.ingredient_id,
+             COALESCE(SUM(wi.quantity),0)::numeric  AS qty,
+             COALESCE(SUM(wi.total_cost),0)::numeric AS amt
+      FROM fb_stock_writeoff_items wi
+      JOIN fb_stock_writeoffs sw ON sw.id = wi.writeoff_id
+      WHERE sw.organization_id=$1 AND sw.status='confirmed'
+        AND sw.writeoff_date BETWEEN $2 AND $3
+        AND wi.ingredient_id IS NOT NULL
+      GROUP BY wi.ingredient_id
+    `, [orgId, from, to]);
+
+    const ingredients = await db_.query(`
+      SELECT id, name, unit, category,
+             current_stock::numeric AS closing_qty,
+             cost_per_unit::numeric AS cost
+      FROM fb_ingredients
+      WHERE organization_id=$1 AND is_active=TRUE
+      ORDER BY category NULLS LAST, name
+    `, [orgId]);
+
+    const recMap: Record<number, any> = {};
+    for (const r of receipts.rows) recMap[r.ingredient_id] = r;
+    const wofMap: Record<number, any> = {};
+    for (const w of writeoffs.rows) wofMap[w.ingredient_id] = w;
+
+    const rows = ingredients.rows
+      .map((i: any) => {
+        const rec = recMap[i.id] || { qty: 0, amt: 0 };
+        const wof = wofMap[i.id] || { qty: 0, amt: 0 };
+        const recQty = parseFloat(rec.qty) || 0;
+        const wofQty = parseFloat(wof.qty) || 0;
+        const closingQty = parseFloat(i.closing_qty) || 0;
+        const cost = parseFloat(i.cost) || 0;
+        const openingQty = Math.round((closingQty - recQty + wofQty) * 1000) / 1000;
+        return {
+          id: i.id,
+          name: i.name,
+          unit: i.unit,
+          category: i.category || "—",
+          opening_qty: openingQty,
+          opening_amt: Math.round(openingQty * cost * 100) / 100,
+          received_qty: recQty,
+          received_amt: parseFloat(rec.amt) || 0,
+          writeoff_qty: wofQty,
+          writeoff_amt: parseFloat(wof.amt) || 0,
+          closing_qty: closingQty,
+          closing_amt: Math.round(closingQty * cost * 100) / 100,
+          cost,
+        };
+      })
+      .filter((r: any) => r.received_qty > 0 || r.writeoff_qty > 0 || r.closing_qty !== 0);
+
+    res.json({ rows, from, to, total: rows.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
+
 

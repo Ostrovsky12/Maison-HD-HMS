@@ -30,6 +30,12 @@ import FbReportOrders from "@/pages/fb-report-orders";
 import FbReportProducts from "@/pages/fb-report-products";
 import FbReportAbc from "@/pages/fb-report-abc";
 import FbShifts from "@/pages/fb-shifts";
+import FbWriteoffs from "@/pages/fb-writeoffs";
+import FbInventorySessions from "@/pages/fb-inventory-sessions";
+import FbTransfers from "@/pages/fb-transfers";
+import FbMovementReport from "@/pages/fb-movement-report";
+import FbWarehousesList from "@/pages/fb-warehouses-list";
+import FbPackaging from "@/pages/fb-packaging";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -93,6 +99,14 @@ function Router() {
       <Route path="/fb/report/products"><ProtectedRoute component={FbReportProducts} /></Route>
       <Route path="/fb/report/abc"><ProtectedRoute component={FbReportAbc} /></Route>
       <Route path="/fb/shifts"><ProtectedRoute component={FbShifts} /></Route>
+      <Route path="/fb/writeoffs"><ProtectedRoute component={FbWriteoffs} /></Route>
+      <Route path="/fb/inventory"><ProtectedRoute component={FbInventorySessions} /></Route>
+      <Route path="/fb/transfers"><ProtectedRoute component={FbTransfers} /></Route>
+      <Route path="/fb/movement-report"><ProtectedRoute component={FbMovementReport} /></Route>
+      <Route path="/fb/warehouses"><ProtectedRoute component={FbWarehousesList} /></Route>
+      <Route path="/fb/packaging"><ProtectedRoute component={FbPackaging} /></Route>
+      <Route path="/fb/receipts"><ProtectedRoute component={FbWarehouse} /></Route>
+      <Route path="/fb/suppliers"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>

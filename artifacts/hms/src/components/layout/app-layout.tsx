@@ -10,6 +10,7 @@ import {
   Wrench, FileText, MessageSquare, UtensilsCrossed,
   Building2, Percent, CreditCard, BookOpen, Shield, Warehouse, FileDown, QrCode, ShieldCheck,
   Users2, Store, Bell, TrendingUp, Receipt, Package, FlaskConical, Clock,
+  PackageX, ArrowRightLeft, BarChart, ClipboardCheck, Package2,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -75,7 +76,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/fb/cashier", label: "Станція касира", icon: Bell },
       { href: "/fb/menu", label: "Меню", icon: BookOpen },
-      { href: "/fb/warehouse", label: "Склад", icon: Warehouse },
+      { href: "/fb/warehouse", label: "Залишки", icon: Warehouse },
       { href: "/fb/qr", label: "QR-меню столів", icon: QrCode },
       { href: "/fb/staff", label: "Персонал", icon: Users2 },
       { href: "/fb/outlets", label: "Точки продажу", icon: Store },
@@ -84,6 +85,22 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/prro", label: "ПРРО / Зміни", icon: Shield },
       { href: "/fb/settings", label: "ПДВ / Оплата / Принтери", icon: Percent },
       { href: "/fb/admin-pin", label: "Admin PIN", icon: ShieldCheck },
+    ],
+  },
+  {
+    id: "fb-warehouse",
+    label: "Склад F&B",
+    icon: Warehouse,
+    items: [
+      { href: "/fb/warehouse", label: "Залишки", icon: Package2 },
+      { href: "/fb/receipts", label: "Постачання", icon: Receipt },
+      { href: "/fb/transfers", label: "Переміщення", icon: ArrowRightLeft },
+      { href: "/fb/writeoffs", label: "Списання", icon: PackageX },
+      { href: "/fb/movement-report", label: "Звіт за рухом", icon: BarChart },
+      { href: "/fb/inventory", label: "Інвентаризації", icon: ClipboardCheck },
+      { href: "/fb/suppliers", label: "Постачальники", icon: Users2 },
+      { href: "/fb/warehouses", label: "Склади", icon: Warehouse },
+      { href: "/fb/packaging", label: "Фасування", icon: Package },
     ],
   },
   {
