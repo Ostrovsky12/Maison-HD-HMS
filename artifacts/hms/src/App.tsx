@@ -41,6 +41,11 @@ import FbTransfers from "@/pages/fb-transfers";
 import FbMovementReport from "@/pages/fb-movement-report";
 import FbWarehousesList from "@/pages/fb-warehouses-list";
 import FbPackaging from "@/pages/fb-packaging";
+import FbStaffAccess from "@/pages/fb-staff-access";
+import FbPositions from "@/pages/fb-positions";
+import FbRegisters from "@/pages/fb-registers";
+import FbSessions from "@/pages/fb-sessions";
+import FbIntegrations from "@/pages/fb-integrations";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -98,6 +103,11 @@ function Router() {
       <Route path="/fb/admin-pin"><ProtectedRoute component={FbAdminPin} /></Route>
       <Route path="/fb/staff"><ProtectedRoute component={FbStaff} /></Route>
       <Route path="/fb/outlets"><ProtectedRoute component={FbOutlets} /></Route>
+      <Route path="/fb/staff-access"><ProtectedRoute component={FbStaffAccess} /></Route>
+      <Route path="/fb/positions"><ProtectedRoute component={FbPositions} /></Route>
+      <Route path="/fb/registers"><ProtectedRoute component={FbRegisters} /></Route>
+      <Route path="/fb/sessions"><ProtectedRoute component={FbSessions} /></Route>
+      <Route path="/fb/integrations"><ProtectedRoute component={FbIntegrations} /></Route>
       <Route path="/fb/cashier"><ProtectedRoute component={FbCashier} /></Route>
       <Route path="/fb/report/sales"><ProtectedRoute component={FbReportSales} /></Route>
       <Route path="/fb/report/orders"><ProtectedRoute component={FbReportOrders} /></Route>

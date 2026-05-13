@@ -12,6 +12,7 @@ import {
   Users2, Store, Bell, TrendingUp, Receipt, Package, FlaskConical, Clock,
   PackageX, ArrowRightLeft, BarChart, ClipboardCheck, Package2,
   Megaphone, Star, Ban, Users2 as UsersGroup,
+  Lock, Monitor, Puzzle,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -79,8 +80,6 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/menu", label: "Меню", icon: BookOpen },
       { href: "/fb/warehouse", label: "Залишки", icon: Warehouse },
       { href: "/fb/qr", label: "QR-меню столів", icon: QrCode },
-      { href: "/fb/staff", label: "Персонал", icon: Users2 },
-      { href: "/fb/outlets", label: "Точки продажу", icon: Store },
       { href: "/fb/import", label: "Імпорт з Poster", icon: FileDown },
       { href: "/fb/legal-entities", label: "Юр. особи", icon: Building2 },
       { href: "/fb/prro", label: "ПРРО / Зміни", icon: Shield },
@@ -114,6 +113,19 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/loyalty", label: "Програми лояльності", icon: Star },
       { href: "/fb/exceptions", label: "Винятки", icon: Ban },
       { href: "/fb/promotions", label: "Акції", icon: Megaphone },
+    ],
+  },
+  {
+    id: "fb-access",
+    label: "Доступ F&B",
+    icon: Lock,
+    items: [
+      { href: "/fb/staff-access", label: "Працівники", icon: Users2 },
+      { href: "/fb/sessions", label: "Сесії користувачів", icon: Monitor },
+      { href: "/fb/positions", label: "Посади", icon: Shield },
+      { href: "/fb/registers", label: "Каси", icon: Monitor },
+      { href: "/fb/outlets", label: "Заклади", icon: Store },
+      { href: "/fb/integrations", label: "Інтеграції", icon: Puzzle },
     ],
   },
   {
