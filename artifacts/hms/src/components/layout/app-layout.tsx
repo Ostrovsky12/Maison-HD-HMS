@@ -14,6 +14,7 @@ import {
   Megaphone, Star, Ban, Users2 as UsersGroup,
   Lock, Monitor, Puzzle,
   Printer, XCircle, Cpu, Bot,
+  Truck, LayoutGrid, ShieldAlert, Receipt as ReceiptIcon, CreditCard as CreditCardIcon,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -153,6 +154,21 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/report/products", label: "Товари та категорії", icon: Package },
       { href: "/fb/report/abc", label: "АВС-аналіз", icon: FlaskConical },
       { href: "/fb/shifts", label: "Касові зміни", icon: Clock },
+    ],
+  },
+  {
+    id: "fb-config",
+    label: "Налаштування F&B",
+    icon: Wrench,
+    items: [
+      { href: "/fb/config/general", label: "Загальні", icon: Settings },
+      { href: "/fb/config/subscription", label: "Передплата", icon: CreditCardIcon },
+      { href: "/fb/config/orders", label: "Замовлення", icon: ShoppingBag },
+      { href: "/fb/config/delivery", label: "Доставлення", icon: Truck },
+      { href: "/fb/config/tables", label: "Столи", icon: LayoutGrid },
+      { href: "/fb/config/security", label: "Безпека", icon: ShieldAlert },
+      { href: "/fb/config/receipt", label: "Чек", icon: ReceiptIcon },
+      { href: "/fb/config/taxes", label: "Податки", icon: Percent },
     ],
   },
   {

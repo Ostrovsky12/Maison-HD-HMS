@@ -81,6 +81,7 @@ import fbGuestRouter from "./fb-guest.js";
 import fbMarketingRouter from "./fb-marketing.js";
 import fbAccessRouter from "./fb-access.js";
 import fbAppsRouter from "./fb-apps.js";
+import fbConfigRouter from "./fb-config.js";
 
 const router: IRouter = Router();
 
@@ -164,6 +165,7 @@ router.use("/fb/outlets", fbOutletsRouter);
 router.use("/fb/marketing", fbMarketingRouter);
 router.use("/fb/access", fbAccessRouter);
 router.use("/fb/apps", fbAppsRouter);
+router.use("/fb/config", fbConfigRouter);
 router.use("/fb", fbGuestRouter);
 router.use("/", storageRouter);
 

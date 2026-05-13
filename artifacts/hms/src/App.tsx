@@ -51,6 +51,14 @@ import FbStopList from "@/pages/fb-stop-list";
 import FbPrintCards from "@/pages/fb-print-cards";
 import FbPostie from "@/pages/fb-postie";
 import FbDeliveryBot from "@/pages/fb-delivery-bot";
+import FbConfigGeneral from "@/pages/fb-config-general";
+import FbConfigSubscription from "@/pages/fb-config-subscription";
+import FbConfigOrders from "@/pages/fb-config-orders";
+import FbConfigDelivery from "@/pages/fb-config-delivery";
+import FbConfigTables from "@/pages/fb-config-tables";
+import FbConfigSecurity from "@/pages/fb-config-security";
+import FbConfigReceipt from "@/pages/fb-config-receipt";
+import FbConfigTaxes from "@/pages/fb-config-taxes";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -137,6 +145,14 @@ function Router() {
       <Route path="/fb/print-cards"><ProtectedRoute component={FbPrintCards} /></Route>
       <Route path="/fb/postie"><ProtectedRoute component={FbPostie} /></Route>
       <Route path="/fb/delivery-bot"><ProtectedRoute component={FbDeliveryBot} /></Route>
+      <Route path="/fb/config/general"><ProtectedRoute component={FbConfigGeneral} /></Route>
+      <Route path="/fb/config/subscription"><ProtectedRoute component={FbConfigSubscription} /></Route>
+      <Route path="/fb/config/orders"><ProtectedRoute component={FbConfigOrders} /></Route>
+      <Route path="/fb/config/delivery"><ProtectedRoute component={FbConfigDelivery} /></Route>
+      <Route path="/fb/config/tables"><ProtectedRoute component={FbConfigTables} /></Route>
+      <Route path="/fb/config/security"><ProtectedRoute component={FbConfigSecurity} /></Route>
+      <Route path="/fb/config/receipt"><ProtectedRoute component={FbConfigReceipt} /></Route>
+      <Route path="/fb/config/taxes"><ProtectedRoute component={FbConfigTaxes} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>
