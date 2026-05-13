@@ -35,13 +35,17 @@ async function resolveOrgId(req: any): Promise<number> {
 
 // ── Middleware: ensure every FB request has a valid organizationId ─────────────
 // This fixes super_admin (organizationId=null in JWT) by looking up or creating an org.
-router.use(requireAuth, async (req: any, res: any, next: any) => {
-  try {
-    await resolveOrgId(req);
-    next();
-  } catch (e: any) {
-    res.status(401).json({ error: e.message });
-  }
+router.use(async (req: any, res: any, next: any) => {
+  // Public guest routes bypass authentication
+  if (req.path.startsWith("/public/")) return next();
+  requireAuth(req, res, async () => {
+    try {
+      await resolveOrgId(req);
+      next();
+    } catch (e: any) {
+      res.status(401).json({ error: e.message });
+    }
+  });
 });
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
@@ -217,8 +221,14 @@ router.patch("/categories/:id", requireAuth, async (req: any, res) => {
 router.delete("/categories/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
+    const catId = parseInt(req.params.id);
+    // Null out items in this category first to avoid FK constraint violation
+    await pool.query(
+      `UPDATE fb_items SET category_id = NULL WHERE category_id = $1 AND organization_id = $2`,
+      [catId, orgId],
+    );
     await db.delete(fbCategoriesTable)
-      .where(and(eq(fbCategoriesTable.id, parseInt(req.params.id)), eq(fbCategoriesTable.organizationId, orgId)));
+      .where(and(eq(fbCategoriesTable.id, catId), eq(fbCategoriesTable.organizationId, orgId)));
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

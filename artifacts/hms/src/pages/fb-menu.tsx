@@ -301,7 +301,28 @@ function ItemDialog({
 
   useEffect(() => {
     if (open) {
-      setForm(initial ? { ...blankItem, ...initial } : blankItem);
+      if (initial) {
+        const api = initial as any;
+        setForm({
+          ...blankItem,
+          ...initial,
+          categoryId: api.category_id ?? api.categoryId ?? categories[0]?.id,
+          cookMinutes: api.cook_minutes ?? api.cookMinutes ?? 15,
+          isAvailable: api.is_available ?? api.isAvailable ?? true,
+          isPopular: api.is_popular ?? api.isPopular ?? false,
+          isVegetarian: api.is_vegetarian ?? api.isVegetarian ?? false,
+          is_alcohol: api.is_alcohol ?? false,
+          is_stop_list: api.is_stop_list ?? false,
+          sortOrder: api.sort_order ?? api.sortOrder ?? 0,
+          allergens: Array.isArray(api.allergens) ? api.allergens : [],
+          tags: Array.isArray(api.tags) ? api.tags : [],
+          tech_card: Array.isArray(api.tech_card) ? api.tech_card : [],
+          vat_rate: api.vat_rate ?? 20,
+          tax_group_id: api.tax_group_id ?? undefined,
+        });
+      } else {
+        setForm({ ...blankItem, categoryId: categories[0]?.id });
+      }
       setTab("main");
     }
   }, [open, initial?.id]);
@@ -497,12 +518,14 @@ function ItemDialog({
 
 // ─── Item Card ─────────────────────────────────────────────────────────────────
 
-function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList }: {
+function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList, onTogglePopular, onToggleVegetarian }: {
   item: Item;
   onEdit: () => void;
   onDelete: () => void;
   onToggleAvailable: () => void;
   onToggleStopList: () => void;
+  onTogglePopular: () => void;
+  onToggleVegetarian: () => void;
 }) {
   const src = imgSrc(item.image_url);
   const stopList = item.is_stop_list;
@@ -522,25 +545,35 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList 
         {/* Overlay badges */}
         <div className="absolute top-1.5 left-1.5 flex gap-1 flex-wrap">
           {stopList && <span className="bg-destructive text-destructive-foreground text-[10px] px-1.5 py-0.5 rounded font-medium">СТОП</span>}
-          {!item.isAvailable && !stopList && <span className="bg-muted text-muted-foreground text-[10px] px-1.5 py-0.5 rounded">Прихована</span>}
-          {item.isPopular && <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded">⭐ Топ</span>}
-          {item.isVegetarian && <span className="bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded">🌿</span>}
+          {!((item as any).is_available ?? item.isAvailable) && !stopList && <span className="bg-muted text-muted-foreground text-[10px] px-1.5 py-0.5 rounded">Прихована</span>}
+          {((item as any).is_popular ?? item.isPopular) && <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded">⭐ Топ</span>}
+          {((item as any).is_vegetarian ?? item.isVegetarian) && <span className="bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded">🌿</span>}
           {item.is_alcohol && <span className="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded">🍷</span>}
         </div>
         {/* Quick actions overlay */}
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-          <button onClick={onEdit} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title="Редагувати">
-            <Pencil className="w-4 h-4" />
-          </button>
-          <button onClick={onToggleAvailable} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title={item.isAvailable ? "Приховати" : "Показати"}>
-            {item.isAvailable ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-          <button onClick={onToggleStopList} className={`rounded-lg p-2 ${stopList ? "bg-green-500 text-white hover:bg-green-600" : "bg-red-500 text-white hover:bg-red-600"}`} title={stopList ? "Прибрати зі стоп-листа" : "В стоп-лист"}>
-            <AlertTriangle className="w-4 h-4" />
-          </button>
-          <button onClick={onDelete} className="bg-red-600 text-white rounded-lg p-2 hover:bg-red-700" title="Видалити">
-            <Trash2 className="w-4 h-4" />
-          </button>
+        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <button onClick={onEdit} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title="Редагувати">
+              <Pencil className="w-4 h-4" />
+            </button>
+            <button onClick={onToggleAvailable} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title={item.isAvailable ? "Приховати" : "Показати"}>
+              {item.isAvailable ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+            <button onClick={onToggleStopList} className={`rounded-lg p-2 ${stopList ? "bg-green-500 text-white hover:bg-green-600" : "bg-red-500 text-white hover:bg-red-600"}`} title={stopList ? "Прибрати зі стоп-листа" : "В стоп-лист"}>
+              <AlertTriangle className="w-4 h-4" />
+            </button>
+            <button onClick={onDelete} className="bg-red-600 text-white rounded-lg p-2 hover:bg-red-700" title="Видалити">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button onClick={onTogglePopular} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_popular ?? item.isPopular ? "bg-amber-400 text-white hover:bg-amber-500" : "bg-white/90 text-gray-700 hover:bg-white"}`} title="ТОП позиція">
+              <Star className="w-3.5 h-3.5" /> Топ
+            </button>
+            <button onClick={onToggleVegetarian} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_vegetarian ?? item.isVegetarian ? "bg-green-500 text-white hover:bg-green-600" : "bg-white/90 text-gray-700 hover:bg-white"}`} title="Вегетаріанське">
+              <Leaf className="w-3.5 h-3.5" /> Вег
+            </button>
+          </div>
         </div>
       </div>
 
@@ -679,6 +712,20 @@ export default function FbMenu() {
       .then(() => qc.invalidateQueries({ queryKey: ["fb-items"] }))
       .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
 
+  const togglePopular = (item: Item) => {
+    const cur = (item as any).is_popular ?? item.isPopular;
+    apiFetch(`/api/fb/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ isPopular: !cur }) })
+      .then(() => qc.invalidateQueries({ queryKey: ["fb-items"] }))
+      .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
+  };
+
+  const toggleVegetarian = (item: Item) => {
+    const cur = (item as any).is_vegetarian ?? item.isVegetarian;
+    apiFetch(`/api/fb/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ isVegetarian: !cur }) })
+      .then(() => qc.invalidateQueries({ queryKey: ["fb-items"] }))
+      .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
+  };
+
   const selectedCat = categories.find(c => c.id === selectedCatId);
 
   const FILTERS = [
@@ -788,6 +835,8 @@ export default function FbMenu() {
                     onDelete={() => setDeleteItem(item)}
                     onToggleAvailable={() => toggleAvailable(item)}
                     onToggleStopList={() => toggleStopList(item)}
+                    onTogglePopular={() => togglePopular(item)}
+                    onToggleVegetarian={() => toggleVegetarian(item)}
                   />
                 ))}
               </div>
