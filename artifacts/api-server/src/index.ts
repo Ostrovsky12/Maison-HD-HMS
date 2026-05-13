@@ -586,6 +586,7 @@ async function ensureSchema() {
     ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS tax_group_id    INTEGER;
     ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS price_happy     NUMERIC(10,2);
     ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS is_stop_list    BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE fb_items ADD COLUMN IF NOT EXISTS is_active       BOOLEAN NOT NULL DEFAULT true;
     ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS image_url  TEXT;
     ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS description TEXT;
     ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS color       VARCHAR(20);
