@@ -1605,5 +1605,295 @@ router.get("/public/bill/:orderId", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── ANALYTICS ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CLOSED = `('billed','closed')`;
+
+function dateRange(from?: string, to?: string) {
+  const f = from || new Date(Date.now() - 29 * 86400000).toISOString().split("T")[0];
+  const t = to || new Date().toISOString().split("T")[0];
+  return { from: f, to: t };
+}
+
+// GET /analytics/overview?from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get("/analytics/overview", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const db_ = (db as any).$client;
+
+    const [kpiR, chartR, payR] = await Promise.all([
+      db_.query(
+        `SELECT
+           COALESCE(SUM(total_amount),0)::numeric   AS revenue,
+           COALESCE(SUM(discount_amount),0)::numeric AS discounts,
+           COALESCE(SUM(tip_amount),0)::numeric      AS tips,
+           COUNT(*)::int                              AS checks,
+           COALESCE(SUM(guest_count),0)::int          AS guests
+         FROM fb_orders
+         WHERE organization_id=$1 AND status IN ${CLOSED}
+           AND DATE(closed_at) BETWEEN $2 AND $3`,
+        [orgId, from, to]
+      ),
+      db_.query(
+        `SELECT DATE(closed_at)::text AS date,
+                COUNT(*)::int                    AS checks,
+                COALESCE(SUM(total_amount),0)::numeric AS revenue
+         FROM fb_orders
+         WHERE organization_id=$1 AND status IN ${CLOSED}
+           AND DATE(closed_at) BETWEEN $2 AND $3
+         GROUP BY DATE(closed_at) ORDER BY DATE(closed_at)`,
+        [orgId, from, to]
+      ),
+      db_.query(
+        `SELECT payment_method AS method,
+                COUNT(*)::int AS cnt,
+                COALESCE(SUM(total_amount),0)::numeric AS amount
+         FROM fb_orders
+         WHERE organization_id=$1 AND status IN ${CLOSED}
+           AND DATE(closed_at) BETWEEN $2 AND $3
+         GROUP BY payment_method ORDER BY amount DESC`,
+        [orgId, from, to]
+      ),
+    ]);
+
+    const k = kpiR.rows[0] || {};
+    const revenue = Number(k.revenue || 0);
+    const checks = Number(k.checks || 0);
+    res.json({
+      from, to,
+      kpi: {
+        revenue,
+        checks,
+        avg_check: checks ? Math.round(revenue / checks * 100) / 100 : 0,
+        guests: Number(k.guests || 0),
+        tips: Number(k.tips || 0),
+        discounts: Number(k.discounts || 0),
+      },
+      chart: chartR.rows,
+      by_payment: payR.rows,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /analytics/orders?from=&to=&status=&payment=&page=&limit=
+router.get("/analytics/orders", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const { status, payment, waiter } = req.query as any;
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(200, parseInt(req.query.limit as string) || 50);
+    const offset = (page - 1) * limit;
+    const db_ = (db as any).$client;
+
+    const conds: string[] = [
+      `o.organization_id = $1`,
+      `DATE(COALESCE(o.closed_at, o.created_at)) BETWEEN $2 AND $3`,
+    ];
+    const vals: any[] = [orgId, from, to];
+    let idx = 4;
+    if (status && status !== "all") { conds.push(`o.status = $${idx++}`); vals.push(status); }
+    if (payment && payment !== "all") { conds.push(`o.payment_method = $${idx++}`); vals.push(payment); }
+    if (waiter && waiter !== "all") { conds.push(`o.current_waiter_user_id = $${idx++}`); vals.push(parseInt(waiter)); }
+
+    const where = conds.join(" AND ");
+
+    const [ordersR, totalR] = await Promise.all([
+      db_.query(
+        `SELECT o.id, o.receipt_number, o.guest_name, o.guest_count, o.status,
+                o.payment_method, o.total_amount, o.discount_amount, o.tip_amount,
+                o.order_type, o.created_at, o.closed_at, o.notes,
+                t.number AS table_number,
+                u.name AS waiter_name
+         FROM fb_orders o
+         LEFT JOIN fb_tables t ON t.id = o.table_id
+         LEFT JOIN users u ON u.id = o.current_waiter_user_id
+         WHERE ${where}
+         ORDER BY COALESCE(o.closed_at, o.created_at) DESC
+         LIMIT $${idx} OFFSET $${idx + 1}`,
+        [...vals, limit, offset]
+      ),
+      db_.query(`SELECT COUNT(*)::int AS total FROM fb_orders o WHERE ${where}`, vals),
+    ]);
+
+    res.json({ orders: ordersR.rows, total: totalR.rows[0]?.total || 0, page, limit });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /analytics/products?from=&to=
+router.get("/analytics/products", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const db_ = (db as any).$client;
+
+    const r = await db_.query(
+      `SELECT oi.item_id,
+              oi.name,
+              COALESCE(fc.name,'—') AS category_name,
+              SUM(oi.quantity)::numeric      AS qty,
+              SUM(oi.total_price)::numeric   AS revenue
+       FROM fb_order_items oi
+       JOIN fb_orders o ON o.id = oi.order_id
+       LEFT JOIN fb_items fi ON fi.id = oi.item_id
+       LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+       WHERE o.organization_id=$1 AND o.status IN ${CLOSED}
+         AND DATE(o.closed_at) BETWEEN $2 AND $3
+         AND oi.status != 'cancelled'
+       GROUP BY oi.item_id, oi.name, fc.name
+       ORDER BY revenue DESC`,
+      [orgId, from, to]
+    );
+
+    res.json({ products: r.rows, from, to });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /analytics/categories?from=&to=
+router.get("/analytics/categories", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const db_ = (db as any).$client;
+
+    const r = await db_.query(
+      `SELECT fc.id AS category_id,
+              COALESCE(fc.name,'Без категорії') AS name,
+              SUM(oi.quantity)::numeric     AS qty,
+              SUM(oi.total_price)::numeric  AS revenue
+       FROM fb_order_items oi
+       JOIN fb_orders o ON o.id = oi.order_id
+       LEFT JOIN fb_items fi ON fi.id = oi.item_id
+       LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+       WHERE o.organization_id=$1 AND o.status IN ${CLOSED}
+         AND DATE(o.closed_at) BETWEEN $2 AND $3
+         AND oi.status != 'cancelled'
+       GROUP BY fc.id, fc.name
+       ORDER BY revenue DESC`,
+      [orgId, from, to]
+    );
+
+    res.json({ categories: r.rows, from, to });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /analytics/abc?from=&to=
+router.get("/analytics/abc", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const db_ = (db as any).$client;
+
+    const r = await db_.query(
+      `SELECT oi.item_id,
+              oi.name,
+              COALESCE(fc.name,'—') AS category_name,
+              SUM(oi.quantity)::numeric     AS qty,
+              SUM(oi.total_price)::numeric  AS revenue
+       FROM fb_order_items oi
+       JOIN fb_orders o ON o.id = oi.order_id
+       LEFT JOIN fb_items fi ON fi.id = oi.item_id
+       LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+       WHERE o.organization_id=$1 AND o.status IN ${CLOSED}
+         AND DATE(o.closed_at) BETWEEN $2 AND $3
+         AND oi.status != 'cancelled'
+       GROUP BY oi.item_id, oi.name, fc.name
+       ORDER BY revenue DESC`,
+      [orgId, from, to]
+    );
+
+    const items = r.rows as any[];
+    const totalRevenue = items.reduce((s: number, i: any) => s + Number(i.revenue), 0);
+    const totalQty = items.reduce((s: number, i: any) => s + Number(i.qty), 0);
+
+    // Sort by revenue for ABC (by revenue)
+    let cumRevenue = 0;
+    const sorted = [...items].sort((a, b) => Number(b.revenue) - Number(a.revenue));
+    const result = sorted.map((item: any, idx: number) => {
+      cumRevenue += Number(item.revenue);
+      const cumPct = totalRevenue > 0 ? cumRevenue / totalRevenue : 0;
+      const revClass = cumPct <= 0.70 ? "A" : cumPct <= 0.90 ? "B" : "C";
+      const revPct = totalRevenue > 0 ? Number(item.revenue) / totalRevenue * 100 : 0;
+      const qtyPct = totalQty > 0 ? Number(item.qty) / totalQty * 100 : 0;
+      return {
+        rank: idx + 1,
+        item_id: item.item_id,
+        name: item.name,
+        category_name: item.category_name,
+        qty: Number(item.qty),
+        qty_pct: Math.round(qtyPct * 100) / 100,
+        revenue: Number(item.revenue),
+        revenue_pct: Math.round(revPct * 100) / 100,
+        class: revClass,
+      };
+    });
+
+    res.json({ items: result, from, to, total_revenue: totalRevenue, total_qty: totalQty });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /cashbox/sessions/history?from=&to=
+router.get("/cashbox/sessions/history", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const db_ = (db as any).$client;
+
+    const r = await db_.query(
+      `SELECT cs.*,
+              u.name  AS cashier_name,
+              le.name AS entity_name,
+              (SELECT COUNT(*)::int FROM fb_orders o
+               WHERE o.organization_id = cs.organization_id
+                 AND o.status IN ${CLOSED}
+                 AND o.closed_at BETWEEN cs.opened_at AND COALESCE(cs.closed_at, NOW())
+              ) AS checks,
+              (SELECT COALESCE(SUM(o.total_amount),0)::numeric FROM fb_orders o
+               WHERE o.organization_id = cs.organization_id
+                 AND o.status IN ${CLOSED}
+                 AND o.closed_at BETWEEN cs.opened_at AND COALESCE(cs.closed_at, NOW())
+              ) AS revenue
+       FROM cashbox_sessions cs
+       LEFT JOIN users u ON u.id = cs.cashier_id
+       LEFT JOIN legal_entities le ON le.id = cs.legal_entity_id
+       WHERE cs.organization_id = $1
+         AND DATE(cs.opened_at) BETWEEN $2 AND $3
+       ORDER BY cs.opened_at DESC`,
+      [orgId, from, to]
+    );
+
+    res.json({ sessions: r.rows, from, to });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /analytics/waiters?from=&to= (staff performance)
+router.get("/analytics/waiters", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const db_ = (db as any).$client;
+
+    const r = await db_.query(
+      `SELECT u.id, u.name,
+              COUNT(o.id)::int AS checks,
+              COALESCE(SUM(o.total_amount),0)::numeric AS revenue,
+              COALESCE(AVG(o.total_amount),0)::numeric AS avg_check,
+              COALESCE(AVG(EXTRACT(EPOCH FROM (o.closed_at - o.created_at))/60),0)::numeric AS avg_minutes
+       FROM fb_orders o
+       JOIN users u ON u.id = o.current_waiter_user_id
+       WHERE o.organization_id=$1 AND o.status IN ${CLOSED}
+         AND DATE(o.closed_at) BETWEEN $2 AND $3
+       GROUP BY u.id, u.name
+       ORDER BY revenue DESC`,
+      [orgId, from, to]
+    );
+
+    res.json({ waiters: r.rows, from, to });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
 

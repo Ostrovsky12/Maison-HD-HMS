@@ -25,6 +25,11 @@ import FbAdminPin from "@/pages/fb-admin-pin";
 import FbStaff from "@/pages/fb-staff";
 import FbOutlets from "@/pages/fb-outlets";
 import FbCashier from "@/pages/fb-cashier";
+import FbReportSales from "@/pages/fb-report-sales";
+import FbReportOrders from "@/pages/fb-report-orders";
+import FbReportProducts from "@/pages/fb-report-products";
+import FbReportAbc from "@/pages/fb-report-abc";
+import FbShifts from "@/pages/fb-shifts";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -83,6 +88,11 @@ function Router() {
       <Route path="/fb/staff"><ProtectedRoute component={FbStaff} /></Route>
       <Route path="/fb/outlets"><ProtectedRoute component={FbOutlets} /></Route>
       <Route path="/fb/cashier"><ProtectedRoute component={FbCashier} /></Route>
+      <Route path="/fb/report/sales"><ProtectedRoute component={FbReportSales} /></Route>
+      <Route path="/fb/report/orders"><ProtectedRoute component={FbReportOrders} /></Route>
+      <Route path="/fb/report/products"><ProtectedRoute component={FbReportProducts} /></Route>
+      <Route path="/fb/report/abc"><ProtectedRoute component={FbReportAbc} /></Route>
+      <Route path="/fb/shifts"><ProtectedRoute component={FbShifts} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>

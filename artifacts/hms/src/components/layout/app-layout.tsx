@@ -9,7 +9,7 @@ import {
   Home, Search, Info, ShoppingBag, BarChart2,
   Wrench, FileText, MessageSquare, UtensilsCrossed,
   Building2, Percent, CreditCard, BookOpen, Shield, Warehouse, FileDown, QrCode, ShieldCheck,
-  Users2, Store, Bell,
+  Users2, Store, Bell, TrendingUp, Receipt, Package, FlaskConical, Clock,
 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 
@@ -73,17 +73,29 @@ const NAV_GROUPS: NavGroup[] = [
     label: "F&B",
     icon: UtensilsCrossed,
     items: [
+      { href: "/fb/cashier", label: "Станція касира", icon: Bell },
+      { href: "/fb/menu", label: "Меню", icon: BookOpen },
+      { href: "/fb/warehouse", label: "Склад", icon: Warehouse },
+      { href: "/fb/qr", label: "QR-меню столів", icon: QrCode },
+      { href: "/fb/staff", label: "Персонал", icon: Users2 },
+      { href: "/fb/outlets", label: "Точки продажу", icon: Store },
+      { href: "/fb/import", label: "Імпорт з Poster", icon: FileDown },
       { href: "/fb/legal-entities", label: "Юр. особи", icon: Building2 },
       { href: "/fb/prro", label: "ПРРО / Зміни", icon: Shield },
       { href: "/fb/settings", label: "ПДВ / Оплата / Принтери", icon: Percent },
-      { href: "/fb/menu", label: "Меню", icon: BookOpen },
-      { href: "/fb/warehouse", label: "Склад", icon: Warehouse },
-      { href: "/fb/import", label: "Імпорт з Poster", icon: FileDown },
-      { href: "/fb/qr", label: "QR-меню столів", icon: QrCode },
       { href: "/fb/admin-pin", label: "Admin PIN", icon: ShieldCheck },
-      { href: "/fb/cashier", label: "Станція касира", icon: Bell },
-      { href: "/fb/staff", label: "Персонал", icon: Users2 },
-      { href: "/fb/outlets", label: "Точки продажу", icon: Store },
+    ],
+  },
+  {
+    id: "fb-reports",
+    label: "Звітність F&B",
+    icon: BarChart2,
+    items: [
+      { href: "/fb/report/sales", label: "Продажі", icon: TrendingUp },
+      { href: "/fb/report/orders", label: "Чеки", icon: Receipt },
+      { href: "/fb/report/products", label: "Товари та категорії", icon: Package },
+      { href: "/fb/report/abc", label: "АВС-аналіз", icon: FlaskConical },
+      { href: "/fb/shifts", label: "Касові зміни", icon: Clock },
     ],
   },
   {
