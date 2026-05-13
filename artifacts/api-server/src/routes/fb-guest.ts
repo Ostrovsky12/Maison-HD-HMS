@@ -105,14 +105,22 @@ router.get("/public/guest-menu", async (req, res) => {
 
     const { rows: items } = await pool.query(
       `SELECT id, category_id, name, description, price,
-              is_popular, is_vegetarian, allergens, image_url, cook_minutes
+              is_popular, is_vegetarian, allergens, image_url, cook_minutes,
+              COALESCE(station, 'kitchen_general') AS station
        FROM fb_items
        WHERE organization_id = $1 AND is_available = true AND (is_stop_list IS NULL OR is_stop_list = false)
        ORDER BY sort_order ASC NULLS LAST, name ASC`,
       [orgId],
     );
 
-    res.json({ orgId, orgName: org_name, orgSlug: org_slug, tableNumber, tableLocation, categories: cats, items });
+    // Fetch guest branding config (logo_url, colors)
+    const { rows: brandingRows } = await pool.query(
+      `SELECT data FROM fb_config_settings WHERE organization_id=$1 AND section='guest_branding' LIMIT 1`,
+      [orgId],
+    ).catch(() => ({ rows: [] }));
+    const branding = brandingRows[0]?.data || {};
+
+    res.json({ orgId, orgName: org_name, orgSlug: org_slug, tableNumber, tableLocation, categories: cats, items, branding });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -315,6 +323,83 @@ router.get("/public/print-jobs/by-order/:orderId", requireAuth, async (req: any,
       [orgId, orderId],
     );
     res.json({ printJobs: rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /fb/public/ai-chat ──────────────────────────────────────────────────
+// AI waiter endpoint — uses OPENAI_API_KEY to chat about the menu
+router.post("/public/ai-chat", async (req, res) => {
+  const { tid, messages } = req.body;
+  if (!tid || !Array.isArray(messages)) return res.status(400).json({ error: "tid and messages required" });
+
+  try {
+    const { rows: tableRows } = await pool.query(
+      `SELECT ft.organization_id, ft.number, ft.location, o.name as org_name
+       FROM fb_tables ft JOIN organizations o ON o.id = ft.organization_id
+       WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
+      [tid],
+    );
+    if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
+    const { organization_id: orgId, number: tableNumber, location: tableLocation, org_name } = tableRows[0];
+
+    // Build menu context
+    const { rows: items } = await pool.query(
+      `SELECT fi.name, fi.description, fi.price, fi.allergens, fi.is_vegetarian, fi.is_popular,
+              fi.cook_minutes, fi.station, fc.name AS category_name
+       FROM fb_items fi
+       LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+       WHERE fi.organization_id = $1 AND fi.is_available = true AND (fi.is_stop_list IS NULL OR fi.is_stop_list = false)
+       ORDER BY fc.sort_order NULLS LAST, fi.sort_order NULLS LAST, fi.name`,
+      [orgId],
+    );
+
+    const menuText = items.map((i: any) => {
+      let line = `• ${i.name} — ${parseFloat(i.price).toFixed(0)} ₴`;
+      if (i.category_name) line += ` [${i.category_name}]`;
+      if (i.description) line += `\n  ${i.description}`;
+      if (i.is_vegetarian) line += " 🌿";
+      if (i.is_popular) line += " ⭐";
+      if (i.cook_minutes) line += ` (~${i.cook_minutes} хв)`;
+      if (Array.isArray(i.allergens) && i.allergens.length) line += `\n  Алергени: ${i.allergens.join(", ")}`;
+      return line;
+    }).join("\n");
+
+    const systemPrompt = `Ти — AI-офіціант ресторану "${org_name}". Стіл: ${tableNumber}${tableLocation ? ` · ${tableLocation}` : ""}.
+
+Твоя роль:
+- Допомагати гостям обрати страви та напої
+- Розповідати про склад, алергени, час приготування
+- Рекомендувати поєднання (вино до м'яса, десерт до кави тощо)
+- Ненав'язливо нагадувати про хліб до перших страв і про десерти наприкінці
+- Відповідати виключно про позиції з меню нижче
+- Говорити тільки українською мовою
+- Бути привітним, коротким і корисним
+
+МЕНЮ ЗАКЛАДУ:
+${menuText}
+
+Якщо гість питає про щось поза меню — чемно поясни, що цього немає в меню.`;
+
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) return res.status(503).json({ error: "AI waiter not configured" });
+
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: systemPrompt }, ...messages.slice(-10)],
+        max_tokens: 400,
+        temperature: 0.7,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const openaiData: any = await openaiRes.json();
+    if (!openaiRes.ok) return res.status(502).json({ error: openaiData.error?.message || "OpenAI error" });
+
+    res.json({ reply: openaiData.choices[0]?.message?.content || "Вибачте, не зрозумів. Спробуйте ще раз." });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

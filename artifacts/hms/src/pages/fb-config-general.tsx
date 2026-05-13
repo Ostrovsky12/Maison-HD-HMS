@@ -1,12 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Loader2, Settings, Upload } from "lucide-react";
+import { Save, Loader2, Settings, ImageIcon } from "lucide-react";
 
 const API = "/api/fb/config";
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -52,6 +51,8 @@ interface GeneralConfig {
   online_orders_email?: string;
 }
 
+interface GuestBranding { logo_url?: string; primary_color?: string; accent_color?: string; }
+
 export default function FbConfigGeneral() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -64,17 +65,32 @@ export default function FbConfigGeneral() {
     show_cashier_on_fiscal: false, stock_notifications: "Не сповіщати",
   });
 
+  const [branding, setBranding] = useState<GuestBranding>({ logo_url: "", primary_color: "#2C2416", accent_color: "#C9A96E" });
+
   const { isLoading } = useQuery({
     queryKey: ["fb-config-general"],
     queryFn: () => apiFetch(`${API}/section/general`),
     onSuccess: (d) => { if (d.data && Object.keys(d.data).length > 0) setCfg(d.data); },
   });
 
+  useQuery({
+    queryKey: ["fb-config-guest-branding"],
+    queryFn: () => apiFetch(`${API}/section/guest_branding`),
+    onSuccess: (d) => { if (d.data && Object.keys(d.data).length > 0) setBranding(prev => ({ ...prev, ...d.data })); },
+  });
+
   const set = <K extends keyof GeneralConfig>(k: K, v: GeneralConfig[K]) => setCfg(p => ({ ...p, [k]: v }));
+  const setBrand = <K extends keyof GuestBranding>(k: K, v: GuestBranding[K]) => setBranding(p => ({ ...p, [k]: v }));
 
   const save = useMutation({
     mutationFn: () => apiFetch(`${API}/section/general`, { method: "PUT", body: JSON.stringify({ data: cfg }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["fb-config-general"] }); toast({ title: "Налаштування збережено" }); },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  const saveBranding = useMutation({
+    mutationFn: () => apiFetch(`${API}/section/guest_branding`, { method: "PUT", body: JSON.stringify({ data: branding }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["fb-config-guest-branding"] }); toast({ title: "Брендинг збережено" }); },
     onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
   });
 
@@ -135,14 +151,8 @@ export default function FbConfigGeneral() {
               <Input value={cfg.poster_address||""} onChange={e => set("poster_address", e.target.value)}
                 placeholder="your-place.joinposter.com" className="max-w-xs" />
             </Row>
-            <Row label="Логотип"
-              hint="Друкуватиметься у шапці чека. Підтримуються формати JPEG, PNG або GIF. Розмір файла — до 5Мбайт.">
-              <div className="flex items-center gap-3">
-                <div className="w-16 h-16 rounded-lg border-2 border-dashed flex items-center justify-center bg-muted/30">
-                  <Upload className="w-6 h-6 text-muted-foreground" />
-                </div>
-                <Button variant="outline" size="sm"><Upload className="w-4 h-4 mr-1" />Завантажити...</Button>
-              </div>
+            <Row label="Логотип" hint="Друкуватиметься у шапці чека.">
+              <Input value={cfg.company_name ? "" : ""} placeholder="(файл: завантаження в розробці)" disabled className="max-w-xs opacity-50" />
             </Row>
 
             <Section title="Загальні налаштування" />
@@ -215,6 +225,58 @@ export default function FbConfigGeneral() {
               <Input value={cfg.online_orders_email||""} onChange={e => set("online_orders_email", e.target.value)}
                 placeholder="email@example.com" className="max-w-xs" />
             </div>
+
+            {/* Guest Menu Branding */}
+            <div className="mt-8 pt-6 border-t border-dashed">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-slate-500" />
+                  <h2 className="text-base font-semibold">Брендинг гостьового меню (QR)</h2>
+                </div>
+                <Button onClick={() => saveBranding.mutate()} disabled={saveBranding.isPending} size="sm" variant="outline">
+                  {saveBranding.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
+                  Зберегти
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">Налаштування відображаються у гостьовому QR-меню. Логотип з'являється на головному екрані меню.</p>
+              <div className="space-y-3">
+                <Row label="URL логотипу" hint="Вставте пряме посилання на зображення (PNG, SVG, JPEG). Рекомендований розмір: 200×80 px.">
+                  <div className="space-y-2 max-w-sm">
+                    <Input value={branding.logo_url||""} onChange={e => setBrand("logo_url", e.target.value)}
+                      placeholder="https://example.com/logo.png" />
+                    {branding.logo_url && (
+                      <div className="w-full h-16 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden">
+                        <img src={branding.logo_url} alt="Logo preview" className="max-h-12 max-w-full object-contain"
+                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                      </div>
+                    )}
+                  </div>
+                </Row>
+                <div className="grid grid-cols-[180px_1fr] gap-4 items-center py-2">
+                  <Label className="text-sm text-muted-foreground">Основний колір</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={branding.primary_color||"#2C2416"}
+                      onChange={e => setBrand("primary_color", e.target.value)}
+                      className="w-10 h-10 rounded-lg border cursor-pointer" />
+                    <Input value={branding.primary_color||"#2C2416"} onChange={e => setBrand("primary_color", e.target.value)}
+                      className="max-w-[120px] font-mono text-sm" />
+                    <span className="text-xs text-muted-foreground">(фон заголовка, кнопки)</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-[180px_1fr] gap-4 items-center py-2">
+                  <Label className="text-sm text-muted-foreground">Акцентний колір</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={branding.accent_color||"#C9A96E"}
+                      onChange={e => setBrand("accent_color", e.target.value)}
+                      className="w-10 h-10 rounded-lg border cursor-pointer" />
+                    <Input value={branding.accent_color||"#C9A96E"} onChange={e => setBrand("accent_color", e.target.value)}
+                      className="max-w-[120px] font-mono text-sm" />
+                    <span className="text-xs text-muted-foreground">(AI-кнопка, теги)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>

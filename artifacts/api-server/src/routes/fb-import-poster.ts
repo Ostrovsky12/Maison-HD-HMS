@@ -188,18 +188,27 @@ router.post("/execute", async (req, res) => {
     const orgId = getOrgId(req, req.body);
     if (!orgId) return res.status(400).json({ error: "Не вдалось визначити організацію." });
 
-    // Fetch everything from Poster
+    // Fetch everything from Poster (including storage quantities)
     const fetches = await Promise.allSettled([
       posterFetch(account, "menu.getCategories", token),
       posterFetch(account, "menu.getProducts", token),
       options.import_dishes ? posterFetch(account, "menu.getDishes", token) : Promise.resolve([]),
       options.import_ingredients ? posterFetch(account, "menu.getIngredients", token) : Promise.resolve([]),
+      options.import_ingredients ? posterFetch(account, "storage.getIngredients", token) : Promise.resolve([]),
     ]);
 
     const cats: any[] = fetches[0].status === "fulfilled" && Array.isArray(fetches[0].value) ? fetches[0].value : [];
     const products: any[] = fetches[1].status === "fulfilled" && Array.isArray(fetches[1].value) ? fetches[1].value : [];
     const dishes: any[] = fetches[2].status === "fulfilled" && Array.isArray(fetches[2].value) ? fetches[2].value : [];
     const rawIngredients: any[] = fetches[3].status === "fulfilled" && Array.isArray(fetches[3].value) ? fetches[3].value : [];
+    // Build stock quantity map from storage: poster_ingredient_id → quantity
+    const storageItems: any[] = fetches[4].status === "fulfilled" && Array.isArray(fetches[4].value) ? fetches[4].value : [];
+    const stockMap: Record<string, number> = {};
+    for (const si of storageItems) {
+      const id = String(si.ingredient_id ?? si.id ?? "");
+      const qty = parseFloat(si.quantity_units ?? si.quantity ?? si.current_stock ?? 0) || 0;
+      if (id) stockMap[id] = qty;
+    }
 
     const stats = {
       categories_created: 0, categories_reused: 0,
@@ -312,21 +321,24 @@ router.post("/execute", async (req, res) => {
           posterIngToHmsId[posterId] = existing.id;
           stats.ingredients_skipped++;
         } else if (existing && options.overwrite_existing) {
+          const currentStock = stockMap[posterId] ?? null;
           await db.execute(sql`
             UPDATE fb_ingredients SET
               unit = ${unit},
               category = NULLIF(${category}, ''),
               cost_per_unit = ${cost},
               barcode = ${barcode},
+              current_stock = COALESCE(${currentStock}, current_stock),
               updated_at = NOW()
             WHERE id = ${existing.id}
           `);
           posterIngToHmsId[posterId] = existing.id;
           stats.ingredients_updated++;
         } else {
+          const currentStock = stockMap[posterId] ?? 0;
           const r = await db.execute(sql`
             INSERT INTO fb_ingredients (organization_id, name, unit, category, cost_per_unit, barcode, current_stock, min_stock)
-            VALUES (${orgId}, ${name}, ${unit}, NULLIF(${category}, ''), ${cost}, ${barcode}, 0, 0)
+            VALUES (${orgId}, ${name}, ${unit}, NULLIF(${category}, ''), ${cost}, ${barcode}, ${currentStock}, 0)
             RETURNING id
           `);
           posterIngToHmsId[posterId] = (r.rows[0] as any).id;
