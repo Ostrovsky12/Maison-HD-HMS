@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import {
   ArrowDownToLine, ArrowUpFromLine, BarChart3, Boxes,
   Scan, FileText, CheckCircle2, XCircle, Clock, Filter,
   ShoppingCart, Warehouse, RefreshCw,
+  Mic, Upload, ImageIcon, ArrowLeft, Sparkles, Info, Loader2,
 } from "lucide-react";
 
 // ─── API helper ───────────────────────────────────────────────────────────────
@@ -235,13 +237,393 @@ function SupplierDialog({ open, onClose, initial, onSave }: {
   );
 }
 
+// ─── Voice Mic Button ─────────────────────────────────────────────────────────
+function VoiceMicButton({ onTranscript }: { onTranscript: (t: string) => void }) {
+  const [recording, setRecording] = useState(false);
+  const recogRef = useRef<any>(null);
+  const toggle = () => {
+    if (recording) { recogRef.current?.stop(); setRecording(false); return; }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { alert("Браузер не підтримує голосовий ввід. Спробуйте Chrome."); return; }
+    const r = new SR();
+    r.lang = "uk-UA"; r.continuous = true; r.interimResults = true;
+    let final = "";
+    r.onresult = (e: any) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      onTranscript(final + interim);
+    };
+    r.onerror = () => setRecording(false);
+    r.onend = () => setRecording(false);
+    recogRef.current = r;
+    r.start();
+    setRecording(true);
+  };
+  return (
+    <button onClick={toggle} className={`rounded-full p-4 transition-colors mx-auto block ${recording ? "bg-red-500 text-white animate-pulse" : "bg-violet-100 text-violet-600 hover:bg-violet-200"}`}>
+      <Mic className="w-7 h-7" />
+    </button>
+  );
+}
+
+// ─── Ingredient Picker ────────────────────────────────────────────────────────
+function IngredientPicker({ value, isNew, suggestions, allIngredients, onChange }: {
+  value: number | null; isNew: boolean; suggestions: any[];
+  allIngredients: any[]; onChange: (ing: any | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+  const current = value ? allIngredients.find((i: any) => i.id === value) : null;
+  const displayList = search.length >= 1
+    ? allIngredients.filter((i: any) => i.name.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
+    : suggestions.length > 0
+      ? allIngredients.filter((i: any) => suggestions.some((s: any) => s.id === i.id)).slice(0, 8)
+      : allIngredients.slice(0, 8);
+  return (
+    <div className="relative" ref={ref}>
+      {isNew ? (
+        <button onClick={() => { setSearch(""); setOpen(v => !v); }} className="text-left w-full">
+          <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-medium flex items-center gap-1 w-full">
+            ⚡ Новий <span className="text-amber-500 underline">Обрати</span>
+          </span>
+        </button>
+      ) : (
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[10px] text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5 max-w-[120px] truncate" title={current?.name}>✓ {current?.name || `ID:${value}`}</span>
+          <button onClick={() => { setSearch(""); setOpen(v => !v); }} className="text-[10px] text-gray-400 hover:text-violet-600 underline">змінити</button>
+        </div>
+      )}
+      {open && (
+        <div className="absolute z-50 bg-white border border-gray-200 shadow-xl rounded-lg p-2 w-64 top-full left-0 mt-1">
+          <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Пошук інгредієнту..."
+            className="w-full text-xs border rounded px-2 py-1 mb-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300" />
+          <div className="max-h-48 overflow-y-auto space-y-0.5">
+            <button onClick={() => { onChange(null); setOpen(false); setSearch(""); }}
+              className="w-full text-left text-[11px] px-2 py-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 border border-dashed border-gray-200">
+              — Позначити як новий інгредієнт
+            </button>
+            {displayList.map((ing: any) => {
+              const isSuggested = suggestions.some((s: any) => s.id === ing.id);
+              return (
+                <button key={ing.id} onClick={() => { onChange(ing); setOpen(false); setSearch(""); }}
+                  className={`w-full text-left text-[11px] px-2 py-1.5 rounded flex items-center justify-between gap-1 ${ing.id === value ? "bg-green-50 text-green-700 border border-green-200" : isSuggested ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "hover:bg-gray-50 text-gray-700"}`}>
+                  <span className="truncate">{ing.name}</span>
+                  <span className="shrink-0 text-[9px] text-gray-400">{ing.unit}</span>
+                </button>
+              );
+            })}
+            {displayList.length === 0 && <div className="text-[11px] text-gray-400 px-2 py-2 text-center">Нічого не знайдено</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AI Scan View ─────────────────────────────────────────────────────────────
+function AiScanView({ suppliers, onBack }: { suppliers: Supplier[]; onBack: () => void }) {
+  const { toast } = useToast();
+  const [step, setStep] = useState<"input" | "reviewing" | "saving">("input");
+  const [inputMode, setInputMode] = useState<"text" | "voice">("text");
+  const [inputText, setInputText] = useState("");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState("image/jpeg");
+  const [scanning, setScanning] = useState(false);
+  const [parsed, setParsed] = useState<any>(null);
+  const [supplierId, setSupplierId] = useState<string>("");
+  const [paymentType, setPaymentType] = useState("unpaid");
+  const [allIngredients, setAllIngredients] = useState<any[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api("/ingredients").then(j => setAllIngredients(j.ingredients || [])).catch(() => {});
+  }, []);
+
+  const handleImageSelect = async (file: File) => {
+    setImageFile(file); setInputText(""); setImageMime(file.type || "image/jpeg");
+    const b64 = await new Promise<string>(res => {
+      const reader = new FileReader();
+      reader.onload = () => res((reader.result as string).split(",")[1]);
+      reader.readAsDataURL(file);
+    });
+    setImageBase64(b64);
+  };
+
+  const scan = async () => {
+    const textToScan = inputMode === "voice" ? voiceTranscript : inputText;
+    if (!textToScan && !imageBase64) return toast({ title: "Вставте текст, завантажте фото або продиктуйте накладну", variant: "destructive" });
+    setScanning(true);
+    try {
+      const endpoint = imageBase64 ? "/receipts/ai-scan" : inputMode === "voice" ? "/receipts/ai-voice-receipt" : "/receipts/ai-scan";
+      const body = imageBase64 ? { image_base64: imageBase64, image_mime: imageMime } : { text: textToScan };
+      const j = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+      const autoLinked = {
+        ...j.parsed,
+        items: (j.parsed?.items || []).map((item: any) => {
+          if (item.is_new_ingredient && item.suggested_ingredient_id) {
+            return { ...item, ingredient_id: item.suggested_ingredient_id, is_new_ingredient: false, suggestions: [] };
+          }
+          return item;
+        }),
+      };
+      setParsed(autoLinked);
+      if (j.parsed?.supplier_id) setSupplierId(String(j.parsed.supplier_id));
+      setStep("reviewing");
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setScanning(false); }
+  };
+
+  const saveReceipt = async () => {
+    if (!parsed) return;
+    setStep("saving");
+    try {
+      let finalSupplierId: number | null = supplierId ? parseInt(supplierId) : null;
+      if (!finalSupplierId && parsed.supplier_name) {
+        try {
+          const sr = await api("/suppliers", { method: "POST", body: JSON.stringify({ name: parsed.supplier_name, edrpou: parsed.supplier_edrpou || null }) });
+          if (sr.supplier?.id) finalSupplierId = sr.supplier.id;
+        } catch {}
+      }
+      const cr = await api("/receipts", { method: "POST", body: JSON.stringify({
+        supplier_id: finalSupplierId, receipt_no: parsed.receipt_no, receipt_date: parsed.receipt_date,
+        payment_type: paymentType,
+        notes: inputMode === "voice" ? "Голосовий ввід (AI)" : imageBase64 ? "AI-сканування фото" : "AI-сканування тексту",
+        invoice_image: imageBase64 || null,
+      })});
+      await api(`/receipts/${cr.receipt.id}/items`, { method: "PUT", body: JSON.stringify({ items: parsed.items.map((item: any) => ({ ...item, receipt_unit: item.receipt_unit || item.unit, conversion_factor: item.conversion_factor || 1 })) }) });
+      const newCount = (parsed.items || []).filter((i: any) => i.is_new_ingredient).length;
+      toast({ title: `Накладну збережено!${newCount > 0 ? ` ${newCount} нових інгредієнтів додано.` : ""}` });
+      onBack();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); setStep("reviewing"); }
+  };
+
+  const updateItem = (idx: number, field: string, value: any) =>
+    setParsed((p: any) => ({
+      ...p,
+      items: p.items.map((item: any, i: number) => {
+        if (i !== idx) return item;
+        if (field === "__link") return { ...item, ingredient_id: value.id, is_new_ingredient: false, suggestions: [], ...(value.unit ? { unit: value.unit } : {}) };
+        if (field === "__unlink") return { ...item, ingredient_id: null, is_new_ingredient: true };
+        return { ...item, [field]: value };
+      }),
+    }));
+
+  const newCount = parsed ? (parsed.items || []).filter((i: any) => i.is_new_ingredient).length : 0;
+
+  if (step === "input") return (
+    <div className="max-w-2xl mx-auto space-y-4 p-5">
+      <div className="flex items-center gap-3 mb-2">
+        <button onClick={onBack} className="text-muted-foreground hover:text-foreground"><ArrowLeft className="w-5 h-5" /></button>
+        <div>
+          <h2 className="font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-violet-500" /> AI-сканування накладної</h2>
+          <p className="text-xs text-muted-foreground">Фото, текст або голос — AI розпізнає позиції автоматично</p>
+        </div>
+      </div>
+
+      <div className="border rounded-xl p-5 space-y-4 bg-card">
+        <div className="flex gap-1 bg-muted rounded-lg p-1">
+          {([{ key: "text", icon: FileText, label: "Фото або текст" }, { key: "voice", icon: Mic, label: "Голосовий ввід" }] as const).map(tab => (
+            <button key={tab.key} onClick={() => setInputMode(tab.key)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-sm font-medium transition-all ${inputMode === tab.key ? "bg-background shadow-sm text-violet-700" : "text-muted-foreground hover:text-foreground"}`}>
+              <tab.icon className="w-4 h-4" /> {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {inputMode === "text" ? (
+          <>
+            <div className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-violet-400 hover:bg-violet-50/50 transition-colors"
+              onClick={() => fileRef.current?.click()}>
+              {imageFile ? (
+                <div className="flex items-center justify-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-violet-500" />
+                  <span className="text-sm font-medium">{imageFile.name}</span>
+                  <button className="text-muted-foreground hover:text-destructive ml-1" onClick={e => { e.stopPropagation(); setImageFile(null); setImageBase64(null); }}><XCircle className="w-4 h-4" /></button>
+                </div>
+              ) : (
+                <>
+                  <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground/50" />
+                  <p className="text-sm font-medium text-muted-foreground">Завантажити фото накладної</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">JPG, PNG, HEIC (до 10 МБ)</p>
+                </>
+              )}
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files?.[0]) handleImageSelect(e.target.files[0]); }} />
+            </div>
+            {!imageFile && (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-border" />
+                  <span className="text-xs text-muted-foreground font-medium">АБО вставте текст</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <Textarea value={inputText} onChange={e => setInputText(e.target.value)} rows={6}
+                  className="font-mono text-xs"
+                  placeholder={"Видаткова накладна №123 від 10.04.2026\nПостачальник: ТОВ Агро-Плюс\n\n1. Куряча грудка 10 кг × 120 грн = 1200 грн\n2. Масло вершкове 5 кг × 180 грн = 900 грн"} />
+              </>
+            )}
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div className="border rounded-xl p-6 text-center bg-violet-50/50">
+              <VoiceMicButton onTranscript={t => setVoiceTranscript(t)} />
+              <p className="text-xs text-violet-600 font-medium mt-3 mb-1">Натисніть мікрофон та продиктуйте накладну</p>
+              <p className="text-xs text-muted-foreground">Приклад: "Накладна від Агро-Плюс, 10 квітня. Куряча грудка 10 кг по 120 гривень"</p>
+            </div>
+            {voiceTranscript && (
+              <div className="bg-muted/50 border rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-medium text-muted-foreground">Розпізнаний текст:</p>
+                  <button className="text-xs text-muted-foreground hover:text-destructive" onClick={() => setVoiceTranscript("")}>Очистити</button>
+                </div>
+                <p className="text-sm italic">"{voiceTranscript}"</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <Button onClick={scan} disabled={scanning || (inputMode === "text" ? !inputText && !imageBase64 : !voiceTranscript)} className="w-full bg-violet-600 hover:bg-violet-700 gap-2">
+          {scanning ? <><Loader2 className="w-4 h-4 animate-spin" /> AI обробляє...</> : <><Sparkles className="w-4 h-4" /> Розпізнати накладну</>}
+        </Button>
+      </div>
+
+      <div className="border rounded-xl p-4 bg-blue-50/50 border-blue-100">
+        <div className="flex gap-3 items-start">
+          <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+          <div className="text-sm text-blue-700">
+            <p className="font-medium mb-1">Як працює AI-розпізнавання:</p>
+            <ul className="space-y-0.5 text-xs text-blue-600">
+              <li>• Витягує номер, дату, постачальника і всі позиції</li>
+              <li>• Зіставляє товари з базою інгредієнтів складу</li>
+              <li>• Нові товари додаються автоматично</li>
+              <li>• Ви перевіряєте результат перед підтвердженням</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  if ((step === "reviewing" || step === "saving") && parsed) return (
+    <div className="max-w-3xl mx-auto space-y-4 p-5">
+      <div className="flex items-center gap-3">
+        <button onClick={() => setStep("input")} className="text-muted-foreground hover:text-foreground"><ArrowLeft className="w-5 h-5" /></button>
+        <div className="flex-1">
+          <h2 className="font-bold">Перевірте результат AI</h2>
+          <p className="text-xs text-muted-foreground">Відредагуйте якщо потрібно, потім збережіть</p>
+        </div>
+        {newCount > 0 && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">{newCount} нових інгредієнтів</Badge>}
+      </div>
+
+      <div className="border rounded-xl p-4 bg-card space-y-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div><Label className="text-xs">Номер накладної</Label>
+            <Input value={parsed.receipt_no || ""} onChange={e => setParsed((p: any) => ({ ...p, receipt_no: e.target.value }))} className="h-8 text-sm mt-1" />
+          </div>
+          <div><Label className="text-xs">Дата</Label>
+            <Input type="date" value={parsed.receipt_date || ""} onChange={e => setParsed((p: any) => ({ ...p, receipt_date: e.target.value }))} className="h-8 text-sm mt-1" />
+          </div>
+          <div>
+            <Label className="text-xs">Постачальник</Label>
+            <Select value={supplierId || "_none"} onValueChange={v => setSupplierId(v === "_none" ? "" : v)}>
+              <SelectTrigger className="h-8 text-sm mt-1"><SelectValue placeholder="Без постачальника" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">{parsed.supplier_name ? `⚡ ${parsed.supplier_name} (новий)` : "— Без постачальника —"}</SelectItem>
+                {suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Розрахунок</Label>
+            <Select value={paymentType} onValueChange={setPaymentType}>
+              <SelectTrigger className="h-8 text-sm mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PAYMENT_TERMS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      <div className="border rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 border-b">
+            <tr className="text-xs text-muted-foreground">
+              <th className="text-left px-3 py-2 font-medium">Назва в накладній</th>
+              <th className="text-right px-3 py-2 font-medium w-16">К-сть</th>
+              <th className="text-left px-3 py-2 font-medium w-16">Од.</th>
+              <th className="text-right px-3 py-2 font-medium w-24">Ціна/од.</th>
+              <th className="text-right px-3 py-2 font-medium w-24">Сума</th>
+              <th className="px-3 py-2 font-medium">Прив'язка до складу</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {(parsed.items || []).map((item: any, idx: number) => (
+              <tr key={idx} className={item.is_new_ingredient ? "bg-amber-50/50" : ""}>
+                <td className="px-3 py-2">
+                  <Input value={item.name || ""} onChange={e => updateItem(idx, "name", e.target.value)} className="h-7 text-sm w-full" />
+                </td>
+                <td className="px-3 py-2">
+                  <Input type="number" value={item.quantity} onChange={e => updateItem(idx, "quantity", parseFloat(e.target.value) || 0)} className="h-7 text-sm w-16" />
+                </td>
+                <td className="px-3 py-2">
+                  <Select value={item.unit || "кг"} onValueChange={v => updateItem(idx, "unit", v)}>
+                    <SelectTrigger className="h-7 text-xs w-16"><SelectValue /></SelectTrigger>
+                    <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                  </Select>
+                </td>
+                <td className="px-3 py-2">
+                  <Input type="number" value={item.price_per_unit} onChange={e => updateItem(idx, "price_per_unit", parseFloat(e.target.value) || 0)} className="h-7 text-sm w-24" />
+                </td>
+                <td className="px-3 py-2 text-right font-mono text-sm font-medium">{((item.quantity || 0) * (item.price_per_unit || 0)).toFixed(0)} ₴</td>
+                <td className="px-3 py-2">
+                  <IngredientPicker value={item.ingredient_id || null} isNew={!!item.is_new_ingredient}
+                    suggestions={item.suggestions || []} allIngredients={allIngredients}
+                    onChange={ing => { if (ing) updateItem(idx, "__link", ing); else updateItem(idx, "__unlink", null); }} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-muted/30 border-t">
+              <td colSpan={4} className="px-3 py-2 text-sm font-semibold text-right text-muted-foreground">Загальна сума:</td>
+              <td className="px-3 py-2 text-right font-bold">{(parsed.items || []).reduce((s: number, i: any) => s + (i.quantity || 0) * (i.price_per_unit || 0), 0).toFixed(0)} ₴</td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="flex justify-between">
+        <Button variant="outline" onClick={() => setStep("input")} disabled={step === "saving"}>← Назад до вводу</Button>
+        <Button onClick={saveReceipt} disabled={step === "saving"} className="bg-green-600 hover:bg-green-700 gap-2">
+          {step === "saving" ? <><Loader2 className="w-4 h-4 animate-spin" /> Зберігаємо...</> : <><CheckCircle2 className="w-4 h-4" /> Зберегти накладну</>}
+        </Button>
+      </div>
+    </div>
+  );
+
+  return null;
+}
+
 // ─── Receipt Dialog ────────────────────────────────────────────────────────────
 function ReceiptDialog({ open, onClose, suppliers, onSave }: {
   open: boolean; onClose: () => void; suppliers: Supplier[];
   onSave: (header: any, items: ReceiptItem[]) => void;
 }) {
   const today = new Date().toISOString().split("T")[0];
-  const [header, setHeader] = useState({ supplier_id: "", receipt_no: "", receipt_date: today, payment_type: "unpaid", notes: "" });
+  const [header, setHeader] = useState({ supplier_id: "_none", receipt_no: "", receipt_date: today, payment_type: "unpaid", notes: "" });
   const [items, setItems] = useState<ReceiptItem[]>([{ name: "", quantity: 1, unit: "кг", price_per_unit: 0, vat_rate: 20 }]);
   const setH = (k: string, v: any) => setHeader(h => ({ ...h, [k]: v }));
 
@@ -254,16 +636,16 @@ function ReceiptDialog({ open, onClose, suppliers, onSave }: {
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader><DialogTitle>Нова накладна (прихід)</DialogTitle></DialogHeader>
-        <div className="space-y-4 py-2">
+        <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Постачальник</Label>
               <Select value={header.supplier_id} onValueChange={v => setH("supplier_id", v)}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="— без постачальника —" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">— без постачальника —</SelectItem>
+                  <SelectItem value="_none">— без постачальника —</SelectItem>
                   {suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -287,7 +669,6 @@ function ReceiptDialog({ open, onClose, suppliers, onSave }: {
             </div>
           </div>
 
-          {/* Items */}
           <div className="border rounded-lg overflow-hidden">
             <div className="bg-muted/50 px-3 py-2 text-xs font-semibold text-muted-foreground grid grid-cols-[1fr_60px_60px_80px_30px] gap-2">
               <span>Товар / Інгредієнт</span><span>Кіл.</span><span>Од.</span><span>Ціна, ₴</span><span></span>
@@ -321,7 +702,7 @@ function ReceiptDialog({ open, onClose, suppliers, onSave }: {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
-          <Button onClick={() => valid && onSave(header, items)} disabled={!valid}>Зберегти накладну</Button>
+          <Button onClick={() => valid && onSave({ ...header, supplier_id: header.supplier_id === "_none" ? "" : header.supplier_id }, items)} disabled={!valid}>Зберегти накладну</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -482,6 +863,11 @@ function ReceiptsTab({ receipts, suppliers, summary, isLoading }: {
   const { toast } = useToast();
   const [dialog, setDialog] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [showAiScan, setShowAiScan] = useState(false);
+
+  if (showAiScan) {
+    return <AiScanView suppliers={suppliers} onBack={() => { setShowAiScan(false); qc.invalidateQueries({ queryKey: ["wh-receipts"] }); }} />;
+  }
 
   const createReceipt = useMutation({
     mutationFn: async ({ header, items }: { header: any; items: ReceiptItem[] }) => {
@@ -515,7 +901,12 @@ function ReceiptsTab({ receipts, suppliers, summary, isLoading }: {
 
       <div className="flex justify-between items-center">
         <h2 className="font-semibold">Накладні ({receipts.length})</h2>
-        <Button size="sm" onClick={() => setDialog(true)}><Plus className="w-4 h-4 mr-1" /> Нова накладна</Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setShowAiScan(true)} className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50">
+            <Sparkles className="w-4 h-4" /> AI Скан накладної
+          </Button>
+          <Button size="sm" onClick={() => setDialog(true)}><Plus className="w-4 h-4 mr-1" /> Нова накладна</Button>
+        </div>
       </div>
 
       <div className="border rounded-lg overflow-hidden">
@@ -680,7 +1071,11 @@ function SuppliersTab({ suppliers, isLoading }: { suppliers: Supplier[]; isLoadi
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function FbWarehouse() {
-  const [tab, setTab] = useState<"stock" | "receipts" | "suppliers">("stock");
+  const [location] = useLocation();
+  const initialTab: "stock" | "receipts" | "suppliers" =
+    location.includes("/receipts") ? "receipts" :
+    location.includes("/suppliers") ? "suppliers" : "stock";
+  const [tab, setTab] = useState<"stock" | "receipts" | "suppliers">(initialTab);
 
   const { data: ingData, isLoading: ingLoading, refetch: refetchIng } = useQuery({
     queryKey: ["wh-ingredients"], queryFn: () => api("/ingredients"),

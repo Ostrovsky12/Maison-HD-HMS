@@ -34,6 +34,7 @@ type NavItem = {
   href: string;
   label: string;
   icon: React.ElementType;
+  isExternal?: boolean;
 };
 
 type NavGroup = {
@@ -79,8 +80,8 @@ const NAV_GROUPS: NavGroup[] = [
     icon: UtensilsCrossed,
     items: [
       { href: "/fb/cashier", label: "Станція касира", icon: Bell },
+      { href: "/waiter", label: "Станція офіціанта", icon: UtensilsCrossed, isExternal: true },
       { href: "/fb/menu", label: "Меню", icon: BookOpen },
-      { href: "/fb/warehouse", label: "Залишки", icon: Warehouse },
       { href: "/fb/qr", label: "QR-меню столів", icon: QrCode },
       { href: "/fb/import", label: "Імпорт з Poster", icon: FileDown },
       { href: "/fb/legal-entities", label: "Юр. особи", icon: Building2 },
@@ -138,8 +139,6 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/fb/apps", label: "Усі застосунки", icon: Puzzle },
       { href: "/fb/print-cards", label: "Друк тех. карток і НФ", icon: Printer },
       { href: "/fb/stop-list", label: "Стоп-лист на касі", icon: XCircle },
-      { href: "/fb/qr", label: "Poster QR", icon: QrCode },
-      { href: "/fb/prro", label: "ПРРО", icon: Shield },
       { href: "/fb/postie", label: "Postie AI Assistant", icon: Cpu },
       { href: "/fb/delivery-bot", label: "Poster Delivery Bot", icon: Bot },
     ],
@@ -203,18 +202,15 @@ function NavLink({
   collapsed: boolean;
 }) {
   const Icon = item.icon;
-  return (
-    <Link
-      href={item.href}
-      title={collapsed ? item.label : undefined}
-      className={cn(
-        "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-150 group relative",
-        collapsed ? "justify-center" : "",
-        isActive
-          ? "bg-primary/12 text-primary font-semibold"
-          : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-      )}
-    >
+  const cls = cn(
+    "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-150 group relative",
+    collapsed ? "justify-center" : "",
+    isActive
+      ? "bg-primary/12 text-primary font-semibold"
+      : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+  );
+  const inner = (
+    <>
       {isActive && (
         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full" />
       )}
@@ -224,6 +220,14 @@ function NavLink({
         isActive ? "text-primary" : "text-sidebar-foreground/45"
       )} />
       {!collapsed && <span className="truncate">{item.label}</span>}
+    </>
+  );
+  if (item.isExternal) {
+    return <a href={item.href} target="_blank" rel="noreferrer" title={collapsed ? item.label : undefined} className={cls}>{inner}</a>;
+  }
+  return (
+    <Link href={item.href} title={collapsed ? item.label : undefined} className={cls}>
+      {inner}
     </Link>
   );
 }
