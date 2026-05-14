@@ -24,12 +24,30 @@ async function createPrintJobs(
   tableLocation: string | null,
   guestName: string | null,
 ) {
-  // Fetch items with station info from fb_items
+  // Fetch items with station info (category hierarchy: item.station → parent_cat.station → cat.station)
   const { rows: orderItems } = await pool.query(
     `SELECT oi.id, oi.name, oi.quantity, oi.price, oi.total_price, oi.notes,
-            COALESCE(fi.station, 'kitchen_general') AS station
+            oi.modifiers,
+            COALESCE(
+              fi.station,
+              CASE WHEN parent_cat.station IS NOT NULL THEN
+                CASE parent_cat.station
+                  WHEN 'bar' THEN 'bar'
+                  ELSE 'kitchen_general'
+                END
+              ELSE NULL END,
+              CASE WHEN cat.station IS NOT NULL THEN
+                CASE cat.station
+                  WHEN 'bar' THEN 'bar'
+                  ELSE 'kitchen_general'
+                END
+              ELSE NULL END,
+              'kitchen_general'
+            ) AS station
      FROM fb_order_items oi
      LEFT JOIN fb_items fi ON fi.id = oi.item_id
+     LEFT JOIN fb_categories cat ON cat.id = fi.category_id
+     LEFT JOIN fb_categories parent_cat ON parent_cat.id = cat.parent_id
      WHERE oi.order_id = $1`,
     [orderId],
   );
@@ -67,13 +85,17 @@ async function createPrintJobs(
         orgId, orderId, printerId, printerType,
         items[0]?.station || printerType,
         tableNumber, tableLocation, guestName,
-        JSON.stringify(items.map(i => ({
-          name: i.name,
-          quantity: Number(i.quantity),
-          price: Number(i.price),
-          total: Number(i.total_price),
-          notes: i.notes || null,
-        }))),
+        JSON.stringify(items.map(i => {
+          const mods: any[] = Array.isArray(i.modifiers) ? i.modifiers : (i.modifiers ? JSON.parse(i.modifiers) : []);
+          return {
+            name: i.name,
+            quantity: Number(i.quantity),
+            price: Number(i.price),
+            total: Number(i.total_price),
+            notes: i.notes || null,
+            modifiers: mods.length ? mods.map((m: any) => `${m.groupName}: ${m.optionName}${m.priceDelta > 0 ? ` (+${m.priceDelta}₴)` : ""}`).join(", ") : null,
+          };
+        })),
       ],
     );
   }
@@ -97,11 +119,33 @@ router.get("/public/guest-menu", async (req, res) => {
     const { organization_id: orgId, org_name, org_slug, number: tableNumber, location: tableLocation } = tableRows[0];
 
     const { rows: cats } = await pool.query(
-      `SELECT id, name, description, color FROM fb_categories
+      `SELECT id, name, description, color, parent_id, station FROM fb_categories
        WHERE organization_id = $1 AND is_active = true
        ORDER BY sort_order ASC NULLS LAST, name ASC`,
       [orgId],
     );
+
+    // Fetch modifier groups with options
+    const { rows: modGroups } = await pool.query(
+      `SELECT mg.id, mg.item_id, mg.name, mg.is_required, mg.min_select, mg.max_select, mg.sort_order,
+              COALESCE(json_agg(
+                json_build_object(
+                  'id', mo.id, 'name', mo.name, 'price_delta', mo.price_delta,
+                  'sort_order', mo.sort_order, 'is_available', mo.is_available
+                ) ORDER BY mo.sort_order
+              ) FILTER (WHERE mo.id IS NOT NULL AND mo.is_available = true), '[]') AS options
+       FROM fb_modifier_groups mg
+       LEFT JOIN fb_modifier_options mo ON mo.group_id = mg.id
+       WHERE mg.organization_id = $1
+       GROUP BY mg.id ORDER BY mg.sort_order`,
+      [orgId],
+    );
+    // Map itemId → groups
+    const modifiersByItem: Record<number, any[]> = {};
+    for (const g of modGroups) {
+      if (!modifiersByItem[g.item_id]) modifiersByItem[g.item_id] = [];
+      modifiersByItem[g.item_id].push(g);
+    }
 
     const { rows: items } = await pool.query(
       `SELECT id, category_id, name, description, price,
@@ -120,7 +164,8 @@ router.get("/public/guest-menu", async (req, res) => {
     ).catch(() => ({ rows: [] }));
     const branding = brandingRows[0]?.data || {};
 
-    res.json({ orgId, orgName: org_name, orgSlug: org_slug, tableNumber, tableLocation, categories: cats, items, branding });
+    const itemsWithMods = items.map((i: any) => ({ ...i, modifier_groups: modifiersByItem[i.id] || [] }));
+    res.json({ orgId, orgName: org_name, orgSlug: org_slug, tableNumber, tableLocation, categories: cats, items: itemsWithMods, branding });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -162,11 +207,16 @@ router.post("/public/guest-orders", async (req, res) => {
       if (!itemRows[0]) continue;
       const { name, price } = itemRows[0];
       const qty = parseInt(item.quantity) || 1;
-      const total = (parseFloat(price) * qty).toFixed(2);
+      // Sum modifier price deltas
+      const mods: Array<{ groupId: number; groupName: string; optionId: number; optionName: string; priceDelta: number }> = Array.isArray(item.modifiers) ? item.modifiers : [];
+      const modDelta = mods.reduce((s, m) => s + (parseFloat(String(m.priceDelta)) || 0), 0);
+      const unitPrice = (parseFloat(price) + modDelta).toFixed(2);
+      const total = (parseFloat(unitPrice) * qty).toFixed(2);
       await pool.query(
-        `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')`,
-        [order.id, item.itemId, orgId, name, price, qty, total, item.notes || null],
+        `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, status, modifiers)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)`,
+        [order.id, item.itemId, orgId, name, unitPrice, qty, total, item.notes || null,
+         mods.length ? JSON.stringify(mods) : null],
       );
     }
 

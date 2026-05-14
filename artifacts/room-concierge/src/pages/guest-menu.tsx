@@ -3,14 +3,46 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const API = import.meta.env.BASE_URL.replace(/\/room-concierge\/?$/, "") + "/api";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ModifierOption {
+  id: number;
+  name: string;
+  price_delta: number;
+  sort_order: number;
+  is_available: boolean;
+}
+
+interface ModifierGroup {
+  id: number;
+  item_id: number;
+  name: string;
+  is_required: boolean;
+  min_select: number;
+  max_select: number;
+  sort_order: number;
+  options: ModifierOption[];
+}
+
+interface SelectedModifier {
+  groupId: number;
+  groupName: string;
+  optionId: number;
+  optionName: string;
+  priceDelta: number;
+}
+
 interface Category { id: number; name: string; description?: string; color?: string; emoji?: string; }
+
 interface MenuItem {
   id: number; category_id: number; name: string; description?: string;
   price: string; is_popular?: boolean; is_vegetarian?: boolean;
   allergens?: string[]; image_url?: string; cook_minutes?: number;
   station?: string;
+  modifier_groups?: ModifierGroup[];
 }
-interface CartItem { item: MenuItem; quantity: number; }
+
+interface CartItem { item: MenuItem; quantity: number; modifiers: SelectedModifier[]; }
 interface AiMsg { role: "user" | "assistant"; content: string; }
 interface Branding { logo_url?: string; primary_color?: string; accent_color?: string; }
 
@@ -18,9 +50,9 @@ type Screen = "home" | "menu";
 type StationId = "bar" | "kitchen" | "other";
 
 const STATIONS: { id: StationId; label: string; emoji: string; desc: string; bg: string; border: string; }[] = [
-  { id: "bar",     label: "Бар",             emoji: "🍷", desc: "Напої, коктейлі, алкоголь", bg: "from-[#4A1020] to-[#7A2535]", border: "border-[#7A2535]" },
-  { id: "kitchen", label: "Кухня",           emoji: "🍽", desc: "Страви, закуски, десерти",   bg: "from-[#1A3A1E] to-[#2C5A30]", border: "border-[#2C5A30]" },
-  { id: "other",   label: "Інші послуги",    emoji: "🛎", desc: "Room service, послуги",       bg: "from-[#1A2A4A] to-[#2A3F6A]", border: "border-[#2A3F6A]" },
+  { id: "bar",     label: "Бар",          emoji: "🍷", desc: "Напої, коктейлі, алкоголь", bg: "from-[#4A1020] to-[#7A2535]", border: "border-[#7A2535]" },
+  { id: "kitchen", label: "Кухня",        emoji: "🍽", desc: "Страви, закуски, десерти",  bg: "from-[#1A3A1E] to-[#2C5A30]", border: "border-[#2C5A30]" },
+  { id: "other",   label: "Інші послуги", emoji: "🛎", desc: "Room service, послуги",      bg: "from-[#1A2A4A] to-[#2A3F6A]", border: "border-[#2A3F6A]" },
 ];
 
 function stationOf(item: MenuItem): StationId {
@@ -43,6 +75,169 @@ function playSuccess() {
     });
   } catch {}
 }
+
+// ─── Modifier Modal ────────────────────────────────────────────────────────────
+
+function ModifierModal({
+  item, primary, accent, onConfirm, onCancel,
+}: {
+  item: MenuItem;
+  primary: string;
+  accent: string;
+  onConfirm: (modifiers: SelectedModifier[]) => void;
+  onCancel: () => void;
+}) {
+  const groups = item.modifier_groups || [];
+  // selected[groupId] = Set of optionIds
+  const [selected, setSelected] = useState<Record<number, Set<number>>>({});
+
+  function toggleOption(group: ModifierGroup, option: ModifierOption) {
+    setSelected(prev => {
+      const cur = new Set(prev[group.id] || []);
+      if (cur.has(option.id)) {
+        cur.delete(option.id);
+      } else {
+        if (group.max_select === 1) {
+          cur.clear();
+        }
+        if (cur.size < group.max_select) {
+          cur.add(option.id);
+        }
+      }
+      return { ...prev, [group.id]: cur };
+    });
+  }
+
+  function isValid() {
+    return groups.every(g => {
+      const count = (selected[g.id]?.size) || 0;
+      return !g.is_required || count >= Math.max(g.min_select, 1);
+    });
+  }
+
+  function handleConfirm() {
+    const mods: SelectedModifier[] = [];
+    for (const g of groups) {
+      const optIds = selected[g.id] || new Set();
+      for (const optId of optIds) {
+        const opt = g.options.find(o => o.id === optId);
+        if (opt) {
+          mods.push({
+            groupId: g.id,
+            groupName: g.name,
+            optionId: opt.id,
+            optionName: opt.name,
+            priceDelta: parseFloat(String(opt.price_delta)) || 0,
+          });
+        }
+      }
+    }
+    onConfirm(mods);
+  }
+
+  const totalDelta = groups.reduce((sum, g) => {
+    const optIds = selected[g.id] || new Set();
+    for (const optId of optIds) {
+      const opt = g.options.find(o => o.id === optId);
+      if (opt) sum += parseFloat(String(opt.price_delta)) || 0;
+    }
+    return sum;
+  }, 0);
+
+  const finalPrice = parseFloat(item.price) + totalDelta;
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex flex-col" initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", damping: 30, stiffness: 300 }}>
+      <div className="flex-1 bg-black/40" onClick={onCancel} />
+      <div className="bg-white rounded-t-3xl max-h-[85vh] flex flex-col max-w-lg mx-auto w-full">
+        {/* Header */}
+        <div className="px-5 pt-5 pb-3 border-b border-[#F0EBE0] shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <h2 className="text-lg font-serif text-[#2C2416]">{item.name}</h2>
+              <p className="text-sm text-[#8B7355] mt-0.5">{parseFloat(item.price).toFixed(0)} ₴</p>
+            </div>
+            <button onClick={onCancel} className="text-[#8B7355] mt-0.5">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Groups */}
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
+          {groups.map(group => {
+            const sel = selected[group.id] || new Set();
+            return (
+              <div key={group.id}>
+                <div className="flex items-center gap-2 mb-2.5">
+                  <span className="font-semibold text-sm text-[#2C2416]">{group.name}</span>
+                  {group.is_required ? (
+                    <span className="text-[10px] bg-red-50 text-red-600 border border-red-200 px-1.5 py-0.5 rounded-full font-medium">Обов'язково</span>
+                  ) : (
+                    <span className="text-[10px] text-[#8B7355]">Необов'язково</span>
+                  )}
+                  {group.max_select > 1 && (
+                    <span className="text-[10px] text-[#8B7355]">до {group.max_select}</span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {group.options.filter(o => o.is_available !== false).map(option => {
+                    const isSelected = sel.has(option.id);
+                    const isRadio = group.max_select === 1;
+                    return (
+                      <button key={option.id}
+                        onClick={() => toggleOption(group, option)}
+                        className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left ${
+                          isSelected
+                            ? "border-[#C9A96E] bg-[#FAF6EE]"
+                            : "border-[#E8E0D0] bg-white hover:border-[#D0C4B0]"
+                        }`}>
+                        {/* Radio / Checkbox indicator */}
+                        <div className={`w-5 h-5 rounded-${isRadio ? "full" : "md"} border-2 flex items-center justify-center shrink-0 transition-all ${
+                          isSelected ? "border-[#C9A96E]" : "border-[#C0B090]"
+                        }`} style={isSelected ? { background: accent } : {}}>
+                          {isSelected && (
+                            isRadio
+                              ? <div className="w-2 h-2 rounded-full bg-white" />
+                              : <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                          )}
+                        </div>
+                        <span className="flex-1 text-sm text-[#2C2416]">{option.name}</span>
+                        {parseFloat(String(option.price_delta)) > 0 && (
+                          <span className="text-sm font-medium text-[#8B7355] shrink-0">
+                            +{parseFloat(String(option.price_delta)).toFixed(0)} ₴
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-[#F0EBE0] shrink-0">
+          <button
+            onClick={handleConfirm}
+            disabled={!isValid()}
+            className="w-full text-white rounded-2xl py-4 font-semibold text-base disabled:opacity-40 flex items-center justify-between px-5 transition-opacity"
+            style={{ background: primary }}>
+            <span>Додати до кошика</span>
+            <span>{finalPrice.toFixed(0)} ₴</span>
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function GuestMenu() {
   const params = new URLSearchParams(window.location.search);
@@ -70,6 +265,9 @@ export default function GuestMenu() {
   const [submitting, setSubmitting] = useState(false);
   const [ordered, setOrdered] = useState(false);
 
+  // Modifier modal
+  const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
+
   // AI Waiter
   const [showAI, setShowAI] = useState(false);
   const [aiMessages, setAiMessages] = useState<AiMsg[]>([]);
@@ -94,12 +292,10 @@ export default function GuestMenu() {
       .finally(() => setLoading(false));
   }, [tid]);
 
-  // Scroll AI to bottom on new messages
   useEffect(() => {
     if (showAI) aiEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [aiMessages, showAI]);
 
-  // Helpers
   const accent = branding.accent_color || "#C9A96E";
   const primary = branding.primary_color || "#2C2416";
 
@@ -112,19 +308,51 @@ export default function GuestMenu() {
     return matchCat && matchSearch;
   });
 
-  const cartTotal = cart.reduce((s, c) => s + parseFloat(c.item.price) * c.quantity, 0);
+  // Cart helpers with modifier support
+  const cartItemKey = (item: MenuItem, modifiers: SelectedModifier[]) => {
+    const modKey = modifiers.map(m => `${m.groupId}:${m.optionId}`).sort().join(",");
+    return `${item.id}__${modKey}`;
+  };
+
+  const cartTotal = cart.reduce((s, c) => {
+    const modDelta = (c.modifiers || []).reduce((m, mod) => m + mod.priceDelta, 0);
+    return s + (parseFloat(c.item.price) + modDelta) * c.quantity;
+  }, 0);
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
-  const addToCart = useCallback((item: MenuItem) => {
+  const addToCartWithModifiers = useCallback((item: MenuItem, modifiers: SelectedModifier[]) => {
     setCart(prev => {
-      const idx = prev.findIndex(c => c.item.id === item.id);
-      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], quantity: n[idx].quantity + 1 }; return n; }
-      return [...prev, { item, quantity: 1 }];
+      const key = cartItemKey(item, modifiers);
+      const idx = prev.findIndex(c => cartItemKey(c.item, c.modifiers) === key);
+      if (idx >= 0) {
+        const n = [...prev];
+        n[idx] = { ...n[idx], quantity: n[idx].quantity + 1 };
+        return n;
+      }
+      return [...prev, { item, quantity: 1, modifiers }];
     });
   }, []);
 
-  const changeQty = (itemId: number, delta: number) => {
-    setCart(prev => prev.map(c => c.item.id === itemId ? { ...c, quantity: c.quantity + delta } : c).filter(c => c.quantity > 0));
+  const handleAddToCart = useCallback((item: MenuItem) => {
+    const groups = item.modifier_groups || [];
+    if (groups.length > 0) {
+      setModifierItem(item);
+    } else {
+      addToCartWithModifiers(item, []);
+    }
+  }, [addToCartWithModifiers]);
+
+  const handleModifierConfirm = (modifiers: SelectedModifier[]) => {
+    if (modifierItem) {
+      addToCartWithModifiers(modifierItem, modifiers);
+      setModifierItem(null);
+    }
+  };
+
+  const changeQty = (cartKey: string, delta: number) => {
+    setCart(prev => prev.map(c => cartItemKey(c.item, c.modifiers) === cartKey
+      ? { ...c, quantity: c.quantity + delta } : c
+    ).filter(c => c.quantity > 0));
   };
 
   const goStation = (s: StationId) => {
@@ -138,7 +366,14 @@ export default function GuestMenu() {
       const resp = await fetch(`${API}/fb/public/guest-orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: parseInt(tid), items: cart.map(c => ({ itemId: c.item.id, quantity: c.quantity })) }),
+        body: JSON.stringify({
+          tableId: parseInt(tid),
+          items: cart.map(c => ({
+            itemId: c.item.id,
+            quantity: c.quantity,
+            modifiers: c.modifiers || [],
+          })),
+        }),
       });
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
@@ -196,12 +431,21 @@ export default function GuestMenu() {
         <p className="text-[#8B7355] mb-1">Стіл {tableNumber}{tableLocation ? ` · ${tableLocation}` : ""}</p>
         <p className="text-[#8B7355] text-sm mb-8">Офіціант підтвердить замовлення</p>
         <div className="bg-white rounded-2xl shadow-sm border border-[#E8E0D0] p-4 text-left mb-6 max-w-xs mx-auto">
-          {cart.map(c => (
-            <div key={c.item.id} className="flex justify-between text-sm py-1.5 border-b border-[#F0EBE0] last:border-0">
-              <span className="text-[#2C2416]">{c.item.name} × {c.quantity}</span>
-              <span className="text-[#8B7355]">{(parseFloat(c.item.price) * c.quantity).toFixed(0)} ₴</span>
-            </div>
-          ))}
+          {cart.map((c, idx) => {
+            const modDelta = (c.modifiers || []).reduce((s, m) => s + m.priceDelta, 0);
+            const unitPrice = parseFloat(c.item.price) + modDelta;
+            return (
+              <div key={idx} className="py-1.5 border-b border-[#F0EBE0] last:border-0">
+                <div className="flex justify-between text-sm">
+                  <span className="text-[#2C2416]">{c.item.name} × {c.quantity}</span>
+                  <span className="text-[#8B7355]">{(unitPrice * c.quantity).toFixed(0)} ₴</span>
+                </div>
+                {c.modifiers.length > 0 && (
+                  <p className="text-xs text-[#B0A090] mt-0.5">{c.modifiers.map(m => m.optionName).join(", ")}</p>
+                )}
+              </div>
+            );
+          })}
           <div className="flex justify-between font-semibold text-[#2C2416] pt-2 mt-1">
             <span>Разом</span><span>{cartTotal.toFixed(0)} ₴</span>
           </div>
@@ -220,8 +464,6 @@ export default function GuestMenu() {
         {/* ══ HOME SCREEN ══════════════════════════════════════════════════ */}
         {screen === "home" && (
           <motion.div key="home" className="flex flex-col min-h-screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
-
-            {/* Hero header */}
             <div className="relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${primary} 0%, #4A3728 100%)` }}>
               <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.3'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }} />
               <div className="relative px-6 pt-12 pb-8 text-center">
@@ -231,13 +473,10 @@ export default function GuestMenu() {
                   <div className="w-20 h-20 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mx-auto mb-4 text-4xl">🍽</div>
                 )}
                 <h1 className="text-2xl font-serif text-white mb-1">{orgName}</h1>
-                <p className="text-white/60 text-sm">
-                  Стіл {tableNumber}{tableLocation ? ` · ${tableLocation}` : ""}
-                </p>
+                <p className="text-white/60 text-sm">Стіл {tableNumber}{tableLocation ? ` · ${tableLocation}` : ""}</p>
               </div>
             </div>
 
-            {/* Station buttons */}
             <div className="px-5 py-6 space-y-3 flex-1">
               <p className="text-xs text-[#8B7355] uppercase tracking-widest font-medium text-center mb-4">Оберіть розділ меню</p>
               {STATIONS.map(station => {
@@ -246,9 +485,7 @@ export default function GuestMenu() {
                 return (
                   <button key={station.id} onClick={() => goStation(station.id)}
                     className={`w-full flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-r ${station.bg} text-white shadow-lg hover:shadow-xl active:scale-[0.98] transition-all`}>
-                    <div className="w-14 h-14 rounded-xl bg-white/15 flex items-center justify-center text-3xl shrink-0">
-                      {station.emoji}
-                    </div>
+                    <div className="w-14 h-14 rounded-xl bg-white/15 flex items-center justify-center text-3xl shrink-0">{station.emoji}</div>
                     <div className="flex-1 text-left">
                       <div className="font-semibold text-lg leading-tight">{station.label}</div>
                       <div className="text-white/60 text-sm">{station.desc}</div>
@@ -264,7 +501,6 @@ export default function GuestMenu() {
               })}
             </div>
 
-            {/* AI Waiter button */}
             <div className="px-5 pb-8">
               <button onClick={() => { setShowAI(true); if (aiMessages.length === 0) setAiMessages([{ role: "assistant", content: `Привіт! Я ваш AI-офіціант 👨‍🍳\n\nЗ задоволенням розповім про меню, порекомендую страви або підберу напій. Що вас цікавить?` }]); }}
                 className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl border-2 bg-white shadow-sm hover:shadow-md active:scale-[0.98] transition-all"
@@ -282,7 +518,6 @@ export default function GuestMenu() {
         {/* ══ MENU SCREEN ══════════════════════════════════════════════════ */}
         {screen === "menu" && (
           <motion.div key="menu" className="flex flex-col min-h-screen" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }} transition={{ duration: 0.25 }}>
-
             {/* Top bar */}
             <div className="bg-white border-b border-[#E8E0D0] px-4 pt-4 pb-3 sticky top-0 z-30 shadow-sm">
               <div className="flex items-center gap-3 mb-2">
@@ -308,8 +543,6 @@ export default function GuestMenu() {
                   </button>
                 )}
               </div>
-
-              {/* Search */}
               <div className="relative">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#B0A090]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -324,9 +557,7 @@ export default function GuestMenu() {
               <div className="flex gap-2 px-4 py-2.5 overflow-x-auto scrollbar-none sticky top-[108px] z-20 bg-[#FAF8F5]">
                 <button onClick={() => setActiveCat("all")}
                   className={`shrink-0 px-3 py-1 rounded-full text-sm font-medium transition-colors ${activeCat === "all" ? "text-white" : "bg-white border border-[#E0D8CC] text-[#5C4E38]"}`}
-                  style={activeCat === "all" ? { background: primary } : {}}>
-                  Все
-                </button>
+                  style={activeCat === "all" ? { background: primary } : {}}>Все</button>
                 {stationCats.map(cat => (
                   <button key={cat.id} onClick={() => setActiveCat(cat.id)}
                     className={`shrink-0 px-3 py-1 rounded-full text-sm font-medium transition-colors ${activeCat === cat.id ? "text-white" : "bg-white border border-[#E0D8CC] text-[#5C4E38]"}`}
@@ -342,7 +573,9 @@ export default function GuestMenu() {
               {filtered.length === 0 ? (
                 <div className="text-center py-16 text-[#B0A090]">Нічого не знайдено</div>
               ) : filtered.map(item => {
-                const inCart = cart.find(c => c.item.id === item.id);
+                const cartEntries = cart.filter(c => c.item.id === item.id);
+                const inCartTotal = cartEntries.reduce((s, c) => s + c.quantity, 0);
+                const hasModifiers = (item.modifier_groups || []).length > 0;
                 return (
                   <div key={item.id} className="bg-white rounded-2xl border border-[#E8E0D0] p-3 flex gap-3 items-start shadow-sm">
                     {item.image_url ? (
@@ -360,16 +593,25 @@ export default function GuestMenu() {
                       </div>
                       {item.description && <p className="text-xs text-[#8B7355] line-clamp-2 mb-1.5">{item.description}</p>}
                       {item.cook_minutes && <p className="text-[11px] text-[#B0A090] mb-1.5">⏱ ~{item.cook_minutes} хв</p>}
+                      {hasModifiers && <p className="text-[10px] text-[#C9A96E] mb-1">✦ Є доповнення на вибір</p>}
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-[#2C2416]">{parseFloat(item.price).toFixed(0)} ₴</span>
-                        {inCart ? (
+                        {inCartTotal > 0 && !hasModifiers ? (
                           <div className="flex items-center gap-2">
-                            <button onClick={() => changeQty(item.id, -1)} className="w-7 h-7 rounded-full bg-[#F0EBE0] flex items-center justify-center text-[#2C2416] font-bold text-base">−</button>
-                            <span className="w-4 text-center font-semibold text-sm text-[#2C2416]">{inCart.quantity}</span>
-                            <button onClick={() => changeQty(item.id, 1)} className="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-base" style={{ background: primary }}>+</button>
+                            <button onClick={() => {
+                              const entry = cart.find(c => c.item.id === item.id);
+                              if (entry) changeQty(cartItemKey(entry.item, entry.modifiers), -1);
+                            }} className="w-7 h-7 rounded-full bg-[#F0EBE0] flex items-center justify-center text-[#2C2416] font-bold text-base">−</button>
+                            <span className="w-4 text-center font-semibold text-sm text-[#2C2416]">{inCartTotal}</span>
+                            <button onClick={() => handleAddToCart(item)} className="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-base" style={{ background: primary }}>+</button>
                           </div>
                         ) : (
-                          <button onClick={() => addToCart(item)} className="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-lg" style={{ background: primary }}>+</button>
+                          <button onClick={() => handleAddToCart(item)}
+                            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-white font-medium text-sm"
+                            style={{ background: primary }}>
+                            {hasModifiers ? "Обрати" : "+"}
+                            {inCartTotal > 0 && <span className="bg-white/30 rounded-full px-1.5 text-xs">{inCartTotal}</span>}
+                          </button>
                         )}
                       </div>
                     </div>
@@ -416,20 +658,28 @@ export default function GuestMenu() {
                 </button>
               </div>
               <div className="overflow-y-auto flex-1 px-5 py-3 space-y-3">
-                {cart.map(c => (
-                  <div key={c.item.id} className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <div className="font-medium text-sm text-[#2C2416]">{c.item.name}</div>
-                      <div className="text-xs text-[#8B7355]">{parseFloat(c.item.price).toFixed(0)} ₴ × {c.quantity}</div>
+                {cart.map((c, idx) => {
+                  const key = cartItemKey(c.item, c.modifiers);
+                  const modDelta = (c.modifiers || []).reduce((s, m) => s + m.priceDelta, 0);
+                  const unitPrice = parseFloat(c.item.price) + modDelta;
+                  return (
+                    <div key={idx} className="flex items-start gap-3">
+                      <div className="flex-1">
+                        <div className="font-medium text-sm text-[#2C2416]">{c.item.name}</div>
+                        {c.modifiers.length > 0 && (
+                          <div className="text-xs text-[#8B7355] mt-0.5">{c.modifiers.map(m => m.optionName).join(" · ")}</div>
+                        )}
+                        <div className="text-xs text-[#8B7355] mt-0.5">{unitPrice.toFixed(0)} ₴ × {c.quantity}</div>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <button onClick={() => changeQty(key, -1)} className="w-7 h-7 rounded-full bg-[#F0EBE0] flex items-center justify-center font-bold text-[#2C2416]">−</button>
+                        <span className="w-4 text-center text-sm font-semibold">{c.quantity}</span>
+                        <button onClick={() => changeQty(key, 1)} className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-white" style={{ background: primary }}>+</button>
+                      </div>
+                      <div className="w-16 text-right font-semibold text-sm text-[#2C2416] mt-1">{(unitPrice * c.quantity).toFixed(0)} ₴</div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => changeQty(c.item.id, -1)} className="w-7 h-7 rounded-full bg-[#F0EBE0] flex items-center justify-center font-bold text-[#2C2416]">−</button>
-                      <span className="w-4 text-center text-sm font-semibold">{c.quantity}</span>
-                      <button onClick={() => changeQty(c.item.id, 1)} className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-white" style={{ background: primary }}>+</button>
-                    </div>
-                    <div className="w-16 text-right font-semibold text-sm text-[#2C2416]">{(parseFloat(c.item.price) * c.quantity).toFixed(0)} ₴</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="px-5 py-4 border-t border-[#F0EBE0]">
                 <div className="flex justify-between font-bold text-[#2C2416] mb-3">
@@ -446,13 +696,26 @@ export default function GuestMenu() {
         )}
       </AnimatePresence>
 
+      {/* Modifier modal */}
+      <AnimatePresence>
+        {modifierItem && (
+          <ModifierModal
+            key={modifierItem.id}
+            item={modifierItem}
+            primary={primary}
+            accent={accent}
+            onConfirm={handleModifierConfirm}
+            onCancel={() => setModifierItem(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* AI Waiter chat */}
       <AnimatePresence>
         {showAI && (
           <motion.div className="fixed inset-0 z-50 flex flex-col" initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", damping: 30, stiffness: 300 }}>
             <div className="flex-1 bg-black/40" onClick={() => setShowAI(false)} />
             <div className="bg-white rounded-t-3xl max-h-[85vh] flex flex-col max-w-lg mx-auto w-full">
-              {/* AI header */}
               <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-[#F0EBE0] shrink-0">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{ background: `linear-gradient(135deg, ${accent}, #e8b87a)` }}>✨</div>
                 <div className="flex-1">
@@ -463,15 +726,11 @@ export default function GuestMenu() {
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
-
-              {/* Messages */}
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
                 {aiMessages.map((m, i) => (
                   <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                      m.role === "user"
-                        ? "text-white rounded-br-sm"
-                        : "bg-[#FAF8F5] text-[#2C2416] rounded-bl-sm border border-[#E8E0D0]"
+                      m.role === "user" ? "text-white rounded-br-sm" : "bg-[#FAF8F5] text-[#2C2416] rounded-bl-sm border border-[#E8E0D0]"
                     }`} style={m.role === "user" ? { background: primary } : {}}>
                       {m.content}
                     </div>
@@ -486,21 +745,15 @@ export default function GuestMenu() {
                 )}
                 <div ref={aiEndRef} />
               </div>
-
-              {/* Quick prompts (if no messages from user yet) */}
               {aiMessages.filter(m => m.role === "user").length === 0 && (
                 <div className="px-4 pb-2 flex flex-wrap gap-2">
                   {["Що порекомендуєш?", "Є вегетаріанські страви?", "Які напої є?", "Що до вина?"].map(q => (
                     <button key={q} onClick={() => { setAiInput(q); setTimeout(() => sendAI(), 50); }}
                       className="text-xs px-3 py-1.5 rounded-full border font-medium bg-white hover:bg-[#FAF8F5] transition-colors"
-                      style={{ borderColor: accent, color: accent }}>
-                      {q}
-                    </button>
+                      style={{ borderColor: accent, color: accent }}>{q}</button>
                   ))}
                 </div>
               )}
-
-              {/* Input */}
               <div className="px-4 py-3 border-t border-[#F0EBE0] shrink-0 flex gap-2">
                 <input value={aiInput} onChange={e => setAiInput(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAI(); } }}

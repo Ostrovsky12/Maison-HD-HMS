@@ -592,6 +592,33 @@ async function ensureSchema() {
     ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS color       VARCHAR(20);
   `);
 
+  // Migrate: hierarchical category tree + modifier system
+  await db.execute(sql`
+    ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES fb_categories(id) ON DELETE SET NULL;
+    ALTER TABLE fb_categories ADD COLUMN IF NOT EXISTS station VARCHAR(50);
+    CREATE TABLE IF NOT EXISTS fb_modifier_groups (
+      id              SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL,
+      item_id         INT NOT NULL REFERENCES fb_items(id) ON DELETE CASCADE,
+      name            VARCHAR(100) NOT NULL,
+      is_required     BOOLEAN NOT NULL DEFAULT false,
+      min_select      INT NOT NULL DEFAULT 0,
+      max_select      INT NOT NULL DEFAULT 1,
+      sort_order      INT NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_fb_modifier_groups_item ON fb_modifier_groups(item_id);
+    CREATE TABLE IF NOT EXISTS fb_modifier_options (
+      id              SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL,
+      group_id        INT NOT NULL REFERENCES fb_modifier_groups(id) ON DELETE CASCADE,
+      name            VARCHAR(100) NOT NULL,
+      price_delta     NUMERIC(10,2) NOT NULL DEFAULT 0,
+      sort_order      INT NOT NULL DEFAULT 0,
+      is_available    BOOLEAN NOT NULL DEFAULT true
+    );
+    ALTER TABLE fb_order_items ADD COLUMN IF NOT EXISTS modifiers JSONB;
+  `);
+
   // Migrate: add missing columns to cashbox_sessions (production catch-up)
   await db.execute(sql`
     ALTER TABLE cashbox_sessions ADD COLUMN IF NOT EXISTS legal_entity_id  INTEGER;

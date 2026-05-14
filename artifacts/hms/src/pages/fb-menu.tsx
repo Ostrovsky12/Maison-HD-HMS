@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,9 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Pencil, Trash2, Search, Upload, X, Image,
   Leaf, Star, Wine, AlertTriangle, ChefHat, Clock,
-  ArrowUp, ArrowDown, Eye, EyeOff, GripVertical,
+  Eye, EyeOff, GripVertical,
   Layers, Package, Filter,
+  ChevronRight, ChevronDown, FolderPlus, Settings2, Sliders,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,12 +29,32 @@ interface Category {
   isActive: boolean;
   color?: string;
   description?: string;
+  parent_id?: number | null;
+  station?: string | null;
 }
 
 interface TechCardLine {
   name: string;
   quantity: number;
   unit: string;
+}
+
+interface ModifierOption {
+  id?: number;
+  name: string;
+  price_delta: number;
+  sort_order: number;
+  is_available: boolean;
+}
+
+interface ModifierGroup {
+  id?: number;
+  name: string;
+  is_required: boolean;
+  min_select: number;
+  max_select: number;
+  sort_order: number;
+  options: ModifierOption[];
 }
 
 interface Item {
@@ -71,7 +92,7 @@ interface TaxGroup {
   is_excise: boolean;
 }
 
-// ─── Allergen options ─────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const ALLERGENS = [
   { key: "gluten", label: "Глютен" },
@@ -88,7 +109,7 @@ const ALLERGENS = [
   { key: "sulphites", label: "Сульфіти" },
 ];
 
-const STATIONS = [
+const ITEM_STATIONS = [
   { value: "kitchen_general", label: "Кухня (загальна)" },
   { value: "kitchen_cold", label: "Холодний цех" },
   { value: "kitchen_grill", label: "Гриль" },
@@ -96,7 +117,13 @@ const STATIONS = [
   { value: "pastry", label: "Кондитерська" },
 ];
 
-const CATEGORY_EMOJIS = ["🍳","🍲","🍖","🥗","🍰","🥤","🍸","🍕","🍣","🍜","🥩","🥚","🥞","🍔","🌮","🍝","🥘","🍱","🍛","🫕"];
+const STATION_TYPES = [
+  { value: "kitchen", label: "Кухня", emoji: "🍽" },
+  { value: "bar", label: "Бар", emoji: "🍷" },
+  { value: "other_services", label: "Послуги", emoji: "🛎" },
+];
+
+const CATEGORY_EMOJIS = ["🍳","🍲","🍖","🥗","🍰","🥤","🍸","🍕","🍣","🍜","🥩","🥚","🥞","🍔","🌮","🍝","🥘","🍱","🍛","🫕","🍷","🍺","☕","🧁","🥐","🥙","🌯","🥗","🍤","🦞","🛎","🛏","🎯","🎪"];
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -112,6 +139,10 @@ async function apiFetch(path: string, opts?: RequestInit) {
   return r.json();
 }
 
+async function apiRequest(method: string, path: string, body?: any) {
+  return apiFetch(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+}
+
 async function uploadPhoto(file: File): Promise<string> {
   const { uploadURL, objectPath } = await apiRequest("POST", "/storage/uploads/request-url", {}) as any;
   await fetch(uploadURL, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
@@ -124,28 +155,49 @@ function imgSrc(objectPath?: string) {
   return `${API}/storage/public-objects/${objectPath}`;
 }
 
+// Derive item station from category's parent station
+function deriveItemStation(cat?: Category, allCats?: Category[]): string | null {
+  if (!cat) return null;
+  const parentStation = cat.station || (allCats?.find(c => c.id === cat.parent_id)?.station);
+  if (!parentStation) return null;
+  return parentStation === "bar" ? "bar" : "kitchen_general";
+}
+
 // ─── Category Dialog ──────────────────────────────────────────────────────────
 
 function CategoryDialog({
-  open, onClose, initial, onSave,
+  open, onClose, initial, parentId, onSave,
 }: {
   open: boolean; onClose: () => void;
-  initial?: Partial<Category>; onSave: (data: Partial<Category>) => void;
+  initial?: Partial<Category>;
+  parentId?: number | null;
+  onSave: (data: Partial<Category>) => void;
 }) {
-  const [form, setForm] = useState<Partial<Category>>(initial || { emoji: "🍽", name: "", isActive: true });
+  const isSubcat = parentId != null || (initial?.parent_id != null);
+  const defaultEmoji = isSubcat ? "🍽" : (STATION_TYPES[0].emoji);
+  const [form, setForm] = useState<Partial<Category>>(initial || { emoji: defaultEmoji, name: "", isActive: true });
 
-  useEffect(() => { if (open) setForm(initial || { emoji: "🍽", name: "", isActive: true }); }, [open]);
+  useEffect(() => {
+    if (open) {
+      if (initial) setForm(initial);
+      else setForm({ emoji: defaultEmoji, name: "", isActive: true, parent_id: parentId ?? null, station: isSubcat ? undefined : "kitchen" });
+    }
+  }, [open, initial?.id, parentId]);
+
+  const title = initial?.id
+    ? (isSubcat ? "Редагувати підкатегорію" : "Редагувати станцію")
+    : (isSubcat ? "Нова підкатегорія" : "Нова станція");
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{initial?.id ? "Редагувати категорію" : "Нова категорія"}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 py-2">
           <div>
             <Label>Емоджі</Label>
-            <div className="flex flex-wrap gap-1 mt-1">
+            <div className="flex flex-wrap gap-1 mt-1 max-h-24 overflow-y-auto">
               {CATEGORY_EMOJIS.map(e => (
                 <button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))}
                   className={`text-xl px-1 rounded hover:bg-muted ${form.emoji === e ? "bg-muted ring-1 ring-primary" : ""}`}>{e}</button>
@@ -154,12 +206,27 @@ function CategoryDialog({
           </div>
           <div>
             <Label>Назва *</Label>
-            <Input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="mt-1" placeholder="Основні страви" />
+            <Input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="mt-1"
+              placeholder={isSubcat ? "Салати, Перші страви..." : "Кухня, Бар..."} autoFocus />
           </div>
-          <div>
-            <Label>Опис (необов'язково)</Label>
-            <Input value={form.description || ""} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="mt-1" placeholder="Короткий опис категорії" />
-          </div>
+          {!isSubcat && (
+            <div>
+              <Label>Тип станції</Label>
+              <Select value={form.station || "kitchen"} onValueChange={v => setForm(f => ({ ...f, station: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATION_TYPES.map(s => <SelectItem key={s.value} value={s.value}>{s.emoji} {s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">Визначає до якого принтера надходять замовлення</p>
+            </div>
+          )}
+          {!isSubcat && (
+            <div>
+              <Label>Опис (необов'язково)</Label>
+              <Input value={form.description || ""} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="mt-1" />
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Switch checked={!!form.isActive} onCheckedChange={v => setForm(f => ({ ...f, isActive: v }))} />
             <span className="text-sm">Активна</span>
@@ -167,7 +234,7 @@ function CategoryDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
-          <Button onClick={() => { if (form.name?.trim()) onSave(form); }} disabled={!form.name?.trim()}>Зберегти</Button>
+          <Button onClick={() => { if (form.name?.trim()) onSave({ ...form, parent_id: parentId ?? form.parent_id ?? null }); }} disabled={!form.name?.trim()}>Зберегти</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -278,6 +345,106 @@ function TechCardEditor({ value, onChange }: { value: TechCardLine[]; onChange: 
   );
 }
 
+// ─── Modifier Editor ───────────────────────────────────────────────────────────
+
+function ModifierEditor({ groups, onChange }: { groups: ModifierGroup[]; onChange: (g: ModifierGroup[]) => void }) {
+  function addGroup() {
+    onChange([...groups, { name: "", is_required: false, min_select: 0, max_select: 1, sort_order: groups.length, options: [] }]);
+  }
+  function removeGroup(gi: number) { onChange(groups.filter((_, i) => i !== gi)); }
+  function updateGroup(gi: number, key: keyof ModifierGroup, val: any) {
+    onChange(groups.map((g, i) => i === gi ? { ...g, [key]: val } : g));
+  }
+  function addOption(gi: number) {
+    const g = groups[gi];
+    updateGroup(gi, "options", [...g.options, { name: "", price_delta: 0, sort_order: g.options.length, is_available: true }]);
+  }
+  function removeOption(gi: number, oi: number) {
+    updateGroup(gi, "options", groups[gi].options.filter((_, i) => i !== oi));
+  }
+  function updateOption(gi: number, oi: number, key: keyof ModifierOption, val: any) {
+    const opts = groups[gi].options.map((o, i) => i === oi ? { ...o, [key]: val } : o);
+    updateGroup(gi, "options", opts);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <Label>Групи модифікаторів</Label>
+          <p className="text-xs text-muted-foreground">Гість обирає перед замовленням (розмір, доповнення тощо)</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={addGroup} className="h-7 text-xs">
+          <Plus className="w-3 h-3 mr-1" /> Нова група
+        </Button>
+      </div>
+
+      {groups.length === 0 && (
+        <div className="border border-dashed rounded-lg p-6 text-center text-muted-foreground">
+          <Sliders className="w-8 h-8 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">Немає груп модифікаторів</p>
+          <p className="text-xs mt-1">Наприклад: «Розмір», «Доповнення», «Ступінь прожарки»</p>
+        </div>
+      )}
+
+      {groups.map((g, gi) => (
+        <div key={gi} className="border rounded-lg p-3 space-y-2 bg-muted/20">
+          {/* Group header */}
+          <div className="flex items-center gap-2">
+            <Input value={g.name} onChange={e => updateGroup(gi, "name", e.target.value)}
+              placeholder="Назва групи (напр. Розмір порції)" className="flex-1 h-8 text-sm font-medium" />
+            <button onClick={() => removeGroup(gi)} className="text-destructive hover:text-destructive/80 p-1">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Group settings */}
+          <div className="flex items-center gap-4 flex-wrap">
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+              <Switch checked={g.is_required} onCheckedChange={v => updateGroup(gi, "is_required", v)} />
+              <span>Обов'язково</span>
+            </label>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground">Мін:</span>
+              <Input type="number" min="0" max="10" value={g.min_select}
+                onChange={e => updateGroup(gi, "min_select", parseInt(e.target.value) || 0)}
+                className="w-12 h-6 text-xs px-1" />
+              <span className="text-muted-foreground">Макс:</span>
+              <Input type="number" min="1" max="10" value={g.max_select}
+                onChange={e => updateGroup(gi, "max_select", parseInt(e.target.value) || 1)}
+                className="w-12 h-6 text-xs px-1" />
+            </div>
+          </div>
+
+          {/* Options */}
+          <div className="space-y-1.5 pl-1">
+            {g.options.map((o, oi) => (
+              <div key={oi} className="flex items-center gap-2">
+                <Switch checked={o.is_available !== false} onCheckedChange={v => updateOption(gi, oi, "is_available", v)} />
+                <Input value={o.name} onChange={e => updateOption(gi, oi, "name", e.target.value)}
+                  placeholder="Назва опції" className="flex-1 h-7 text-xs" />
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-xs text-muted-foreground">+</span>
+                  <Input type="number" min="0" step="0.5" value={o.price_delta}
+                    onChange={e => updateOption(gi, oi, "price_delta", parseFloat(e.target.value) || 0)}
+                    className="w-16 h-7 text-xs" />
+                  <span className="text-xs text-muted-foreground">₴</span>
+                </div>
+                <button onClick={() => removeOption(gi, oi)} className="text-destructive hover:text-destructive/80">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <Button variant="ghost" size="sm" onClick={() => addOption(gi)} className="h-6 text-xs w-full mt-1">
+              <Plus className="w-3 h-3 mr-1" /> Додати опцію
+            </Button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Item Dialog ───────────────────────────────────────────────────────────────
 
 function ItemDialog({
@@ -287,17 +454,23 @@ function ItemDialog({
   initial?: Partial<Item>;
   categories: Category[];
   taxGroups: TaxGroup[];
-  onSave: (data: Partial<Item>) => void;
+  onSave: (data: Partial<Item>, modifierGroups: ModifierGroup[]) => void;
 }) {
+  // Only show subcategories (those with parent_id) and legacy categories (no parent but have items)
+  const leafCats = categories.filter(c => c.parent_id != null || (!c.parent_id && !c.station));
+  const allCats = categories; // for station derivation
+
   const blankItem: Partial<Item> = {
     name: "", description: "", price: "0", price_happy: undefined,
     cookMinutes: 15, isAvailable: true, isPopular: false, isVegetarian: false,
     is_alcohol: false, is_stop_list: false, allergens: [], tags: [],
     vat_rate: 20, station: "kitchen_general", tech_card: [],
-    categoryId: categories[0]?.id,
+    categoryId: leafCats[0]?.id ?? categories[0]?.id,
   };
   const [form, setForm] = useState<Partial<Item>>(blankItem);
-  const [tab, setTab] = useState<"main" | "details" | "tech">("main");
+  const [tab, setTab] = useState<"main" | "details" | "tech" | "modifiers">("main");
+  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
+  const [loadingMods, setLoadingMods] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -306,7 +479,7 @@ function ItemDialog({
         setForm({
           ...blankItem,
           ...initial,
-          categoryId: api.category_id ?? api.categoryId ?? categories[0]?.id,
+          categoryId: api.category_id ?? api.categoryId ?? leafCats[0]?.id,
           cookMinutes: api.cook_minutes ?? api.cookMinutes ?? 15,
           isAvailable: api.is_available ?? api.isAvailable ?? true,
           isPopular: api.is_popular ?? api.isPopular ?? false,
@@ -321,13 +494,32 @@ function ItemDialog({
           tax_group_id: api.tax_group_id ?? undefined,
         });
       } else {
-        setForm({ ...blankItem, categoryId: categories[0]?.id });
+        setForm({ ...blankItem, categoryId: leafCats[0]?.id ?? categories[0]?.id });
       }
       setTab("main");
+      setModifierGroups([]);
+    }
+  }, [open, initial?.id]);
+
+  // Load modifiers for existing items
+  useEffect(() => {
+    if (open && initial?.id) {
+      setLoadingMods(true);
+      apiFetch(`/api/fb/modifier-groups?itemId=${initial.id}`)
+        .then(d => setModifierGroups(d.groups || []))
+        .catch(() => {})
+        .finally(() => setLoadingMods(false));
     }
   }, [open, initial?.id]);
 
   function set(key: string, val: any) { setForm(f => ({ ...f, [key]: val })); }
+
+  function handleCategoryChange(catId: number) {
+    set("categoryId", catId);
+    const cat = categories.find(c => c.id === catId);
+    const derived = deriveItemStation(cat, allCats);
+    if (derived) set("station", derived);
+  }
 
   function toggleAllergen(key: string) {
     const list = form.allergens || [];
@@ -335,6 +527,10 @@ function ItemDialog({
   }
 
   const valid = !!form.name?.trim() && parseFloat(form.price || "0") >= 0;
+
+  // Flatten categories for display: station > subcats, then standalone cats
+  const stations = categories.filter(c => !c.parent_id && c.station);
+  const standaloneLeafs = categories.filter(c => !c.parent_id && !c.station);
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -345,10 +541,13 @@ function ItemDialog({
 
         {/* Tabs */}
         <div className="flex gap-1 border-b mb-4">
-          {(["main", "details", "tech"] as const).map(t => (
+          {(["main", "details", "tech", "modifiers"] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-              {t === "main" ? "Основне" : t === "details" ? "Деталі" : "Техкарта"}
+              {t === "main" ? "Основне" : t === "details" ? "Деталі" : t === "tech" ? "Техкарта" : "Модифікатори"}
+              {t === "modifiers" && modifierGroups.length > 0 && (
+                <span className="ml-1.5 bg-primary text-primary-foreground text-[10px] rounded-full px-1.5">{modifierGroups.length}</span>
+              )}
             </button>
           ))}
         </div>
@@ -366,21 +565,29 @@ function ItemDialog({
               </div>
               <div>
                 <Label>Категорія</Label>
-                <Select value={String(form.categoryId || "")} onValueChange={v => set("categoryId", parseInt(v))}>
+                <Select value={String(form.categoryId || "")} onValueChange={v => handleCategoryChange(parseInt(v))}>
                   <SelectTrigger className="mt-1"><SelectValue placeholder="Оберіть категорію" /></SelectTrigger>
                   <SelectContent>
-                    {categories.map(c => (
+                    {stations.map(st => (
+                      <div key={st.id}>
+                        <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">{st.emoji} {st.name}</div>
+                        {categories.filter(c => c.parent_id === st.id).map(c => (
+                          <SelectItem key={c.id} value={String(c.id)} className="pl-4">{c.emoji} {c.name}</SelectItem>
+                        ))}
+                      </div>
+                    ))}
+                    {standaloneLeafs.map(c => (
                       <SelectItem key={c.id} value={String(c.id)}>{c.emoji} {c.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>Станція</Label>
+                <Label>Станція (принтер)</Label>
                 <Select value={form.station || "kitchen_general"} onValueChange={v => set("station", v)}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {STATIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                    {ITEM_STATIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -468,7 +675,7 @@ function ItemDialog({
                   </div>
                   <div>
                     <Label>Акцизний код</Label>
-                    <Input value={form.excise_code || ""} onChange={e => set("excise_code", e.target.value)} className="mt-1" placeholder="Код акцизного бандерола" />
+                    <Input value={form.excise_code || ""} onChange={e => set("excise_code", e.target.value)} className="mt-1" />
                   </div>
                 </div>
               )}
@@ -505,9 +712,27 @@ function ItemDialog({
           />
         )}
 
+        {tab === "modifiers" && (
+          <div>
+            {loadingMods ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+              </div>
+            ) : !initial?.id ? (
+              <div className="text-center py-10 text-muted-foreground">
+                <Sliders className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm font-medium">Спочатку збережіть страву</p>
+                <p className="text-xs mt-1">Після збереження ви зможете додати модифікатори</p>
+              </div>
+            ) : (
+              <ModifierEditor groups={modifierGroups} onChange={setModifierGroups} />
+            )}
+          </div>
+        )}
+
         <DialogFooter className="mt-4">
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
-          <Button onClick={() => valid && onSave(form)} disabled={!valid}>
+          <Button onClick={() => valid && onSave(form, modifierGroups)} disabled={!valid}>
             {initial?.id ? "Зберегти зміни" : "Створити страву"}
           </Button>
         </DialogFooter>
@@ -532,7 +757,6 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
 
   return (
     <div className={`group relative border rounded-xl overflow-hidden bg-card hover:shadow-md transition-shadow ${stopList ? "opacity-60 border-destructive/40" : ""}`}>
-      {/* Photo */}
       <div className="relative h-36 bg-muted/40 flex items-center justify-center overflow-hidden">
         {src ? (
           <img src={src} alt={item.name} className="w-full h-full object-cover" />
@@ -542,7 +766,6 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
             <span className="text-xs">Немає фото</span>
           </div>
         )}
-        {/* Overlay badges */}
         <div className="absolute top-1.5 left-1.5 flex gap-1 flex-wrap">
           {stopList && <span className="bg-destructive text-destructive-foreground text-[10px] px-1.5 py-0.5 rounded font-medium">СТОП</span>}
           {!((item as any).is_available ?? item.isAvailable) && !stopList && <span className="bg-muted text-muted-foreground text-[10px] px-1.5 py-0.5 rounded">Прихована</span>}
@@ -550,7 +773,6 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
           {((item as any).is_vegetarian ?? item.isVegetarian) && <span className="bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded">🌿</span>}
           {item.is_alcohol && <span className="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded">🍷</span>}
         </div>
-        {/* Quick actions overlay */}
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5">
           <div className="flex items-center gap-1.5">
             <button onClick={onEdit} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title="Редагувати">
@@ -567,17 +789,16 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
             </button>
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={onTogglePopular} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_popular ?? item.isPopular ? "bg-amber-400 text-white hover:bg-amber-500" : "bg-white/90 text-gray-700 hover:bg-white"}`} title="ТОП позиція">
+            <button onClick={onTogglePopular} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_popular ?? item.isPopular ? "bg-amber-400 text-white hover:bg-amber-500" : "bg-white/90 text-gray-700 hover:bg-white"}`}>
               <Star className="w-3.5 h-3.5" /> Топ
             </button>
-            <button onClick={onToggleVegetarian} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_vegetarian ?? item.isVegetarian ? "bg-green-500 text-white hover:bg-green-600" : "bg-white/90 text-gray-700 hover:bg-white"}`} title="Вегетаріанське">
+            <button onClick={onToggleVegetarian} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_vegetarian ?? item.isVegetarian ? "bg-green-500 text-white hover:bg-green-600" : "bg-white/90 text-gray-700 hover:bg-white"}`}>
               <Leaf className="w-3.5 h-3.5" /> Вег
             </button>
           </div>
         </div>
       </div>
 
-      {/* Info */}
       <div className="p-3 space-y-1">
         <div className="font-medium text-sm leading-tight line-clamp-1">{item.name}</div>
         {item.description && <div className="text-xs text-muted-foreground line-clamp-2">{item.description}</div>}
@@ -608,31 +829,64 @@ export default function FbMenu() {
   const { toast } = useToast();
 
   const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
+  const [expandedStations, setExpandedStations] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "available" | "stop" | "popular" | "vegetarian">("all");
-  const [catDialog, setCatDialog] = useState<{ open: boolean; initial?: Partial<Category> }>({ open: false });
+  const [catDialog, setCatDialog] = useState<{ open: boolean; initial?: Partial<Category>; parentId?: number | null }>({ open: false });
   const [itemDialog, setItemDialog] = useState<{ open: boolean; initial?: Partial<Item> }>({ open: false });
   const [deleteCat, setDeleteCat] = useState<Category | null>(null);
   const [deleteItem, setDeleteItem] = useState<Item | null>(null);
 
-  // Queries
   const { data: catsData } = useQuery({ queryKey: ["fb-categories"], queryFn: () => apiFetch("/api/fb/categories") });
-  const { data: itemsData, isLoading: itemsLoading } = useQuery({
-    queryKey: ["fb-items"], queryFn: () => apiFetch("/api/fb/items"),
-  });
+  const { data: itemsData, isLoading: itemsLoading } = useQuery({ queryKey: ["fb-items"], queryFn: () => apiFetch("/api/fb/items") });
   const { data: taxData } = useQuery({ queryKey: ["fb-tax-groups"], queryFn: () => apiFetch("/api/fb/settings/tax-groups") });
 
-  const categories: Category[] = catsData?.categories || [];
+  const categories: Category[] = (catsData?.categories || []).map((c: any) => ({
+    ...c,
+    isActive: c.is_active ?? c.isActive ?? true,
+    sortOrder: c.sort_order ?? c.sortOrder ?? 0,
+    parent_id: c.parent_id ?? null,
+    station: c.station ?? null,
+  }));
   const allItems: Item[] = itemsData?.items || [];
   const taxGroups: TaxGroup[] = taxData?.taxGroups || [];
 
-  // Auto-select first category
-  useEffect(() => { if (categories.length && selectedCatId === null) setSelectedCatId(categories[0].id); }, [categories]);
+  // Stations = top-level categories with station field
+  const stations = categories.filter(c => !c.parent_id && c.station).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  // Standalone categories = top-level without station (legacy / uncategorised)
+  const standaloneLeafs = categories.filter(c => !c.parent_id && !c.station).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-  // Filtered items (always from full list, filter client-side)
+  // Auto-expand stations and select first subcat on load
+  useEffect(() => {
+    if (stations.length && expandedStations.size === 0) {
+      const firstStation = stations[0];
+      setExpandedStations(new Set([firstStation.id]));
+      if (selectedCatId === null) setSelectedCatId(firstStation.id);
+    }
+  }, [stations.length]);
+
+  function toggleExpanded(stationId: number) {
+    setExpandedStations(prev => {
+      const next = new Set(prev);
+      if (next.has(stationId)) next.delete(stationId); else next.add(stationId);
+      return next;
+    });
+  }
+
+  // Item filtering — handle station → all subcats
   const items = allItems.filter(item => {
     const catId = (item as any).category_id ?? item.categoryId;
-    if (selectedCatId && catId !== selectedCatId) return false;
+    if (selectedCatId !== null) {
+      const selCat = categories.find(c => c.id === selectedCatId);
+      if (selCat && !selCat.parent_id) {
+        // Station selected → show items in station + all subcategories
+        const stationCatIds = new Set([selectedCatId, ...categories.filter(c => c.parent_id === selectedCatId).map(c => c.id)]);
+        if (!stationCatIds.has(catId)) return false;
+      } else {
+        // Subcategory or standalone → exact match
+        if (catId !== selectedCatId) return false;
+      }
+    }
     if (search && !item.name.toLowerCase().includes(search.toLowerCase()) && !(item.description || "").toLowerCase().includes(search.toLowerCase())) return false;
     const isAvail = (item as any).is_available ?? item.isAvailable;
     const isPop   = (item as any).is_popular   ?? item.isPopular;
@@ -644,17 +898,28 @@ export default function FbMenu() {
     return true;
   });
 
+  // Count items under a station (all subcats + direct)
+  function stationItemCount(stationId: number) {
+    const subcatIds = new Set([stationId, ...categories.filter(c => c.parent_id === stationId).map(c => c.id)]);
+    return allItems.filter(i => subcatIds.has((i as any).category_id ?? i.categoryId)).length;
+  }
+
   // Mutations
   const saveCategory = useMutation({
     mutationFn: async (data: Partial<Category>) => {
-      const payload = { name: data.name, emoji: data.emoji, isActive: data.isActive, description: data.description, sortOrder: data.sortOrder };
+      const payload = {
+        name: data.name, emoji: data.emoji, isActive: data.isActive,
+        description: data.description, sortOrder: data.sortOrder,
+        parent_id: data.parent_id ?? null,
+        station: data.parent_id ? null : (data.station ?? null),
+      };
       if (data.id) return apiFetch(`/api/fb/categories/${data.id}`, { method: "PATCH", body: JSON.stringify(payload) });
       return apiFetch("/api/fb/categories", { method: "POST", body: JSON.stringify(payload) });
     },
     onSuccess: (_, v) => {
       qc.invalidateQueries({ queryKey: ["fb-categories"] });
       setCatDialog({ open: false });
-      toast({ title: v.id ? "Категорію оновлено" : "Категорію створено" });
+      toast({ title: v.id ? "Оновлено" : "Категорію створено" });
     },
     onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
   });
@@ -665,13 +930,13 @@ export default function FbMenu() {
       qc.invalidateQueries({ queryKey: ["fb-categories"] });
       setDeleteCat(null);
       if (deleteCat?.id === selectedCatId) setSelectedCatId(null);
-      toast({ title: "Категорію видалено" });
+      toast({ title: "Видалено" });
     },
     onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
   });
 
   const saveItem = useMutation({
-    mutationFn: async (data: Partial<Item>) => {
+    mutationFn: async ({ data, modifierGroups }: { data: Partial<Item>; modifierGroups: ModifierGroup[] }) => {
       const payload = {
         name: data.name, description: data.description, price: data.price,
         price_happy: data.price_happy || null,
@@ -685,13 +950,30 @@ export default function FbMenu() {
         tech_card: data.tech_card || null,
         sortOrder: data.sortOrder || 0,
       };
-      if (data.id) return apiFetch(`/api/fb/items/${data.id}`, { method: "PATCH", body: JSON.stringify(payload) });
-      return apiFetch("/api/fb/items", { method: "POST", body: JSON.stringify(payload) });
+      let saved: any;
+      if (data.id) {
+        saved = await apiFetch(`/api/fb/items/${data.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      } else {
+        saved = await apiFetch("/api/fb/items", { method: "POST", body: JSON.stringify(payload) });
+      }
+      // Bulk-save modifier groups if item has id
+      const itemId = saved.item?.id ?? data.id;
+      if (itemId) {
+        try {
+          await apiFetch(`/api/fb/modifier-groups/bulk/${itemId}`, {
+            method: "PUT",
+            body: JSON.stringify({ groups: modifierGroups }),
+          });
+        } catch (e) {
+          console.warn("Failed to save modifiers:", e);
+        }
+      }
+      return saved;
     },
     onSuccess: (_, v) => {
       qc.invalidateQueries({ queryKey: ["fb-items"] });
       setItemDialog({ open: false });
-      toast({ title: v.id ? "Страву оновлено" : "Страву створено" });
+      toast({ title: v.data.id ? "Страву оновлено" : "Страву створено" });
     },
     onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
   });
@@ -727,6 +1009,11 @@ export default function FbMenu() {
   };
 
   const selectedCat = categories.find(c => c.id === selectedCatId);
+  const selectedCatLabel = selectedCat
+    ? (selectedCat.parent_id
+      ? `${selectedCat.emoji} ${selectedCat.name}`
+      : (STATION_TYPES.find(s => s.value === selectedCat.station)?.emoji || selectedCat.emoji) + ` ${selectedCat.name}`)
+    : null;
 
   const FILTERS = [
     { value: "all", label: "Всі" },
@@ -736,47 +1023,141 @@ export default function FbMenu() {
     { value: "vegetarian", label: "Веган" },
   ] as const;
 
+  // Default category for new items
+  const defaultCatId = selectedCatId
+    ? (selectedCat?.parent_id ? selectedCatId : (categories.find(c => c.parent_id === selectedCatId)?.id ?? selectedCatId))
+    : (categories[0]?.id);
+
   return (
     <AppLayout>
       <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
 
-        {/* ─── Left: Categories ─────────────────────────────── */}
-        <div className="w-56 shrink-0 border-r flex flex-col bg-background">
-          <div className="px-3 py-3 border-b flex items-center justify-between">
-            <span className="font-semibold text-sm">Категорії</span>
-            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setCatDialog({ open: true })}>
-              <Plus className="w-4 h-4" />
-            </Button>
+        {/* ─── Left: Category Tree ──────────────────────────── */}
+        <div className="w-60 shrink-0 border-r flex flex-col bg-background">
+          <div className="px-3 py-2.5 border-b flex items-center justify-between">
+            <span className="font-semibold text-sm">Меню</span>
+            <span className="text-xs text-muted-foreground">{allItems.length} позицій</span>
           </div>
+
           <div className="flex-1 overflow-y-auto py-1">
-            {/* All categories shortcut */}
+            {/* All shortcut */}
             <button onClick={() => setSelectedCatId(null)}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-none hover:bg-muted transition-colors ${selectedCatId === null ? "bg-muted font-medium" : ""}`}>
-              <Layers className="w-4 h-4 text-muted-foreground" />
-              <span>Усі страви</span>
-              <span className="ml-auto text-xs text-muted-foreground">{allItems.length}</span>
+              className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors ${selectedCatId === null ? "bg-muted font-medium" : ""}`}>
+              <Layers className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="flex-1 text-left">Усі страви</span>
+              <span className="text-xs text-muted-foreground">{allItems.length}</span>
             </button>
 
-            {categories.map(cat => (
-              <div key={cat.id} className={`group relative flex items-center gap-2 px-3 py-2 cursor-pointer text-sm hover:bg-muted transition-colors ${selectedCatId === cat.id ? "bg-muted font-medium" : ""} ${!cat.isActive ? "opacity-50" : ""}`}
-                onClick={() => setSelectedCatId(cat.id)}>
-                <span className="text-base">{cat.emoji}</span>
-                <span className="flex-1 truncate">{cat.name}</span>
-                <span className="text-xs text-muted-foreground">{allItems.filter(i => ((i as any).category_id ?? i.categoryId) === cat.id).length}</span>
-                <div className="absolute right-1 opacity-0 group-hover:opacity-100 flex gap-0.5 bg-background border rounded shadow-sm">
-                  <button className="p-1 hover:bg-muted rounded" onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: cat }); }} title="Редагувати">
-                    <Pencil className="w-3 h-3" />
-                  </button>
-                  <button className="p-1 hover:bg-destructive/10 text-destructive rounded" onClick={e => { e.stopPropagation(); setDeleteCat(cat); }} title="Видалити">
-                    <Trash2 className="w-3 h-3" />
-                  </button>
+            {/* Station tree */}
+            {stations.map(station => {
+              const subcats = categories.filter(c => c.parent_id === station.id).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+              const isExpanded = expandedStations.has(station.id);
+              const isSelected = selectedCatId === station.id;
+              const count = stationItemCount(station.id);
+              const stationEmoji = STATION_TYPES.find(s => s.value === station.station)?.emoji || station.emoji;
+
+              return (
+                <div key={station.id}>
+                  {/* Station row */}
+                  <div className={`group relative flex items-center gap-1.5 px-2 py-2 cursor-pointer text-sm hover:bg-muted transition-colors ${isSelected ? "bg-muted font-medium" : ""}`}
+                    onClick={() => { setSelectedCatId(station.id); if (!isExpanded) toggleExpanded(station.id); }}>
+                    <button
+                      className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
+                      onClick={e => { e.stopPropagation(); toggleExpanded(station.id); }}>
+                      {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    </button>
+                    <span className="text-base shrink-0">{stationEmoji}</span>
+                    <span className="flex-1 truncate font-medium uppercase text-xs tracking-wide text-muted-foreground">{station.name}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{count}</span>
+                    {/* Hover actions */}
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
+                      <button className="p-1 hover:bg-muted rounded" title="Нова підкатегорія"
+                        onClick={e => { e.stopPropagation(); setCatDialog({ open: true, parentId: station.id }); }}>
+                        <FolderPlus className="w-3 h-3" />
+                      </button>
+                      <button className="p-1 hover:bg-muted rounded" title="Редагувати"
+                        onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: station }); }}>
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Видалити"
+                        onClick={e => { e.stopPropagation(); setDeleteCat(station); }}>
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Subcategories */}
+                  {isExpanded && (
+                    <>
+                      {subcats.map(subcat => {
+                        const subCount = allItems.filter(i => ((i as any).category_id ?? i.categoryId) === subcat.id).length;
+                        const isSubSelected = selectedCatId === subcat.id;
+                        return (
+                          <div key={subcat.id}
+                            className={`group relative flex items-center gap-2 pl-8 pr-2 py-1.5 cursor-pointer text-sm hover:bg-muted transition-colors ${isSubSelected ? "bg-muted font-medium" : ""} ${!subcat.isActive ? "opacity-50" : ""}`}
+                            onClick={() => setSelectedCatId(subcat.id)}>
+                            <span className="text-sm shrink-0">{subcat.emoji}</span>
+                            <span className="flex-1 truncate">{subcat.name}</span>
+                            <span className="text-xs text-muted-foreground shrink-0">{subCount}</span>
+                            <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
+                              <button className="p-1 hover:bg-muted rounded" title="Редагувати"
+                                onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: subcat }); }}>
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                              <button className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Видалити"
+                                onClick={e => { e.stopPropagation(); setDeleteCat(subcat); }}>
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {/* Add subcategory row */}
+                      <button
+                        className="flex items-center gap-1.5 pl-8 pr-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 w-full transition-colors"
+                        onClick={() => setCatDialog({ open: true, parentId: station.id })}>
+                        <Plus className="w-3 h-3" />
+                        <span>Нова підкатегорія</span>
+                      </button>
+                    </>
+                  )}
                 </div>
+              );
+            })}
+
+            {/* Standalone leaf categories (legacy) */}
+            {standaloneLeafs.length > 0 && (
+              <div className="mt-1">
+                {standaloneLeafs.length > 0 && <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Без станції</div>}
+                {standaloneLeafs.map(cat => {
+                  const catCount = allItems.filter(i => ((i as any).category_id ?? i.categoryId) === cat.id).length;
+                  const isSel = selectedCatId === cat.id;
+                  return (
+                    <div key={cat.id}
+                      className={`group relative flex items-center gap-2 px-3 py-2 cursor-pointer text-sm hover:bg-muted transition-colors ${isSel ? "bg-muted font-medium" : ""} ${!cat.isActive ? "opacity-50" : ""}`}
+                      onClick={() => setSelectedCatId(cat.id)}>
+                      <span className="text-base">{cat.emoji}</span>
+                      <span className="flex-1 truncate">{cat.name}</span>
+                      <span className="text-xs text-muted-foreground">{catCount}</span>
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
+                        <button className="p-1 hover:bg-muted rounded" onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: cat }); }}>
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button className="p-1 hover:bg-destructive/10 text-destructive rounded" onClick={e => { e.stopPropagation(); setDeleteCat(cat); }}>
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            )}
           </div>
-          <div className="p-2 border-t">
+
+          {/* Bottom actions */}
+          <div className="p-2 border-t space-y-1">
             <Button variant="ghost" className="w-full h-8 text-xs justify-start" onClick={() => setCatDialog({ open: true })}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" /> Нова категорія
+              <Plus className="w-3.5 h-3.5 mr-1.5" /> Нова станція
             </Button>
           </div>
         </div>
@@ -787,7 +1168,7 @@ export default function FbMenu() {
           <div className="flex items-center gap-3 px-5 py-3 border-b bg-background shrink-0">
             <div>
               <h1 className="font-semibold text-base">
-                {selectedCat ? `${selectedCat.emoji} ${selectedCat.name}` : "🍽 Усі страви"}
+                {selectedCatLabel ? selectedCatLabel : "🍽 Усі страви"}
               </h1>
               <p className="text-xs text-muted-foreground">{items.length} позицій{search ? " (відфільтровано)" : ""}</p>
             </div>
@@ -797,7 +1178,6 @@ export default function FbMenu() {
               <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Пошук страв..." className="pl-8 h-8 text-sm" />
             </div>
 
-            {/* Filters */}
             <div className="flex gap-1">
               {FILTERS.map(f => (
                 <button key={f.value} onClick={() => setFilter(f.value as any)}
@@ -807,7 +1187,7 @@ export default function FbMenu() {
               ))}
             </div>
 
-            <Button size="sm" onClick={() => setItemDialog({ open: true, initial: { categoryId: selectedCatId || categories[0]?.id } })}>
+            <Button size="sm" onClick={() => setItemDialog({ open: true, initial: { categoryId: defaultCatId } })}>
               <Plus className="w-4 h-4 mr-1" /> Додати страву
             </Button>
           </div>
@@ -821,7 +1201,7 @@ export default function FbMenu() {
                 <Package className="w-10 h-10 opacity-30" />
                 <p className="text-sm">{search ? "Нічого не знайдено" : "В цій категорії ще немає страв"}</p>
                 {!search && (
-                  <Button size="sm" onClick={() => setItemDialog({ open: true, initial: { categoryId: selectedCatId || categories[0]?.id } })}>
+                  <Button size="sm" onClick={() => setItemDialog({ open: true, initial: { categoryId: defaultCatId } })}>
                     <Plus className="w-4 h-4 mr-1" /> Додати першу страву
                   </Button>
                 )}
@@ -849,6 +1229,7 @@ export default function FbMenu() {
       <CategoryDialog
         open={catDialog.open}
         initial={catDialog.initial}
+        parentId={catDialog.parentId}
         onClose={() => setCatDialog({ open: false })}
         onSave={saveCategory.mutate}
       />
@@ -860,16 +1241,16 @@ export default function FbMenu() {
         categories={categories}
         taxGroups={taxGroups}
         onClose={() => setItemDialog({ open: false })}
-        onSave={saveItem.mutate}
+        onSave={(data, modifierGroups) => saveItem.mutate({ data, modifierGroups })}
       />
 
       {/* ─── Delete Category ─────────────────────────────── */}
       <AlertDialog open={!!deleteCat} onOpenChange={v => !v && setDeleteCat(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Видалити категорію «{deleteCat?.name}»?</AlertDialogTitle>
+            <AlertDialogTitle>Видалити «{deleteCat?.name}»?</AlertDialogTitle>
             <AlertDialogDescription>
-              Увага: страви у цій категорії залишаться, але втратять прив'язку до категорії.
+              {deleteCat?.parent_id ? "Страви у цій підкатегорії залишаться, але втратять прив'язку." : "Буде видалена станція разом з усіма підкатегоріями. Страви залишаться."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

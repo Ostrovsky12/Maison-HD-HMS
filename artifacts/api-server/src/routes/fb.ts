@@ -411,6 +411,108 @@ router.delete("/items/:id", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Modifier Groups & Options ────────────────────────────────────────────────
+
+router.get("/modifier-groups", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { itemId } = req.query;
+    const db_ = (db as any).$client;
+    const params: any[] = [orgId];
+    let where = `mg.organization_id = $1`;
+    if (itemId) { params.push(parseInt(itemId as string)); where += ` AND mg.item_id = $2`; }
+    const r = await db_.query(
+      `SELECT mg.*,
+              COALESCE(json_agg(
+                json_build_object(
+                  'id', mo.id, 'name', mo.name, 'price_delta', mo.price_delta,
+                  'sort_order', mo.sort_order, 'is_available', mo.is_available
+                ) ORDER BY mo.sort_order
+              ) FILTER (WHERE mo.id IS NOT NULL), '[]') AS options
+       FROM fb_modifier_groups mg
+       LEFT JOIN fb_modifier_options mo ON mo.group_id = mg.id
+       WHERE ${where}
+       GROUP BY mg.id ORDER BY mg.sort_order`, params
+    );
+    res.json({ groups: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Bulk-save modifier groups for an item (reconcile: delete removed, create/update)
+router.put("/modifier-groups/bulk/:itemId", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const itemId = parseInt(req.params.itemId);
+    const { groups } = req.body as { groups: Array<{
+      id?: number; name: string; is_required: boolean;
+      min_select: number; max_select: number; sort_order: number;
+      options: Array<{ id?: number; name: string; price_delta: number; sort_order: number; is_available: boolean; }>;
+    }> };
+    const db_ = (db as any).$client;
+
+    // Fetch existing group ids
+    const { rows: existingGroups } = await db_.query(
+      `SELECT id FROM fb_modifier_groups WHERE item_id = $1 AND organization_id = $2`,
+      [itemId, orgId]
+    );
+    const incomingIds = (groups || []).filter(g => g.id).map(g => g.id!);
+    const toDelete = existingGroups.map((r: any) => r.id).filter((id: number) => !incomingIds.includes(id));
+    if (toDelete.length) {
+      await db_.query(`DELETE FROM fb_modifier_groups WHERE id = ANY($1) AND organization_id = $2`, [toDelete, orgId]);
+    }
+
+    const resultGroups: any[] = [];
+    for (let gi = 0; gi < (groups || []).length; gi++) {
+      const g = groups[gi];
+      let groupId = g.id;
+      if (groupId) {
+        await db_.query(
+          `UPDATE fb_modifier_groups SET name=$1, is_required=$2, min_select=$3, max_select=$4, sort_order=$5
+           WHERE id=$6 AND organization_id=$7`,
+          [g.name, g.is_required, g.min_select, g.max_select, gi, groupId, orgId]
+        );
+      } else {
+        const { rows } = await db_.query(
+          `INSERT INTO fb_modifier_groups (organization_id, item_id, name, is_required, min_select, max_select, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [orgId, itemId, g.name, g.is_required, g.min_select, g.max_select, gi]
+        );
+        groupId = rows[0].id;
+      }
+      // Reconcile options
+      const { rows: existingOpts } = await db_.query(
+        `SELECT id FROM fb_modifier_options WHERE group_id = $1`, [groupId]
+      );
+      const incomingOptIds = (g.options || []).filter(o => o.id).map(o => o.id!);
+      const optsToDelete = existingOpts.map((r: any) => r.id).filter((id: number) => !incomingOptIds.includes(id));
+      if (optsToDelete.length) {
+        await db_.query(`DELETE FROM fb_modifier_options WHERE id = ANY($1)`, [optsToDelete]);
+      }
+      const resultOpts: any[] = [];
+      for (let oi = 0; oi < (g.options || []).length; oi++) {
+        const o = g.options[oi];
+        if (o.id) {
+          await db_.query(
+            `UPDATE fb_modifier_options SET name=$1, price_delta=$2, sort_order=$3, is_available=$4
+             WHERE id=$5 AND group_id=$6`,
+            [o.name, o.price_delta, oi, o.is_available, o.id, groupId]
+          );
+          resultOpts.push({ ...o, sort_order: oi });
+        } else {
+          const { rows } = await db_.query(
+            `INSERT INTO fb_modifier_options (organization_id, group_id, name, price_delta, sort_order, is_available)
+             VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+            [orgId, groupId, o.name, o.price_delta, oi, o.is_available !== false]
+          );
+          resultOpts.push(rows[0]);
+        }
+      }
+      resultGroups.push({ ...g, id: groupId, sort_order: gi, options: resultOpts });
+    }
+    res.json({ groups: resultGroups });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Excise Rates (global lookup table) ──────────────────────────────────────
 router.get("/excise-rates", requireAuth, async (req: any, res) => {
   try {
