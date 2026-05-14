@@ -57,7 +57,18 @@ async function ensureAccessTables() {
     )
   `);
   // Extend fb_staff with new columns if needed
-  await pool.query(`ALTER TABLE fb_staff ADD COLUMN IF NOT EXISTS position_id INT REFERENCES fb_positions(id) ON DELETE SET NULL`).catch(() => {});
+  await pool.query(`ALTER TABLE fb_staff ADD COLUMN IF NOT EXISTS position_id INT`).catch(() => {});
+  // Ensure FK constraint exists with correct name (idempotent)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fb_staff_position_id_fkey'
+      ) THEN
+        ALTER TABLE fb_staff ADD CONSTRAINT fb_staff_position_id_fkey
+          FOREIGN KEY (position_id) REFERENCES fb_positions(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `).catch(() => {});
   await pool.query(`ALTER TABLE fb_staff ADD COLUMN IF NOT EXISTS pin_plain VARCHAR(10)`).catch(() => {});
   await pool.query(`ALTER TABLE fb_staff ADD COLUMN IF NOT EXISTS login VARCHAR(150)`).catch(() => {});
   await pool.query(`ALTER TABLE fb_staff ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP`).catch(() => {});
