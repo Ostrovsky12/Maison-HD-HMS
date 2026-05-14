@@ -743,7 +743,7 @@ function ItemDialog({
 
 // ─── Item Card ─────────────────────────────────────────────────────────────────
 
-function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList, onTogglePopular, onToggleVegetarian }: {
+function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList, onTogglePopular, onToggleVegetarian, onDragStart, onDragEnd, isDragging }: {
   item: Item;
   onEdit: () => void;
   onDelete: () => void;
@@ -751,12 +751,28 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
   onToggleStopList: () => void;
   onTogglePopular: () => void;
   onToggleVegetarian: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+  isDragging: boolean;
 }) {
   const src = imgSrc(item.image_url);
   const stopList = item.is_stop_list;
 
   return (
-    <div className={`group relative border rounded-xl overflow-hidden bg-card hover:shadow-md transition-shadow ${stopList ? "opacity-60 border-destructive/40" : ""}`}>
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={`group relative border rounded-xl overflow-hidden bg-card hover:shadow-md transition-all cursor-grab active:cursor-grabbing select-none
+        ${stopList ? "opacity-60 border-destructive/40" : ""}
+        ${isDragging ? "opacity-40 scale-95 shadow-lg ring-2 ring-primary/30" : ""}
+      `}
+    >
+      {/* Drag handle hint */}
+      <div className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none">
+        <GripVertical className="w-4 h-4 text-white drop-shadow" />
+      </div>
+
       <div className="relative h-36 bg-muted/40 flex items-center justify-center overflow-hidden">
         {src ? (
           <img src={src} alt={item.name} className="w-full h-full object-cover" />
@@ -775,24 +791,24 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
         </div>
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5">
           <div className="flex items-center gap-1.5">
-            <button onClick={onEdit} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title="Редагувати">
+            <button onClick={e => { e.stopPropagation(); onEdit(); }} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title="Редагувати">
               <Pencil className="w-4 h-4" />
             </button>
-            <button onClick={onToggleAvailable} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title={item.isAvailable ? "Приховати" : "Показати"}>
+            <button onClick={e => { e.stopPropagation(); onToggleAvailable(); }} className="bg-white text-gray-900 rounded-lg p-2 hover:bg-gray-100" title={item.isAvailable ? "Приховати" : "Показати"}>
               {item.isAvailable ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
-            <button onClick={onToggleStopList} className={`rounded-lg p-2 ${stopList ? "bg-green-500 text-white hover:bg-green-600" : "bg-red-500 text-white hover:bg-red-600"}`} title={stopList ? "Прибрати зі стоп-листа" : "В стоп-лист"}>
+            <button onClick={e => { e.stopPropagation(); onToggleStopList(); }} className={`rounded-lg p-2 ${stopList ? "bg-green-500 text-white hover:bg-green-600" : "bg-red-500 text-white hover:bg-red-600"}`} title={stopList ? "Прибрати зі стоп-листа" : "В стоп-лист"}>
               <AlertTriangle className="w-4 h-4" />
             </button>
-            <button onClick={onDelete} className="bg-red-600 text-white rounded-lg p-2 hover:bg-red-700" title="Видалити">
+            <button onClick={e => { e.stopPropagation(); onDelete(); }} className="bg-red-600 text-white rounded-lg p-2 hover:bg-red-700" title="Видалити">
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={onTogglePopular} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_popular ?? item.isPopular ? "bg-amber-400 text-white hover:bg-amber-500" : "bg-white/90 text-gray-700 hover:bg-white"}`}>
+            <button onClick={e => { e.stopPropagation(); onTogglePopular(); }} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_popular ?? item.isPopular ? "bg-amber-400 text-white hover:bg-amber-500" : "bg-white/90 text-gray-700 hover:bg-white"}`}>
               <Star className="w-3.5 h-3.5" /> Топ
             </button>
-            <button onClick={onToggleVegetarian} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_vegetarian ?? item.isVegetarian ? "bg-green-500 text-white hover:bg-green-600" : "bg-white/90 text-gray-700 hover:bg-white"}`}>
+            <button onClick={e => { e.stopPropagation(); onToggleVegetarian(); }} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 ${(item as any).is_vegetarian ?? item.isVegetarian ? "bg-green-500 text-white hover:bg-green-600" : "bg-white/90 text-gray-700 hover:bg-white"}`}>
               <Leaf className="w-3.5 h-3.5" /> Вег
             </button>
           </div>
@@ -836,6 +852,8 @@ export default function FbMenu() {
   const [itemDialog, setItemDialog] = useState<{ open: boolean; initial?: Partial<Item> }>({ open: false });
   const [deleteCat, setDeleteCat] = useState<Category | null>(null);
   const [deleteItem, setDeleteItem] = useState<Item | null>(null);
+  const [draggingItemId, setDraggingItemId] = useState<number | null>(null);
+  const [dragOverCatId, setDragOverCatId] = useState<number | null>(null);
 
   const { data: catsData } = useQuery({ queryKey: ["fb-categories"], queryFn: () => apiFetch("/api/fb/categories") });
   const { data: itemsData, isLoading: itemsLoading } = useQuery({ queryKey: ["fb-items"], queryFn: () => apiFetch("/api/fb/items") });
@@ -1008,6 +1026,50 @@ export default function FbMenu() {
       .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
   };
 
+  const moveItemToCategory = async (itemId: number, categoryId: number) => {
+    try {
+      await apiFetch(`/api/fb/items/${itemId}`, { method: "PATCH", body: JSON.stringify({ categoryId }) });
+      qc.invalidateQueries({ queryKey: ["fb-items"] });
+      const cat = categories.find(c => c.id === categoryId);
+      toast({ title: `Переміщено до «${cat?.name || ""}»` });
+    } catch (e: any) {
+      toast({ title: e.message, variant: "destructive" });
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent, itemId: number) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("itemId", String(itemId));
+    setDraggingItemId(itemId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingItemId(null);
+    setDragOverCatId(null);
+  };
+
+  const handleCatDragOver = (e: React.DragEvent, catId: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverCatId(catId);
+  };
+
+  const handleCatDragLeave = () => {
+    setDragOverCatId(null);
+  };
+
+  const handleCatDrop = (e: React.DragEvent, catId: number) => {
+    e.preventDefault();
+    const itemId = parseInt(e.dataTransfer.getData("itemId"));
+    setDragOverCatId(null);
+    setDraggingItemId(null);
+    if (!itemId || !catId) return;
+    const item = allItems.find(i => i.id === itemId);
+    const catId_current = (item as any)?.category_id ?? item?.categoryId;
+    if (catId_current === catId) return;
+    moveItemToCategory(itemId, catId);
+  };
+
   const selectedCat = categories.find(c => c.id === selectedCatId);
   const selectedCatLabel = selectedCat
     ? (selectedCat.parent_id
@@ -1092,11 +1154,15 @@ export default function FbMenu() {
                       {subcats.map(subcat => {
                         const subCount = allItems.filter(i => ((i as any).category_id ?? i.categoryId) === subcat.id).length;
                         const isSubSelected = selectedCatId === subcat.id;
+                        const isDragTarget = dragOverCatId === subcat.id;
                         return (
                           <div key={subcat.id}
-                            className={`group relative flex items-center gap-2 pl-8 pr-2 py-1.5 cursor-pointer text-sm hover:bg-muted transition-colors ${isSubSelected ? "bg-muted font-medium" : ""} ${!subcat.isActive ? "opacity-50" : ""}`}
-                            onClick={() => setSelectedCatId(subcat.id)}>
-                            <span className="text-sm shrink-0">{subcat.emoji}</span>
+                            className={`group relative flex items-center gap-2 pl-8 pr-2 py-1.5 cursor-pointer text-sm transition-colors ${isSubSelected ? "bg-muted font-medium" : "hover:bg-muted"} ${!subcat.isActive ? "opacity-50" : ""} ${isDragTarget ? "bg-primary/10 ring-1 ring-inset ring-primary/40 rounded" : ""}`}
+                            onClick={() => setSelectedCatId(subcat.id)}
+                            onDragOver={e => handleCatDragOver(e, subcat.id)}
+                            onDragLeave={handleCatDragLeave}
+                            onDrop={e => handleCatDrop(e, subcat.id)}>
+                            <span className="text-sm shrink-0">{isDragTarget ? "📥" : subcat.emoji}</span>
                             <span className="flex-1 truncate">{subcat.name}</span>
                             <span className="text-xs text-muted-foreground shrink-0">{subCount}</span>
                             <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
@@ -1217,6 +1283,9 @@ export default function FbMenu() {
                     onToggleStopList={() => toggleStopList(item)}
                     onTogglePopular={() => togglePopular(item)}
                     onToggleVegetarian={() => toggleVegetarian(item)}
+                    onDragStart={e => handleDragStart(e, item.id)}
+                    onDragEnd={handleDragEnd}
+                    isDragging={draggingItemId === item.id}
                   />
                 ))}
               </div>
