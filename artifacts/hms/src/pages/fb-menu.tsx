@@ -34,9 +34,12 @@ interface Category {
 }
 
 interface TechCardLine {
+  ingredient_id?: number | null;
   name: string;
-  quantity: number;
+  brutto: number;
+  waste_pct: number;
   unit: string;
+  cost_per_unit: number;
 }
 
 interface ModifierOption {
@@ -301,46 +304,196 @@ function PhotoUploader({ value, onChange }: { value?: string; onChange: (path: s
   );
 }
 
-// ─── Tech Card Editor ──────────────────────────────────────────────────────────
+// ─── Cost helpers ──────────────────────────────────────────────────────────────
 
-function TechCardEditor({ value, onChange }: { value: TechCardLine[]; onChange: (v: TechCardLine[]) => void }) {
-  function add() { onChange([...value, { name: "", quantity: 1, unit: "г" }]); }
-  function remove(i: number) { onChange(value.filter((_, idx) => idx !== i)); }
-  function update(i: number, key: keyof TechCardLine, val: string | number) {
-    onChange(value.map((l, idx) => idx === i ? { ...l, [key]: val } : l));
-  }
+function warehouseIngToTechUnit(ing: any): { unit: string; cost_per_unit: number } {
+  const warehouseUnit = (ing.unit || "кг").trim();
+  const costPerWH = parseFloat(ing.cost_per_unit || "0");
+  const map: Record<string, [string, number]> = {
+    "кг": ["г",  costPerWH / 1000],
+    "г":  ["г",  costPerWH],
+    "л":  ["мл", costPerWH / 1000],
+    "мл": ["мл", costPerWH],
+    "шт": ["шт", costPerWH],
+  };
+  const [unit, cost] = map[warehouseUnit] || ["г", costPerWH / 1000];
+  return { unit, cost_per_unit: cost };
+}
+
+function computeTechCardCost(techCard?: TechCardLine[]): number {
+  return (techCard || []).reduce((sum, l) => {
+    const netto = (l.brutto || 0) * (1 - (l.waste_pct || 0) / 100);
+    return sum + netto * (l.cost_per_unit || 0);
+  }, 0);
+}
+
+// ─── Ingredient search input ───────────────────────────────────────────────────
+
+function IngSearchInput({ name, onSelect, allIngredients }: {
+  name: string;
+  allIngredients: any[];
+  onSelect: (name: string, ing: any | null) => void;
+}) {
+  const [search, setSearch] = useState(name);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setSearch(name); }, [name]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = search.trim().length >= 1
+    ? allIngredients.filter(i => i.name.toLowerCase().includes(search.toLowerCase())).slice(0, 10)
+    : [];
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label>Техкарта (інгредієнти)</Label>
-        <Button variant="ghost" size="sm" onClick={add} className="h-6 px-2 text-xs">
-          <Plus className="w-3 h-3 mr-1" /> Додати
-        </Button>
-      </div>
-      {value.length === 0 && (
-        <p className="text-xs text-muted-foreground border border-dashed rounded p-2 text-center">
-          Натисніть «Додати» щоб вказати інгредієнти
-        </p>
-      )}
-      {value.map((line, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <Input placeholder="Назва інгредієнта" value={line.name}
-            onChange={e => update(i, "name", e.target.value)} className="flex-1 h-8 text-sm" />
-          <Input type="number" min="0" step="0.01" value={line.quantity}
-            onChange={e => update(i, "quantity", parseFloat(e.target.value) || 0)}
-            className="w-20 h-8 text-sm" />
-          <Select value={line.unit} onValueChange={v => update(i, "unit", v)}>
-            <SelectTrigger className="w-16 h-8 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {["г","кг","мл","л","шт","ст.л","ч.л"].map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <button onClick={() => remove(i)} className="text-destructive hover:text-destructive/80">
-            <X className="w-4 h-4" />
-          </button>
+    <div className="relative flex-1" ref={ref}>
+      <Input
+        value={search}
+        onChange={e => { setSearch(e.target.value); onSelect(e.target.value, null); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Назва або пошук зі складу..."
+        className="h-8 text-sm"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 bg-background border rounded-lg shadow-xl top-full mt-0.5 left-0 w-80 max-h-52 overflow-y-auto">
+          {filtered.map(ing => {
+            const { unit, cost_per_unit } = warehouseIngToTechUnit(ing);
+            return (
+              <button key={ing.id}
+                className="w-full text-left text-xs px-3 py-2 hover:bg-muted flex items-center justify-between gap-2 border-b last:border-b-0"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => { onSelect(ing.name, ing); setSearch(ing.name); setOpen(false); }}>
+                <span className="font-medium">{ing.name}</span>
+                <span className="text-muted-foreground shrink-0 text-[10px]">
+                  {unit} · {cost_per_unit > 0 ? `${cost_per_unit.toFixed(4)} ₴/${unit}` : "ціна невідома"}
+                </span>
+              </button>
+            );
+          })}
         </div>
-      ))}
+      )}
+    </div>
+  );
+}
+
+// ─── Tech Card Editor ──────────────────────────────────────────────────────────
+
+function TechCardEditor({ value, onChange, itemPrice }: {
+  value: TechCardLine[];
+  onChange: (v: TechCardLine[]) => void;
+  itemPrice?: string;
+}) {
+  const { data } = useQuery({
+    queryKey: ["wh-ingredients-tc"],
+    queryFn: () => apiFetch("/api/fb/warehouse/ingredients"),
+  });
+  const allIngredients: any[] = (data as any)?.ingredients || [];
+
+  function add() {
+    onChange([...value, { ingredient_id: null, name: "", brutto: 100, waste_pct: 0, unit: "г", cost_per_unit: 0 }]);
+  }
+  function remove(i: number) { onChange(value.filter((_, idx) => idx !== i)); }
+  function update(i: number, patch: Partial<TechCardLine>) {
+    onChange(value.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  }
+
+  const totalCost = computeTechCardCost(value);
+  const price = parseFloat(itemPrice || "0");
+  const foodcost = price > 0 ? (totalCost / price) * 100 : 0;
+  const margin = price > 0 ? price - totalCost : 0;
+
+  return (
+    <div className="space-y-3">
+      {/* Cost summary */}
+      {value.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="border rounded-lg p-3 bg-muted/30">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Собівартість</div>
+            <div className="font-bold text-lg mt-0.5">{totalCost.toFixed(2)} ₴</div>
+          </div>
+          <div className={`border rounded-lg p-3 ${foodcost > 35 ? "bg-red-50 border-red-200" : foodcost > 25 ? "bg-amber-50 border-amber-200" : foodcost > 0 ? "bg-green-50 border-green-200" : "bg-muted/30"}`}>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Фудкост</div>
+            <div className={`font-bold text-lg mt-0.5 ${foodcost > 35 ? "text-red-600" : foodcost > 25 ? "text-amber-600" : foodcost > 0 ? "text-green-600" : "text-muted-foreground"}`}>
+              {price > 0 ? `${foodcost.toFixed(1)}%` : "—"}
+            </div>
+          </div>
+          <div className="border rounded-lg p-3 bg-muted/30">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Маржа</div>
+            <div className="font-bold text-lg mt-0.5">{price > 0 ? `${margin.toFixed(2)} ₴` : "—"}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Table header */}
+      {value.length > 0 && (
+        <div className="grid grid-cols-[1fr_68px_56px_56px_72px_24px] gap-1.5 text-[10px] text-muted-foreground font-semibold uppercase tracking-wide px-1">
+          <span>Інгредієнт (зі складу)</span>
+          <span>Брутто</span>
+          <span>Відх, %</span>
+          <span>Нетто</span>
+          <span>Вартість</span>
+          <span />
+        </div>
+      )}
+
+      {/* Lines */}
+      {value.map((line, i) => {
+        const netto = (line.brutto || 0) * (1 - (line.waste_pct || 0) / 100);
+        const lineCost = netto * (line.cost_per_unit || 0);
+        return (
+          <div key={i} className="grid grid-cols-[1fr_68px_56px_56px_72px_24px] gap-1.5 items-center">
+            <IngSearchInput
+              name={line.name}
+              allIngredients={allIngredients}
+              onSelect={(name, ing) => {
+                if (ing) {
+                  const { unit, cost_per_unit } = warehouseIngToTechUnit(ing);
+                  update(i, { name, ingredient_id: ing.id, unit, cost_per_unit });
+                } else {
+                  update(i, { name, ingredient_id: null });
+                }
+              }}
+            />
+            <div className="flex items-center gap-0.5">
+              <Input type="number" min="0" step="1" value={line.brutto}
+                onChange={e => update(i, { brutto: parseFloat(e.target.value) || 0 })}
+                className="h-8 text-sm w-12" />
+              <span className="text-[10px] text-muted-foreground shrink-0">{line.unit}</span>
+            </div>
+            <Input type="number" min="0" max="99" step="1" value={line.waste_pct}
+              onChange={e => update(i, { waste_pct: parseFloat(e.target.value) || 0 })}
+              className="h-8 text-sm" />
+            <div className="h-8 flex items-center text-sm px-2 bg-muted/40 rounded border font-mono text-center justify-center">
+              {netto.toFixed(0)}<span className="text-[9px] text-muted-foreground ml-0.5">{line.unit}</span>
+            </div>
+            <div className={`h-8 flex items-center text-xs px-1.5 rounded border font-mono justify-center ${lineCost > 0 ? "bg-blue-50 border-blue-100 text-blue-700" : "bg-muted/40"}`}>
+              {lineCost > 0 ? `${lineCost.toFixed(2)} ₴` : "—"}
+            </div>
+            <button onClick={() => remove(i)} className="text-muted-foreground hover:text-destructive">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        );
+      })}
+
+      <Button variant="outline" size="sm" onClick={add} className="w-full h-8 border-dashed">
+        <Plus className="w-3.5 h-3.5 mr-1.5" /> Додати інгредієнт зі складу
+      </Button>
+
+      {value.length === 0 && (
+        <div className="text-center py-8 text-muted-foreground border border-dashed rounded-xl">
+          <ChefHat className="w-9 h-9 mx-auto mb-2 opacity-25" />
+          <p className="text-sm font-medium">Тех карта порожня</p>
+          <p className="text-xs mt-1">Додайте інгредієнти зі складу — собівартість і фудкост розрахуються автоматично</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -639,10 +792,10 @@ function ItemDialog({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Група ПДВ</Label>
-                <Select value={String(form.tax_group_id || "")} onValueChange={v => set("tax_group_id", v ? parseInt(v) : undefined)}>
+                <Select value={form.tax_group_id ? String(form.tax_group_id) : "_none"} onValueChange={v => set("tax_group_id", v === "_none" ? undefined : parseInt(v))}>
                   <SelectTrigger className="mt-1"><SelectValue placeholder="Оберіть групу" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">— без прив'язки —</SelectItem>
+                    <SelectItem value="_none">— без прив'язки —</SelectItem>
                     {taxGroups.map(g => (
                       <SelectItem key={g.id} value={String(g.id)}>{g.code} — {g.name} ({g.rate}%)</SelectItem>
                     ))}
@@ -707,8 +860,16 @@ function ItemDialog({
 
         {tab === "tech" && (
           <TechCardEditor
-            value={form.tech_card || []}
+            value={(form.tech_card || []).map((l: any) => ({
+              ingredient_id: l.ingredient_id ?? null,
+              name: l.name || "",
+              brutto: l.brutto ?? l.quantity ?? 100,
+              waste_pct: l.waste_pct ?? 0,
+              unit: l.unit || "г",
+              cost_per_unit: l.cost_per_unit ?? 0,
+            }))}
             onChange={v => set("tech_card", v)}
+            itemPrice={form.price}
           />
         )}
 
@@ -817,8 +978,8 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
 
       <div className="p-3 space-y-1">
         <div className="font-medium text-sm leading-tight line-clamp-1">{item.name}</div>
-        {item.description && <div className="text-xs text-muted-foreground line-clamp-2">{item.description}</div>}
-        <div className="flex items-center justify-between pt-1">
+        {item.description && <div className="text-xs text-muted-foreground line-clamp-1">{item.description}</div>}
+        <div className="flex items-center justify-between pt-0.5">
           <div>
             <span className="font-semibold text-sm">{parseFloat(item.price).toFixed(0)} ₴</span>
             {item.price_happy && <span className="text-xs text-muted-foreground ml-1 line-through">{parseFloat(item.price_happy).toFixed(0)} ₴</span>}
@@ -828,6 +989,29 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
             <span>{item.cookMinutes} хв</span>
           </div>
         </div>
+        {(() => {
+          const cost = computeTechCardCost((item.tech_card || []).map((l: any) => ({
+            ingredient_id: null,
+            name: l.name || "",
+            brutto: l.brutto ?? l.quantity ?? 0,
+            waste_pct: l.waste_pct ?? 0,
+            unit: l.unit || "г",
+            cost_per_unit: l.cost_per_unit ?? 0,
+          })));
+          const price = parseFloat(item.price);
+          const fc = cost > 0 && price > 0 ? (cost / price) * 100 : 0;
+          if (cost <= 0) return null;
+          return (
+            <div className="flex items-center justify-between text-[10px] pt-0.5">
+              <span className="text-muted-foreground">С/В: {cost.toFixed(2)} ₴</span>
+              {fc > 0 && (
+                <span className={`px-1.5 py-0.5 rounded font-medium ${fc > 35 ? "bg-red-100 text-red-700" : fc > 25 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}`}>
+                  FC {fc.toFixed(0)}%
+                </span>
+              )}
+            </div>
+          );
+        })()}
         {(item.allergens || []).length > 0 && (
           <div className="text-[10px] text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 truncate">
             ⚠ {(item.allergens || []).map(a => ALLERGENS.find(al => al.key === a)?.label || a).join(", ")}
