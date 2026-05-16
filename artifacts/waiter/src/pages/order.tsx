@@ -47,35 +47,51 @@ export default function Order() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["waiter-order", orderId] }); },
   });
 
-  function printBill() {
-    const win = window.open("", "_blank", "width=380,height=620");
-    if (!win) return;
+  async function printBill() {
+    let cfg: any = {};
+    try { const d = await apiFetch("/fb/config/section/receipt"); cfg = d.data || {}; } catch {}
+
     const receiptItems = activeItems;
     const total = receiptItems.reduce(
       (s: number, i: any) => s + parseFloat(i.total_price || i.totalPrice || "0"), 0
     );
-    const now = new Date().toLocaleString("uk-UA");
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("uk-UA");
+    const timeStr = now.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
     const tableLabel = order.tableNumber ? `Стіл №${order.tableNumber}` : order.guestName || "Замовлення";
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Рахунок</title>
+    const estName = cfg.establishment_name || "Maison HD";
+    const showDate = cfg.show_date !== false;
+    const showTime = cfg.show_time !== false;
+
+    const win = window.open("", "_blank", "width=380,height=700");
+    if (!win) return;
+
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Передрахунок</title>
     <style>
-      body { font-family: 'Courier New', monospace; font-size: 12px; padding: 12px; max-width: 300px; margin: 0 auto; }
-      .center { text-align: center; } .bold { font-weight: bold; } .big { font-size: 15px; }
-      hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
-      .row { display: flex; justify-content: space-between; margin: 2px 0; }
-      .small { font-size: 10px; color: #555; }
+      body{font-family:'Courier New',monospace;font-size:12px;padding:14px;max-width:300px;margin:0 auto;color:#111}
+      .center{text-align:center}.bold{font-weight:bold}.big{font-size:14px}
+      hr{border:none;border-top:1px dashed #999;margin:7px 0}
+      .row{display:flex;justify-content:space-between;margin:2px 0}
+      .small{font-size:10px;color:#555}.italic{font-style:italic}
+      @media print{body{padding:4px}}
     </style></head><body>
-    <div class="center bold big">ПЕРЕДРАХУНОК</div>
+    ${cfg.logo_url ? `<div class="center" style="margin-bottom:6px"><img src="${cfg.logo_url}" style="max-height:50px;max-width:200px" onerror="this.remove()"/></div>` : ""}
+    <div class="center bold big">${estName}</div>
+    <div class="center small">— ПЕРЕДРАХУНОК —</div>
     <hr/>
-    <div class="row"><span class="bold">${tableLabel}</span><span class="small">${now}</span></div>
+    <div class="row">
+      <span class="bold">${tableLabel}</span>
+      <span class="small">${showDate ? dateStr : ""}${showDate && showTime ? " " : ""}${showTime ? timeStr : ""}</span>
+    </div>
     ${order.guestName ? `<div class="small">Гість: ${order.guestName}</div>` : ""}
     <hr/>
-    ${receiptItems.map((it: any) => `
-      <div class="row">
-        <span style="flex:1;margin-right:8px">${it.quantity}×${it.name}</span>
-        <span>${parseFloat(it.total_price || it.totalPrice || "0").toFixed(2)} ₴</span>
-      </div>`).join("")}
+    ${receiptItems.map((it: any) => `<div class="row"><span style="flex:1;margin-right:8px">${it.quantity}×${it.name}</span><span>${parseFloat(it.total_price || it.totalPrice || "0").toFixed(2)} ₴</span></div>`).join("")}
     <hr/>
     <div class="row bold big"><span>РАЗОМ:</span><span>${total.toFixed(2)} ₴</span></div>
+    ${cfg.guest_message ? `<hr/><div class="center small italic">${cfg.guest_message}</div>` : ""}
+    ${cfg.show_qr && cfg.qr_url ? `<hr/><div class="center"><img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(cfg.qr_url)}" style="width:90px;height:90px"/><div class="small" style="margin-top:2px">Відскануйте QR</div></div>` : ""}
+    ${cfg.print_wifi && cfg.wifi_name ? `<hr/><div class="center small"><div>Wi-Fi: <b>${cfg.wifi_name}</b></div>${cfg.wifi_password ? `<div>Пароль: ${cfg.wifi_password}</div>` : ""}</div>` : ""}
+    ${cfg.footer_text ? `<hr/><div class="center small">${cfg.footer_text}</div>` : ""}
     <hr/>
     <div class="center small">Дякуємо за відвідування!</div>
     <script>window.onload=()=>{ window.print(); }</script>
