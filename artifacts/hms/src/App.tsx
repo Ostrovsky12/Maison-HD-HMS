@@ -55,6 +55,9 @@ import FbConfigTables from "@/pages/fb-config-tables";
 import FbConfigSecurity from "@/pages/fb-config-security";
 import FbConfigReceipt from "@/pages/fb-config-receipt";
 import FbConfigTaxes from "@/pages/fb-config-taxes";
+import FbMarketing from "@/pages/fb-marketing";
+import FbReports from "@/pages/fb-reports";
+import FbConfig from "@/pages/fb-config";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -128,20 +131,29 @@ function Router() {
       <Route path="/fb/inventory"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/fb/transfers"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/fb/movement-report"><ProtectedRoute component={FbWarehouse} /></Route>
-      <Route path="/fb/clients"><ProtectedRoute component={FbClients} /></Route>
-      <Route path="/fb/client-groups"><ProtectedRoute component={FbClientGroups} /></Route>
-      <Route path="/fb/loyalty"><ProtectedRoute component={FbLoyalty} /></Route>
-      <Route path="/fb/exceptions"><ProtectedRoute component={FbExceptions} /></Route>
-      <Route path="/fb/promotions"><ProtectedRoute component={FbPromotions} /></Route>
-      <Route path="/fb/warehouses"><ProtectedRoute component={FbWarehouse} /></Route>
-      <Route path="/fb/packaging"><ProtectedRoute component={FbPackaging} /></Route>
-      <Route path="/fb/receipts"><ProtectedRoute component={FbWarehouse} /></Route>
-      <Route path="/fb/suppliers"><ProtectedRoute component={FbWarehouse} /></Route>
+      {/* ── Marketing hub + old routes redirect to hub ── */}
+      <Route path="/fb/marketing"><ProtectedRoute component={FbMarketing} /></Route>
+      <Route path="/fb/promotions"><ProtectedRoute component={FbMarketing} /></Route>
+      <Route path="/fb/clients"><ProtectedRoute component={FbMarketing} /></Route>
+      <Route path="/fb/client-groups"><ProtectedRoute component={FbMarketing} /></Route>
+      <Route path="/fb/loyalty"><ProtectedRoute component={FbMarketing} /></Route>
+      <Route path="/fb/exceptions"><ProtectedRoute component={FbMarketing} /></Route>
+      {/* ── Reports hub + old routes redirect to hub ── */}
+      <Route path="/fb/reports"><ProtectedRoute component={FbReports} /></Route>
+      <Route path="/fb/report/ai"><ProtectedRoute component={FbReports} /></Route>
+      <Route path="/fb/report/sales"><ProtectedRoute component={FbReports} /></Route>
+      <Route path="/fb/report/orders"><ProtectedRoute component={FbReports} /></Route>
+      <Route path="/fb/report/products"><ProtectedRoute component={FbReports} /></Route>
+      <Route path="/fb/report/abc"><ProtectedRoute component={FbReports} /></Route>
+      <Route path="/fb/shifts"><ProtectedRoute component={FbReports} /></Route>
+      {/* ── Apps hub + old routes redirect to hub ── */}
       <Route path="/fb/apps"><ProtectedRoute component={FbApps} /></Route>
-      <Route path="/fb/stop-list"><ProtectedRoute component={FbStopList} /></Route>
-      <Route path="/fb/print-cards"><ProtectedRoute component={FbPrintCards} /></Route>
-      <Route path="/fb/postie"><ProtectedRoute component={FbPostie} /></Route>
-      <Route path="/fb/delivery-bot"><ProtectedRoute component={FbDeliveryBot} /></Route>
+      <Route path="/fb/stop-list"><ProtectedRoute component={FbApps} /></Route>
+      <Route path="/fb/print-cards"><ProtectedRoute component={FbApps} /></Route>
+      <Route path="/fb/postie"><ProtectedRoute component={FbApps} /></Route>
+      <Route path="/fb/delivery-bot"><ProtectedRoute component={FbApps} /></Route>
+      {/* ── Config hub + individual config pages still work ── */}
+      <Route path="/fb/config"><ProtectedRoute component={FbConfig} /></Route>
       <Route path="/fb/config/general"><ProtectedRoute component={FbConfigGeneral} /></Route>
       <Route path="/fb/config/subscription"><ProtectedRoute component={FbConfigSubscription} /></Route>
       <Route path="/fb/config/orders"><ProtectedRoute component={FbConfigOrders} /></Route>
@@ -150,6 +162,10 @@ function Router() {
       <Route path="/fb/config/security"><ProtectedRoute component={FbConfigSecurity} /></Route>
       <Route path="/fb/config/receipt"><ProtectedRoute component={FbConfigReceipt} /></Route>
       <Route path="/fb/config/taxes"><ProtectedRoute component={FbConfigTaxes} /></Route>
+      <Route path="/fb/warehouses"><ProtectedRoute component={FbWarehouse} /></Route>
+      <Route path="/fb/packaging"><ProtectedRoute component={FbPackaging} /></Route>
+      <Route path="/fb/receipts"><ProtectedRoute component={FbWarehouse} /></Route>
+      <Route path="/fb/suppliers"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>
