@@ -29,6 +29,7 @@ import FbReportSales from "@/pages/fb-report-sales";
 import FbReportOrders from "@/pages/fb-report-orders";
 import FbReportProducts from "@/pages/fb-report-products";
 import FbReportAbc from "@/pages/fb-report-abc";
+import FbReportAi from "@/pages/fb-report-ai";
 import FbShifts from "@/pages/fb-shifts";
 import FbWriteoffs from "@/pages/fb-writeoffs";
 import FbClients from "@/pages/fb-clients";
@@ -122,6 +123,7 @@ function Router() {
       <Route path="/fb/sessions"><ProtectedRoute component={FbSessions} /></Route>
       <Route path="/fb/integrations"><ProtectedRoute component={FbIntegrations} /></Route>
       <Route path="/fb/cashier"><ProtectedRoute component={FbCashier} /></Route>
+      <Route path="/fb/report/ai"><ProtectedRoute component={FbReportAi} /></Route>
       <Route path="/fb/report/sales"><ProtectedRoute component={FbReportSales} /></Route>
       <Route path="/fb/report/orders"><ProtectedRoute component={FbReportOrders} /></Route>
       <Route path="/fb/report/products"><ProtectedRoute component={FbReportProducts} /></Route>

@@ -1963,7 +1963,7 @@ router.get("/public/bill/:orderId", async (req, res) => {
 // ─── ANALYTICS ────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const CLOSED = `('billed','closed')`;
+const CLOSED = `('billed')`;
 
 function dateRange(from?: string, to?: string) {
   const f = from || new Date(Date.now() - 29 * 86400000).toISOString().split("T")[0];
@@ -2238,6 +2238,138 @@ router.get("/analytics/waiters", requireAuth, async (req: any, res) => {
     );
 
     res.json({ waiters: r.rows, from, to });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── AI Report ────────────────────────────────────────────────────────────────
+// POST /analytics/ai-report
+router.post("/analytics/ai-report", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { question, from: fromQ, to: toQ } = req.body as { question: string; from?: string; to?: string };
+    if (!question?.trim()) return res.status(400).json({ error: "question required" });
+
+    const { from, to } = dateRange(fromQ, toQ);
+    const db_ = (db as any).$client;
+
+    // Gather analytics context in parallel
+    const [overviewR, productsR, categoriesR, hoursR] = await Promise.all([
+      db_.query(
+        `SELECT COALESCE(SUM(total_amount),0)::numeric AS revenue,
+                COUNT(*)::int AS checks,
+                COALESCE(SUM(guest_count),0)::int AS guests,
+                CASE WHEN COUNT(*)>0 THEN (SUM(total_amount)/COUNT(*))::numeric ELSE 0 END AS avg_check
+         FROM fb_orders WHERE organization_id=$1 AND status IN ${CLOSED} AND DATE(closed_at) BETWEEN $2 AND $3`,
+        [orgId, from, to]
+      ),
+      db_.query(
+        `SELECT oi.name, COALESCE(fc.name,'—') AS category,
+                SUM(oi.quantity)::int AS qty,
+                SUM(oi.total_price)::numeric AS revenue
+         FROM fb_order_items oi
+         JOIN fb_orders o ON o.id = oi.order_id
+         LEFT JOIN fb_items fi ON fi.id = oi.item_id
+         LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+         WHERE o.organization_id=$1 AND o.status IN ${CLOSED}
+           AND DATE(o.closed_at) BETWEEN $2 AND $3 AND oi.status!='cancelled'
+         GROUP BY oi.name, fc.name ORDER BY revenue DESC LIMIT 20`,
+        [orgId, from, to]
+      ),
+      db_.query(
+        `SELECT COALESCE(fc.name,'Без категорії') AS name,
+                SUM(oi.quantity)::int AS qty,
+                SUM(oi.total_price)::numeric AS revenue
+         FROM fb_order_items oi
+         JOIN fb_orders o ON o.id = oi.order_id
+         LEFT JOIN fb_items fi ON fi.id = oi.item_id
+         LEFT JOIN fb_categories fc ON fc.id = fi.category_id
+         WHERE o.organization_id=$1 AND o.status IN ${CLOSED}
+           AND DATE(o.closed_at) BETWEEN $2 AND $3 AND oi.status!='cancelled'
+         GROUP BY fc.name ORDER BY revenue DESC LIMIT 10`,
+        [orgId, from, to]
+      ),
+      db_.query(
+        `SELECT EXTRACT(HOUR FROM closed_at)::int AS hour, COUNT(*)::int AS checks,
+                SUM(total_amount)::numeric AS revenue
+         FROM fb_orders WHERE organization_id=$1 AND status IN ${CLOSED}
+           AND DATE(closed_at) BETWEEN $2 AND $3
+         GROUP BY hour ORDER BY hour`,
+        [orgId, from, to]
+      ),
+    ]);
+
+    const kpi = overviewR.rows[0] || {};
+    const products = productsR.rows as any[];
+    const categories = categoriesR.rows as any[];
+    const hours = hoursR.rows as any[];
+
+    // Find peak hour
+    const peakHour = hours.length > 0
+      ? hours.reduce((best: any, h: any) => Number(h.revenue) > Number(best.revenue) ? h : best, hours[0])
+      : null;
+
+    // Build context string
+    const ctx = `
+АНАЛІТИЧНІ ДАНІ РЕСТОРАНУ (${from} — ${to}):
+
+📊 КЛЮЧОВІ ПОКАЗНИКИ:
+- Виторг: ${Number(kpi.revenue).toFixed(2)} ₴
+- Кількість чеків: ${kpi.checks}
+- Середній чек: ${Number(kpi.avg_check).toFixed(2)} ₴
+- Кількість гостей: ${kpi.guests}
+
+🏆 ТОП-20 СТРАВ (за виторгом):
+${products.map((p, i) => `${i + 1}. ${p.name} (${p.category}) — ${p.qty} шт., ${Number(p.revenue).toFixed(0)} ₴`).join("\n") || "Немає даних"}
+
+📂 КАТЕГОРІЇ:
+${categories.map(c => `- ${c.name}: ${c.qty} шт., ${Number(c.revenue).toFixed(0)} ₴`).join("\n") || "Немає даних"}
+
+⏰ ПІКОВІ ГОДИНИ:
+${hours.map(h => `${String(h.hour).padStart(2, "0")}:00 — ${h.checks} чеків, ${Number(h.revenue).toFixed(0)} ₴`).join("\n") || "Немає даних"}
+${peakHour ? `\nНайактивніша година: ${String(peakHour.hour).padStart(2, "0")}:00` : ""}
+`.trim();
+
+    const aiBase = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || "http://localhost:1106/modelfarm/openai";
+    const aiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY  || "_DUMMY_API_KEY_";
+
+    const aiRes = await fetch(`${aiBase}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${aiKey}` },
+      body: JSON.stringify({
+        model: "gpt-5-mini",
+        max_completion_tokens: 16000,
+        messages: [
+          {
+            role: "user",
+            content: `Ти аналітик ресторанного бізнесу. Відповідай українською мовою. Форматуй відповідь у Markdown з заголовками та пунктами. Використовуй реальні цифри. Якщо даних немає - поясни що за цей період немає продажів і дай загальні рекомендації.
+
+${ctx}
+
+ПИТАННЯ: ${question}`,
+          },
+        ],
+      }),
+    });
+
+    if (!aiRes.ok) {
+      const errText = await aiRes.text();
+      throw new Error(`AI error ${aiRes.status}: ${errText.slice(0, 200)}`);
+    }
+    const aiJson = await aiRes.json() as any;
+    const report = aiJson.choices?.[0]?.message?.content || "ШІ не надав відповіді. Спробуйте ще раз.";
+
+    res.json({
+      report,
+      question,
+      from,
+      to,
+      kpi: {
+        revenue: Number(kpi.revenue),
+        checks: Number(kpi.checks),
+        avg_check: Number(kpi.avg_check),
+        guests: Number(kpi.guests),
+      },
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

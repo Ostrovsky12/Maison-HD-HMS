@@ -35,6 +35,7 @@ type NavItem = {
   label: string;
   icon: React.ElementType;
   isExternal?: boolean;
+  badge?: string;
 };
 
 type NavGroup = {
@@ -118,6 +119,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Звітність F&B",
     icon: BarChart2,
     items: [
+      { href: "/fb/report/ai", label: "ШІ-звіти", icon: Sparkles, badge: "Нове" },
       { href: "/fb/report/sales", label: "Продажі", icon: TrendingUp },
       { href: "/fb/report/orders", label: "Чеки", icon: Receipt },
       { href: "/fb/report/products", label: "Товари та категорії", icon: Package },
@@ -211,7 +213,12 @@ function NavLink({
         collapsed ? "w-5 h-5" : "w-4 h-4",
         isActive ? "text-primary" : "text-sidebar-foreground/45"
       )} />
-      {!collapsed && <span className="truncate">{item.label}</span>}
+      {!collapsed && <span className="truncate flex-1">{item.label}</span>}
+      {!collapsed && item.badge && (
+        <span className="text-[9px] font-bold bg-violet-500 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wide shrink-0">
+          {item.badge}
+        </span>
+      )}
     </>
   );
   if (item.isExternal) {
