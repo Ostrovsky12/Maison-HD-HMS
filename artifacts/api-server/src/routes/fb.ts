@@ -549,7 +549,6 @@ router.get("/tables", requireAuth, async (req: any, res) => {
   try {
     const orgId = await resolveOrgId(req);
     const db_ = (db as any).$client;
-    await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS current_waiter_user_id INT REFERENCES users(id) ON DELETE SET NULL`);
 
     // Physical tables (with or without active orders)
     const { rows: tableRows } = await db_.query(
