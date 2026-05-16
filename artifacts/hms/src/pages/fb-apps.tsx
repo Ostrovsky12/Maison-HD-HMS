@@ -14,7 +14,7 @@ import {
 import {
   ExternalLink, Bot, QrCode, Printer, XCircle, Shield, Cpu, Truck,
   Plus, Trash2, Loader2, AlertTriangle, RefreshCw, Search, Star,
-  ChevronRight, Brain, Save, Puzzle,
+  ChevronRight, Brain, Save, Puzzle, UtensilsCrossed, Sparkles,
 } from "lucide-react";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -33,117 +33,92 @@ async function apiFetch(url: string, opts?: RequestInit) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TAB: Каталог
+// TAB: Застосунки
 // ─────────────────────────────────────────────────────────────────────────────
-interface AppCard {
-  title: string;
-  description: string[];
-  tab?: string;
-  externalHref?: string;
-  bg: string;
-  titleColor: string;
-  icon: React.ElementType;
-  badge?: string;
-}
-
-const APPS: AppCard[] = [
-  {
-    title: "Postie AI Assistant",
-    description: ["Відповідає на питання про ваш бізнес", "Створює постачання з фото накладних", "Завантажує банківські виписки"],
-    tab: "postie",
-    bg: "bg-violet-50 border-violet-200",
-    titleColor: "text-violet-900",
-    icon: Cpu,
-  },
-  {
-    title: "QR-меню, оплата, чайові та відгуки",
-    description: ["QR-коди для столів", "Гостьове меню у браузері", "Онлайн-оплата та чайові"],
-    tab: undefined,
-    externalHref: "/fb/qr",
-    bg: "bg-violet-600",
-    titleColor: "text-white",
-    icon: QrCode,
-  },
-  {
-    title: "Сайт для замовлень",
-    description: ["Сайт з онлайн-меню та замовленнями", "Синхронізація з меню в реальному часі"],
-    externalHref: "#",
-    bg: "bg-orange-50 border-orange-200",
-    titleColor: "text-orange-900",
-    icon: ExternalLink,
-  },
-  {
-    title: "Друк ТК та НФ",
-    description: ["Масовий друк технологічних карток", "Напівфабрикати та рецептури"],
-    tab: "print-cards",
-    bg: "bg-blue-50 border-blue-200",
-    titleColor: "text-blue-900",
-    icon: Printer,
-  },
-  {
-    title: "Стоп-лист на касі",
-    description: ["Позначайте страви недоступними", "Касири та офіціанти не зможуть додати їх до замовлення"],
-    tab: "stop-list",
-    bg: "bg-red-50 border-red-200",
-    titleColor: "text-red-900",
-    icon: XCircle,
-  },
-  {
-    title: "ПРРО",
-    description: ["Програмний реєстратор розрахункових операцій", "Фіскальні зміни та чеки"],
-    externalHref: "/fb/prro",
-    bg: "bg-slate-50 border-slate-200",
-    titleColor: "text-slate-900",
-    icon: Shield,
-  },
-  {
-    title: "Poster Delivery Bot",
-    description: ["Telegram-бот для замовлень", "Доставка, самовивіз, в закладі", "Онлайн-оплата"],
-    tab: "delivery",
-    bg: "bg-sky-50 border-sky-200",
-    titleColor: "text-sky-900",
-    icon: Bot,
-  },
-];
-
 function CatalogTab({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const [, nav] = useLocation();
-  const [featured, ...rest] = APPS;
 
-  function CardContent({ app }: { app: AppCard }) {
-    const Icon = app.icon;
-    return (
-      <div className={`rounded-2xl border p-6 h-full flex flex-col gap-3 cursor-pointer hover:shadow-md transition-all ${app.bg}`}
-        onClick={() => {
-          if (app.tab) onTabChange(app.tab);
-          else if (app.externalHref) { if (app.externalHref.startsWith("/")) nav(app.externalHref); else window.open(app.externalHref, "_blank"); }
-        }}>
-        <div className="flex items-start justify-between gap-3">
-          <h3 className={`font-bold text-lg leading-tight ${app.titleColor}`}>{app.title}</h3>
-          {app.externalHref && <ExternalLink className="w-4 h-4 shrink-0 mt-1 opacity-40" />}
-        </div>
-        <ul className="space-y-1">
-          {app.description.map((d, i) => (
-            <li key={i} className={`text-sm flex items-start gap-2 ${app.bg.includes("violet-600") ? "text-violet-100" : "text-muted-foreground"}`}>
-              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-current shrink-0" />
-              {d}
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
+  const OUR_APPS = [
+    {
+      id: "waiter",
+      title: "Мобільний офіціант",
+      description: "Приймайте замовлення зі смартфона або планшета. Офіціант бачить столи, замовлення та може друкувати рахунок прямо з телефону.",
+      features: ["Перегляд столів та замовлень", "Прийом і редагування замовлень", "Виклик рахунку та оплата"],
+      icon: UtensilsCrossed,
+      gradient: "from-violet-600 to-violet-800",
+      badge: null as string | null,
+      action: () => window.open("/waiter", "_blank"),
+      actionLabel: "Відкрити",
+      actionIcon: ExternalLink,
+    },
+    {
+      id: "ai-reports",
+      title: "ШІ-звіти",
+      description: "Ставте питання про ваш бізнес — отримуйте детальні аналітичні звіти. Підтримується аналіз продажів, меню, гостей та фудкосту.",
+      features: ["Аналіз продажів та виторгу", "АВС-аналіз меню", "Звіти по касових змінах"],
+      icon: Sparkles,
+      gradient: "from-indigo-600 to-violet-700",
+      badge: "Нове" as string | null,
+      action: () => nav("/fb/reports"),
+      actionLabel: "Відкрити звіти",
+      actionIcon: ChevronRight,
+    },
+    {
+      id: "qr",
+      title: "QR-замовлення",
+      description: "Гості сканують QR-код на столі та роблять замовлення самостійно. Підтримується онлайн-оплата, чайові та відгуки.",
+      features: ["QR-коди для кожного столу", "Онлайн-меню у браузері гостя", "Оплата та чайові онлайн"],
+      icon: QrCode,
+      gradient: "from-emerald-600 to-teal-700",
+      badge: null as string | null,
+      action: () => nav("/fb/qr"),
+      actionLabel: "Налаштувати",
+      actionIcon: ChevronRight,
+    },
+  ];
 
   return (
     <div className="flex-1 overflow-auto p-6">
-      <p className="text-xs text-muted-foreground mb-5">Підключайте додаткові функції для вашого закладу</p>
-      <div className="grid grid-cols-3 gap-4">
-        <div className="row-span-2">
-          <CardContent app={featured} />
-        </div>
-        {rest.map(app => (
-          <CardContent key={app.title} app={app} />
-        ))}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-5xl">
+        {OUR_APPS.map(app => {
+          const Icon = app.icon;
+          const ActionIcon = app.actionIcon;
+          return (
+            <div key={app.id} className="flex flex-col border rounded-2xl overflow-hidden bg-card hover:shadow-lg transition-all">
+              <div className={`bg-gradient-to-br ${app.gradient} p-6 flex items-start justify-between`}>
+                <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Icon className="w-6 h-6 text-white" />
+                </div>
+                {app.badge && (
+                  <span className="text-[10px] font-bold bg-white/20 text-white px-2 py-1 rounded-full uppercase tracking-wide">
+                    {app.badge}
+                  </span>
+                )}
+              </div>
+              <div className="p-5 flex flex-col flex-1 gap-4">
+                <div>
+                  <h3 className="font-bold text-base mb-1.5">{app.title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{app.description}</p>
+                </div>
+                <ul className="space-y-1.5 flex-1">
+                  {app.features.map((f, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={app.action}
+                  className="flex items-center justify-center gap-2 w-full py-2 rounded-lg border border-primary text-primary text-sm font-medium hover:bg-primary hover:text-primary-foreground transition-colors"
+                >
+                  {app.actionLabel}
+                  <ActionIcon className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
