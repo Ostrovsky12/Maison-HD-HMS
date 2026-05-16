@@ -547,10 +547,12 @@ router.put("/excise-rates/:id", requireAuth, async (req: any, res) => {
 // ─── Tables ───────────────────────────────────────────────────────────────────
 router.get("/tables", requireAuth, async (req: any, res) => {
   try {
-    const orgId = getOrg(req);
+    const orgId = await resolveOrgId(req);
     const db_ = (db as any).$client;
     await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS current_waiter_user_id INT REFERENCES users(id) ON DELETE SET NULL`);
-    const { rows } = await db_.query(
+
+    // Physical tables (with or without active orders)
+    const { rows: tableRows } = await db_.query(
       `SELECT
          t.id,
          t.number        AS table_number,
@@ -570,7 +572,31 @@ router.get("/tables", requireAuth, async (req: any, res) => {
        ORDER BY t.location, t.number`,
       [orgId]
     );
-    res.json({ tables: rows });
+
+    // Orphan orders (no table_id) — waiter typed a number not in DB, show them as virtual rows
+    const { rows: orphanRows } = await db_.query(
+      `SELECT
+         NULL::int                                            AS id,
+         REGEXP_REPLACE(o.guest_name, '^Стіл\\s+', '')       AS table_number,
+         1                                                   AS capacity,
+         'Без столу'                                         AS section,
+         'occupied'                                          AS status,
+         o.id                                               AS current_order_id,
+         true                                               AS is_active,
+         o.guest_name                                       AS current_guest,
+         o.total_amount                                     AS current_total,
+         o.status                                           AS order_status,
+         o.order_type,
+         o.current_waiter_user_id
+       FROM fb_orders o
+       WHERE o.organization_id = $1
+         AND o.table_id IS NULL
+         AND o.status NOT IN ('billed', 'cancelled')
+       ORDER BY o.opened_at DESC`,
+      [orgId]
+    );
+
+    res.json({ tables: [...tableRows, ...orphanRows] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -409,8 +409,21 @@ export default function FbCashier() {
         orders.map(async (o) => {
           try {
             const d = await apiFetch(`/orders/${o.id}`);
-            return { ...o, tableNumber: d.order?.tableNumber || o.tableNumber, items: d.items || [] };
-          } catch { return { ...o, items: [] }; }
+            // Normalize: API returns camelCase from Drizzle, interface expects snake_case
+            const merged = { ...o, tableNumber: d.order?.tableNumber || o.tableNumber, items: d.items || [] };
+            return {
+              ...merged,
+              total_amount: merged.total_amount ?? merged.totalAmount ?? "0",
+              guest_name:   merged.guest_name   ?? merged.guestName   ?? "",
+              opened_at:    merged.opened_at    ?? merged.openedAt    ?? merged.createdAt ?? "",
+              order_type:   merged.order_type   ?? merged.orderType   ?? "",
+            };
+          } catch { return { ...o, items: [],
+            total_amount: o.total_amount ?? o.totalAmount ?? "0",
+            guest_name:   o.guest_name   ?? o.guestName   ?? "",
+            opened_at:    o.opened_at    ?? o.openedAt    ?? o.createdAt ?? "",
+            order_type:   o.order_type   ?? o.orderType   ?? "",
+          }; }
         })
       );
       setActiveOrders(withItems);
