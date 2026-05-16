@@ -51,7 +51,7 @@ interface GeneralConfig {
   online_orders_email?: string;
 }
 
-interface GuestBranding { logo_url?: string; primary_color?: string; accent_color?: string; }
+interface GuestBranding { logo_url?: string; primary_color?: string; accent_color?: string; service_card?: string; }
 
 export default function FbConfigGeneral() {
   const { toast } = useToast();
@@ -274,6 +274,14 @@ export default function FbConfigGeneral() {
                     <span className="text-xs text-muted-foreground">(AI-кнопка, теги)</span>
                   </div>
                 </div>
+                <Row label="Карта для сервісу" hint="Номер картки офіціанта, яка відображатиметься гостю у QR-меню при виборі чайових. Наприклад: 5168 7573 1234 5678">
+                  <Input
+                    value={branding.service_card||""}
+                    onChange={e => setBrand("service_card", e.target.value)}
+                    placeholder="5168 7573 XXXX XXXX"
+                    className="max-w-xs font-mono"
+                  />
+                </Row>
               </div>
             </div>
 

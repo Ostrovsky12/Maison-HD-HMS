@@ -54,6 +54,7 @@ interface ActiveOrder {
   id: number; status: string; order_type: string; guest_name: string;
   total_amount: string; opened_at: string;
   tableNumber?: string | null; tableId?: number | null;
+  tipPct?: number | null;
   items?: OrderItem[];
 }
 interface MenuItem { id: number; name: string; price: string; categoryName: string; }
@@ -309,8 +310,9 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
   const [discountValue, setDiscountValue] = useState("");
 
   // ── Service charge (чайові / надбавка) ──
-  const [serviceEnabled, setServiceEnabled] = useState(false);
-  const [serviceValue, setServiceValue] = useState("10");
+  const guestTip = order.tipPct ? Number(order.tipPct) : 0;
+  const [serviceEnabled, setServiceEnabled] = useState(guestTip > 0);
+  const [serviceValue, setServiceValue] = useState(guestTip > 0 ? String(guestTip) : "10");
 
   // ── Computed totals ──
   const discountNum = parseFloat(discountValue || "0");
@@ -778,7 +780,7 @@ export default function FbCashier() {
         orders.map(async (o) => {
           try {
             const d = await apiFetch(`/orders/${o.id}`);
-            const merged = { ...o, tableNumber: d.order?.tableNumber || o.tableNumber, items: d.items || [] };
+            const merged = { ...o, tableNumber: d.order?.tableNumber || o.tableNumber, tipPct: d.order?.tipPct ?? o.tipPct ?? null, items: d.items || [] };
             return {
               ...merged,
               total_amount: merged.total_amount ?? merged.totalAmount ?? "0",

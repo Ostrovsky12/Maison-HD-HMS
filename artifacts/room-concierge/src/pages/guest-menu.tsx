@@ -30,7 +30,7 @@ interface AiMsg { role: "user" | "assistant"; content: string; }
 interface PromoBanner { title: string; subtitle?: string; badge?: string; image_url?: string; color?: string; }
 interface Branding {
   logo_url?: string; primary_color?: string; accent_color?: string;
-  banners?: PromoBanner[];
+  banners?: PromoBanner[]; service_card?: string;
 }
 
 // ─── Modifier Modal ────────────────────────────────────────────────────────────
@@ -253,6 +253,7 @@ export default function GuestMenu() {
   const [showCart, setShowCart] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [ordered, setOrdered] = useState(false);
+  const [tipPct, setTipPct] = useState<0 | 5 | 10 | 15>(0);
 
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
 
@@ -335,7 +336,7 @@ export default function GuestMenu() {
     try {
       const r = await fetch(`${API}/fb/public/guest-orders`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: parseInt(tid), items: cart.map(c => ({ itemId: c.item.id, quantity: c.quantity, modifiers: c.modifiers })) }),
+        body: JSON.stringify({ tableId: parseInt(tid), tipPct: tipPct || undefined, items: cart.map(c => ({ itemId: c.item.id, quantity: c.quantity, modifiers: c.modifiers })) }),
       });
       const d = await r.json();
       if (d.error) throw new Error(d.error);
@@ -688,9 +689,54 @@ export default function GuestMenu() {
                   );
                 })}
               </div>
-              <div className="px-5 py-4 border-t border-stone-100">
-                <div className="flex justify-between font-bold text-stone-900 mb-3"><span>Разом</span><span>{cartTotal.toFixed(0)} ₴</span></div>
-                <p className="text-xs text-stone-400 mb-3 text-center">
+              <div className="px-5 py-4 border-t border-stone-100 space-y-3">
+                {/* ── Tip / Service section ── */}
+                <div className="bg-stone-50 rounded-2xl p-3.5">
+                  <p className="text-xs text-stone-500 text-center mb-2.5 leading-snug">
+                    Винагорода офіціанту залишається на ваш розсуд
+                  </p>
+                  <div className="flex gap-2">
+                    {([0, 5, 10, 15] as const).map(pct => (
+                      <button
+                        key={pct}
+                        onClick={() => setTipPct(pct)}
+                        className={`flex-1 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
+                          tipPct === pct
+                            ? "border-transparent text-white"
+                            : "border-stone-200 text-stone-600 bg-white"
+                        }`}
+                        style={tipPct === pct ? { background: accent } : {}}>
+                        {pct === 0 ? "—" : `+${pct}%`}
+                      </button>
+                    ))}
+                  </div>
+                  {tipPct > 0 && branding.service_card && (
+                    <p className="text-[11px] text-stone-400 text-center mt-2 leading-snug">
+                      Картка для чайових: <span className="font-mono text-stone-600">{branding.service_card}</span>
+                    </p>
+                  )}
+                </div>
+
+                {/* ── Totals ── */}
+                <div>
+                  {tipPct > 0 ? (
+                    <>
+                      <div className="flex justify-between text-sm text-stone-500 mb-1">
+                        <span>Замовлення</span><span>{cartTotal.toFixed(0)} ₴</span>
+                      </div>
+                      <div className="flex justify-between text-sm mb-2" style={{ color: accent }}>
+                        <span>Сервіс {tipPct}%</span>
+                        <span>+ {(cartTotal * tipPct / 100).toFixed(0)} ₴</span>
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="flex justify-between font-bold text-stone-900">
+                    <span>Разом</span>
+                    <span>{(cartTotal * (1 + tipPct / 100)).toFixed(0)} ₴</span>
+                  </div>
+                </div>
+
+                <p className="text-xs text-stone-400 text-center">
                   {tableLocation ? tableLocation : `Стіл ${tableNumber}`}{tableLocation && tableNumber ? ` · №${tableNumber}` : ""} · Офіціант підтвердить замовлення
                 </p>
                 <button onClick={submitOrder} disabled={submitting}

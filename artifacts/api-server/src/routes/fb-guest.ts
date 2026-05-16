@@ -173,7 +173,7 @@ router.get("/public/guest-menu", async (req, res) => {
 
 // ─── POST /fb/public/guest-orders ────────────────────────────────────────────
 router.post("/public/guest-orders", async (req, res) => {
-  const { tableId, items, guestName, guestCount, notes } = req.body;
+  const { tableId, items, guestName, guestCount, notes, tipPct } = req.body;
   if (!tableId || !Array.isArray(items) || !items.length) {
     return res.status(400).json({ error: "tableId and items required" });
   }
@@ -186,11 +186,12 @@ router.post("/public/guest-orders", async (req, res) => {
     if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
     const orgId = tableRows[0].organization_id;
 
+    const safeTipPct = Math.max(0, Math.min(100, parseFloat(tipPct) || 0));
     const { rows: orderRows } = await pool.query(
-      `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, status, notes, opened_at)
-       VALUES ($1, $2, 'dine_in', $3, $4, 'new_guest', $5, NOW())
+      `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, status, notes, tip_pct, opened_at)
+       VALUES ($1, $2, 'dine_in', $3, $4, 'new_guest', $5, $6, NOW())
        RETURNING *`,
-      [orgId, tableId, guestName || "Гість (QR)", parseInt(guestCount) || 1, notes || null],
+      [orgId, tableId, guestName || "Гість (QR)", parseInt(guestCount) || 1, notes || null, safeTipPct],
     );
     const order = orderRows[0];
 
@@ -240,6 +241,7 @@ router.get("/public/pending-orders", requireAuth, async (req: any, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT o.id, o.status, o.guest_name, o.guest_count, o.notes, o.total_amount, o.opened_at,
+              o.tip_pct,
               ft.number as table_number, ft.location as table_location,
               COALESCE(json_agg(
                 json_build_object(

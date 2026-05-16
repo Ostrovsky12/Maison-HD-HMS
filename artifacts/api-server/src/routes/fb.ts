@@ -678,21 +678,24 @@ router.get("/orders/:id", requireAuth, async (req: any, res) => {
     const orgId = getOrg(req);
     const orderId = parseInt(req.params.id);
 
-    const [order] = await db.select({
-      id: fbOrdersTable.id, orderType: fbOrdersTable.orderType, guestName: fbOrdersTable.guestName,
-      roomNumber: fbOrdersTable.roomNumber, guestCount: fbOrdersTable.guestCount,
-      status: fbOrdersTable.status, totalAmount: fbOrdersTable.totalAmount, paidAmount: fbOrdersTable.paidAmount,
-      notes: fbOrdersTable.notes, staffNotes: fbOrdersTable.staffNotes,
-      openedAt: fbOrdersTable.openedAt, tableId: fbOrdersTable.tableId,
-      tableNumber: fbTablesTable.number,
-    })
-      .from(fbOrdersTable)
-      .leftJoin(fbTablesTable, eq(fbOrdersTable.tableId, fbTablesTable.id))
-      .where(and(eq(fbOrdersTable.id, orderId), eq(fbOrdersTable.organizationId, orgId)));
+    const db_ = (db as any).$client;
+    const { rows: orderRows } = await db_.query(
+      `SELECT o.id, o.order_type AS "orderType", o.guest_name AS "guestName",
+              o.room_number AS "roomNumber", o.guest_count AS "guestCount",
+              o.status, o.total_amount AS "totalAmount", o.paid_amount AS "paidAmount",
+              o.notes, o.staff_notes AS "staffNotes",
+              o.opened_at AS "openedAt", o.table_id AS "tableId",
+              o.tip_pct AS "tipPct",
+              ft.number AS "tableNumber"
+       FROM fb_orders o
+       LEFT JOIN fb_tables ft ON ft.id = o.table_id
+       WHERE o.id = $1 AND o.organization_id = $2`,
+      [orderId, orgId]
+    );
+    const order = orderRows[0];
 
     if (!order) return res.status(404).json({ error: "Not found" });
 
-    const db_ = (db as any).$client;
     const itemsRow = await db_.query(
       `SELECT oi.*,
               fi.is_alcohol, fi.excise_group, fi.volume_l,
