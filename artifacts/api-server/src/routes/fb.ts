@@ -1005,7 +1005,7 @@ router.get("/cashbox/report", requireAuth, async (req: any, res) => {
               COALESCE(SUM(total_amount), 0)::numeric AS total,
               COALESCE(SUM(discount_amount), 0)::numeric AS discounts
        FROM fb_orders
-       WHERE organization_id = $1 AND status = 'closed'
+       WHERE organization_id = $1 AND status = 'billed'
          AND DATE(closed_at) = $2::date
        GROUP BY payment_method`, [orgId, date]
     );
@@ -1013,7 +1013,7 @@ router.get("/cashbox/report", requireAuth, async (req: any, res) => {
       `SELECT COUNT(*)::int AS orders, COALESCE(SUM(total_amount),0)::numeric AS revenue,
               COALESCE(SUM(discount_amount),0)::numeric AS discounts,
               COALESCE(AVG(total_amount),0)::numeric AS avg_check
-       FROM fb_orders WHERE organization_id = $1 AND status = 'closed' AND DATE(closed_at) = $2::date`,
+       FROM fb_orders WHERE organization_id = $1 AND status = 'billed' AND DATE(closed_at) = $2::date`,
       [orgId, date]
     );
     res.json({
