@@ -6,7 +6,7 @@ import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowLeft, Plus, Minus, Send, QrCode, CreditCard,
   ChefHat, CheckCircle2, Clock, X, Loader2, UtensilsCrossed,
-  Receipt, ExternalLink, Trash2,
+  Receipt, ExternalLink, Trash2, Printer,
 } from "lucide-react";
 
 const ITEM_STATUS: Record<string, { label: string; color: string }> = {
@@ -46,6 +46,42 @@ export default function Order() {
       apiFetch(`/fb/order-items/${itemId}`, { method: "PATCH", body: JSON.stringify({ status: "cancelled" }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["waiter-order", orderId] }); },
   });
+
+  function printBill() {
+    const win = window.open("", "_blank", "width=380,height=620");
+    if (!win) return;
+    const receiptItems = activeItems;
+    const total = receiptItems.reduce(
+      (s: number, i: any) => s + parseFloat(i.total_price || i.totalPrice || "0"), 0
+    );
+    const now = new Date().toLocaleString("uk-UA");
+    const tableLabel = order.tableNumber ? `Стіл №${order.tableNumber}` : order.guestName || "Замовлення";
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Рахунок</title>
+    <style>
+      body { font-family: 'Courier New', monospace; font-size: 12px; padding: 12px; max-width: 300px; margin: 0 auto; }
+      .center { text-align: center; } .bold { font-weight: bold; } .big { font-size: 15px; }
+      hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+      .row { display: flex; justify-content: space-between; margin: 2px 0; }
+      .small { font-size: 10px; color: #555; }
+    </style></head><body>
+    <div class="center bold big">ПЕРЕДРАХУНОК</div>
+    <hr/>
+    <div class="row"><span class="bold">${tableLabel}</span><span class="small">${now}</span></div>
+    ${order.guestName ? `<div class="small">Гість: ${order.guestName}</div>` : ""}
+    <hr/>
+    ${receiptItems.map((it: any) => `
+      <div class="row">
+        <span style="flex:1;margin-right:8px">${it.quantity}×${it.name}</span>
+        <span>${parseFloat(it.total_price || it.totalPrice || "0").toFixed(2)} ₴</span>
+      </div>`).join("")}
+    <hr/>
+    <div class="row bold big"><span>РАЗОМ:</span><span>${total.toFixed(2)} ₴</span></div>
+    <hr/>
+    <div class="center small">Дякуємо за відвідування!</div>
+    <script>window.onload=()=>{ window.print(); }</script>
+    </body></html>`);
+    win.document.close();
+  }
 
   async function sendToKitchen() {
     setSending(true);
@@ -200,16 +236,20 @@ export default function Order() {
           </button>
         )}
 
-        {/* QR buttons */}
-        {order.status !== "cancelled" && (
-          <div className="grid grid-cols-2 gap-3">
+        {/* Print bill + QR */}
+        {order.status !== "cancelled" && activeItems.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={printBill}
+              className="py-3 rounded-2xl bg-gray-50 border border-gray-200 text-gray-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+              <Printer className="w-4 h-4" /> Рахунок
+            </button>
             <button onClick={() => setQrMode("bill")}
               className="py-3 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
-              <QrCode className="w-4 h-4" /> QR Рахунок
+              <QrCode className="w-4 h-4" /> QR Рах.
             </button>
             <button onClick={() => setQrMode("pay")}
               className="py-3 rounded-2xl bg-green-50 border border-green-200 text-green-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
-              <CreditCard className="w-4 h-4" /> QR Оплата
+              <CreditCard className="w-4 h-4" /> QR Опл.
             </button>
           </div>
         )}

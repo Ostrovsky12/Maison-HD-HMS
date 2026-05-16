@@ -749,17 +749,32 @@ router.patch("/orders/:id", requireAuth, async (req: any, res) => {
     const orgId = getOrg(req);
     const orderId = parseInt(req.params.id);
     const { status, paidAmount, staffNotes } = req.body;
-    const updates: any = { updatedAt: new Date() };
-    if (status) { updates.status = status; if (["billed", "cancelled"].includes(status)) updates.closedAt = new Date(); }
-    if (paidAmount !== undefined) updates.paidAmount = paidAmount;
-    if (staffNotes !== undefined) updates.staffNotes = staffNotes;
+    const db_ = (db as any).$client;
 
-    const [order] = await db.update(fbOrdersTable).set(updates)
-      .where(and(eq(fbOrdersTable.id, orderId), eq(fbOrdersTable.organizationId, orgId)))
-      .returning();
+    const setClauses: string[] = ["updated_at = NOW()"];
+    const vals: any[] = [];
+    let idx = 1;
 
-    if (status && ["billed", "cancelled"].includes(status) && order.tableId) {
-      await db.update(fbTablesTable).set({ status: "free", currentOrderId: null }).where(eq(fbTablesTable.id, order.tableId));
+    if (status) {
+      setClauses.push(`status = $${idx++}`); vals.push(status);
+      if (["billed", "cancelled"].includes(status)) { setClauses.push(`closed_at = NOW()`); }
+    }
+    if (paidAmount !== undefined) { setClauses.push(`paid_amount = $${idx++}`); vals.push(paidAmount); }
+    if (staffNotes !== undefined) { setClauses.push(`staff_notes = $${idx++}`); vals.push(staffNotes); }
+
+    vals.push(orderId); vals.push(orgId);
+    const { rows: [order] } = await db_.query(
+      `UPDATE fb_orders SET ${setClauses.join(", ")}
+       WHERE id = $${idx++} AND organization_id = $${idx++}
+       RETURNING id, table_id, status, closed_at, total_amount, paid_amount, order_type, guest_name`,
+      vals
+    );
+
+    if (status && ["billed", "cancelled"].includes(status) && order?.table_id) {
+      await db_.query(
+        `UPDATE fb_tables SET status = 'free', current_order_id = NULL WHERE id = $1`,
+        [order.table_id]
+      );
     }
 
     res.json({ order });
@@ -863,14 +878,21 @@ router.patch("/order-items/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const { status } = req.body;
-    const updates: any = { status };
-    if (status === "cooking") updates.sentAt = new Date();
-    if (status === "ready") updates.readyAt = new Date();
-    if (status === "served") updates.servedAt = new Date();
+    const db_ = (db as any).$client;
 
-    const [item] = await db.update(fbOrderItemsTable).set(updates)
-      .where(and(eq(fbOrderItemsTable.id, parseInt(req.params.id)), eq(fbOrderItemsTable.organizationId, orgId)))
-      .returning();
+    const setClauses: string[] = [`status = $1`];
+    const vals: any[] = [status];
+    if (status === "cooking") setClauses.push("sent_at = NOW()");
+    if (status === "ready")   setClauses.push("ready_at = NOW()");
+    if (status === "served")  setClauses.push("served_at = NOW()");
+    vals.push(parseInt(req.params.id)); vals.push(orgId);
+
+    const { rows: [item] } = await db_.query(
+      `UPDATE fb_order_items SET ${setClauses.join(", ")}
+       WHERE id = $2 AND organization_id = $3
+       RETURNING id, order_id, status, sent_at, ready_at, served_at`,
+      vals
+    );
     res.json({ item });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -999,6 +1021,94 @@ router.get("/cashbox/report", requireAuth, async (req: any, res) => {
       byPaymentMethod: orders.rows,
       totals: totals.rows[0],
     });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CASH MOVEMENT (внесення / інкасація) ─────────────────────────────────────
+router.post("/cashbox/movement", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { type, amount, notes } = req.body;
+    const db_ = (db as any).$client;
+    const sess = await db_.query(
+      `SELECT id FROM cashbox_sessions WHERE organization_id=$1 AND status='open' LIMIT 1`, [orgId]
+    );
+    if (!sess.rows.length) { res.status(400).json({ error: "Немає відкритої зміни" }); return; }
+    const sessionId = sess.rows[0].id;
+    const amt = Math.abs(Number(amount) || 0);
+    if (type === "in") {
+      await db_.query(
+        `UPDATE cashbox_sessions SET cash_in=cash_in+$1, expected_balance=expected_balance+$1 WHERE id=$2`, [amt, sessionId]
+      );
+    } else {
+      await db_.query(
+        `UPDATE cashbox_sessions SET cash_out=cash_out+$1, expected_balance=GREATEST(0,expected_balance-$1) WHERE id=$2`, [amt, sessionId]
+      );
+    }
+    const r = await db_.query(`SELECT * FROM cashbox_sessions WHERE id=$1`, [sessionId]);
+    res.json({ session: r.rows[0], movement: { type, amount: amt, notes } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── X-REPORT (поточна зміна) ──────────────────────────────────────────────────
+router.get("/cashbox/x-report", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    const sess = await db_.query(
+      `SELECT cs.*, u.name AS cashier_name, le.name AS entity_name
+       FROM cashbox_sessions cs
+       LEFT JOIN users u ON u.id = cs.cashier_id
+       LEFT JOIN legal_entities le ON le.id = cs.legal_entity_id
+       WHERE cs.organization_id=$1 AND cs.status='open' ORDER BY cs.opened_at ASC LIMIT 1`, [orgId]
+    );
+    if (!sess.rows.length) { res.json({ session: null, byPayment: [], totals: {} }); return; }
+    const session = sess.rows[0];
+    const [byPayR, totR] = await Promise.all([
+      db_.query(
+        `SELECT payment_method AS method, COUNT(*)::int AS cnt, COALESCE(SUM(total_amount),0)::numeric AS amount
+         FROM fb_orders WHERE organization_id=$1 AND status='billed' AND closed_at >= $2
+         GROUP BY payment_method ORDER BY amount DESC`, [orgId, session.opened_at]
+      ),
+      db_.query(
+        `SELECT COUNT(*)::int AS checks, COALESCE(SUM(total_amount),0)::numeric AS revenue,
+                COALESCE(SUM(guest_count),0)::int AS guests
+         FROM fb_orders WHERE organization_id=$1 AND status='billed' AND closed_at >= $2`,
+        [orgId, session.opened_at]
+      ),
+    ]);
+    res.json({ session, byPayment: byPayR.rows, totals: totR.rows[0] || {} });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── RETURN ORDER (повернення) ─────────────────────────────────────────────────
+router.post("/orders/:id/return", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const orderId = parseInt(req.params.id);
+    const { reason } = req.body;
+    const db_ = (db as any).$client;
+    const orig = await db_.query(
+      `SELECT * FROM fb_orders WHERE id=$1 AND organization_id=$2 AND status='billed'`, [orderId, orgId]
+    );
+    if (!orig.rows.length) { res.status(404).json({ error: "Замовлення не знайдено або не закрите" }); return; }
+    const order = orig.rows[0];
+    const returnNum = `RET-${order.receipt_number || orderId}`;
+    const retR = await db_.query(
+      `INSERT INTO fb_orders
+         (organization_id, order_type, guest_name, status, total_amount, paid_amount,
+          payment_method, receipt_number, notes, closed_at, opened_at)
+       VALUES ($1,'dine_in',$2,'cancelled',
+               (SELECT total_amount FROM fb_orders WHERE id=$3) * -1,
+               (SELECT paid_amount  FROM fb_orders WHERE id=$3) * -1,
+               $4,$5,$6,NOW(),NOW()) RETURNING id, receipt_number`,
+      [orgId, order.guest_name, orderId, order.payment_method, returnNum,
+       `ПОВЕРНЕННЯ. Причина: ${reason || "не вказана"}. Оригінал: ${order.receipt_number || orderId}`]
+    );
+    await db_.query(
+      `UPDATE fb_orders SET notes=CONCAT(COALESCE(notes,''), ' [ПОВЕРНЕНО]'), updated_at=NOW() WHERE id=$1`, [orderId]
+    );
+    res.json({ returnOrder: retR.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1871,9 +1981,9 @@ router.get("/analytics/overview", requireAuth, async (req: any, res) => {
     const [kpiR, chartR, payR] = await Promise.all([
       db_.query(
         `SELECT
-           COALESCE(SUM(total_amount),0)::numeric   AS revenue,
-           COALESCE(SUM(discount_amount),0)::numeric AS discounts,
-           COALESCE(SUM(tip_amount),0)::numeric      AS tips,
+           COALESCE(SUM(total_amount),0)::numeric    AS revenue,
+           0::numeric                                 AS discounts,
+           0::numeric                                 AS tips,
            COUNT(*)::int                              AS checks,
            COALESCE(SUM(guest_count),0)::int          AS guests
          FROM fb_orders

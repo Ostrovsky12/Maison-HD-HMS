@@ -5,6 +5,8 @@ import {
   Wifi, Printer, ChefHat, Wine, ChevronDown, ChevronUp,
   Plus, CreditCard, Banknote, Search, X, UtensilsCrossed,
   FileText, Gift, Wallet, Layers, Users, Hash,
+  TrendingUp, Archive, DollarSign, Power, RotateCcw, Send,
+  Receipt as ReceiptIcon,
 } from "lucide-react";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -197,89 +199,552 @@ function NewOrderModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   );
 }
 
-// ─── Add Item Modal ───────────────────────────────────────────────────────────
+// ─── Print Bill (передрахунок) ────────────────────────────────────────────────
+function printBill(order: ActiveOrder) {
+  const win = window.open("", "_blank", "width=380,height=640");
+  if (!win) return;
+  const items = order.items || [];
+  const total = parseFloat(order.total_amount || "0");
+  const now = new Date().toLocaleString("uk-UA");
+  const tableLabel = order.tableNumber ? `Стіл №${order.tableNumber}` : order.order_type === "takeaway" ? "Takeaway" : "Замовлення";
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Рахунок</title>
+  <style>
+    body{font-family:'Courier New',monospace;font-size:12px;padding:12px;max-width:300px;margin:0 auto}
+    .center{text-align:center}.bold{font-weight:bold}.big{font-size:15px}
+    hr{border:none;border-top:1px dashed #000;margin:6px 0}
+    .row{display:flex;justify-content:space-between;margin:2px 0}
+    .small{font-size:10px;color:#555}
+  </style></head><body>
+  <div class="center bold big">ПЕРЕДРАХУНОК</div>
+  <hr/>
+  <div class="row"><span class="bold">${tableLabel}</span><span class="small">${now}</span></div>
+  ${order.guest_name ? `<div class="small">Гість: ${order.guest_name}</div>` : ""}
+  <hr/>
+  ${items.map(it => `<div class="row"><span style="flex:1;margin-right:8px">${it.quantity}×${it.name}</span><span>${parseFloat(it.total_price||"0").toFixed(2)} ₴</span></div>`).join("")}
+  <hr/>
+  <div class="row bold big"><span>РАЗОМ:</span><span>${total.toFixed(2)} ₴</span></div>
+  <hr/>
+  <div class="center small">Дякуємо за відвідування!</div>
+  <script>window.onload=()=>{window.print()}</script>
+  </body></html>`);
+  win.document.close();
+}
+
+// ─── Add Item Modal (full menu with categories) ────────────────────────────────
 function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: () => void; onDone: () => void }) {
-  const [items, setItems] = useState<MenuItem[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [items, setItems] = useState<any[]>([]);
+  const [activeCat, setActiveCat] = useState<number | "all">("all");
   const [search, setSearch] = useState("");
-  const [qty, setQty] = useState(1);
-  const [selected, setSelected] = useState<MenuItem | null>(null);
+  const [justAdded, setJustAdded] = useState<Set<number>>(new Set());
+  const [adding, setAdding] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
+  const [qtys, setQtys] = useState<Record<number, number>>({});
 
   useEffect(() => {
-    apiFetch("/items?available=true").then(d => setItems(d.items || [])).catch(() => {}).finally(() => setLoading(false));
+    Promise.all([
+      apiFetch("/categories").catch(() => ({ categories: [] })),
+      apiFetch("/items?available=true").catch(() => ({ items: [] })),
+    ]).then(([cd, id]) => {
+      setCategories(cd.categories || []);
+      setItems(id.items || []);
+    }).finally(() => setLoading(false));
   }, []);
 
-  const filtered = items.filter(it =>
-    !search || it.name.toLowerCase().includes(search.toLowerCase()) || it.categoryName?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = items.filter(it => {
+    if (search) return it.name.toLowerCase().includes(search.toLowerCase()) || (it.categoryName || "").toLowerCase().includes(search.toLowerCase());
+    if (activeCat !== "all") return it.category_id === activeCat;
+    return true;
+  });
 
-  async function handleAdd() {
-    if (!selected) return;
-    setAdding(true);
+  function getQty(id: number) { return qtys[id] ?? 1; }
+  function setQty(id: number, v: number) { setQtys(q => ({ ...q, [id]: Math.max(1, v) })); }
+
+  async function handleAdd(item: any) {
+    setAdding(item.id);
     try {
-      await apiFetch(`/orders/${orderId}/items`, { method: "POST", body: JSON.stringify({ itemId: selected.id, quantity: qty }) });
+      await apiFetch(`/orders/${orderId}/items`, {
+        method: "POST",
+        body: JSON.stringify({ itemId: item.id, quantity: getQty(item.id) }),
+      });
+      setJustAdded(s => { const n = new Set(s); n.add(item.id); return n; });
+      setTimeout(() => setJustAdded(s => { const n = new Set(s); n.delete(item.id); return n; }), 2000);
       onDone();
     } catch (e: any) { alert("Помилка: " + e.message); }
-    finally { setAdding(false); }
+    finally { setAdding(null); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex flex-col">
+      <div className="bg-white flex flex-col flex-1 overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b shrink-0 bg-amber-50">
+          <div>
+            <h3 className="font-bold text-base">Додати страву</h3>
+            <p className="text-xs text-gray-500">Замовлення #{orderId}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-3 py-2 border-b shrink-0">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              value={search}
+              onChange={e => { setSearch(e.target.value); if (e.target.value) setActiveCat("all"); }}
+              autoFocus placeholder="Пошук..."
+              className="w-full pl-9 pr-8 py-2 rounded-xl border bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Category tabs */}
+        {!search && (
+          <div className="flex gap-1.5 px-3 py-2 overflow-x-auto border-b shrink-0 bg-gray-50/60">
+            <button
+              onClick={() => setActiveCat("all")}
+              className={`shrink-0 px-3 py-1 rounded-full text-xs font-semibold transition-all ${activeCat === "all" ? "bg-amber-500 text-white shadow-sm" : "bg-white border text-gray-600 hover:bg-amber-50"}`}
+            >
+              Всі
+            </button>
+            {categories.map(c => (
+              <button
+                key={c.id}
+                onClick={() => setActiveCat(c.id)}
+                className={`shrink-0 px-3 py-1 rounded-full text-xs font-semibold transition-all ${activeCat === c.id ? "bg-amber-500 text-white shadow-sm" : "bg-white border text-gray-600 hover:bg-amber-50"}`}
+              >
+                {c.emoji} {c.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Items */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {loading ? (
+            <div className="flex items-center justify-center h-40 text-gray-400 text-sm">Завантаження...</div>
+          ) : filtered.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-gray-400 text-sm">Нічого не знайдено</div>
+          ) : filtered.map(it => {
+            const isAdded = justAdded.has(it.id);
+            const isPending = adding === it.id;
+            const qty = getQty(it.id);
+            return (
+              <div key={it.id} className="bg-white border rounded-xl overflow-hidden">
+                <div className="flex items-center gap-3 px-3 py-2.5">
+                  {it.image_url && (
+                    <img src={it.image_url} alt={it.name} className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm leading-tight">{it.name}</div>
+                    <div className="text-xs text-gray-400">{it.categoryName}</div>
+                  </div>
+                  <span className="font-bold text-amber-600 text-sm shrink-0 mr-1">
+                    {(parseFloat(it.price) * qty).toFixed(0)} ₴
+                  </span>
+                  {/* Quantity */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => setQty(it.id, qty - 1)}
+                      className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-200 text-sm font-bold"
+                    >−</button>
+                    <span className="w-5 text-center text-xs font-bold">{qty}</span>
+                    <button
+                      onClick={() => setQty(it.id, qty + 1)}
+                      className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-200 text-sm font-bold"
+                    >+</button>
+                  </div>
+                  <button
+                    onClick={() => handleAdd(it)}
+                    disabled={isPending}
+                    className={`shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      isAdded ? "bg-green-100 text-green-700" : "bg-amber-500 text-white hover:bg-amber-600"
+                    }`}
+                  >
+                    {isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      : isAdded ? <CheckCircle2 className="w-3.5 h-3.5" />
+                      : <Plus className="w-3.5 h-3.5" />}
+                    {isAdded ? "Ок" : "Дод."}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="px-4 py-3 border-t shrink-0 bg-gray-50">
+          <button onClick={onClose}
+            className="w-full py-2.5 border-2 border-gray-200 rounded-xl font-semibold text-gray-600 hover:bg-gray-100 transition-colors">
+            Готово
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Shift Bar ─────────────────────────────────────────────────────────────────
+function ShiftBar({ onCashMovement, onXReport }: { onCashMovement: () => void; onXReport: () => void }) {
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [opening, setOpening] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [openBalance, setOpenBalance] = useState("");
+  const [showOpenForm, setShowOpenForm] = useState(false);
+
+  const load = useCallback(async () => {
+    try { const d = await apiFetch("/cashbox/session"); setSession(d.session || null); }
+    catch {} finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+
+  async function handleOpen() {
+    setOpening(true);
+    try {
+      await apiFetch("/cashbox/session", {
+        method: "POST",
+        body: JSON.stringify({ openingBalance: parseFloat(openBalance || "0"), cashboxName: "Каса 1" }),
+      });
+      setShowOpenForm(false); load();
+    } catch (e: any) { alert(e.message); }
+    finally { setOpening(false); }
+  }
+
+  async function handleClose() {
+    if (!session || !confirm("Закрити зміну? Переконайтесь що всі замовлення закриті.")) return;
+    setClosing(true);
+    try {
+      await apiFetch(`/cashbox/session/${session.id}/close`, { method: "PATCH", body: JSON.stringify({}) });
+      load();
+    } catch (e: any) { alert(e.message); }
+    finally { setClosing(false); }
+  }
+
+  if (loading) return <div className="h-8 border-b bg-gray-50 animate-pulse" />;
+
+  if (session) {
+    const balance = parseFloat(session.expected_balance || "0");
+    return (
+      <div className="px-3 py-1.5 border-b bg-green-50 flex items-center gap-2 text-xs flex-wrap shrink-0">
+        <div className="w-2 h-2 rounded-full bg-green-500 shrink-0 animate-pulse" />
+        <span className="font-bold text-green-800">Зміна відкрита</span>
+        <span className="text-green-600">
+          з {new Date(session.opened_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}
+        </span>
+        <span className="text-gray-400">·</span>
+        <span className="font-semibold text-gray-700">Каса: {balance.toFixed(0)} ₴</span>
+        <div className="flex gap-1 ml-auto">
+          <button onClick={onXReport}
+            className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 transition-colors">
+            X-звіт
+          </button>
+          <button onClick={onCashMovement}
+            className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 font-bold hover:bg-amber-200 transition-colors flex items-center gap-0.5">
+            <DollarSign className="w-3 h-3" /> Рух
+          </button>
+          <button onClick={handleClose} disabled={closing}
+            className="px-2 py-0.5 rounded-md bg-red-100 text-red-700 font-bold hover:bg-red-200 transition-colors flex items-center gap-0.5">
+            <Power className="w-3 h-3" /> Закрити
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (showOpenForm) {
+    return (
+      <div className="px-3 py-1.5 border-b bg-amber-50 flex items-center gap-2 text-xs shrink-0 flex-wrap">
+        <span className="font-semibold text-amber-800">Залишок готівки при відкритті:</span>
+        <input
+          type="number" value={openBalance} onChange={e => setOpenBalance(e.target.value)}
+          placeholder="0.00" min={0} step={0.01} autoFocus
+          className="w-24 px-2 py-0.5 border rounded-lg text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+        <button onClick={handleOpen} disabled={opening}
+          className="px-3 py-0.5 rounded-md bg-green-600 text-white font-bold hover:bg-green-700">
+          {opening ? "..." : "Відкрити"}
+        </button>
+        <button onClick={() => setShowOpenForm(false)}
+          className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">
+          Скасувати
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-1.5 border-b bg-amber-50 flex items-center gap-2 text-xs shrink-0">
+      <div className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+      <span className="text-amber-800 font-semibold">Зміна не відкрита</span>
+      <button onClick={() => setShowOpenForm(true)}
+        className="ml-auto px-3 py-0.5 rounded-md bg-green-600 text-white font-bold hover:bg-green-700 flex items-center gap-1">
+        <Power className="w-3 h-3" /> Відкрити зміну
+      </button>
+    </div>
+  );
+}
+
+// ─── Cash Movement Modal ──────────────────────────────────────────────────────
+function CashMovementModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [type, setType] = useState<"in" | "out">("in");
+  const [amount, setAmount] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave() {
+    if (!amount || parseFloat(amount) <= 0) { setError("Введіть суму"); return; }
+    setSaving(true); setError("");
+    try {
+      await apiFetch("/cashbox/movement", {
+        method: "POST",
+        body: JSON.stringify({ type, amount: parseFloat(amount), notes }),
+      });
+      onDone();
+    } catch (e: any) { setError(e.message); }
+    finally { setSaving(false); }
   }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
-        <div className="flex items-center justify-between p-4 border-b shrink-0">
-          <h3 className="font-bold text-base">Додати страву</h3>
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-amber-500" /> Рух готівки
+          </h3>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
         </div>
-        <div className="p-3 border-b shrink-0">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} autoFocus
-              placeholder="Пошук страви..." className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+        <div className="p-4 space-y-4">
+          <div className="flex rounded-xl border overflow-hidden">
+            {([["in", "↓ Внесення", "bg-green-600"], ["out", "↑ Інкасація", "bg-red-500"]] as const).map(([t, label, cls]) => (
+              <button key={t} onClick={() => setType(t)}
+                className={`flex-1 py-2.5 text-sm font-bold transition-colors ${type === t ? `${cls} text-white` : "hover:bg-gray-50 text-gray-600"}`}>
+                {label}
+              </button>
+            ))}
           </div>
+          <input
+            type="number" value={amount} onChange={e => setAmount(e.target.value)}
+            placeholder="Сума, ₴" min={0} step={0.01} autoFocus
+            className="w-full px-3 py-3 text-2xl font-black border-2 rounded-xl text-right focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+          <input
+            value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Примітка (необов'язково)"
+            className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+          {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+          <button
+            onClick={handleSave} disabled={saving}
+            className={`w-full py-3 font-bold rounded-xl text-white transition-colors ${type === "in" ? "bg-green-600 hover:bg-green-700" : "bg-red-500 hover:bg-red-600"}`}
+          >
+            {saving ? "Зберігаємо..." : type === "in" ? "Внести до каси" : "Інкасувати"}
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-2">
+      </div>
+    </div>
+  );
+}
+
+// ─── X-Report Modal ───────────────────────────────────────────────────────────
+function XReportModal({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const METHOD_LABELS: Record<string, string> = {
+    cash: "Готівка", card: "Картка", mixed: "Змішана",
+    invoice: "Рах. рахунок", certificate: "Сертифікат", deposit: "Депозит",
+  };
+
+  useEffect(() => {
+    apiFetch("/cashbox/x-report")
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-blue-500" /> X-Звіт (поточна зміна)
+          </h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-4">
           {loading ? (
-            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">Завантаження...</div>
-          ) : filtered.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">Нічого не знайдено</div>
+            <div className="flex items-center justify-center h-32 text-gray-400">Завантаження...</div>
+          ) : !data?.session ? (
+            <div className="flex flex-col items-center justify-center h-32 text-gray-400 gap-2">
+              <Power className="w-8 h-8" />
+              <p className="text-sm">Зміна не відкрита</p>
+            </div>
           ) : (
-            <div className="space-y-1">
-              {filtered.map(it => (
-                <button key={it.id} onClick={() => setSelected(prev => prev?.id === it.id ? null : it)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm text-left transition-colors ${selected?.id === it.id ? "bg-amber-50 border-2 border-amber-400" : "hover:bg-gray-50 border border-transparent"}`}>
+            <div className="space-y-4">
+              {/* Session info */}
+              <div className="bg-green-50 rounded-xl p-3 space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Відкрито о:</span>
+                  <span className="font-semibold">{new Date(data.session.opened_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Каса (готівка):</span>
+                  <span className="font-bold text-green-700">{parseFloat(data.session.expected_balance || "0").toFixed(2)} ₴</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Внесено:</span><span>{parseFloat(data.session.cash_in || "0").toFixed(2)} ₴</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Інкасовано:</span><span>{parseFloat(data.session.cash_out || "0").toFixed(2)} ₴</span>
+                </div>
+              </div>
+              {/* Sales */}
+              <div>
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Продажі за зміну</h4>
+                <div className="space-y-1">
+                  {(data.byPayment || []).map((r: any) => (
+                    <div key={r.method} className="flex justify-between text-sm py-1 border-b border-gray-100">
+                      <span className="text-gray-700">{METHOD_LABELS[r.method] || r.method}</span>
+                      <div className="text-right">
+                        <span className="font-bold">{parseFloat(r.amount).toFixed(2)} ₴</span>
+                        <span className="text-gray-400 text-xs ml-2">({r.cnt} чек.)</span>
+                      </div>
+                    </div>
+                  ))}
+                  {!data.byPayment?.length && (
+                    <p className="text-sm text-gray-400 text-center py-4">Продажів за зміну немає</p>
+                  )}
+                </div>
+              </div>
+              {/* Totals */}
+              {data.totals?.checks > 0 && (
+                <div className="bg-gray-50 rounded-xl p-3 flex justify-between items-center">
                   <div>
-                    <div className="font-medium">{it.name}</div>
-                    <div className="text-xs text-gray-400">{it.categoryName}</div>
+                    <div className="text-xs text-gray-500">Чеків: {data.totals.checks}</div>
+                    <div className="text-xs text-gray-500">Гостей: {data.totals.guests || "—"}</div>
                   </div>
-                  <span className="font-bold text-gray-700 shrink-0 ml-2">{parseFloat(it.price).toFixed(0)} ₴</span>
-                </button>
-              ))}
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500">Загальна виручка</div>
+                    <div className="font-black text-xl text-gray-900">{parseFloat(data.totals.revenue || "0").toFixed(2)} ₴</div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
-        {selected && (
-          <div className="p-4 border-t shrink-0">
-            <div className="flex items-center justify-between mb-3">
-              <span className="font-medium text-sm truncate pr-2">{selected.name}</span>
-              <span className="font-bold">{(parseFloat(selected.price) * qty).toFixed(0)} ₴</span>
-            </div>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-sm text-gray-500">Кількість:</span>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setQty(q => Math.max(1, q - 1))}
-                  className="w-8 h-8 rounded-lg border font-bold text-lg hover:bg-gray-50 flex items-center justify-center">−</button>
-                <span className="w-8 text-center font-bold">{qty}</span>
-                <button onClick={() => setQty(q => q + 1)}
-                  className="w-8 h-8 rounded-lg border font-bold text-lg hover:bg-gray-50 flex items-center justify-center">+</button>
+        <div className="p-4 border-t">
+          <button onClick={onClose}
+            className="w-full py-2.5 border-2 border-gray-200 rounded-xl font-semibold text-gray-600 hover:bg-gray-50">
+            Закрити
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Receipt Archive Panel ─────────────────────────────────────────────────────
+function ReceiptArchive() {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [returning, setReturning] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    apiFetch("/orders?status=billed")
+      .then(d => setOrders((d.orders || []).slice(0, 100)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = orders.filter(o =>
+    !search ||
+    (o.guestName || o.guest_name || "").toLowerCase().includes(search.toLowerCase()) ||
+    String(o.tableNumber || o.table_number || "").includes(search) ||
+    String(o.id).includes(search)
+  );
+
+  async function handleReturn(order: any) {
+    const reason = prompt(`Причина повернення для чеку ${order.receiptNumber || order.id}:`);
+    if (reason === null) return;
+    setReturning(order.id);
+    try {
+      await apiFetch(`/orders/${order.id}/return`, { method: "POST", body: JSON.stringify({ reason }) });
+      setOrders(prev => prev.filter(o => o.id !== order.id));
+    } catch (e: any) { alert("Помилка повернення: " + e.message); }
+    finally { setReturning(null); }
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-3 py-2 border-b shrink-0">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Пошук по гостю, столу, ID..."
+            className="w-full pl-9 pr-3 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {loading ? (
+          <div className="flex items-center justify-center h-32 text-gray-400 text-sm">Завантаження...</div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-center">
+            <Archive className="w-10 h-10 text-gray-300 mb-3" />
+            <p className="text-sm text-gray-500">Архів порожній</p>
+          </div>
+        ) : filtered.map(o => {
+          const total = parseFloat(o.totalAmount || o.total_amount || "0");
+          const closedAt = o.closedAt || o.closed_at;
+          return (
+            <div key={o.id} className="bg-white border rounded-xl p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-bold text-sm">
+                    {o.tableNumber || o.table_number ? `Стіл ${o.tableNumber || o.table_number}` : o.orderType === "takeaway" ? "Takeaway" : "Замовлення"}
+                  </div>
+                  <div className="text-xs text-gray-500">{o.guestName || o.guest_name}</div>
+                  {(o.receiptNumber || o.receipt_number) && (
+                    <div className="text-[10px] text-gray-400 font-mono">{o.receiptNumber || o.receipt_number}</div>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-black text-gray-900">{total.toFixed(0)} ₴</div>
+                  {closedAt && (
+                    <div className="text-[10px] text-gray-400">
+                      {new Date(closedAt).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
+                  {{cash:"Готівка",card:"Картка",mixed:"Змішана",invoice:"Рахунок",certificate:"Сертифікат",deposit:"Депозит"}[o.paymentMethod || o.payment_method] || (o.paymentMethod || o.payment_method)}
+                </span>
+                <button
+                  onClick={() => handleReturn(o)}
+                  disabled={returning === o.id}
+                  className="ml-auto flex items-center gap-1 px-2.5 py-0.5 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {returning === o.id ? "..." : "Повернення"}
+                </button>
               </div>
             </div>
-            <button onClick={handleAdd} disabled={adding}
-              className="w-full py-3 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 disabled:opacity-40 transition-colors">
-              {adding ? "Додаємо..." : "Додати до замовлення"}
-            </button>
-          </div>
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -626,12 +1091,28 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
 
 // ─── Active Order Card ────────────────────────────────────────────────────────
 function ActiveOrderCard({
-  order, isExpanded, onToggle, onAddItem, onPay,
+  order, isExpanded, onToggle, onAddItem, onPay, onSendKitchen,
 }: {
   order: ActiveOrder; isExpanded: boolean;
   onToggle: () => void; onAddItem: () => void; onPay: () => void;
+  onSendKitchen: () => void;
 }) {
+  const [sending, setSending] = useState(false);
   const statusColor = order.status === "open" ? "border-blue-200 bg-blue-50/30" : "border-gray-200 bg-white";
+  const hasPending = (order.items || []).some((it: any) => it.status === "pending" && !it.sent_at);
+
+  async function handleSendKitchen() {
+    setSending(true);
+    try {
+      await apiFetch(`/orders/${order.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sendToKitchen: true }),
+      });
+      onSendKitchen();
+    } catch (e: any) { alert("Помилка: " + e.message); }
+    finally { setSending(false); }
+  }
+
   return (
     <div className={`rounded-xl border-2 overflow-hidden transition-all ${statusColor}`}>
       <button onClick={onToggle} className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/80 transition-colors">
@@ -647,6 +1128,7 @@ function ActiveOrderCard({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
+          {hasPending && <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />}
           <span className="font-bold text-gray-800">{parseFloat(order.total_amount || "0").toFixed(0)} ₴</span>
           {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </div>
@@ -654,27 +1136,43 @@ function ActiveOrderCard({
       {isExpanded && (
         <div className="border-t border-current/10 px-4 pb-4">
           <div className="py-3 space-y-1.5">
-            {order.items && order.items.length > 0 ? order.items.map(it => (
+            {order.items && order.items.length > 0 ? order.items.map((it: any) => (
               <div key={it.id} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-xs font-bold shrink-0">{it.quantity}</span>
-                  <span className="text-gray-800">{it.name}</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    it.status === "pending" && !it.sent_at ? "bg-orange-100 text-orange-600" : "bg-gray-100 text-gray-600"
+                  }`}>{it.quantity}</span>
+                  <span className="text-gray-800 truncate">{it.name}</span>
                   {it.notes && <span className="text-gray-400 text-xs">({it.notes})</span>}
                 </div>
-                <span className="text-gray-600 shrink-0 ml-2">{parseFloat(it.total_price).toFixed(0)} ₴</span>
+                <span className="text-gray-600 shrink-0 ml-2">{parseFloat(it.total_price || "0").toFixed(0)} ₴</span>
               </div>
             )) : (
               <p className="text-xs text-gray-400 text-center py-2">Позиції відсутні</p>
             )}
           </div>
-          <div className="flex gap-2 mt-1">
+
+          {/* Send to kitchen (if pending items) */}
+          {hasPending && (
+            <button onClick={handleSendKitchen} disabled={sending}
+              className="w-full mb-2 flex items-center justify-center gap-1.5 py-2 text-xs font-bold bg-orange-500 text-white rounded-xl hover:bg-orange-600 disabled:opacity-40 transition-colors">
+              {sending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              {sending ? "Відправка..." : "На кухню"}
+            </button>
+          )}
+
+          <div className="flex gap-2">
             <button onClick={onAddItem}
               className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold border-2 border-amber-400 text-amber-700 rounded-xl hover:bg-amber-50 transition-colors">
               <Plus className="w-4 h-4" /> Страва
             </button>
+            <button onClick={() => printBill(order)} disabled={!(order.items && order.items.length > 0)}
+              className="flex items-center justify-center gap-1 px-3 py-2.5 text-sm font-semibold border-2 border-gray-300 text-gray-600 rounded-xl hover:bg-gray-50 disabled:opacity-40 transition-colors">
+              <Printer className="w-4 h-4" />
+            </button>
             <button onClick={onPay}
               className="flex-[2] flex items-center justify-center gap-1.5 py-2.5 text-sm font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors shadow-sm">
-              <CreditCard className="w-4 h-4" /> Сплатити {parseFloat(order.total_amount || "0").toFixed(0)} ₴
+              <CreditCard className="w-4 h-4" /> {parseFloat(order.total_amount || "0").toFixed(0)} ₴
             </button>
           </div>
         </div>
@@ -758,6 +1256,9 @@ export default function FbCashier() {
   const [addItemForOrderId, setAddItemForOrderId] = useState<number | null>(null);
   const [payForOrder, setPayForOrder] = useState<ActiveOrder | null>(null);
   const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [leftTab, setLeftTab] = useState<"qr" | "archive">("qr");
+  const [cashModalOpen, setCashModalOpen] = useState(false);
+  const [xReportOpen, setXReportOpen] = useState(false);
   const knownIds = useRef<Set<number>>(new Set());
 
   const fetchPending = useCallback(async () => {
@@ -850,7 +1351,7 @@ export default function FbCashier() {
         <AddItemModal
           orderId={addItemForOrderId}
           onClose={() => setAddItemForOrderId(null)}
-          onDone={() => { setAddItemForOrderId(null); setTimeout(fetchActive, 300); }}
+          onDone={() => { setTimeout(fetchActive, 300); }}
         />
       )}
       {payForOrder && (
@@ -860,10 +1361,19 @@ export default function FbCashier() {
           onDone={() => { setPayForOrder(null); fetchActive(); }}
         />
       )}
+      {cashModalOpen && (
+        <CashMovementModal
+          onClose={() => setCashModalOpen(false)}
+          onDone={() => setCashModalOpen(false)}
+        />
+      )}
+      {xReportOpen && (
+        <XReportModal onClose={() => setXReportOpen(false)} />
+      )}
 
       <div className="flex flex-col h-[calc(100vh-4rem)]">
         {/* Header */}
-        <div className="px-5 py-4 border-b bg-background shrink-0">
+        <div className="px-5 py-3 border-b bg-background shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="relative">
@@ -876,10 +1386,10 @@ export default function FbCashier() {
               </div>
               <div>
                 <h1 className="text-lg font-bold">Станція касира</h1>
-                <p className="text-xs text-muted-foreground">QR-замовлення та управління активними столами</p>
+                <p className="text-xs text-muted-foreground">QR-замовлення · архів чеків · управління замовленнями</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <div className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full ${connected ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
                 <Wifi className="w-3 h-3" />
                 {connected ? "Онлайн" : "Немає зв'язку"}
@@ -896,47 +1406,71 @@ export default function FbCashier() {
 
         <div className="flex-1 overflow-hidden">
           <div className="flex h-full">
-            {/* ── LEFT: Pending QR orders ── */}
-            <div className="flex-1 p-5 overflow-y-auto border-r">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                  <ShoppingBag className="w-4 h-4 text-amber-500" />
-                  Нові QR-замовлення
+
+            {/* ── LEFT: QR orders / Receipt archive ── */}
+            <div className="flex-1 flex flex-col border-r overflow-hidden">
+
+              {/* Tab switcher */}
+              <div className="flex border-b shrink-0">
+                <button
+                  onClick={() => setLeftTab("qr")}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold transition-colors ${leftTab === "qr" ? "text-amber-700 border-b-2 border-amber-500 bg-amber-50/50" : "text-muted-foreground hover:bg-muted/30"}`}
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  QR-замовлення
                   {pendingOrders.length > 0 && (
                     <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{pendingOrders.length}</span>
                   )}
-                </h2>
+                </button>
+                <button
+                  onClick={() => setLeftTab("archive")}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold transition-colors ${leftTab === "archive" ? "text-blue-700 border-b-2 border-blue-500 bg-blue-50/50" : "text-muted-foreground hover:bg-muted/30"}`}
+                >
+                  <Archive className="w-4 h-4" />
+                  Архів чеків
+                </button>
               </div>
-              {pendingOrders.length > 0 && (
-                <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center shrink-0 animate-bounce">
-                    <Bell className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-amber-800 text-sm">{pendingOrders.length === 1 ? "Нове замовлення!" : `${pendingOrders.length} нових замовлень!`}</div>
-                    <div className="text-amber-600 text-xs">Прийміть — система надрукує завдання на кухонний та барний принтери</div>
-                  </div>
-                </div>
-              )}
-              {pendingOrders.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 text-center">
-                  <div className="w-16 h-16 rounded-full bg-muted/40 flex items-center justify-center mb-3">
-                    <ShoppingBag className="w-7 h-7 text-muted-foreground/50" />
-                  </div>
-                  <p className="font-semibold text-muted-foreground text-sm">Нових QR-замовлень немає</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">Оновлення кожні 3 секунди</p>
+
+              {/* Tab content */}
+              {leftTab === "qr" ? (
+                <div className="flex-1 overflow-y-auto p-5">
+                  {pendingOrders.length > 0 && (
+                    <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center shrink-0 animate-bounce">
+                        <Bell className="w-4 h-4 text-white" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-amber-800 text-sm">{pendingOrders.length === 1 ? "Нове замовлення!" : `${pendingOrders.length} нових замовлень!`}</div>
+                        <div className="text-amber-600 text-xs">Прийміть — система надрукує завдання на кухонний та барний принтери</div>
+                      </div>
+                    </div>
+                  )}
+                  {pendingOrders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-48 text-center">
+                      <div className="w-16 h-16 rounded-full bg-muted/40 flex items-center justify-center mb-3">
+                        <ShoppingBag className="w-7 h-7 text-muted-foreground/50" />
+                      </div>
+                      <p className="font-semibold text-muted-foreground text-sm">Нових QR-замовлень немає</p>
+                      <p className="text-xs text-muted-foreground/70 mt-1">Оновлення кожні 3 секунди</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 max-w-xl">
+                      {pendingOrders.map(order => (
+                        <OrderAlert key={order.id} order={order} onAccept={handleAccept} onReject={handleReject} accepting={accepting} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="space-y-4 max-w-xl">
-                  {pendingOrders.map(order => (
-                    <OrderAlert key={order.id} order={order} onAccept={handleAccept} onReject={handleReject} accepting={accepting} />
-                  ))}
+                <div className="flex-1 overflow-hidden">
+                  <ReceiptArchive />
                 </div>
               )}
             </div>
 
             {/* ── RIGHT: Active Orders Manager ── */}
             <div className="w-96 shrink-0 flex flex-col bg-gray-50/50">
+              {/* Right header */}
               <div className="px-4 py-3 border-b bg-background flex items-center justify-between shrink-0">
                 <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                   <UtensilsCrossed className="w-4 h-4 text-blue-500" />
@@ -958,6 +1492,13 @@ export default function FbCashier() {
                 </div>
               </div>
 
+              {/* Shift bar */}
+              <ShiftBar
+                onCashMovement={() => setCashModalOpen(true)}
+                onXReport={() => setXReportOpen(true)}
+              />
+
+              {/* Orders list */}
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
                 {activeOrders.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-48 text-center">
@@ -976,6 +1517,7 @@ export default function FbCashier() {
                       onToggle={() => setExpandedOrderId(prev => prev === order.id ? null : order.id)}
                       onAddItem={() => setAddItemForOrderId(order.id)}
                       onPay={() => setPayForOrder(order)}
+                      onSendKitchen={() => setTimeout(fetchActive, 500)}
                     />
                   ))
                 )}
