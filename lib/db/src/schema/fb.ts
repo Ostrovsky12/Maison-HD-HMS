@@ -1,8 +1,10 @@
 import { pgTable, serial, integer, timestamp, text, boolean, pgEnum, jsonb, varchar, numeric, date } from "drizzle-orm/pg-core";
 import { organizationsTable } from "./organizations";
 import { bookingsTable } from "./bookings";
+import { usersTable } from "./users";
+import { legalEntitiesTable } from "./legal-entities";
 
-export const fbOrderStatusEnum = pgEnum("fb_order_status", ["open", "in_kitchen", "ready", "served", "billed", "cancelled"]);
+export const fbOrderStatusEnum = pgEnum("fb_order_status", ["open", "in_kitchen", "ready", "served", "billed", "cancelled", "new_guest"]);
 export const fbOrderTypeEnum = pgEnum("fb_order_type", ["dine_in", "room_service", "takeaway", "bar", "breakfast", "banquet", "corporate"]);
 export const fbItemStatusEnum = pgEnum("fb_item_status", ["pending", "cooking", "ready", "served", "cancelled"]);
 export const fbTableStatusEnum = pgEnum("fb_table_status", ["free", "occupied", "reserved", "cleaning"]);
@@ -33,6 +35,23 @@ export const fbItemsTable = pgTable("fb_items", {
   tags: jsonb("tags").$type<string[]>().default([]),
   sortOrder: integer("sort_order").default(0),
   imageUrl: text("image_url"),
+  // Extended columns (added via raw SQL migrations)
+  station: varchar("station", { length: 50 }).default("kitchen_general"),
+  isStopList: boolean("is_stop_list").default(false),
+  isAlcohol: boolean("is_alcohol").default(false),
+  alcoholVolumePct: numeric("alcohol_volume_pct", { precision: 5, scale: 2 }),
+  volumeL: numeric("volume_l", { precision: 6, scale: 3 }),
+  exciseGroup: varchar("excise_group", { length: 50 }),
+  exciseCode: varchar("excise_code", { length: 50 }),
+  uktzedCode: varchar("uktzed_code", { length: 20 }),
+  vatRate: integer("vat_rate").default(20),
+  legalEntityId: integer("legal_entity_id").references(() => legalEntitiesTable.id),
+  ingredientId: integer("ingredient_id"),
+  itemType: varchar("item_type", { length: 30 }).default("dish"),
+  techCard: jsonb("tech_card"),
+  taxGroupId: integer("tax_group_id"),
+  productCode: varchar("product_code", { length: 50 }),
+  serviceCode: varchar("service_code", { length: 50 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -67,6 +86,16 @@ export const fbOrdersTable = pgTable("fb_orders", {
   closedAt: timestamp("closed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  // Extended columns (added via raw SQL migrations)
+  currentWaiterUserId: integer("current_waiter_user_id").references(() => usersTable.id),
+  tipAmount: numeric("tip_amount", { precision: 10, scale: 2 }).default("0"),
+  tipPct: numeric("tip_pct", { precision: 5, scale: 2 }).default("0"),
+  discountAmount: numeric("discount_amount", { precision: 10, scale: 2 }).default("0"),
+  discountLabel: varchar("discount_label", { length: 100 }),
+  paymentMethod: varchar("payment_method", { length: 50 }),
+  receiptNumber: varchar("receipt_number", { length: 100 }),
+  exciseTotal: numeric("excise_total", { precision: 10, scale: 2 }).default("0"),
+  legalEntityId: integer("legal_entity_id").references(() => legalEntitiesTable.id),
 });
 
 export const fbOrderItemsTable = pgTable("fb_order_items", {
@@ -80,6 +109,7 @@ export const fbOrderItemsTable = pgTable("fb_order_items", {
   totalPrice: numeric("total_price", { precision: 10, scale: 2 }).notNull(),
   status: fbItemStatusEnum("status").notNull().default("pending"),
   notes: text("notes"),
+  modifiers: jsonb("modifiers"),
   sentAt: timestamp("sent_at"),
   readyAt: timestamp("ready_at"),
   servedAt: timestamp("served_at"),
