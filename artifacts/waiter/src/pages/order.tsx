@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 
 const ITEM_STATUS: Record<string, { label: string; color: string }> = {
-  pending:  { label: "Очікує",  color: "text-amber-600 bg-amber-50" },
-  cooking:  { label: "Готується", color: "text-blue-600 bg-blue-50" },
-  ready:    { label: "Готово",  color: "text-green-600 bg-green-50" },
-  served:   { label: "Подано",  color: "text-gray-500 bg-gray-50" },
-  cancelled:{ label: "Скасовано", color: "text-red-500 bg-red-50" },
+  pending:  { label: "Не відправлено", color: "text-orange-600 bg-orange-50 border border-orange-200" },
+  cooking:  { label: "На кухні",       color: "text-blue-600 bg-blue-50"   },
+  ready:    { label: "Готово ✓",       color: "text-green-700 bg-green-50" },
+  served:   { label: "Подано",         color: "text-gray-500 bg-gray-100"  },
+  cancelled:{ label: "Скасовано",      color: "text-red-500 bg-red-50"     },
 };
 
 const ORDER_STATUS_LABEL: Record<string, string> = {
