@@ -297,56 +297,86 @@ const PAY_METHODS: { id: PayMode; label: string; icon: React.ReactNode; hint: st
 ];
 
 function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose: () => void; onDone: () => void }) {
-  const total = parseFloat(order.total_amount || "0");
+  const orderTotal = parseFloat(order.total_amount || "0");
+
   const [mode, setMode] = useState<PayMode>("cash");
-  const [cashReceived, setCashReceived] = useState(total.toFixed(2));
-  const [mixedCash, setMixedCash] = useState("");
-  const [mixedCard, setMixedCard] = useState("");
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState("");
 
-  const cashChange = Math.max(0, parseFloat(cashReceived || "0") - total);
+  // ── Discount ──
+  const [discountEnabled, setDiscountEnabled] = useState(false);
+  const [discountType, setDiscountType] = useState<"pct" | "fixed">("pct");
+  const [discountValue, setDiscountValue] = useState("");
 
-  // Mixed: auto-balance when one field changes
+  // ── Service charge (чайові / надбавка) ──
+  const [serviceEnabled, setServiceEnabled] = useState(false);
+  const [serviceValue, setServiceValue] = useState("10");
+
+  // ── Computed totals ──
+  const discountNum = parseFloat(discountValue || "0");
+  const discountAmount = discountEnabled
+    ? (discountType === "pct" ? Math.round(orderTotal * discountNum) / 100 : discountNum)
+    : 0;
+  const servicePct = serviceEnabled ? parseFloat(serviceValue || "0") : 0;
+  const serviceAmount = Math.round((orderTotal - discountAmount) * servicePct) / 100;
+  const finalTotal = Math.max(0, orderTotal - discountAmount + serviceAmount);
+
+  // ── Cash fields ──
+  const [cashReceived, setCashReceived] = useState("");
+  useEffect(() => { setCashReceived(finalTotal.toFixed(2)); }, [finalTotal]);
+  const cashChange = Math.max(0, parseFloat(cashReceived || "0") - finalTotal);
+
+  // ── Mixed fields ──
+  const [mixedCash, setMixedCash] = useState("");
+  const [mixedCard, setMixedCard] = useState("");
+
   function onMixedCashChange(val: string) {
     setMixedCash(val);
     const n = parseFloat(val);
-    if (!isNaN(n) && n >= 0 && n <= total) setMixedCard((total - n).toFixed(2));
+    if (!isNaN(n) && n >= 0 && n <= finalTotal) setMixedCard((finalTotal - n).toFixed(2));
     else setMixedCard("");
   }
   function onMixedCardChange(val: string) {
     setMixedCard(val);
     const n = parseFloat(val);
-    if (!isNaN(n) && n >= 0 && n <= total) setMixedCash((total - n).toFixed(2));
+    if (!isNaN(n) && n >= 0 && n <= finalTotal) setMixedCash((finalTotal - n).toFixed(2));
     else setMixedCash("");
   }
 
   const mixedCashNum = parseFloat(mixedCash || "0");
   const mixedCardNum = parseFloat(mixedCard || "0");
-  const mixedTotal = mixedCashNum + mixedCardNum;
-  const mixedChange = Math.max(0, mixedCashNum - (total - mixedCardNum));
+  const mixedPaidTotal = mixedCashNum + mixedCardNum;
+  const mixedChange = Math.max(0, mixedCashNum - (finalTotal - mixedCardNum));
 
   function canPay() {
     if (paying) return false;
-    if (mode === "cash") return parseFloat(cashReceived || "0") >= total;
-    if (mode === "mixed") return mixedTotal >= total - 0.01 && (mixedCashNum > 0 || mixedCardNum > 0);
-    return true; // card, invoice, certificate, deposit always ok
+    if (mode === "cash") return parseFloat(cashReceived || "0") >= finalTotal - 0.01;
+    if (mode === "mixed") return mixedPaidTotal >= finalTotal - 0.01 && (mixedCashNum > 0 || mixedCardNum > 0);
+    return true;
   }
 
   async function handlePay() {
     if (!canPay()) return;
     setPaying(true); setError("");
     try {
-      let body: any;
+      let body: any = {
+        discountAmount: discountAmount > 0 ? discountAmount : undefined,
+        discountLabel:  discountEnabled && discountAmount > 0
+          ? (discountType === "pct" ? `Знижка ${discountNum}%` : `Знижка ${discountAmount.toFixed(2)} ₴`)
+          : undefined,
+        tipAmount: serviceAmount > 0 ? serviceAmount : undefined,
+        tipPct:    servicePct > 0 ? servicePct : undefined,
+      };
+
       if (mode === "mixed") {
         const payments = [];
         if (mixedCashNum > 0) payments.push({ method: "cash", amount: mixedCashNum });
         if (mixedCardNum > 0) payments.push({ method: "card", amount: mixedCardNum });
-        body = { payments };
+        body = { ...body, payments };
       } else if (mode === "cash") {
-        body = { paymentMethod: "cash", paidAmount: parseFloat(cashReceived || "0") };
+        body = { ...body, paymentMethod: "cash", paidAmount: parseFloat(cashReceived || "0") };
       } else {
-        body = { paymentMethod: mode, paidAmount: total };
+        body = { ...body, paymentMethod: mode, paidAmount: finalTotal };
       }
       await apiFetch(`/orders/${order.id}/pay`, { method: "POST", body: JSON.stringify(body) });
       onDone();
@@ -370,14 +400,101 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
         </div>
 
-        <div className="p-5 space-y-5">
-          {/* Total */}
-          <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
-            <p className="text-sm text-green-700 font-medium mb-1">До сплати</p>
-            <p className="text-4xl font-black text-green-800">{total.toFixed(2)} ₴</p>
+        <div className="p-5 space-y-4">
+
+          {/* ── Price summary ── */}
+          <div className="bg-gray-50 border rounded-xl p-3 space-y-1.5 text-sm">
+            <div className="flex justify-between text-gray-600">
+              <span>Сума замовлення:</span>
+              <span className="font-semibold">{orderTotal.toFixed(2)} ₴</span>
+            </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-red-600">
+                <span>{discountType === "pct" ? `Знижка ${discountNum}%` : "Знижка"}:</span>
+                <span className="font-semibold">− {discountAmount.toFixed(2)} ₴</span>
+              </div>
+            )}
+            {serviceAmount > 0 && (
+              <div className="flex justify-between text-blue-600">
+                <span>Сервісний збір {servicePct}%:</span>
+                <span className="font-semibold">+ {serviceAmount.toFixed(2)} ₴</span>
+              </div>
+            )}
+            <div className="border-t pt-1.5 flex justify-between font-black text-base text-green-800">
+              <span>До сплати:</span>
+              <span>{finalTotal.toFixed(2)} ₴</span>
+            </div>
           </div>
 
-          {/* Payment method grid */}
+          {/* ── Discount row ── */}
+          <div className="border rounded-xl overflow-hidden">
+            <button
+              onClick={() => setDiscountEnabled(v => !v)}
+              className={`w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold transition-colors ${discountEnabled ? "bg-red-50 text-red-700" : "hover:bg-gray-50 text-gray-700"}`}
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-base">🏷</span> Знижка
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${discountEnabled ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-400"}`}>
+                {discountEnabled ? (discountAmount > 0 ? `− ${discountAmount.toFixed(0)} ₴` : "вкл") : "вимк"}
+              </span>
+            </button>
+            {discountEnabled && (
+              <div className="px-4 pb-3 pt-1 border-t bg-red-50/40 flex gap-2 items-center">
+                <div className="flex border rounded-lg overflow-hidden shrink-0">
+                  {(["pct", "fixed"] as const).map(t => (
+                    <button key={t} onClick={() => { setDiscountType(t); setDiscountValue(""); }}
+                      className={`px-3 py-1.5 text-xs font-bold transition-colors ${discountType === t ? "bg-red-500 text-white" : "hover:bg-gray-100 text-gray-600"}`}>
+                      {t === "pct" ? "%" : "₴"}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number" value={discountValue} onChange={e => setDiscountValue(e.target.value)}
+                  placeholder={discountType === "pct" ? "напр. 10" : "напр. 50"}
+                  min={0} max={discountType === "pct" ? 100 : orderTotal} step="0.01" autoFocus
+                  className="flex-1 px-3 py-1.5 text-sm font-bold border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 text-right"
+                />
+                <span className="text-sm text-gray-500 shrink-0">{discountType === "pct" ? "%" : "₴"}</span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Service charge row ── */}
+          <div className="border rounded-xl overflow-hidden">
+            <button
+              onClick={() => setServiceEnabled(v => !v)}
+              className={`w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold transition-colors ${serviceEnabled ? "bg-blue-50 text-blue-700" : "hover:bg-gray-50 text-gray-700"}`}
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-base">⭐</span> Сервісний збір
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${serviceEnabled ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-400"}`}>
+                {serviceEnabled ? `+ ${serviceAmount.toFixed(0)} ₴` : "вимк"}
+              </span>
+            </button>
+            {serviceEnabled && (
+              <div className="px-4 pb-3 pt-1 border-t bg-blue-50/40 flex gap-2 items-center">
+                <span className="text-xs text-gray-500 shrink-0">Відсоток:</span>
+                <div className="flex gap-1.5">
+                  {[5, 10, 15].map(pct => (
+                    <button key={pct} onClick={() => setServiceValue(String(pct))}
+                      className={`px-3 py-1.5 text-xs font-bold border-2 rounded-lg transition-colors ${serviceValue === String(pct) && serviceEnabled ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 hover:border-gray-300"}`}>
+                      {pct}%
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number" value={serviceValue} onChange={e => setServiceValue(e.target.value)}
+                  min={0} max={50} step="1"
+                  className="w-16 px-2 py-1.5 text-sm font-bold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-right"
+                />
+                <span className="text-sm text-gray-500">%</span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Payment method grid ── */}
           <div>
             <p className="text-sm font-semibold text-gray-700 mb-2">Спосіб оплати</p>
             <div className="grid grid-cols-3 gap-2">
@@ -393,7 +510,7 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
                 </button>
               ))}
             </div>
-            <p className="text-xs text-gray-400 text-center mt-2">{selectedInfo.hint}</p>
+            <p className="text-xs text-gray-400 text-center mt-1.5">{selectedInfo.hint}</p>
           </div>
 
           {/* ── Cash fields ── */}
@@ -402,13 +519,12 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
               <div>
                 <label className="text-sm font-semibold text-gray-700 block mb-1.5">Отримано від гостя (₴)</label>
                 <input type="number" value={cashReceived} onChange={e => setCashReceived(e.target.value)}
-                  step="0.01" min={total} autoFocus
+                  step="0.01" min={0}
                   className="w-full px-4 py-3 text-2xl font-black border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 text-right" />
               </div>
-              {/* Quick amounts */}
               <div className="flex gap-2 flex-wrap">
-                {[Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100, Math.ceil(total / 200) * 200, Math.ceil(total / 500) * 500]
-                  .filter((v, i, a) => v >= total && a.indexOf(v) === i)
+                {[Math.ceil(finalTotal / 50) * 50, Math.ceil(finalTotal / 100) * 100, Math.ceil(finalTotal / 200) * 200, Math.ceil(finalTotal / 500) * 500]
+                  .filter((v, i, a) => v >= finalTotal && a.indexOf(v) === i)
                   .slice(0, 4)
                   .map(v => (
                     <button key={v} onClick={() => setCashReceived(v.toFixed(2))}
@@ -416,12 +532,12 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
                       {v} ₴
                     </button>
                   ))}
-                <button onClick={() => setCashReceived(total.toFixed(2))}
+                <button onClick={() => setCashReceived(finalTotal.toFixed(2))}
                   className="px-3 py-1.5 text-sm font-bold border-2 border-gray-200 rounded-xl hover:border-green-400 hover:bg-green-50 transition-colors">
                   Точно
                 </button>
               </div>
-              {cashChange > 0 && (
+              {cashChange > 0.01 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex justify-between items-center">
                   <span className="font-semibold text-amber-800 text-sm">Решта гостю:</span>
                   <span className="font-black text-xl text-amber-800">{cashChange.toFixed(2)} ₴</span>
@@ -440,7 +556,7 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
                     <Banknote className="w-3.5 h-3.5" /> Готівкою (₴)
                   </label>
                   <input type="number" value={mixedCash} onChange={e => onMixedCashChange(e.target.value)}
-                    placeholder="0.00" min={0} max={total} step="0.01" autoFocus
+                    placeholder="0.00" min={0} step="0.01"
                     className="w-full px-3 py-2.5 text-lg font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-right" />
                 </div>
                 <div>
@@ -448,11 +564,10 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
                     <CreditCard className="w-3.5 h-3.5" /> Карткою (₴)
                   </label>
                   <input type="number" value={mixedCard} onChange={e => onMixedCardChange(e.target.value)}
-                    placeholder="0.00" min={0} max={total} step="0.01"
+                    placeholder="0.00" min={0} step="0.01"
                     className="w-full px-3 py-2.5 text-lg font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-right" />
                 </div>
               </div>
-              {/* Summary */}
               <div className="bg-gray-50 border rounded-xl p-3 space-y-1.5 text-sm">
                 <div className="flex justify-between text-gray-600">
                   <span>Готівка:</span><span className="font-bold">{mixedCashNum.toFixed(2)} ₴</span>
@@ -462,15 +577,15 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
                 </div>
                 <div className="border-t pt-1.5 flex justify-between font-bold">
                   <span>Разом:</span>
-                  <span className={mixedTotal >= total - 0.01 ? "text-green-700" : "text-red-600"}>
-                    {mixedTotal.toFixed(2)} ₴
+                  <span className={mixedPaidTotal >= finalTotal - 0.01 ? "text-green-700" : "text-red-600"}>
+                    {mixedPaidTotal.toFixed(2)} ₴
                   </span>
                 </div>
-                {mixedTotal < total - 0.01 && (
-                  <p className="text-xs text-red-500 text-center">Не вистачає {(total - mixedTotal).toFixed(2)} ₴</p>
+                {mixedPaidTotal < finalTotal - 0.01 && (
+                  <p className="text-xs text-red-500 text-center">Не вистачає {(finalTotal - mixedPaidTotal).toFixed(2)} ₴</p>
                 )}
               </div>
-              {mixedChange > 0 && (
+              {mixedChange > 0.01 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex justify-between items-center">
                   <span className="font-semibold text-amber-800 text-sm">Решта готівкою:</span>
                   <span className="font-black text-xl text-amber-800">{mixedChange.toFixed(2)} ₴</span>
@@ -479,21 +594,18 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
             </div>
           )}
 
-          {/* ── Card / Invoice / Certificate / Deposit — no extra fields ── */}
+          {/* ── Card / Invoice / Certificate / Deposit ── */}
           {(mode === "card" || mode === "invoice" || mode === "certificate" || mode === "deposit") && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center text-sm text-blue-700">
-              <p className="font-semibold">Сума до оплати: {total.toFixed(2)} ₴</p>
+              <p className="font-semibold">Сума до оплати: {finalTotal.toFixed(2)} ₴</p>
               <p className="text-xs opacity-80 mt-1">{selectedInfo.hint}</p>
             </div>
           )}
 
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-700">
-              {error}
-            </div>
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-700">{error}</div>
           )}
 
-          {/* Confirm button */}
           <button
             onClick={handlePay}
             disabled={!canPay()}
@@ -501,7 +613,7 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
           >
             {paying
               ? <><RefreshCw className="w-5 h-5 animate-spin" /> Проводимо...</>
-              : <><CheckCircle2 className="w-5 h-5" /> Закрити замовлення</>
+              : <><CheckCircle2 className="w-5 h-5" /> Закрити · {finalTotal.toFixed(2)} ₴</>
             }
           </button>
         </div>

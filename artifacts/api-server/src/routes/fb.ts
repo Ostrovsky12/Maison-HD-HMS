@@ -602,9 +602,16 @@ router.get("/tables", requireAuth, async (req: any, res) => {
 
 router.post("/tables", requireAuth, async (req: any, res) => {
   try {
-    const orgId = getOrg(req);
-    const [tbl] = await db.insert(fbTablesTable).values({ ...req.body, organizationId: orgId }).returning();
-    res.json({ table: tbl });
+    const orgId = await resolveOrgId(req);
+    const { number, capacity, location } = req.body;
+    if (!number?.trim()) { res.status(400).json({ error: "Номер столу обов'язковий" }); return; }
+    const db_ = (db as any).$client;
+    const r = await db_.query(
+      `INSERT INTO fb_tables (organization_id, number, capacity, location)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [orgId, number.trim(), parseInt(capacity) || 4, location?.trim() || "Основний зал"]
+    );
+    res.json({ table: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
