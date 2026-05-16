@@ -772,11 +772,16 @@ router.post("/orders/:id/items", requireAuth, async (req: any, res) => {
     const orgId = getOrg(req);
     const orderId = parseInt(req.params.id);
     const { itemId, quantity, notes } = req.body;
+    const db_ = (db as any).$client;
 
     let name: string, price: string;
     if (itemId) {
-      const [menuItem] = await db.select().from(fbItemsTable).where(eq(fbItemsTable.id, itemId));
-      name = menuItem.name; price = menuItem.price;
+      const { rows } = await db_.query(
+        `SELECT name, price FROM fb_items WHERE id = $1 AND organization_id = $2`,
+        [parseInt(itemId), orgId]
+      );
+      if (!rows.length) return res.status(404).json({ error: "Страву не знайдено" });
+      name = rows[0].name; price = rows[0].price;
     } else {
       name = req.body.name; price = req.body.price;
     }
@@ -784,16 +789,23 @@ router.post("/orders/:id/items", requireAuth, async (req: any, res) => {
     const qty = parseInt(quantity) || 1;
     const total = (parseFloat(price) * qty).toFixed(2);
 
-    const [orderItem] = await db.insert(fbOrderItemsTable).values({
-      orderId, itemId: itemId || null, organizationId: orgId,
-      name, price, quantity: qty, totalPrice: total, notes,
-    }).returning();
+    const { rows: [orderItem] } = await db_.query(
+      `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [orderId, itemId || null, orgId, name, price, qty, total, notes || null]
+    );
 
     // Recalc order total
-    const allItems = await db.select({ totalPrice: fbOrderItemsTable.totalPrice }).from(fbOrderItemsTable)
-      .where(and(eq(fbOrderItemsTable.orderId, orderId), ne(fbOrderItemsTable.status, "cancelled")));
-    const newTotal = allItems.reduce((s, i) => s + parseFloat(i.totalPrice), 0).toFixed(2);
-    await db.update(fbOrdersTable).set({ totalAmount: newTotal, updatedAt: new Date() }).where(eq(fbOrdersTable.id, orderId));
+    const { rows: sumRows } = await db_.query(
+      `SELECT COALESCE(SUM(total_price),0)::numeric AS total FROM fb_order_items
+       WHERE order_id = $1 AND status != 'cancelled'`,
+      [orderId]
+    );
+    const newTotal = parseFloat(sumRows[0].total).toFixed(2);
+    await db_.query(
+      `UPDATE fb_orders SET total_amount = $1, updated_at = NOW() WHERE id = $2`,
+      [newTotal, orderId]
+    );
 
     res.json({ item: orderItem, newTotal });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
