@@ -31,16 +31,11 @@ import FbReportProducts from "@/pages/fb-report-products";
 import FbReportAbc from "@/pages/fb-report-abc";
 import FbReportAi from "@/pages/fb-report-ai";
 import FbShifts from "@/pages/fb-shifts";
-import FbWriteoffs from "@/pages/fb-writeoffs";
 import FbClients from "@/pages/fb-clients";
 import FbClientGroups from "@/pages/fb-client-groups";
 import FbLoyalty from "@/pages/fb-loyalty";
 import FbExceptions from "@/pages/fb-exceptions";
 import FbPromotions from "@/pages/fb-promotions";
-import FbInventorySessions from "@/pages/fb-inventory-sessions";
-import FbTransfers from "@/pages/fb-transfers";
-import FbMovementReport from "@/pages/fb-movement-report";
-import FbWarehousesList from "@/pages/fb-warehouses-list";
 import FbPackaging from "@/pages/fb-packaging";
 import FbStaffAccess from "@/pages/fb-staff-access";
 import FbPositions from "@/pages/fb-positions";
@@ -129,16 +124,16 @@ function Router() {
       <Route path="/fb/report/products"><ProtectedRoute component={FbReportProducts} /></Route>
       <Route path="/fb/report/abc"><ProtectedRoute component={FbReportAbc} /></Route>
       <Route path="/fb/shifts"><ProtectedRoute component={FbShifts} /></Route>
-      <Route path="/fb/writeoffs"><ProtectedRoute component={FbWriteoffs} /></Route>
-      <Route path="/fb/inventory"><ProtectedRoute component={FbInventorySessions} /></Route>
-      <Route path="/fb/transfers"><ProtectedRoute component={FbTransfers} /></Route>
-      <Route path="/fb/movement-report"><ProtectedRoute component={FbMovementReport} /></Route>
+      <Route path="/fb/writeoffs"><ProtectedRoute component={FbWarehouse} /></Route>
+      <Route path="/fb/inventory"><ProtectedRoute component={FbWarehouse} /></Route>
+      <Route path="/fb/transfers"><ProtectedRoute component={FbWarehouse} /></Route>
+      <Route path="/fb/movement-report"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/fb/clients"><ProtectedRoute component={FbClients} /></Route>
       <Route path="/fb/client-groups"><ProtectedRoute component={FbClientGroups} /></Route>
       <Route path="/fb/loyalty"><ProtectedRoute component={FbLoyalty} /></Route>
       <Route path="/fb/exceptions"><ProtectedRoute component={FbExceptions} /></Route>
       <Route path="/fb/promotions"><ProtectedRoute component={FbPromotions} /></Route>
-      <Route path="/fb/warehouses"><ProtectedRoute component={FbWarehousesList} /></Route>
+      <Route path="/fb/warehouses"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/fb/packaging"><ProtectedRoute component={FbPackaging} /></Route>
       <Route path="/fb/receipts"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/fb/suppliers"><ProtectedRoute component={FbWarehouse} /></Route>
