@@ -299,7 +299,7 @@ router.post("/items", requireAuth, async (req: any, res) => {
       allergens, tags, sortOrder = 0, imageUrl,
       vat_rate = 20, is_alcohol = false, alcohol_volume_pct, uktzed_code, excise_code,
       volume_l, excise_group,
-      station = "kitchen_general", legal_entity_id, ingredient_id,
+      station = "kitchen_general", legal_entity_id, ingredient_id, item_type = "dish",
     } = req.body;
     const db_ = (db as any).$client;
     const r = await db_.query(
@@ -307,13 +307,13 @@ router.post("/items", requireAuth, async (req: any, res) => {
          is_available, is_popular, is_vegetarian, allergens, tags, sort_order, image_url,
          vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
          volume_l, excise_group,
-         station, legal_entity_id, ingredient_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
+         station, legal_entity_id, ingredient_id, item_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
       [orgId, name, description||null, price, categoryId||null, cookMinutes||15,
        isAvailable, isPopular, isVegetarian, allergens||null, tags||null, sortOrder, imageUrl||null,
        vat_rate||20, is_alcohol||false, alcohol_volume_pct||null, uktzed_code||null, excise_code||null,
        volume_l||null, excise_group||null,
-       station||"kitchen_general", legal_entity_id||null, ingredient_id||null]
+       station||"kitchen_general", legal_entity_id||null, ingredient_id||null, item_type||"dish"]
     );
     res.json({ item: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -327,7 +327,7 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
       allergens, tags, sortOrder, imageUrl,
       vat_rate, is_alcohol, alcohol_volume_pct, uktzed_code, excise_code,
       volume_l, excise_group,
-      station, legal_entity_id, ingredient_id,
+      station, legal_entity_id, ingredient_id, item_type,
       is_stop_list, tech_card, tax_group_id, price_happy,
     } = req.body;
     const db_ = (db as any).$client;
@@ -370,6 +370,7 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
          price_happy        = CASE WHEN $32 = TRUE THEN $31::numeric ELSE price_happy END,
          allergens          = CASE WHEN $34 = TRUE THEN $33::jsonb ELSE allergens END,
          tags               = CASE WHEN $36 = TRUE THEN $35::jsonb ELSE tags END,
+         item_type          = COALESCE($37::varchar, item_type),
          updated_at         = NOW()
        WHERE id = $18 AND organization_id = $19 RETURNING *`,
       [name||null, description||null, price??null, categoryId||null, cookMinutes??null,
@@ -395,6 +396,7 @@ router.patch("/items/:id", requireAuth, async (req: any, res) => {
        allergensVal !== undefined,
        tagsVal ? JSON.stringify(tagsVal) : null,
        tagsVal !== undefined,
+       item_type || null,
       ]
     );
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
@@ -426,7 +428,8 @@ router.get("/modifier-groups", requireAuth, async (req: any, res) => {
               COALESCE(json_agg(
                 json_build_object(
                   'id', mo.id, 'name', mo.name, 'price_delta', mo.price_delta,
-                  'sort_order', mo.sort_order, 'is_available', mo.is_available
+                  'sort_order', mo.sort_order, 'is_available', mo.is_available,
+                  'tech_card', mo.tech_card
                 ) ORDER BY mo.sort_order
               ) FILTER (WHERE mo.id IS NOT NULL), '[]') AS options
        FROM fb_modifier_groups mg
@@ -446,7 +449,7 @@ router.put("/modifier-groups/bulk/:itemId", requireAuth, async (req: any, res) =
     const { groups } = req.body as { groups: Array<{
       id?: number; name: string; is_required: boolean;
       min_select: number; max_select: number; sort_order: number;
-      options: Array<{ id?: number; name: string; price_delta: number; sort_order: number; is_available: boolean; }>;
+      options: Array<{ id?: number; name: string; price_delta: number; sort_order: number; is_available: boolean; tech_card?: any[] | null; }>;
     }> };
     const db_ = (db as any).$client;
 
@@ -491,18 +494,19 @@ router.put("/modifier-groups/bulk/:itemId", requireAuth, async (req: any, res) =
       const resultOpts: any[] = [];
       for (let oi = 0; oi < (g.options || []).length; oi++) {
         const o = g.options[oi];
+        const tcJson = (o.tech_card && o.tech_card.length > 0) ? JSON.stringify(o.tech_card) : null;
         if (o.id) {
           await db_.query(
-            `UPDATE fb_modifier_options SET name=$1, price_delta=$2, sort_order=$3, is_available=$4
-             WHERE id=$5 AND group_id=$6`,
-            [o.name, o.price_delta, oi, o.is_available, o.id, groupId]
+            `UPDATE fb_modifier_options SET name=$1, price_delta=$2, sort_order=$3, is_available=$4, tech_card=$5
+             WHERE id=$6 AND group_id=$7`,
+            [o.name, o.price_delta, oi, o.is_available, tcJson, o.id, groupId]
           );
           resultOpts.push({ ...o, sort_order: oi });
         } else {
           const { rows } = await db_.query(
-            `INSERT INTO fb_modifier_options (organization_id, group_id, name, price_delta, sort_order, is_available)
-             VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-            [orgId, groupId, o.name, o.price_delta, oi, o.is_available !== false]
+            `INSERT INTO fb_modifier_options (organization_id, group_id, name, price_delta, sort_order, is_available, tech_card)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+            [orgId, groupId, o.name, o.price_delta, oi, o.is_available !== false, tcJson]
           );
           resultOpts.push(rows[0]);
         }
@@ -1159,28 +1163,88 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
               });
             }
           } else if (oi.item_id) {
-            // ── Шлях 2: Штучний товар (пряма прив'язка до інгредієнту) ────────
-            // Перевіряємо чи є ingredient_id на самому пункті меню
-            const itemRow = await db_.query(
-              `SELECT fi.ingredient_id, ing.unit, ing.cost_per_unit, ing.name AS ingredient_name
+            // ── Завантажуємо дані позиції меню ────────────────────────────────
+            const fbItemRow = await db_.query(
+              `SELECT fi.item_type, fi.tech_card, fi.ingredient_id,
+                      ing.unit AS ing_unit, ing.cost_per_unit AS ing_cost
                FROM fb_items fi
-               JOIN fb_ingredients ing ON ing.id = fi.ingredient_id
-               WHERE fi.id = $1 AND fi.organization_id = $2 AND fi.ingredient_id IS NOT NULL`,
+               LEFT JOIN fb_ingredients ing ON ing.id = fi.ingredient_id
+               WHERE fi.id = $1 AND fi.organization_id = $2`,
               [oi.item_id, orgId]
             );
-            if (itemRow.rows.length) {
-              const itm = itemRow.rows[0];
+            const fbItem = fbItemRow.rows[0];
+
+            // ── Шлях 1.5: tech_card JSONB (наш редактор техкарти) ─────────────
+            const tcLines = Array.isArray(fbItem?.tech_card) ? fbItem.tech_card : null;
+            if (tcLines && tcLines.length > 0 && fbItem?.item_type !== "goods") {
+              for (const line of tcLines) {
+                if (!line.ingredient_id || !line.brutto) continue;
+                const ingRow = await db_.query(
+                  `SELECT unit, cost_per_unit FROM fb_ingredients WHERE id = $1 AND organization_id = $2`,
+                  [line.ingredient_id, orgId]
+                );
+                if (!ingRow.rows.length) continue;
+                const ing = ingRow.rows[0];
+                const conv = unitFactor(line.unit || "г", ing.unit);
+                const deductQty = Number(line.brutto) * conv * Number(oi.quantity);
+                if (deductQty <= 0) continue;
+                deductions.push({
+                  ingredientId: line.ingredient_id,
+                  quantity: deductQty,
+                  unit: ing.unit,
+                  costPerUnit: Number(ing.cost_per_unit) || Number(line.cost_per_unit) || 0,
+                  menuItemName: oi.name,
+                  deductionType: "tech_card",
+                });
+              }
+            } else if (fbItem?.ingredient_id && fbItem?.ing_unit) {
+              // ── Шлях 2: Товар (пряма прив'язка до інгредієнту) ───────────────
               // 1 продаж = 1 одиниця зі складу × кількість
               deductions.push({
-                ingredientId: itm.ingredient_id,
+                ingredientId: fbItem.ingredient_id,
                 quantity: Number(oi.quantity),
-                unit: itm.unit,
-                costPerUnit: Number(itm.cost_per_unit) || 0,
+                unit: fbItem.ing_unit,
+                costPerUnit: Number(fbItem.ing_cost) || 0,
                 menuItemName: oi.name,
                 deductionType: "direct",
               });
             }
-            // Якщо жодного зв'язку — просто пропускаємо (послуга, страва без картки)
+            // Якщо жодного зв'язку (послуга) — пропускаємо
+
+            // ── Шлях 3: Модифікатори → склад (tech_card на опції) ────────────────
+            if (Array.isArray(oi.modifiers) && oi.modifiers.length > 0) {
+              const optionIds = oi.modifiers.map((m: any) => m.optionId).filter(Boolean);
+              if (optionIds.length > 0) {
+                const modOptsRow = await db_.query(
+                  `SELECT id, tech_card FROM fb_modifier_options WHERE id = ANY($1) AND tech_card IS NOT NULL`,
+                  [optionIds]
+                );
+                for (const modOpt of modOptsRow.rows) {
+                  const modTc = Array.isArray(modOpt.tech_card) ? modOpt.tech_card : null;
+                  if (!modTc || modTc.length === 0) continue;
+                  for (const line of modTc) {
+                    if (!line.ingredient_id || !line.brutto) continue;
+                    const ingRow2 = await db_.query(
+                      `SELECT unit, cost_per_unit FROM fb_ingredients WHERE id = $1 AND organization_id = $2`,
+                      [line.ingredient_id, orgId]
+                    );
+                    if (!ingRow2.rows.length) continue;
+                    const ing2 = ingRow2.rows[0];
+                    const conv2 = unitFactor(line.unit || "г", ing2.unit);
+                    const deductQty2 = Number(line.brutto) * conv2 * Number(oi.quantity);
+                    if (deductQty2 <= 0) continue;
+                    deductions.push({
+                      ingredientId: line.ingredient_id,
+                      quantity: deductQty2,
+                      unit: ing2.unit,
+                      costPerUnit: Number(ing2.cost_per_unit) || Number(line.cost_per_unit) || 0,
+                      menuItemName: `${oi.name} (мод.)`,
+                      deductionType: "modifier_tech_card",
+                    });
+                  }
+                }
+              }
+            }
           }
         }
 

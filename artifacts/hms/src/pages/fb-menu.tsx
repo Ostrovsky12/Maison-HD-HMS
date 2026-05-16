@@ -17,6 +17,7 @@ import {
   Eye, EyeOff, GripVertical,
   Layers, Package, Filter,
   ChevronRight, ChevronDown, FolderPlus, Settings2, Sliders,
+  Printer,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ interface ModifierOption {
   price_delta: number;
   sort_order: number;
   is_available: boolean;
+  tech_card?: TechCardLine[] | null;
 }
 
 interface ModifierGroup {
@@ -78,6 +80,10 @@ interface Item {
   allergens?: string[];
   tags?: string[];
   image_url?: string;
+  item_type: "dish" | "goods" | "service";
+  ingredient_id?: number | null;
+  ingredient_name?: string;
+  legal_entity_id?: number | null;
   vat_rate: number;
   tax_group_id?: number;
   uktzed_code?: string;
@@ -383,12 +389,97 @@ function IngSearchInput({ name, onSelect, allIngredients }: {
   );
 }
 
+// ─── Calculation card printer ──────────────────────────────────────────────────
+
+function printCalcCard(itemName: string, categoryName: string, price: number, lines: TechCardLine[]) {
+  const totalCost = computeTechCardCost(lines);
+  const foodcost = price > 0 ? (totalCost / price) * 100 : 0;
+  const margin = price > 0 ? price - totalCost : 0;
+  const date = new Date().toLocaleDateString("uk-UA");
+
+  const rows = lines.map(l => {
+    const netto = (l.brutto || 0) * (1 - (l.waste_pct || 0) / 100);
+    const cost = netto * (l.cost_per_unit || 0);
+    return `<tr>
+      <td>${l.name || "—"}</td>
+      <td class="num">${(l.brutto || 0).toFixed(1)}</td>
+      <td class="num">${l.unit}</td>
+      <td class="num">${(l.waste_pct || 0).toFixed(1)}</td>
+      <td class="num">${netto.toFixed(1)}</td>
+      <td class="num">${l.cost_per_unit > 0 ? l.cost_per_unit.toFixed(4) : "—"}</td>
+      <td class="num">${cost > 0 ? cost.toFixed(2) : "—"}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+  <title>Калькуляційна карта — ${itemName}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:12px;margin:20mm;color:#000}
+    h1{font-size:16px;text-align:center;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+    .subtitle{text-align:center;font-size:11px;color:#555;margin-bottom:16px}
+    .meta{display:flex;justify-content:space-between;margin-bottom:12px;font-size:11px}
+    table{width:100%;border-collapse:collapse;margin-bottom:16px}
+    th{background:#f0f0f0;border:1px solid #aaa;padding:5px 6px;font-size:10px;text-transform:uppercase}
+    td{border:1px solid #bbb;padding:4px 6px}
+    .num{text-align:right}
+    .totals{margin-top:12px;border-top:2px solid #000;padding-top:10px}
+    .totals table{width:320px;margin-left:auto}
+    .totals td{border:none;padding:3px 8px;font-size:12px}
+    .totals .lbl{font-weight:600;color:#333}
+    .totals .val{text-align:right;font-weight:700}
+    .fc-ok{color:#16a34a} .fc-warn{color:#d97706} .fc-bad{color:#dc2626}
+    .sigs{margin-top:24px;display:flex;justify-content:space-between;font-size:11px}
+    .sig-line{border-top:1px solid #000;margin-top:20px;width:160px;text-align:center;padding-top:3px}
+    @media print{body{margin:10mm}}
+  </style></head><body>
+  <h1>Калькуляційна карта</h1>
+  <div class="subtitle">Технологічна собівартість страви</div>
+  <div class="meta">
+    <span><b>Страва:</b> ${itemName}</span>
+    <span><b>Категорія:</b> ${categoryName || "—"}</span>
+    <span><b>Дата:</b> ${date}</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Найменування інгредієнта</th>
+      <th>Брутто</th>
+      <th>Од.</th>
+      <th>Відх,%</th>
+      <th>Нетто</th>
+      <th>Ціна грн/од</th>
+      <th>Сума, грн</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="totals">
+    <table>
+      <tr><td class="lbl">Собівартість (1 порція):</td><td class="val">${totalCost.toFixed(2)} грн</td></tr>
+      <tr><td class="lbl">Ціна продажу:</td><td class="val">${price > 0 ? price.toFixed(2) + " грн" : "—"}</td></tr>
+      <tr><td class="lbl">Маржа:</td><td class="val">${price > 0 ? margin.toFixed(2) + " грн" : "—"}</td></tr>
+      <tr><td class="lbl">Фудкост:</td>
+        <td class="val ${foodcost > 35 ? "fc-bad" : foodcost > 25 ? "fc-warn" : "fc-ok"}">${price > 0 ? foodcost.toFixed(1) + "%" : "—"}</td></tr>
+    </table>
+  </div>
+  <div class="sigs">
+    <div><div class="sig-line">Калькулятор</div></div>
+    <div><div class="sig-line">Завідувач виробництва</div></div>
+    <div><div class="sig-line">Бухгалтер</div></div>
+  </div>
+  <script>window.onload=()=>{window.print();}</script>
+  </body></html>`;
+
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
 // ─── Tech Card Editor ──────────────────────────────────────────────────────────
 
-function TechCardEditor({ value, onChange, itemPrice }: {
+function TechCardEditor({ value, onChange, itemPrice, itemName, categoryName }: {
   value: TechCardLine[];
   onChange: (v: TechCardLine[]) => void;
   itemPrice?: string;
+  itemName?: string;
+  categoryName?: string;
 }) {
   const { data } = useQuery({
     queryKey: ["wh-ingredients-tc"],
@@ -483,9 +574,17 @@ function TechCardEditor({ value, onChange, itemPrice }: {
         );
       })}
 
-      <Button variant="outline" size="sm" onClick={add} className="w-full h-8 border-dashed">
-        <Plus className="w-3.5 h-3.5 mr-1.5" /> Додати інгредієнт зі складу
-      </Button>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={add} className="flex-1 h-8 border-dashed">
+          <Plus className="w-3.5 h-3.5 mr-1.5" /> Додати інгредієнт зі складу
+        </Button>
+        {value.length > 0 && (
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 shrink-0"
+            onClick={() => printCalcCard(itemName || "Страва", categoryName || "", parseFloat(itemPrice || "0"), value)}>
+            <Printer className="w-3.5 h-3.5" /> Калькуляційна карта
+          </Button>
+        )}
+      </div>
 
       {value.length === 0 && (
         <div className="text-center py-8 text-muted-foreground border border-dashed rounded-xl">
@@ -508,9 +607,18 @@ function ModifierEditor({ groups, onChange }: { groups: ModifierGroup[]; onChang
   function updateGroup(gi: number, key: keyof ModifierGroup, val: any) {
     onChange(groups.map((g, i) => i === gi ? { ...g, [key]: val } : g));
   }
+  const { data: modIngData } = useQuery({
+    queryKey: ["wh-ingredients-mod"],
+    queryFn: () => apiFetch("/api/fb/warehouse/ingredients"),
+    staleTime: 60_000,
+  });
+  const modIngredients: any[] = (modIngData as any)?.ingredients || [];
+
+  const [expandedOpt, setExpandedOpt] = useState<string | null>(null); // "gi-oi"
+
   function addOption(gi: number) {
     const g = groups[gi];
-    updateGroup(gi, "options", [...g.options, { name: "", price_delta: 0, sort_order: g.options.length, is_available: true }]);
+    updateGroup(gi, "options", [...g.options, { name: "", price_delta: 0, sort_order: g.options.length, is_available: true, tech_card: [] }]);
   }
   function removeOption(gi: number, oi: number) {
     updateGroup(gi, "options", groups[gi].options.filter((_, i) => i !== oi));
@@ -570,24 +678,90 @@ function ModifierEditor({ groups, onChange }: { groups: ModifierGroup[]; onChang
           </div>
 
           {/* Options */}
-          <div className="space-y-1.5 pl-1">
-            {g.options.map((o, oi) => (
-              <div key={oi} className="flex items-center gap-2">
-                <Switch checked={o.is_available !== false} onCheckedChange={v => updateOption(gi, oi, "is_available", v)} />
-                <Input value={o.name} onChange={e => updateOption(gi, oi, "name", e.target.value)}
-                  placeholder="Назва опції" className="flex-1 h-7 text-xs" />
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-xs text-muted-foreground">+</span>
-                  <Input type="number" min="0" step="0.5" value={o.price_delta}
-                    onChange={e => updateOption(gi, oi, "price_delta", parseFloat(e.target.value) || 0)}
-                    className="w-16 h-7 text-xs" />
-                  <span className="text-xs text-muted-foreground">₴</span>
+          <div className="space-y-2 pl-1">
+            {g.options.map((o, oi) => {
+              const key = `${gi}-${oi}`;
+              const isExpanded = expandedOpt === key;
+              const tc = o.tech_card || [];
+              const hasTc = tc.length > 0;
+
+              function addTcLine() {
+                const newTc = [...tc, { ingredient_id: null, name: "", brutto: 100, waste_pct: 0, unit: "г", cost_per_unit: 0 }];
+                updateOption(gi, oi, "tech_card", newTc);
+              }
+              function removeTcLine(li: number) {
+                updateOption(gi, oi, "tech_card", tc.filter((_, i) => i !== li));
+              }
+              function updateTcLine(li: number, patch: Partial<TechCardLine>) {
+                updateOption(gi, oi, "tech_card", tc.map((l, i) => i === li ? { ...l, ...patch } : l));
+              }
+
+              return (
+                <div key={oi} className="border rounded-md bg-background">
+                  <div className="flex items-center gap-2 p-1.5">
+                    <Switch checked={o.is_available !== false} onCheckedChange={v => updateOption(gi, oi, "is_available", v)} />
+                    <Input value={o.name} onChange={e => updateOption(gi, oi, "name", e.target.value)}
+                      placeholder="Назва опції" className="flex-1 h-7 text-xs" />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-muted-foreground">+</span>
+                      <Input type="number" min="0" step="0.5" value={o.price_delta}
+                        onChange={e => updateOption(gi, oi, "price_delta", parseFloat(e.target.value) || 0)}
+                        className="w-16 h-7 text-xs" />
+                      <span className="text-xs text-muted-foreground">₴</span>
+                    </div>
+                    <button title="Прив'язати до складу" onClick={() => setExpandedOpt(isExpanded ? null : key)}
+                      className={`p-1 rounded text-xs transition-colors ${hasTc ? "text-blue-600 bg-blue-50" : "text-muted-foreground hover:text-foreground"}`}>
+                      <Package className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => removeOption(gi, oi)} className="text-destructive hover:text-destructive/80">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="border-t px-2 pb-2 pt-1.5 space-y-1.5 bg-blue-50/40">
+                      <p className="text-[10px] text-blue-700 font-semibold uppercase tracking-wide">Склад цього модифікатора</p>
+                      {tc.length > 0 && (
+                        <div className="grid grid-cols-[1fr_60px_44px_20px] gap-1 text-[10px] text-muted-foreground px-0.5 font-semibold uppercase">
+                          <span>Інгредієнт</span><span>Брутто</span><span>Від,%</span><span />
+                        </div>
+                      )}
+                      {tc.map((line, li) => (
+                        <div key={li} className="grid grid-cols-[1fr_60px_44px_20px] gap-1 items-center">
+                          <IngSearchInput
+                            name={line.name}
+                            allIngredients={modIngredients}
+                            onSelect={(name, ing) => {
+                              if (ing) {
+                                const { unit, cost_per_unit } = warehouseIngToTechUnit(ing);
+                                updateTcLine(li, { name, ingredient_id: ing.id, unit, cost_per_unit });
+                              } else {
+                                updateTcLine(li, { name, ingredient_id: null });
+                              }
+                            }}
+                          />
+                          <div className="flex items-center gap-0.5">
+                            <Input type="number" min="0" step="1" value={line.brutto}
+                              onChange={e => updateTcLine(li, { brutto: parseFloat(e.target.value) || 0 })}
+                              className="h-7 text-xs w-10" />
+                            <span className="text-[9px] text-muted-foreground">{line.unit}</span>
+                          </div>
+                          <Input type="number" min="0" max="99" step="1" value={line.waste_pct}
+                            onChange={e => updateTcLine(li, { waste_pct: parseFloat(e.target.value) || 0 })}
+                            className="h-7 text-xs" />
+                          <button onClick={() => removeTcLine(li)} className="text-muted-foreground hover:text-destructive">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                      <Button variant="outline" size="sm" onClick={addTcLine} className="h-6 text-[10px] w-full border-dashed">
+                        <Plus className="w-3 h-3 mr-1" /> Додати інгредієнт
+                      </Button>
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => removeOption(gi, oi)} className="text-destructive hover:text-destructive/80">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
+              );
+            })}
             <Button variant="ghost" size="sm" onClick={() => addOption(gi)} className="h-6 text-xs w-full mt-1">
               <Plus className="w-3 h-3 mr-1" /> Додати опцію
             </Button>
@@ -618,12 +792,29 @@ function ItemDialog({
     cookMinutes: 15, isAvailable: true, isPopular: false, isVegetarian: false,
     is_alcohol: false, is_stop_list: false, allergens: [], tags: [],
     vat_rate: 20, station: "kitchen_general", tech_card: [],
+    item_type: "dish", ingredient_id: null, legal_entity_id: null,
     categoryId: leafCats[0]?.id ?? categories[0]?.id,
   };
   const [form, setForm] = useState<Partial<Item>>(blankItem);
   const [tab, setTab] = useState<"main" | "details" | "tech" | "modifiers">("main");
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
   const [loadingMods, setLoadingMods] = useState(false);
+
+  // Ingredients for "goods" type link
+  const { data: ingData } = useQuery({
+    queryKey: ["fb-ingredients-simple"],
+    queryFn: () => apiFetch("/api/fb/warehouse/ingredients"),
+    staleTime: 60_000,
+  });
+  const ingredients: any[] = (ingData as any)?.ingredients ?? [];
+
+  // Legal entities for ФОП/ТОВ assignment
+  const { data: leData } = useQuery({
+    queryKey: ["fb-legal-entities-simple"],
+    queryFn: () => apiFetch("/api/accounting/legal-entities"),
+    staleTime: 60_000,
+  });
+  const legalEntities: any[] = (leData as any)?.entities ?? [];
 
   useEffect(() => {
     if (open) {
@@ -645,6 +836,9 @@ function ItemDialog({
           tech_card: Array.isArray(api.tech_card) ? api.tech_card : [],
           vat_rate: api.vat_rate ?? 20,
           tax_group_id: api.tax_group_id ?? undefined,
+          item_type: (api.item_type as any) ?? "dish",
+          ingredient_id: api.ingredient_id ?? null,
+          legal_entity_id: api.legal_entity_id ?? null,
         });
       } else {
         setForm({ ...blankItem, categoryId: leafCats[0]?.id ?? categories[0]?.id });
@@ -694,7 +888,7 @@ function ItemDialog({
 
         {/* Tabs */}
         <div className="flex gap-1 border-b mb-4">
-          {(["main", "details", "tech", "modifiers"] as const).map(t => (
+          {(["main", "details", ...(form.item_type === "dish" ? ["tech"] : []), "modifiers"] as const).map((t: any) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
               {t === "main" ? "Основне" : t === "details" ? "Деталі" : t === "tech" ? "Техкарта" : "Модифікатори"}
@@ -707,6 +901,41 @@ function ItemDialog({
 
         {tab === "main" && (
           <div className="space-y-4">
+            {/* Item type selector */}
+            <div>
+              <Label className="block mb-2">Тип позиції</Label>
+              <div className="flex gap-2">
+                {([
+                  { value: "dish", label: "🍽 Страва / Напій", desc: "Списання по техкарті" },
+                  { value: "goods", label: "📦 Товар", desc: "Списання цілою одиницею" },
+                  { value: "service", label: "🛎 Послуга", desc: "Без списання" },
+                ] as const).map(opt => (
+                  <button key={opt.value} type="button"
+                    onClick={() => { set("item_type", opt.value); if (opt.value !== "dish" && tab === "tech") setTab("main"); }}
+                    className={`flex-1 rounded-lg border-2 p-2.5 text-left transition-colors ${form.item_type === opt.value ? "border-primary bg-primary/5" : "border-muted hover:border-muted-foreground/40"}`}>
+                    <div className="text-sm font-medium">{opt.label}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Goods: ingredient link */}
+            {form.item_type === "goods" && (
+              <div>
+                <Label>Складський інгредієнт (товар)</Label>
+                <select value={form.ingredient_id ? String(form.ingredient_id) : ""}
+                  onChange={e => set("ingredient_id", e.target.value ? parseInt(e.target.value) : null)}
+                  className="mt-1 w-full border rounded-md px-3 py-2 text-sm bg-background">
+                  <option value="">— не прив'язано —</option>
+                  {ingredients.map((ing: any) => (
+                    <option key={ing.id} value={ing.id}>{ing.name} ({ing.unit}) — залишок: {parseFloat(ing.current_stock || "0").toFixed(2)}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground mt-1">При продажу 1 одиниця буде списана зі складу автоматично</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <Label>Назва *</Label>
@@ -789,6 +1018,24 @@ function ItemDialog({
 
         {tab === "details" && (
           <div className="space-y-4">
+            {/* Legal entity (ФОП / ТОВ) */}
+            <div>
+              <Label>Юридична особа (ФОП / ТОВ)</Label>
+              <Select value={form.legal_entity_id ? String(form.legal_entity_id) : "_none"}
+                onValueChange={v => set("legal_entity_id", v === "_none" ? null : parseInt(v))}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Оберіть юрособу" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">— не визначено —</SelectItem>
+                  {legalEntities.map((le: any) => (
+                    <SelectItem key={le.id} value={String(le.id)}>
+                      {le.type?.toUpperCase()} — {le.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">Визначає як розділяти виручку між ФОП і ТОВ при продажу</p>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Група ПДВ</Label>
@@ -870,6 +1117,8 @@ function ItemDialog({
             }))}
             onChange={v => set("tech_card", v)}
             itemPrice={form.price}
+            itemName={form.name}
+            categoryName={categories.find(c => c.id === form.categoryId)?.name}
           />
         )}
 
@@ -949,6 +1198,8 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
           {((item as any).is_popular ?? item.isPopular) && <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded">⭐ Топ</span>}
           {((item as any).is_vegetarian ?? item.isVegetarian) && <span className="bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded">🌿</span>}
           {item.is_alcohol && <span className="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded">🍷</span>}
+          {item.item_type === "goods" && <span className="bg-sky-600 text-white text-[10px] px-1.5 py-0.5 rounded">📦 Товар</span>}
+          {item.item_type === "service" && <span className="bg-slate-500 text-white text-[10px] px-1.5 py-0.5 rounded">🛎 Послуга</span>}
         </div>
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5">
           <div className="flex items-center gap-1.5">
@@ -1149,7 +1400,10 @@ export default function FbMenu() {
         vat_rate: data.vat_rate, tax_group_id: data.tax_group_id || null,
         is_alcohol: data.is_alcohol, uktzed_code: data.uktzed_code || null, excise_code: data.excise_code || null,
         is_stop_list: data.is_stop_list, station: data.station,
-        tech_card: data.tech_card || null,
+        tech_card: data.item_type === "dish" ? (data.tech_card || null) : null,
+        item_type: data.item_type || "dish",
+        ingredient_id: data.item_type === "goods" ? (data.ingredient_id ?? null) : null,
+        legal_entity_id: data.legal_entity_id ?? null,
         sortOrder: data.sortOrder || 0,
       };
       let saved: any;
