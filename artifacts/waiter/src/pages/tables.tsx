@@ -25,10 +25,8 @@ export default function Tables() {
 
   const allTables: any[] = data?.tables || [];
 
-  // Only show tables with active orders opened by this waiter
-  const myTables = allTables.filter(
-    t => t.status === "occupied" && t.current_waiter_user_id === user?.id
-  );
+  // Show tables with active orders: waiter's own tables first, then all occupied
+  const myTables = allTables.filter(t => t.status === "occupied");
 
   // Free tables for picking when creating a new order
   const freeTables = allTables.filter(t => t.status === "free");

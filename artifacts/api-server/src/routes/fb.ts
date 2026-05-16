@@ -548,18 +548,29 @@ router.put("/excise-rates/:id", requireAuth, async (req: any, res) => {
 router.get("/tables", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const tables = await db.select({
-      id: fbTablesTable.id, number: fbTablesTable.number, capacity: fbTablesTable.capacity,
-      location: fbTablesTable.location, status: fbTablesTable.status, currentOrderId: fbTablesTable.currentOrderId,
-      isActive: fbTablesTable.isActive,
-      orderGuestName: fbOrdersTable.guestName, orderTotal: fbOrdersTable.totalAmount,
-      orderStatus: fbOrdersTable.status, orderType: fbOrdersTable.orderType,
-    })
-      .from(fbTablesTable)
-      .leftJoin(fbOrdersTable, eq(fbTablesTable.currentOrderId, fbOrdersTable.id))
-      .where(and(eq(fbTablesTable.organizationId, orgId), eq(fbTablesTable.isActive, true)))
-      .orderBy(asc(fbTablesTable.location), asc(fbTablesTable.number));
-    res.json({ tables });
+    const db_ = (db as any).$client;
+    await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS current_waiter_user_id INT REFERENCES users(id) ON DELETE SET NULL`);
+    const { rows } = await db_.query(
+      `SELECT
+         t.id,
+         t.number        AS table_number,
+         t.capacity,
+         t.location      AS section,
+         t.status,
+         t.current_order_id,
+         t.is_active,
+         o.guest_name    AS current_guest,
+         o.total_amount  AS current_total,
+         o.status        AS order_status,
+         o.order_type,
+         o.current_waiter_user_id
+       FROM fb_tables t
+       LEFT JOIN fb_orders o ON o.id = t.current_order_id
+       WHERE t.organization_id = $1 AND t.is_active = true
+       ORDER BY t.location, t.number`,
+      [orgId]
+    );
+    res.json({ tables: rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -671,16 +682,26 @@ router.get("/orders/:id", requireAuth, async (req: any, res) => {
 router.post("/orders", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
+    const db_ = (db as any).$client;
     const { tableId, orderType, guestName, roomNumber, guestCount, notes, bookingId } = req.body;
+    const waiterUserId = (req as any).user?.id || null;
 
-    const [order] = await db.insert(fbOrdersTable).values({
-      organizationId: orgId, tableId, orderType: orderType || "dine_in",
-      guestName, roomNumber, guestCount: parseInt(guestCount) || 1, notes, bookingId,
-    }).returning();
+    const { rows: [order] } = await db_.query(
+      `INSERT INTO fb_orders
+         (organization_id, table_id, order_type, guest_name, room_number,
+          guest_count, notes, booking_id, current_waiter_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING *`,
+      [orgId, tableId || null, orderType || "dine_in", guestName || null,
+       roomNumber || null, parseInt(guestCount) || 1, notes || null,
+       bookingId || null, waiterUserId]
+    );
 
     if (tableId) {
-      await db.update(fbTablesTable).set({ status: "occupied", currentOrderId: order.id })
-        .where(eq(fbTablesTable.id, tableId));
+      await db_.query(
+        `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2`,
+        [order.id, tableId]
+      );
     }
 
     res.json({ order });
