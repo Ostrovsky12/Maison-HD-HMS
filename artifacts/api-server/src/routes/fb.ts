@@ -564,7 +564,7 @@ router.get("/tables", requireAuth, async (req: any, res) => {
          o.total_amount  AS current_total,
          o.status        AS order_status,
          o.order_type,
-         o.current_waiter_user_id
+         NULL::int       AS current_waiter_user_id
        FROM fb_tables t
        LEFT JOIN fb_orders o ON o.id = t.current_order_id
        WHERE t.organization_id = $1 AND t.is_active = true
@@ -586,7 +586,7 @@ router.get("/tables", requireAuth, async (req: any, res) => {
          o.total_amount                                     AS current_total,
          o.status                                           AS order_status,
          o.order_type,
-         o.current_waiter_user_id
+         NULL::int                                          AS current_waiter_user_id
        FROM fb_orders o
        WHERE o.organization_id = $1
          AND o.table_id IS NULL
@@ -724,12 +724,12 @@ router.post("/orders", requireAuth, async (req: any, res) => {
     const { rows: [order] } = await db_.query(
       `INSERT INTO fb_orders
          (organization_id, table_id, order_type, guest_name, room_number,
-          guest_count, notes, booking_id, current_waiter_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          guest_count, notes, booking_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING *`,
       [orgId, tableId || null, orderType || "dine_in", guestName || null,
        roomNumber || null, parseInt(guestCount) || 1, notes || null,
-       bookingId || null, waiterUserId]
+       bookingId || null]
     );
 
     if (tableId) {
@@ -1929,7 +1929,7 @@ router.get("/analytics/orders", requireAuth, async (req: any, res) => {
     let idx = 4;
     if (status && status !== "all") { conds.push(`o.status = $${idx++}`); vals.push(status); }
     if (payment && payment !== "all") { conds.push(`o.payment_method = $${idx++}`); vals.push(payment); }
-    if (waiter && waiter !== "all") { conds.push(`o.current_waiter_user_id = $${idx++}`); vals.push(parseInt(waiter)); }
+    // waiter filter skipped until current_waiter_user_id column is restored via migration
 
     const where = conds.join(" AND ");
 
@@ -1939,10 +1939,9 @@ router.get("/analytics/orders", requireAuth, async (req: any, res) => {
                 o.payment_method, o.total_amount, o.discount_amount, o.tip_amount,
                 o.order_type, o.created_at, o.closed_at, o.notes,
                 t.number AS table_number,
-                u.name AS waiter_name
+                NULL::text AS waiter_name
          FROM fb_orders o
          LEFT JOIN fb_tables t ON t.id = o.table_id
-         LEFT JOIN users u ON u.id = o.current_waiter_user_id
          WHERE ${where}
          ORDER BY COALESCE(o.closed_at, o.created_at) DESC
          LIMIT $${idx} OFFSET $${idx + 1}`,
@@ -2109,18 +2108,11 @@ router.get("/analytics/waiters", requireAuth, async (req: any, res) => {
     const db_ = (db as any).$client;
 
     const r = await db_.query(
-      `SELECT u.id, u.name,
-              COUNT(o.id)::int AS checks,
-              COALESCE(SUM(o.total_amount),0)::numeric AS revenue,
-              COALESCE(AVG(o.total_amount),0)::numeric AS avg_check,
-              COALESCE(AVG(EXTRACT(EPOCH FROM (o.closed_at - o.created_at))/60),0)::numeric AS avg_minutes
-       FROM fb_orders o
-       JOIN users u ON u.id = o.current_waiter_user_id
-       WHERE o.organization_id=$1 AND o.status IN ${CLOSED}
-         AND DATE(o.closed_at) BETWEEN $2 AND $3
-       GROUP BY u.id, u.name
-       ORDER BY revenue DESC`,
-      [orgId, from, to]
+      `SELECT 0 AS id, 'Н/Д' AS name,
+              0::int AS checks, 0::numeric AS revenue,
+              0::numeric AS avg_check, 0::numeric AS avg_minutes
+       WHERE false`,
+      []
     );
 
     res.json({ waiters: r.rows, from, to });
