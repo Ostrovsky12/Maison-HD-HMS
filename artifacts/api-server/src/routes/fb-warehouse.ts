@@ -1407,6 +1407,99 @@ router.post("/inventory/:id/complete", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── AI Voice Inventory ────────────────────────────────────────────────────────
+// Парсить вільний голосовий текст і повертає фактичні залишки для рядків інвентаризації
+router.post("/ai-voice-inventory", async (req, res) => {
+  const { text, session_id } = req.body;
+  if (!text) return res.status(400).json({ error: "text required" });
+  if (!session_id) return res.status(400).json({ error: "session_id required" });
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+
+    // Перевіряємо що сесія належить організації
+    const sr = await db_.query(
+      `SELECT id, status FROM fb_inventory_sessions WHERE id=$1 AND organization_id=$2`,
+      [session_id, orgId]
+    );
+    if (!sr.rows[0]) return res.status(404).json({ error: "Сесію не знайдено" });
+    if (sr.rows[0].status === "completed") return res.status(400).json({ error: "Інвентаризацію вже проведено" });
+
+    // Завантажуємо рядки сесії з назвами інгредієнтів
+    const lr = await db_.query(`
+      SELECT l.id AS line_id, l.system_qty, l.actual_qty,
+             i.name AS ingredient_name, i.unit
+      FROM fb_inventory_lines l
+      JOIN fb_ingredients i ON i.id = l.ingredient_id
+      WHERE l.session_id = $1
+      ORDER BY i.name
+    `, [session_id]);
+    const lines = lr.rows;
+
+    // Формуємо список для промпту
+    const linesList = lines
+      .map((l: any) => `${l.line_id}|${l.ingredient_name}|${l.unit}|по системі: ${parseFloat(l.system_qty||0).toFixed(3)}`)
+      .join("\n");
+
+    const systemPrompt = `Ти система голосового вводу для інвентаризації ресторану в Україні.
+Менеджер диктує фактичні залишки товарів на складі. Розпізнай кожну позицію та її кількість.
+Текст може містити помилки розпізнавання (схожі за звуком слова, суржик).
+Сьогодні: ${new Date().toISOString().split("T")[0]}
+
+Список рядків інвентаризації (line_id|назва|одиниця|системний залишок):
+${linesList || "—"}
+
+Поверни ТІЛЬКИ JSON масив знайдених позицій:
+[
+  {"line_id": число, "ingredient_name": "назва", "actual_qty": число, "unit": "одиниця", "confidence": "high|medium|low"}
+]
+
+Правила:
+- Включай тільки ті позиції, для яких чітко названа кількість
+- Конвертуй одиниці якщо потрібно (250г = 0.25кг)
+- Якщо назва нечітка — шукай найближчу з переліку
+- Не вигадуй позиції яких немає у списку
+- confidence: high = чітко розпізнано, medium = з припущенням, low = неточно`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      max_completion_tokens: 1500,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text }
+      ]
+    });
+
+    const raw = completion.choices[0].message.content || "";
+    let parsed: any[];
+    try {
+      const m = raw.match(/\[[\s\S]*\]/);
+      parsed = JSON.parse(m ? m[0] : raw);
+      if (!Array.isArray(parsed)) throw new Error("not array");
+    } catch {
+      return res.status(422).json({ error: "Не вдалося розпізнати відповідь AI", raw });
+    }
+
+    // Фільтруємо тільки валідні line_id з нашої сесії
+    const validLineIds = new Set(lines.map((l: any) => l.line_id));
+    const enriched = parsed
+      .filter((item: any) => item.line_id && validLineIds.has(item.line_id) && item.actual_qty >= 0)
+      .map((item: any) => {
+        const line = lines.find((l: any) => l.line_id === item.line_id);
+        return {
+          line_id: item.line_id,
+          ingredient_name: line?.ingredient_name || item.ingredient_name,
+          actual_qty: Number(item.actual_qty),
+          unit: line?.unit || item.unit,
+          system_qty: line ? parseFloat(line.system_qty || 0) : 0,
+          confidence: item.confidence || "medium",
+        };
+      });
+
+    res.json({ items: enriched, raw_transcript: text });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.delete("/inventory/:id", async (req, res) => {
   try {
     const orgId = org(req);
