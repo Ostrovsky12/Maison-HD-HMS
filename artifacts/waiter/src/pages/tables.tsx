@@ -2,15 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
-import {
-  Users, LogOut, RefreshCw, ChefHat, Plus,
-} from "lucide-react";
+import { LogOut, RefreshCw, ChefHat, Plus, UtensilsCrossed, ArrowRight, Users } from "lucide-react";
 
-const STATUS_CONFIG = {
-  free:     { label: "Вільний",    color: "bg-green-100 border-green-300 text-green-800",   dot: "bg-green-500" },
-  occupied: { label: "Зайнятий",   color: "bg-orange-100 border-orange-300 text-orange-800", dot: "bg-orange-500" },
-  reserved: { label: "Резерв",     color: "bg-purple-100 border-purple-300 text-purple-800", dot: "bg-purple-500" },
-  cleaning: { label: "Прибирання", color: "bg-gray-100 border-gray-300 text-gray-600",       dot: "bg-gray-400" },
+const STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  open:       { label: "Відкрите",   color: "text-blue-600 bg-blue-50"   },
+  in_kitchen: { label: "На кухні",   color: "text-orange-600 bg-orange-50" },
+  ready:      { label: "Готово",     color: "text-green-600 bg-green-50"  },
+  new_guest:  { label: "Новий гість",color: "text-purple-600 bg-purple-50"},
+  billed:     { label: "Закрите",    color: "text-gray-500 bg-gray-100"   },
 };
 
 export default function Tables() {
@@ -24,91 +23,106 @@ export default function Tables() {
   });
 
   const allTables: any[] = data?.tables || [];
+  const activeTables = allTables.filter(t => t.status === "occupied" && t.current_order_id);
 
-  // Show tables with active orders: waiter's own tables first, then all occupied
-  const myTables = allTables.filter(t => t.status === "occupied");
-
-  // Free tables for picking when creating a new order
-  const freeTables = allTables.filter(t => t.status === "free");
-
-  function openTable(t: any) {
-    if (t.current_order_id) {
-      setLocation(`/order/${t.current_order_id}`);
-    }
-  }
-
-  function newOrder() {
-    setLocation("/new-order");
+  function openOrder(orderId: number) {
+    setLocation(`/order/${orderId}`);
   }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="bg-blue-600 text-white px-4 pt-12 pb-4 safe-top">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h1 className="text-xl font-bold">Мої столи</h1>
-            <p className="text-blue-200 text-sm">{user?.name || user?.email}</p>
+      <div className="bg-blue-600 text-white px-4 pt-12 pb-5 safe-top">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center">
+              <UtensilsCrossed className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold leading-tight">Maison HD</h1>
+              <p className="text-blue-200 text-sm leading-tight">{user?.name || user?.email}</p>
+            </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => refetch()} disabled={isFetching}
-              className="p-2 rounded-xl bg-white/20 active:bg-white/30">
-              <RefreshCw className={`w-5 h-5 ${isFetching ? "animate-spin" : ""}`} />
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="p-2.5 rounded-xl bg-white/20 active:bg-white/30"
+            >
+              <RefreshCw className={`w-4.5 h-4.5 w-[18px] h-[18px] ${isFetching ? "animate-spin" : ""}`} />
             </button>
-            <button onClick={logout} className="p-2 rounded-xl bg-white/20 active:bg-white/30">
-              <LogOut className="w-5 h-5" />
+            <button onClick={logout} className="p-2.5 rounded-xl bg-white/20 active:bg-white/30">
+              <LogOut className="w-[18px] h-[18px]" />
             </button>
-          </div>
-        </div>
-        {/* Stats */}
-        <div className="flex gap-3">
-          <div className="flex-1 bg-white/20 rounded-xl px-3 py-2 text-center">
-            <div className="text-xl font-bold">{myTables.length}</div>
-            <div className="text-xs text-blue-100">Мої столи</div>
-          </div>
-          <div className="flex-1 bg-white/20 rounded-xl px-3 py-2 text-center">
-            <div className="text-xl font-bold">{freeTables.length}</div>
-            <div className="text-xs text-blue-100">Вільних</div>
           </div>
         </div>
       </div>
 
-      {/* My open tables */}
-      <div className="flex-1 p-4 pb-safe overflow-y-auto">
+      {/* Active orders list */}
+      <div className="flex-1 overflow-y-auto px-4 pt-5 pb-28">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-bold text-base text-foreground">
+            Активні замовлення
+            {activeTables.length > 0 && (
+              <span className="ml-2 text-xs font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                {activeTables.length}
+              </span>
+            )}
+          </h2>
+        </div>
+
         {isLoading ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground">
-            <RefreshCw className="w-6 h-6 animate-spin" />
+          <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground">
+            <RefreshCw className="w-7 h-7 animate-spin" />
+            <p className="text-sm">Завантаження...</p>
           </div>
-        ) : myTables.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-3">
-            <ChefHat className="w-12 h-12 opacity-20" />
-            <p className="text-sm">У вас немає відкритих столів</p>
-            <p className="text-xs opacity-60">Натисніть «+» щоб створити замовлення</p>
+        ) : activeTables.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-56 gap-4 text-center">
+            <div className="w-20 h-20 rounded-3xl bg-blue-50 flex items-center justify-center">
+              <ChefHat className="w-10 h-10 text-blue-300" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">Немає активних замовлень</p>
+              <p className="text-sm text-muted-foreground mt-1">Натисніть «+» щоб відкрити новий стіл</p>
+            </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3">
-            {myTables.map(t => {
-              const cfg = STATUS_CONFIG[t.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.occupied;
+          <div className="space-y-3">
+            {activeTables.map(t => {
+              const st = STATUS_LABEL[t.order_status] || STATUS_LABEL.open;
               return (
-                <button key={t.id} onClick={() => openTable(t)}
-                  className={`relative border-2 rounded-2xl p-4 text-left active:scale-95 transition-transform ${cfg.color}`}>
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="text-2xl font-bold">№{t.table_number}</div>
-                    <ChefHat className="w-4 h-4 text-orange-600 opacity-80 mt-1" />
-                  </div>
-                  <div className="text-xs font-medium opacity-70 mb-1">{t.section || "Зал"}</div>
-                  <div className="flex items-center gap-1 text-xs opacity-70">
-                    <Users className="w-3.5 h-3.5" />
-                    <span>{t.capacity} місць</span>
-                  </div>
-                  {t.current_total && (
-                    <div className="mt-2 text-sm font-bold">
-                      ₴{Number(t.current_total).toFixed(0)}
+                <button
+                  key={t.id}
+                  onClick={() => openOrder(t.current_order_id)}
+                  className="w-full bg-card border border-border rounded-2xl p-4 text-left active:scale-[0.98] transition-transform shadow-sm hover:shadow-md"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                        <span className="text-blue-700 font-black text-base">#{t.table_number}</span>
+                      </div>
+                      <div>
+                        <div className="font-bold text-base">Стіл №{t.table_number}</div>
+                        {t.current_guest && (
+                          <div className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <Users className="w-3.5 h-3.5" />
+                            {t.current_guest}
+                          </div>
+                        )}
+                        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full mt-1 ${st.color}`}>
+                          {st.label}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                  {t.current_guest && (
-                    <div className="mt-1 text-xs opacity-60 truncate">{t.current_guest}</div>
-                  )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {t.current_total && (
+                        <span className="font-black text-lg text-foreground">
+                          {Number(t.current_total).toFixed(0)} ₴
+                        </span>
+                      )}
+                      <ArrowRight className="w-5 h-5 text-muted-foreground" />
+                    </div>
+                  </div>
                 </button>
               );
             })}
@@ -117,10 +131,10 @@ export default function Tables() {
       </div>
 
       {/* New order FAB */}
-      <div className="fixed bottom-8 right-6">
+      <div className="fixed bottom-8 right-5">
         <button
-          onClick={newOrder}
-          className="w-16 h-16 rounded-full bg-blue-600 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+          onClick={() => setLocation("/new-order")}
+          className="w-16 h-16 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform"
         >
           <Plus className="w-7 h-7" />
         </button>
