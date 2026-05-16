@@ -4,6 +4,7 @@ import {
   Bell, CheckCircle2, XCircle, Clock, ShoppingBag, RefreshCw,
   Wifi, Printer, ChefHat, Wine, ChevronDown, ChevronUp,
   Plus, CreditCard, Banknote, Search, X, UtensilsCrossed,
+  FileText, Gift, Wallet, Layers, Users, Hash,
 } from "lucide-react";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -84,6 +85,117 @@ function PrintJobBadge({ job }: { job: PrintJob }) {
   );
 }
 
+// ─── New Order Modal ───────────────────────────────────────────────────────────
+function NewOrderModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [tableNumber, setTableNumber] = useState("");
+  const [guestCount, setGuestCount] = useState(2);
+  const [orderType, setOrderType] = useState<"dine_in" | "takeaway">("dine_in");
+  const [notes, setNotes] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleCreate() {
+    if (!tableNumber.trim() && orderType === "dine_in") { setError("Введіть номер столу"); return; }
+    setCreating(true); setError("");
+    try {
+      // Fetch tables to resolve number → id
+      const td = await apiFetch("/tables").catch(() => ({ tables: [] }));
+      const tables: any[] = td.tables || [];
+      const matched = tables.find(
+        t => String(t.table_number ?? t.number ?? "").toLowerCase() === tableNumber.trim().toLowerCase()
+      );
+      await apiFetch("/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          tableId: matched?.id || null,
+          orderType,
+          guestName: orderType === "takeaway" ? "Takeaway" : `Стіл ${tableNumber.trim() || "?"}`,
+          guestCount,
+          notes: notes || undefined,
+        }),
+      });
+      onDone();
+    } catch (e: any) { setError(e.message); }
+    finally { setCreating(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <UtensilsCrossed className="w-5 h-5 text-blue-600" /> Нове замовлення
+          </h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Order type */}
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Тип замовлення</label>
+            <div className="grid grid-cols-2 gap-2">
+              {([["dine_in", "В залі"], ["takeaway", "Takeaway"]] as const).map(([val, label]) => (
+                <button key={val} onClick={() => setOrderType(val)}
+                  className={`py-2.5 rounded-xl border-2 font-semibold text-sm transition-colors ${orderType === val ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 hover:border-gray-300 text-gray-600"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Table number */}
+          {orderType === "dine_in" && (
+            <div>
+              <label className="text-sm font-semibold text-gray-700 block mb-2 flex items-center gap-1.5">
+                <Hash className="w-4 h-4" /> Номер столу
+              </label>
+              <input
+                type="text"
+                value={tableNumber}
+                onChange={e => setTableNumber(e.target.value)}
+                placeholder="напр. 5, VIP-1, Т-2"
+                autoFocus
+                className="w-full px-4 py-3 text-2xl font-black text-center border-2 rounded-xl focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            </div>
+          )}
+
+          {/* Guest count */}
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2 flex items-center gap-1.5">
+              <Users className="w-4 h-4" /> Кількість гостей
+            </label>
+            <div className="grid grid-cols-4 gap-2">
+              {[1,2,3,4,5,6,7,8].map(n => (
+                <button key={n} onClick={() => setGuestCount(n)}
+                  className={`py-2.5 rounded-xl font-bold text-base border-2 transition-colors ${guestCount === n ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 hover:border-gray-300 text-gray-600"}`}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Примітки</label>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Алергії, побажання..."
+              className="w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+
+          {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
+
+          <button onClick={handleCreate} disabled={creating}
+            className="w-full py-3.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors shadow-md text-base flex items-center justify-center gap-2">
+            {creating ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+            {creating ? "Створення..." : "Відкрити замовлення"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Add Item Modal ───────────────────────────────────────────────────────────
 function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: () => void; onDone: () => void }) {
   const [items, setItems] = useState<MenuItem[]>([]);
@@ -105,10 +217,7 @@ function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: 
     if (!selected) return;
     setAdding(true);
     try {
-      await apiFetch(`/orders/${orderId}/items`, {
-        method: "POST",
-        body: JSON.stringify({ itemId: selected.id, quantity: qty }),
-      });
+      await apiFetch(`/orders/${orderId}/items`, { method: "POST", body: JSON.stringify({ itemId: selected.id, quantity: qty }) });
       onDone();
     } catch (e: any) { alert("Помилка: " + e.message); }
     finally { setAdding(false); }
@@ -124,10 +233,8 @@ function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: 
         <div className="p-3 border-b shrink-0">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              value={search} onChange={e => setSearch(e.target.value)} autoFocus
-              placeholder="Пошук страви..." className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
-            />
+            <input value={search} onChange={e => setSearch(e.target.value)} autoFocus
+              placeholder="Пошук страви..." className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
@@ -168,7 +275,7 @@ function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: 
             </div>
             <button onClick={handleAdd} disabled={adding}
               className="w-full py-3 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 disabled:opacity-40 transition-colors">
-              {adding ? "Додаємо..." : `Додати до замовлення`}
+              {adding ? "Додаємо..." : "Додати до замовлення"}
             </button>
           </div>
         )}
@@ -177,74 +284,225 @@ function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: 
   );
 }
 
-// ─── Payment Modal ────────────────────────────────────────────────────────────
+// ─── Payment Modal ─────────────────────────────────────────────────────────────
+type PayMode = "cash" | "card" | "invoice" | "certificate" | "deposit" | "mixed";
+
+const PAY_METHODS: { id: PayMode; label: string; icon: React.ReactNode; hint: string }[] = [
+  { id: "cash",        label: "Готівка",      icon: <Banknote   className="w-5 h-5" />, hint: "Розрахунок готівкою" },
+  { id: "card",        label: "Картка",       icon: <CreditCard className="w-5 h-5" />, hint: "Безготівковий розрахунок" },
+  { id: "mixed",       label: "Змішана",      icon: <Layers     className="w-5 h-5" />, hint: "Готівка + картка" },
+  { id: "invoice",     label: "Рах. рахунок", icon: <FileText   className="w-5 h-5" />, hint: "Безготівково через банк" },
+  { id: "certificate", label: "Сертифікат",   icon: <Gift       className="w-5 h-5" />, hint: "Подарунковий сертифікат" },
+  { id: "deposit",     label: "Депозит",      icon: <Wallet     className="w-5 h-5" />, hint: "З депозиту клієнта" },
+];
+
 function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose: () => void; onDone: () => void }) {
   const total = parseFloat(order.total_amount || "0");
-  const [method, setMethod] = useState<"cash" | "card">("cash");
-  const [received, setReceived] = useState(total.toFixed(2));
+  const [mode, setMode] = useState<PayMode>("cash");
+  const [cashReceived, setCashReceived] = useState(total.toFixed(2));
+  const [mixedCash, setMixedCash] = useState("");
+  const [mixedCard, setMixedCard] = useState("");
   const [paying, setPaying] = useState(false);
-  const change = Math.max(0, parseFloat(received || "0") - total);
+  const [error, setError] = useState("");
 
-  async function handlePay() {
-    setPaying(true);
-    try {
-      await apiFetch(`/orders/${order.id}/pay`, {
-        method: "POST",
-        body: JSON.stringify({
-          paymentMethod: method,
-          paidAmount: parseFloat(received || "0"),
-        }),
-      });
-      onDone();
-    } catch (e: any) { alert("Помилка оплати: " + e.message); }
-    finally { setPaying(false); }
+  const cashChange = Math.max(0, parseFloat(cashReceived || "0") - total);
+
+  // Mixed: auto-balance when one field changes
+  function onMixedCashChange(val: string) {
+    setMixedCash(val);
+    const n = parseFloat(val);
+    if (!isNaN(n) && n >= 0 && n <= total) setMixedCard((total - n).toFixed(2));
+    else setMixedCard("");
+  }
+  function onMixedCardChange(val: string) {
+    setMixedCard(val);
+    const n = parseFloat(val);
+    if (!isNaN(n) && n >= 0 && n <= total) setMixedCash((total - n).toFixed(2));
+    else setMixedCash("");
   }
 
+  const mixedCashNum = parseFloat(mixedCash || "0");
+  const mixedCardNum = parseFloat(mixedCard || "0");
+  const mixedTotal = mixedCashNum + mixedCardNum;
+  const mixedChange = Math.max(0, mixedCashNum - (total - mixedCardNum));
+
+  function canPay() {
+    if (paying) return false;
+    if (mode === "cash") return parseFloat(cashReceived || "0") >= total;
+    if (mode === "mixed") return mixedTotal >= total - 0.01 && (mixedCashNum > 0 || mixedCardNum > 0);
+    return true; // card, invoice, certificate, deposit always ok
+  }
+
+  async function handlePay() {
+    if (!canPay()) return;
+    setPaying(true); setError("");
+    try {
+      let body: any;
+      if (mode === "mixed") {
+        const payments = [];
+        if (mixedCashNum > 0) payments.push({ method: "cash", amount: mixedCashNum });
+        if (mixedCardNum > 0) payments.push({ method: "card", amount: mixedCardNum });
+        body = { payments };
+      } else if (mode === "cash") {
+        body = { paymentMethod: "cash", paidAmount: parseFloat(cashReceived || "0") };
+      } else {
+        body = { paymentMethod: mode, paidAmount: total };
+      }
+      await apiFetch(`/orders/${order.id}/pay`, { method: "POST", body: JSON.stringify(body) });
+      onDone();
+    } catch (e: any) { setError(e.message); setPaying(false); }
+  }
+
+  const selectedInfo = PAY_METHODS.find(m => m.id === mode)!;
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="font-bold text-base">Оплата замовлення</h3>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="p-4 space-y-4">
-          <div className="bg-gray-50 rounded-xl p-3 text-sm">
-            <div className="flex justify-between text-gray-500 mb-1">
-              <span>Стіл {order.tableNumber || "—"}</span>
-              <span>{order.guest_name}</span>
-            </div>
-            <div className="flex justify-between font-bold text-lg">
-              <span>До сплати:</span>
-              <span className="text-green-700">{total.toFixed(2)} ₴</span>
-            </div>
-          </div>
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[95vh] overflow-y-auto">
+
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b shrink-0">
           <div>
-            <div className="text-sm font-semibold text-gray-700 mb-2">Спосіб оплати</div>
-            <div className="grid grid-cols-2 gap-2">
-              {(["cash", "card"] as const).map(m => (
-                <button key={m} onClick={() => setMethod(m)}
-                  className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 font-semibold text-sm transition-colors ${method === m ? "border-green-500 bg-green-50 text-green-700" : "border-gray-200 hover:border-gray-300"}`}>
-                  {m === "cash" ? <Banknote className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
-                  {m === "cash" ? "Готівка" : "Картка"}
+            <h3 className="font-bold text-base">Оплата замовлення</h3>
+            <p className="text-xs text-gray-500">
+              {order.tableNumber ? `Стіл ${order.tableNumber}` : "Замовлення"} · {order.guest_name}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Total */}
+          <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
+            <p className="text-sm text-green-700 font-medium mb-1">До сплати</p>
+            <p className="text-4xl font-black text-green-800">{total.toFixed(2)} ₴</p>
+          </div>
+
+          {/* Payment method grid */}
+          <div>
+            <p className="text-sm font-semibold text-gray-700 mb-2">Спосіб оплати</p>
+            <div className="grid grid-cols-3 gap-2">
+              {PAY_METHODS.map(m => (
+                <button key={m.id} onClick={() => { setMode(m.id); setError(""); }}
+                  className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 font-semibold text-xs transition-all ${
+                    mode === m.id
+                      ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm"
+                      : "border-gray-200 hover:border-gray-300 text-gray-600"
+                  }`}>
+                  {m.icon}
+                  <span className="text-center leading-tight">{m.label}</span>
                 </button>
               ))}
             </div>
+            <p className="text-xs text-gray-400 text-center mt-2">{selectedInfo.hint}</p>
           </div>
-          {method === "cash" && (
-            <div>
-              <label className="text-sm font-semibold text-gray-700 block mb-1.5">Отримано від гостя (₴)</label>
-              <input type="number" value={received} onChange={e => setReceived(e.target.value)} step="0.01" min={total}
-                className="w-full px-4 py-3 text-lg font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 text-right" />
-              {change > 0 && (
-                <div className="mt-2 text-center text-sm font-semibold text-amber-700 bg-amber-50 rounded-lg py-1.5">
-                  Решта: {change.toFixed(2)} ₴
+
+          {/* ── Cash fields ── */}
+          {mode === "cash" && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-1.5">Отримано від гостя (₴)</label>
+                <input type="number" value={cashReceived} onChange={e => setCashReceived(e.target.value)}
+                  step="0.01" min={total} autoFocus
+                  className="w-full px-4 py-3 text-2xl font-black border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 text-right" />
+              </div>
+              {/* Quick amounts */}
+              <div className="flex gap-2 flex-wrap">
+                {[Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100, Math.ceil(total / 200) * 200, Math.ceil(total / 500) * 500]
+                  .filter((v, i, a) => v >= total && a.indexOf(v) === i)
+                  .slice(0, 4)
+                  .map(v => (
+                    <button key={v} onClick={() => setCashReceived(v.toFixed(2))}
+                      className="px-3 py-1.5 text-sm font-bold border-2 border-gray-200 rounded-xl hover:border-green-400 hover:bg-green-50 transition-colors">
+                      {v} ₴
+                    </button>
+                  ))}
+                <button onClick={() => setCashReceived(total.toFixed(2))}
+                  className="px-3 py-1.5 text-sm font-bold border-2 border-gray-200 rounded-xl hover:border-green-400 hover:bg-green-50 transition-colors">
+                  Точно
+                </button>
+              </div>
+              {cashChange > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex justify-between items-center">
+                  <span className="font-semibold text-amber-800 text-sm">Решта гостю:</span>
+                  <span className="font-black text-xl text-amber-800">{cashChange.toFixed(2)} ₴</span>
                 </div>
               )}
             </div>
           )}
-          <button onClick={handlePay} disabled={paying || (method === "cash" && parseFloat(received || "0") < total)}
-            className="w-full py-3.5 bg-green-600 text-white font-bold rounded-xl text-base hover:bg-green-700 disabled:opacity-40 transition-colors shadow-md">
-            {paying ? "Проводимо..." : "✓ Закрити замовлення"}
+
+          {/* ── Mixed fields ── */}
+          {mode === "mixed" && (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-500 text-center">Введіть суму готівкою — картка розрахується автоматично</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1.5 flex items-center gap-1">
+                    <Banknote className="w-3.5 h-3.5" /> Готівкою (₴)
+                  </label>
+                  <input type="number" value={mixedCash} onChange={e => onMixedCashChange(e.target.value)}
+                    placeholder="0.00" min={0} max={total} step="0.01" autoFocus
+                    className="w-full px-3 py-2.5 text-lg font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-right" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1.5 flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5" /> Карткою (₴)
+                  </label>
+                  <input type="number" value={mixedCard} onChange={e => onMixedCardChange(e.target.value)}
+                    placeholder="0.00" min={0} max={total} step="0.01"
+                    className="w-full px-3 py-2.5 text-lg font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-right" />
+                </div>
+              </div>
+              {/* Summary */}
+              <div className="bg-gray-50 border rounded-xl p-3 space-y-1.5 text-sm">
+                <div className="flex justify-between text-gray-600">
+                  <span>Готівка:</span><span className="font-bold">{mixedCashNum.toFixed(2)} ₴</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Картка:</span><span className="font-bold">{mixedCardNum.toFixed(2)} ₴</span>
+                </div>
+                <div className="border-t pt-1.5 flex justify-between font-bold">
+                  <span>Разом:</span>
+                  <span className={mixedTotal >= total - 0.01 ? "text-green-700" : "text-red-600"}>
+                    {mixedTotal.toFixed(2)} ₴
+                  </span>
+                </div>
+                {mixedTotal < total - 0.01 && (
+                  <p className="text-xs text-red-500 text-center">Не вистачає {(total - mixedTotal).toFixed(2)} ₴</p>
+                )}
+              </div>
+              {mixedChange > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex justify-between items-center">
+                  <span className="font-semibold text-amber-800 text-sm">Решта готівкою:</span>
+                  <span className="font-black text-xl text-amber-800">{mixedChange.toFixed(2)} ₴</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Card / Invoice / Certificate / Deposit — no extra fields ── */}
+          {(mode === "card" || mode === "invoice" || mode === "certificate" || mode === "deposit") && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center text-sm text-blue-700">
+              <p className="font-semibold">Сума до оплати: {total.toFixed(2)} ₴</p>
+              <p className="text-xs opacity-80 mt-1">{selectedInfo.hint}</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          {/* Confirm button */}
+          <button
+            onClick={handlePay}
+            disabled={!canPay()}
+            className="w-full py-4 bg-green-600 text-white font-bold rounded-xl text-lg hover:bg-green-700 disabled:opacity-40 transition-colors shadow-lg flex items-center justify-center gap-2"
+          >
+            {paying
+              ? <><RefreshCw className="w-5 h-5 animate-spin" /> Проводимо...</>
+              : <><CheckCircle2 className="w-5 h-5" /> Закрити замовлення</>
+            }
           </button>
         </div>
       </div>
@@ -268,7 +526,7 @@ function ActiveOrderCard({
             <UtensilsCrossed className="w-4 h-4 text-blue-600" />
           </div>
           <div className="min-w-0">
-            <div className="font-bold text-sm flex items-center gap-1.5">
+            <div className="font-bold text-sm">
               {order.tableNumber ? `Стіл ${order.tableNumber}` : order.order_type === "takeaway" ? "Takeaway" : "Замовлення"}
             </div>
             <div className="text-xs text-gray-500 truncate">{order.guest_name} · {timeAgo(order.opened_at)}</div>
@@ -385,9 +643,9 @@ export default function FbCashier() {
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
   const [addItemForOrderId, setAddItemForOrderId] = useState<number | null>(null);
   const [payForOrder, setPayForOrder] = useState<ActiveOrder | null>(null);
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
   const knownIds = useRef<Set<number>>(new Set());
 
-  // ── fetch pending QR orders ──
   const fetchPending = useCallback(async () => {
     try {
       const data = await apiFetch("/public/pending-orders");
@@ -400,7 +658,6 @@ export default function FbCashier() {
     } catch { setConnected(false); }
   }, []);
 
-  // ── fetch active orders (open/billed_pending) with items ──
   const fetchActive = useCallback(async () => {
     try {
       const data = await apiFetch("/orders?open=true");
@@ -409,7 +666,6 @@ export default function FbCashier() {
         orders.map(async (o) => {
           try {
             const d = await apiFetch(`/orders/${o.id}`);
-            // Normalize: API returns camelCase from Drizzle, interface expects snake_case
             const merged = { ...o, tableNumber: d.order?.tableNumber || o.tableNumber, items: d.items || [] };
             return {
               ...merged,
@@ -470,6 +726,12 @@ export default function FbCashier() {
       `}</style>
 
       {/* Modals */}
+      {newOrderOpen && (
+        <NewOrderModal
+          onClose={() => setNewOrderOpen(false)}
+          onDone={() => { setNewOrderOpen(false); setTimeout(fetchActive, 400); }}
+        />
+      )}
       {addItemForOrderId !== null && (
         <AddItemModal
           orderId={addItemForOrderId}
@@ -569,9 +831,17 @@ export default function FbCashier() {
                     <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{activeOrders.length}</span>
                   )}
                 </h2>
-                <button onClick={fetchActive} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={fetchActive} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setNewOrderOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Нове
+                  </button>
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -581,7 +851,7 @@ export default function FbCashier() {
                       <UtensilsCrossed className="w-6 h-6 text-muted-foreground/40" />
                     </div>
                     <p className="text-sm text-muted-foreground">Немає активних замовлень</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Приймайте QR або відкрийте через офіціанта</p>
+                    <p className="text-xs text-muted-foreground/60 mt-1">Натисніть «Нове» або приймайте QR</p>
                   </div>
                 ) : (
                   activeOrders.map(order => (
