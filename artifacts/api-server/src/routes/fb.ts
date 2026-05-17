@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db, pool } from "@workspace/db";
 import { fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable } from "@workspace/db";
-import { eq, and, desc, asc, sql, gte, ne } from "drizzle-orm";
+import { eq, and, desc, asc, sql, gte, lte, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { createFiscalReceipt, buildCheckboxGoods, toCheckboxPaymentType } from "../services/checkbox.js";
 
@@ -644,7 +644,7 @@ router.delete("/tables/:id", requireAuth, async (req: any, res) => {
 router.get("/orders", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const { status, type, open } = req.query;
+    const { status, type, open, date_from, date_to } = req.query;
     let conditions: any[] = [eq(fbOrdersTable.organizationId, orgId)];
     if (status && status !== "all") conditions.push(eq(fbOrdersTable.status, status as any));
     if (type && type !== "all") conditions.push(eq(fbOrdersTable.orderType, type as any));
@@ -652,6 +652,16 @@ router.get("/orders", requireAuth, async (req: any, res) => {
       // all non-closed
       conditions.push(ne(fbOrdersTable.status, "billed"));
       conditions.push(ne(fbOrdersTable.status, "cancelled"));
+    }
+    if (date_from) {
+      const from = new Date(date_from as string);
+      from.setHours(0, 0, 0, 0);
+      conditions.push(gte(fbOrdersTable.closedAt, from));
+    }
+    if (date_to) {
+      const to = new Date(date_to as string);
+      to.setHours(23, 59, 59, 999);
+      conditions.push(lte(fbOrdersTable.closedAt, to));
     }
 
     const orders = await db.select({
@@ -1082,6 +1092,70 @@ router.get("/cashbox/x-report", requireAuth, async (req: any, res) => {
 });
 
 // ── RETURN ORDER (повернення) ─────────────────────────────────────────────────
+// ── PRINT RECEIPT to internal receipt printer ────────────────────────────────
+router.post("/orders/:id/print-receipt", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const orderId = parseInt(req.params.id);
+    const db_ = (db as any).$client;
+
+    // Find active receipt printer for this org
+    const printerRow = await db_.query(
+      `SELECT * FROM pos_printers
+       WHERE organization_id = $1 AND printer_type = 'receipt' AND is_active = true
+       ORDER BY id LIMIT 1`,
+      [orgId]
+    );
+    if (!printerRow.rows.length) {
+      res.status(404).json({ error: "Принтер чеків не налаштований. Налаштуйте принтер у розділі Налаштування → Принтери." });
+      return;
+    }
+    const printer = printerRow.rows[0];
+
+    // Get order + table
+    const orderRow = await db_.query(
+      `SELECT o.*, rt.number AS table_number, rt.location AS table_location
+       FROM fb_orders o
+       LEFT JOIN restaurant_tables rt ON rt.id = o.table_id
+       WHERE o.id = $1 AND o.organization_id = $2`,
+      [orderId, orgId]
+    );
+    if (!orderRow.rows.length) { res.status(404).json({ error: "Замовлення не знайдено" }); return; }
+    const order = orderRow.rows[0];
+
+    // Get order items
+    const itemsRow = await db_.query(
+      `SELECT oi.quantity, oi.unit_price AS price, oi.total_price, oi.notes,
+              fi.name
+       FROM fb_order_items oi
+       LEFT JOIN fb_items fi ON fi.id = oi.item_id
+       WHERE oi.order_id = $1`,
+      [orderId]
+    );
+    const items = itemsRow.rows.map((i: any) => ({
+      name: i.name,
+      quantity: Number(i.quantity),
+      price: Number(i.price),
+      total: Number(i.total_price),
+      notes: i.notes || null,
+    }));
+
+    // Create print job
+    await db_.query(
+      `INSERT INTO fb_print_jobs
+         (organization_id, order_id, printer_id, printer_type, station,
+          status, table_number, table_location, guest_name, items_json)
+       VALUES ($1,$2,$3,'receipt','receipt','queued',$4,$5,$6,$7)`,
+      [orgId, orderId, printer.id,
+       order.table_number || null, order.table_location || null,
+       order.guest_name || null,
+       JSON.stringify(items)]
+    );
+
+    res.json({ ok: true, printerName: printer.name || "Принтер чеків" });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/orders/:id/return", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);

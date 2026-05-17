@@ -186,7 +186,7 @@ export default function FbQrCodes() {
     queryKey: ["fb-tables"],
     queryFn: () => apiFetch("/tables"),
   });
-  const tables: Table[] = (data?.tables || []).filter((t: Table) => t.isActive);
+  const tables: Table[] = (data?.tables || []).filter((t: Table) => t.isActive !== false);
 
   const saveTable = useMutation({
     mutationFn: (d: any) => d.id

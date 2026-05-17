@@ -199,8 +199,23 @@ function NewOrderModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   );
 }
 
-// ─── Print Bill (передрахунок) ────────────────────────────────────────────────
-async function printBill(order: ActiveOrder) {
+// ─── Print Bill — internal printer first, browser fallback ───────────────────
+async function printBill(order: ActiveOrder): Promise<{ ok: boolean; msg: string }> {
+  // Try internal receipt printer via print job API
+  try {
+    const result = await apiFetch(`/orders/${order.id}/print-receipt`, { method: "POST" });
+    return { ok: true, msg: `Надруковано на ${result.printerName || "принтер чеків"}` };
+  } catch (apiErr: any) {
+    // If no printer configured → fall back to browser print dialog
+    if ((apiErr.message || "").includes("не налаштований") || (apiErr.message || "").includes("404")) {
+      await printBillBrowser(order);
+      return { ok: true, msg: "Відкрито діалог друку браузера" };
+    }
+    throw apiErr;
+  }
+}
+
+async function printBillBrowser(order: ActiveOrder) {
   let cfg: any = {};
   try { const d = await apiFetch("/config/section/receipt"); cfg = d.data || {}; } catch {}
 
@@ -211,9 +226,8 @@ async function printBill(order: ActiveOrder) {
   const timeStr = now.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
   const tableLabel = order.tableNumber ? `Стіл №${order.tableNumber}` : order.order_type === "takeaway" ? "Takeaway" : "Замовлення";
   const estName = cfg.establishment_name || "Maison HD";
-  const showWaiter = cfg.show_waiter !== false;
-  const showDate  = cfg.show_date  !== false;
-  const showTime  = cfg.show_time  !== false;
+  const showDate = cfg.show_date !== false;
+  const showTime = cfg.show_time !== false;
 
   const win = window.open("", "_blank", "width=380,height=700");
   if (!win) return;
@@ -236,14 +250,11 @@ async function printBill(order: ActiveOrder) {
     <span class="small">${showDate ? dateStr : ""}${showDate && showTime ? " " : ""}${showTime ? timeStr : ""}</span>
   </div>
   ${order.guest_name ? `<div class="small">Гість: ${order.guest_name}</div>` : ""}
-  ${(cfg.print_number !== false) && (order as any).receiptNumber ? `<div class="small">Чек: ${(order as any).receiptNumber}</div>` : ""}
   <hr/>
   ${items.map(it => `<div class="row"><span style="flex:1;margin-right:8px">${it.quantity}×${it.name}</span><span>${parseFloat(it.total_price||"0").toFixed(2)} ₴</span></div>`).join("")}
   <hr/>
   <div class="row bold big"><span>РАЗОМ:</span><span>${total.toFixed(2)} ₴</span></div>
   ${cfg.guest_message ? `<hr/><div class="center small italic">${cfg.guest_message}</div>` : ""}
-  ${cfg.show_qr && cfg.qr_url ? `<hr/><div class="center"><img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(cfg.qr_url)}" style="width:90px;height:90px"/><div class="small" style="margin-top:2px">Відскануйте QR</div></div>` : ""}
-  ${cfg.print_wifi && cfg.wifi_name ? `<hr/><div class="center small"><div>Wi-Fi: <b>${cfg.wifi_name}</b></div>${cfg.wifi_password ? `<div>Пароль: ${cfg.wifi_password}</div>` : ""}</div>` : ""}
   ${cfg.footer_text ? `<hr/><div class="center small">${cfg.footer_text}</div>` : ""}
   <hr/>
   <div class="center small">Дякуємо за відвідування!</div>
@@ -677,17 +688,23 @@ function XReportModal({ onClose }: { onClose: () => void }) {
 
 // ─── Receipt Archive Panel ─────────────────────────────────────────────────────
 function ReceiptArchive() {
+  const todayStr = new Date().toISOString().slice(0, 10);
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [returning, setReturning] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState(todayStr);
+  const [dateTo, setDateTo] = useState(todayStr);
 
-  useEffect(() => {
-    apiFetch("/orders?status=billed")
-      .then(d => setOrders((d.orders || []).slice(0, 100)))
-      .catch(() => {})
+  function fetchOrders() {
+    setLoading(true);
+    apiFetch(`/orders?status=billed&date_from=${dateFrom}&date_to=${dateTo}`)
+      .then(d => setOrders((d.orders || []).slice(0, 200)))
+      .catch(() => setOrders([]))
       .finally(() => setLoading(false));
-  }, []);
+  }
+
+  useEffect(() => { fetchOrders(); }, [dateFrom, dateTo]);
 
   const filtered = orders.filter(o =>
     !search ||
@@ -709,7 +726,24 @@ function ReceiptArchive() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-2 border-b shrink-0">
+      {/* Date filter row */}
+      <div className="px-3 pt-2 pb-1.5 border-b shrink-0 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] text-gray-500 font-semibold shrink-0">З</label>
+          <input
+            type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="flex-1 px-2 py-1 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          <label className="text-[10px] text-gray-500 font-semibold shrink-0">До</label>
+          <input
+            type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="flex-1 px-2 py-1 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          <button onClick={fetchOrders} disabled={loading}
+            className="p-1.5 rounded-lg border hover:bg-gray-50 text-gray-500 shrink-0" title="Оновити">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           <input
@@ -790,6 +824,7 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
   const [mode, setMode] = useState<PayMode>("cash");
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState("");
+  const [isFiscal, setIsFiscal] = useState(true);
 
   // ── Discount ──
   const [discountEnabled, setDiscountEnabled] = useState(false);
@@ -855,6 +890,7 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
           : undefined,
         tipAmount: serviceAmount > 0 ? serviceAmount : undefined,
         tipPct:    servicePct > 0 ? servicePct : undefined,
+        fiscal: isFiscal,
       };
 
       if (mode === "mixed") {
@@ -981,6 +1017,27 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
                 <span className="text-sm text-gray-500">%</span>
               </div>
             )}
+          </div>
+
+          {/* ── Fiscal toggle ── */}
+          <div className="flex items-center justify-between px-4 py-2.5 border rounded-xl">
+            <span className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <span className="text-base">🧾</span> Тип чека
+            </span>
+            <div className="flex border rounded-lg overflow-hidden text-xs font-bold">
+              <button
+                onClick={() => setIsFiscal(true)}
+                className={`px-3 py-1.5 transition-colors ${isFiscal ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}
+              >
+                Фіскальний
+              </button>
+              <button
+                onClick={() => setIsFiscal(false)}
+                className={`px-3 py-1.5 transition-colors ${!isFiscal ? "bg-gray-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}
+              >
+                Нефіскальний
+              </button>
+            </div>
           </div>
 
           {/* ── Payment method grid ── */}
@@ -1120,6 +1177,8 @@ function ActiveOrderCard({
   onSendKitchen: () => void;
 }) {
   const [sending, setSending] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [printMsg, setPrintMsg] = useState<string | null>(null);
   const statusColor = order.status === "open" ? "border-blue-200 bg-blue-50/30" : "border-gray-200 bg-white";
   const hasPending = (order.items || []).some((it: any) => it.status === "pending" && !it.sent_at);
 
@@ -1188,9 +1247,24 @@ function ActiveOrderCard({
               className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold border-2 border-amber-400 text-amber-700 rounded-xl hover:bg-amber-50 transition-colors">
               <Plus className="w-4 h-4" /> Страва
             </button>
-            <button onClick={() => printBill(order)} disabled={!(order.items && order.items.length > 0)}
-              className="flex items-center justify-center gap-1 px-3 py-2.5 text-sm font-semibold border-2 border-gray-300 text-gray-600 rounded-xl hover:bg-gray-50 disabled:opacity-40 transition-colors">
-              <Printer className="w-4 h-4" />
+            <button
+              onClick={async () => {
+                if (printing || !(order.items && order.items.length > 0)) return;
+                setPrinting(true); setPrintMsg(null);
+                try {
+                  const r = await printBill(order);
+                  setPrintMsg(r.msg);
+                  setTimeout(() => setPrintMsg(null), 3000);
+                } catch (e: any) {
+                  setPrintMsg("Помилка: " + e.message);
+                  setTimeout(() => setPrintMsg(null), 4000);
+                } finally { setPrinting(false); }
+              }}
+              disabled={printing || !(order.items && order.items.length > 0)}
+              title={printMsg || "Друкувати передрахунок"}
+              className={`relative flex items-center justify-center gap-1 px-3 py-2.5 text-sm font-semibold border-2 rounded-xl disabled:opacity-40 transition-colors ${printMsg ? (printMsg.startsWith("Помилка") ? "border-red-300 bg-red-50 text-red-600" : "border-green-300 bg-green-50 text-green-700") : "border-gray-300 text-gray-600 hover:bg-gray-50"}`}
+            >
+              {printing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
             </button>
             <button onClick={onPay}
               className="flex-[2] flex items-center justify-center gap-1.5 py-2.5 text-sm font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors shadow-sm">
