@@ -235,6 +235,26 @@ router.post("/public/guest-orders", async (req, res) => {
   }
 });
 
+// ─── GET /fb/public/table-order?tid= ─────────────────────────────────────────
+router.get("/public/table-order", async (req, res) => {
+  const { tid } = req.query;
+  if (!tid) return res.status(400).json({ error: "tid required" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT o.id, o.total_amount, o.status, o.tip_pct
+       FROM fb_orders o
+       JOIN fb_tables ft ON ft.id = o.table_id
+       WHERE ft.id = $1 AND o.status NOT IN ('billed','cancelled','closed')
+       ORDER BY o.opened_at DESC LIMIT 1`,
+      [tid],
+    );
+    if (!rows[0]) return res.json({ order: null });
+    res.json({ order: rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── GET /fb/public/pending-orders ───────────────────────────────────────────
 router.get("/public/pending-orders", requireAuth, async (req: any, res) => {
   const orgId = req.user?.organizationId;

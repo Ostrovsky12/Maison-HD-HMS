@@ -230,6 +230,73 @@ function PromoCarousel({ banners, popular, accent, primary }: {
   );
 }
 
+// ─── Pay Panel ────────────────────────────────────────────────────────────────
+
+function PayPanel({ orderId, baseTotal, accent, primary, onClose, onPay }: {
+  orderId: number; baseTotal: number; accent: string; primary: string;
+  onClose: () => void; onPay: (tipPct: number) => void;
+}) {
+  const [tipPct, setTipPct] = useState<0 | 5 | 10 | 15>(0);
+  const tipAmount = baseTotal * tipPct / 100;
+  const total = baseTotal + tipAmount;
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex flex-col" initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", damping: 30, stiffness: 300 }}>
+      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div className="bg-white rounded-t-3xl max-w-lg mx-auto w-full">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-stone-100">
+          <div>
+            <h2 className="text-lg font-serif text-stone-900">Оплата рахунку</h2>
+            <p className="text-xs text-stone-400 mt-0.5">Замовлення #{orderId}</p>
+          </div>
+          <button onClick={onClose} className="text-stone-400">
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="px-5 py-5 space-y-4">
+          {/* Service charge */}
+          <div className="bg-stone-50 rounded-2xl p-4">
+            <p className="text-xs text-stone-500 text-center mb-3 leading-snug font-medium">Сервісна винагорода (за бажанням)</p>
+            <div className="flex gap-2">
+              {([0, 5, 10, 15] as const).map(pct => (
+                <button key={pct} onClick={() => setTipPct(pct)}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${tipPct === pct ? "border-transparent text-white" : "border-stone-200 text-stone-600 bg-white"}`}
+                  style={tipPct === pct ? { background: accent } : {}}>
+                  {pct === 0 ? "—" : `+${pct}%`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Total */}
+          <div className="flex flex-col gap-1">
+            {tipPct > 0 && (
+              <>
+                <div className="flex justify-between text-sm text-stone-500">
+                  <span>Замовлення</span><span>{baseTotal.toFixed(0)} ₴</span>
+                </div>
+                <div className="flex justify-between text-sm" style={{ color: accent }}>
+                  <span>Сервіс {tipPct}%</span><span>+ {tipAmount.toFixed(0)} ₴</span>
+                </div>
+              </>
+            )}
+            <div className="flex justify-between font-bold text-stone-900 text-base pt-1">
+              <span>До сплати</span><span>{total.toFixed(0)} ₴</span>
+            </div>
+          </div>
+
+          <button onClick={() => onPay(tipPct)}
+            className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg, #16a34a, #15803d)" }}>
+            💳 Перейти до оплати
+          </button>
+          <p className="text-xs text-stone-400 text-center">Оплата готівкою або карткою через офіціанта</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function GuestMenu() {
@@ -255,6 +322,12 @@ export default function GuestMenu() {
   const [ordered, setOrdered] = useState(false);
   const [tipPct, setTipPct] = useState<0 | 5 | 10 | 15>(0);
 
+  const [orderId, setOrderId] = useState<number | null>(null);
+  const [existingOrderId, setExistingOrderId] = useState<number | null>(null);
+  const [existingOrderTotal, setExistingOrderTotal] = useState<number>(0);
+  const [showPayPanel, setShowPayPanel] = useState(false);
+  const [payTipPct, setPayTipPct] = useState<0 | 5 | 10 | 15>(0);
+
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
 
   const [showAI, setShowAI] = useState(false);
@@ -268,17 +341,23 @@ export default function GuestMenu() {
 
   useEffect(() => {
     if (!tid) { setError("Невірний QR-код. Зверніться до персоналу."); setLoading(false); return; }
-    fetch(`${API}/fb/public/guest-menu?tid=${tid}`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.error) { setError(d.error); return; }
-        setOrgName(d.orgName || "Maison HD");
-        setTableNumber(d.tableNumber || "");
-        setTableLocation(d.tableLocation || "");
-        setCategories(d.categories || []);
-        setItems(d.items || []);
-        setBranding(d.branding || {});
-      })
+    Promise.all([
+      fetch(`${API}/fb/public/guest-menu?tid=${tid}`).then(r => r.json()),
+      fetch(`${API}/fb/public/table-order?tid=${tid}`).then(r => r.json()).catch(() => null),
+    ]).then(([menu, tableOrder]) => {
+      if (menu.error) { setError(menu.error); return; }
+      setOrgName(menu.orgName || "Maison HD");
+      setTableNumber(menu.tableNumber || "");
+      setTableLocation(menu.tableLocation || "");
+      setCategories(menu.categories || []);
+      setItems(menu.items || []);
+      setBranding(menu.branding || {});
+      if (tableOrder?.order) {
+        setExistingOrderId(tableOrder.order.id);
+        setExistingOrderTotal(parseFloat(tableOrder.order.total_amount || "0"));
+        setOrderId(tableOrder.order.id);
+      }
+    })
       .catch(() => setError("Помилка завантаження меню."))
       .finally(() => setLoading(false));
   }, [tid]);
@@ -340,6 +419,8 @@ export default function GuestMenu() {
       });
       const d = await r.json();
       if (d.error) throw new Error(d.error);
+      const newOrderId = d.order?.id ?? null;
+      if (newOrderId) setOrderId(newOrderId);
       setOrdered(true); setShowCart(false);
       try {
         const ctx = new AudioContext();
@@ -395,9 +476,15 @@ export default function GuestMenu() {
     </div>
   );
 
+  const goToPay = () => {
+    if (!orderId) return;
+    const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+    window.location.href = `${base}/pay/${orderId}`;
+  };
+
   if (ordered) return (
     <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-6 text-center">
-      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring" }}>
+      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring" }} className="w-full max-w-sm">
         <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: `${accent}20` }}>
           <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke={accent} strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -405,8 +492,8 @@ export default function GuestMenu() {
         </div>
         <h2 className="text-2xl font-serif text-stone-900 mb-2">Замовлення прийнято!</h2>
         <p className="text-stone-500 mb-1">Стіл {tableNumber}{tableLocation ? ` · ${tableLocation}` : ""}</p>
-        <p className="text-stone-400 text-sm mb-8">Офіціант підтвердить замовлення</p>
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-4 text-left mb-6 max-w-xs mx-auto">
+        <p className="text-stone-400 text-sm mb-6">Офіціант підтвердить замовлення</p>
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-4 text-left mb-6">
           {cart.map((c, i) => {
             const delta = c.modifiers.reduce((s, m) => s + m.priceDelta, 0);
             const up = parseFloat(c.item.price) + delta;
@@ -419,10 +506,35 @@ export default function GuestMenu() {
           })}
           <div className="flex justify-between font-semibold text-stone-900 pt-2 mt-1"><span>Разом</span><span>{cartTotal.toFixed(0)} ₴</span></div>
         </div>
-        <button onClick={() => { setOrdered(false); setCart([]); }} className="text-sm underline underline-offset-2" style={{ color: accent }}>
-          Зробити ще одне замовлення
-        </button>
+        <div className="flex gap-3 w-full">
+          <button onClick={() => { setOrdered(false); setCart([]); }}
+            className="flex-1 py-3.5 rounded-2xl border-2 text-sm font-semibold transition-colors"
+            style={{ borderColor: primary, color: primary }}>
+            Ще замовити
+          </button>
+          {orderId && (
+            <button onClick={() => setShowPayPanel(true)}
+              className="flex-1 py-3.5 rounded-2xl text-white text-sm font-bold shadow-lg transition-all active:scale-95"
+              style={{ background: "linear-gradient(135deg, #16a34a, #15803d)" }}>
+              💳 Сплатити
+            </button>
+          )}
+        </div>
       </motion.div>
+
+      {/* Pay Panel */}
+      <AnimatePresence>
+        {showPayPanel && orderId && (
+          <PayPanel
+            orderId={orderId}
+            baseTotal={cartTotal}
+            accent={accent}
+            primary={primary}
+            onClose={() => setShowPayPanel(false)}
+            onPay={goToPay}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 
@@ -493,6 +605,24 @@ export default function GuestMenu() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* ── Existing order banner (rescan) ─────────────────────────── */}
+      {existingOrderId && !ordered && (
+        <div className="mx-4 mt-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-green-600 text-lg shrink-0">🧾</span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-green-800 leading-tight">Є відкрите замовлення</p>
+              <p className="text-xs text-green-600 leading-tight">{existingOrderTotal > 0 ? `${existingOrderTotal.toFixed(0)} ₴` : "Рахунок формується"}</p>
+            </div>
+          </div>
+          <button onClick={() => setShowPayPanel(true)}
+            className="shrink-0 px-4 py-2 rounded-xl text-white text-sm font-bold active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg, #16a34a, #15803d)" }}>
+            Сплатити
+          </button>
+        </div>
+      )}
 
       {/* ── Promo carousel ─────────────────────────────────────────── */}
       {!search && (popular.length > 0 || promoBanners.length > 0) && (
@@ -739,12 +869,22 @@ export default function GuestMenu() {
                 <p className="text-xs text-stone-400 text-center">
                   {tableLocation ? tableLocation : `Стіл ${tableNumber}`}{tableLocation && tableNumber ? ` · №${tableNumber}` : ""} · Офіціант підтвердить замовлення
                 </p>
-                <button onClick={submitOrder} disabled={submitting}
-                  className="w-full text-white rounded-2xl py-4 font-semibold text-base disabled:opacity-50 flex items-center justify-center gap-2"
-                  style={{ background: primary }}>
-                  {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                  {submitting ? "Відправляємо..." : "Замовити"}
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={submitOrder} disabled={submitting}
+                    className="flex-1 text-white rounded-2xl py-4 font-semibold text-base disabled:opacity-50 flex items-center justify-center gap-2"
+                    style={{ background: primary }}>
+                    {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {submitting ? "Відправляємо..." : "Замовити"}
+                  </button>
+                  {orderId && (
+                    <button
+                      onClick={() => { setShowCart(false); setShowPayPanel(true); }}
+                      className="flex-1 text-white rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-1.5 shadow active:scale-95 transition-transform"
+                      style={{ background: "linear-gradient(135deg, #16a34a, #15803d)" }}>
+                      💳 Сплатити
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>
@@ -757,6 +897,20 @@ export default function GuestMenu() {
           <ModifierModal key={modifierItem.id} item={modifierItem} primary={primary} accent={accent}
             onConfirm={mods => { addToCartWith(modifierItem, mods); setModifierItem(null); }}
             onCancel={() => setModifierItem(null)} />
+        )}
+      </AnimatePresence>
+
+      {/* ── Pay Panel ──────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showPayPanel && orderId && (
+          <PayPanel
+            orderId={orderId}
+            baseTotal={existingOrderTotal > 0 ? existingOrderTotal : cartTotal}
+            accent={accent}
+            primary={primary}
+            onClose={() => setShowPayPanel(false)}
+            onPay={() => goToPay()}
+          />
         )}
       </AnimatePresence>
 
