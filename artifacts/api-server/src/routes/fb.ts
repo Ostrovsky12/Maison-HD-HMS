@@ -560,12 +560,18 @@ router.get("/tables", requireAuth, async (req: any, res) => {
          t.status,
          t.current_order_id,
          t.is_active,
+         t.group_id,
+         tg.name         AS group_name,
+         tg.icon         AS group_icon,
+         tg.color        AS group_color,
+         tg.is_minibar   AS group_is_minibar,
          o.guest_name    AS current_guest,
          o.total_amount  AS current_total,
          o.status        AS order_status,
          o.order_type,
          NULL::int       AS current_waiter_user_id
        FROM fb_tables t
+       LEFT JOIN fb_table_groups tg ON tg.id = t.group_id AND tg.is_active = true
        LEFT JOIN fb_orders o ON o.id = t.current_order_id
        WHERE t.organization_id = $1 AND t.is_active = true
        ORDER BY t.location, t.number`,
@@ -602,13 +608,13 @@ router.get("/tables", requireAuth, async (req: any, res) => {
 router.post("/tables", requireAuth, async (req: any, res) => {
   try {
     const orgId = await resolveOrgId(req);
-    const { number, capacity, location } = req.body;
+    const { number, capacity, location, groupId } = req.body;
     if (!number?.trim()) { res.status(400).json({ error: "Номер столу обов'язковий" }); return; }
     const db_ = (db as any).$client;
     const r = await db_.query(
-      `INSERT INTO fb_tables (organization_id, number, capacity, location)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [orgId, number.trim(), parseInt(capacity) || 4, location?.trim() || "Основний зал"]
+      `INSERT INTO fb_tables (organization_id, number, capacity, location, group_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [orgId, number.trim(), parseInt(capacity) || 4, location?.trim() || "Основний зал", groupId ? parseInt(groupId) : null]
     );
     res.json({ table: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -617,17 +623,31 @@ router.post("/tables", requireAuth, async (req: any, res) => {
 router.patch("/tables/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const { status, number, capacity, location } = req.body;
-    const updates: any = {};
-    if (status !== undefined) updates.status = status;
-    if (status === "free") updates.currentOrderId = null;
-    if (number !== undefined) updates.number = number;
-    if (capacity !== undefined) updates.capacity = capacity;
-    if (location !== undefined) updates.location = location;
-    const [tbl] = await db.update(fbTablesTable).set(updates)
-      .where(and(eq(fbTablesTable.id, parseInt(req.params.id)), eq(fbTablesTable.organizationId, orgId)))
-      .returning();
-    res.json({ table: tbl });
+    const db_ = (db as any).$client;
+    const { status, number, capacity, location, groupId } = req.body;
+    // Use raw SQL to support group_id (not yet in Drizzle schema)
+    const r = await db_.query(
+      `UPDATE fb_tables SET
+         status           = COALESCE($1, status),
+         current_order_id = CASE WHEN $1 = 'free' THEN NULL ELSE current_order_id END,
+         number           = COALESCE($2, number),
+         capacity         = COALESCE($3, capacity),
+         location         = COALESCE($4, location),
+         group_id         = CASE WHEN $5 IS NOT NULL THEN $5::int ELSE group_id END,
+         updated_at       = NOW()
+       WHERE id = $6 AND organization_id = $7 RETURNING *`,
+      [status ?? null, number ?? null, capacity ? parseInt(capacity) : null,
+       location ?? null, groupId !== undefined ? (groupId ? parseInt(groupId) : null) : undefined,
+       parseInt(req.params.id), orgId]
+    );
+    // Handle "unset group" explicitly (groupId === null sent by client)
+    if (groupId === null || groupId === "") {
+      await db_.query(
+        `UPDATE fb_tables SET group_id = NULL WHERE id = $1 AND organization_id = $2`,
+        [parseInt(req.params.id), orgId]
+      );
+    }
+    res.json({ table: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
