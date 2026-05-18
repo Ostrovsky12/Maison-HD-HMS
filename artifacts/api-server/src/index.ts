@@ -678,6 +678,50 @@ async function ensureSchema() {
       ON fb_table_notifications (organization_id, status, created_at DESC);
   `);
 
+  // Legacy F&B tables — must exist in dev DB so Replit deploy diff doesn't drop them from prod
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS fb_config_settings (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL,
+      section         VARCHAR(100) NOT NULL,
+      data            JSONB NOT NULL DEFAULT '{}',
+      updated_at      TIMESTAMP NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS fb_order_sources (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL,
+      name            VARCHAR(100) NOT NULL,
+      show_on_pos     BOOLEAN NOT NULL DEFAULT true,
+      sort_order      INTEGER NOT NULL DEFAULT 0,
+      created_at      TIMESTAMP NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS fb_payment_methods (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL,
+      name            VARCHAR(100) NOT NULL,
+      type            VARCHAR(30) NOT NULL DEFAULT 'cash',
+      commission_pct  NUMERIC(5,2) NOT NULL DEFAULT 0,
+      show_on_pos     BOOLEAN NOT NULL DEFAULT true,
+      color           VARCHAR(20),
+      icon_code       VARCHAR(50),
+      sort_order      INTEGER NOT NULL DEFAULT 0,
+      created_at      TIMESTAMP NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS fb_hall_tables (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL,
+      hall_id         INTEGER,
+      hall_name       VARCHAR(100),
+      table_number    INTEGER NOT NULL,
+      pos_x           INTEGER NOT NULL DEFAULT 0,
+      pos_y           INTEGER NOT NULL DEFAULT 0,
+      width           INTEGER NOT NULL DEFAULT 80,
+      height          INTEGER NOT NULL DEFAULT 80,
+      seats           INTEGER NOT NULL DEFAULT 4,
+      created_at      TIMESTAMP NOT NULL DEFAULT now()
+    );
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (
