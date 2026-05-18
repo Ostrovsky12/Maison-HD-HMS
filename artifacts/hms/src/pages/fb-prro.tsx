@@ -11,7 +11,8 @@ import {
 import {
   Shield, CheckCircle2, XCircle, AlertTriangle, Clock,
   Play, Square, FileText, Printer, RefreshCw, ExternalLink,
-  ChevronDown, ChevronUp, Receipt, BarChart3, History,
+  ChevronDown, ChevronUp, Receipt, BarChart3, History, ShieldCheck,
+  Banknote, CreditCard, Layers,
 } from "lucide-react";
 
 const API = "/api";
@@ -40,6 +41,21 @@ type PrroStatus = {
   cashier: { name: string; tin: string } | null;
 };
 
+type LocalReceipt = {
+  id: number;
+  receipt_number: string;
+  guest_name: string;
+  total_amount: string;
+  payment_method: string;
+  closed_at: string;
+  fiscal_status: "done" | "error";
+  fiscal_receipt_id: string;
+  fiscal_receipt_url: string;
+  fiscal_qr_url: string;
+  table_number?: number;
+  legal_entity_name?: string;
+};
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: PrroStatus["status"] }) {
   const cfg: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
@@ -55,6 +71,20 @@ function StatusBadge({ status }: { status: PrroStatus["status"] }) {
       {c.icon}{c.label}
     </Badge>
   );
+}
+
+// ── Payment method label ──────────────────────────────────────────────────────
+function PaymentLabel({ method }: { method: string }) {
+  if (method === "cash") return (
+    <span className="flex items-center gap-1 text-green-600"><Banknote className="w-3 h-3" />Готівка</span>
+  );
+  if (method === "card" || method === "cashless") return (
+    <span className="flex items-center gap-1 text-blue-600"><CreditCard className="w-3 h-3" />Картка</span>
+  );
+  if (method === "mixed") return (
+    <span className="flex items-center gap-1 text-violet-600"><Layers className="w-3 h-3" />Змішано</span>
+  );
+  return <span className="text-muted-foreground">{method}</span>;
 }
 
 // ── Report modal ──────────────────────────────────────────────────────────────
@@ -287,7 +317,7 @@ function PrroEntityCard({ entity, onRefresh }: { entity: PrroStatus; onRefresh: 
 // ── Shifts history panel ──────────────────────────────────────────────────────
 function ShiftsHistory({ entityId, entityName }: { entityId: number; entityName: string }) {
   const [open, setOpen] = useState(false);
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["prro-shifts", entityId],
     queryFn: () => apiFetch(`/fb/prro/${entityId}/shifts`),
     enabled: open,
@@ -339,11 +369,116 @@ function ShiftsHistory({ entityId, entityName }: { entityId: number; entityName:
   );
 }
 
+// ── Local receipts tab ────────────────────────────────────────────────────────
+function LocalReceiptsTab() {
+  const [filter, setFilter] = useState<"done" | "all" | "error">("all");
+
+  const { data, isLoading, refetch, isFetching } = useQuery({
+    queryKey: ["prro-local-receipts", filter],
+    queryFn: () => apiFetch(`/fb/prro/local-receipts?status=${filter}&limit=100`),
+    refetchInterval: 30_000,
+  });
+
+  const receipts: LocalReceipt[] = data?.receipts || [];
+  const totalAmount = receipts
+    .filter(r => r.fiscal_status === "done")
+    .reduce((s, r) => s + parseFloat(r.total_amount || "0"), 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border bg-card p-3 text-center">
+          <div className="text-2xl font-bold text-green-600">{receipts.filter(r => r.fiscal_status === "done").length}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">Фіскалізовано</div>
+        </div>
+        <div className="rounded-xl border bg-card p-3 text-center">
+          <div className="text-2xl font-bold text-red-500">{receipts.filter(r => r.fiscal_status === "error").length}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">Помилок</div>
+        </div>
+        <div className="rounded-xl border bg-card p-3 text-center">
+          <div className="text-lg font-bold">{totalAmount.toFixed(0)} ₴</div>
+          <div className="text-xs text-muted-foreground mt-0.5">Сума чеків</div>
+        </div>
+      </div>
+
+      {/* Filter */}
+      <div className="flex items-center gap-2">
+        {(["all", "done", "error"] as const).map(f => (
+          <button key={f}
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              filter === f
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}>
+            {f === "all" ? "Всі" : f === "done" ? "✓ Успішні" : "✗ Помилки"}
+          </button>
+        ))}
+        <button onClick={() => refetch()} disabled={isFetching}
+          className="ml-auto p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+          <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      {/* List */}
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => <div key={i} className="rounded-xl border bg-card h-16 animate-pulse" />)}
+        </div>
+      ) : receipts.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-10 text-center">
+          <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">Фіскальних чеків ще немає</p>
+          <p className="text-xs text-muted-foreground mt-1">Чеки з'являться після оплати замовлень із увімкненим ПРРО</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {receipts.map(r => (
+            <div key={r.id} className={`rounded-xl border bg-card p-3.5 flex items-center gap-3 ${r.fiscal_status === "error" ? "border-red-200" : ""}`}>
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${r.fiscal_status === "done" ? "bg-green-500/10" : "bg-red-500/10"}`}>
+                {r.fiscal_status === "done"
+                  ? <ShieldCheck className="w-4 h-4 text-green-600" />
+                  : <XCircle className="w-4 h-4 text-red-500" />
+                }
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium">{r.receipt_number || `#${r.id}`}</span>
+                  {r.table_number && <span className="text-xs text-muted-foreground">Стіл {r.table_number}</span>}
+                  {r.guest_name && <span className="text-xs text-muted-foreground truncate max-w-[120px]">{r.guest_name}</span>}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                  <PaymentLabel method={r.payment_method} />
+                  {r.closed_at && (
+                    <span>{new Date(r.closed_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                  )}
+                  {r.legal_entity_name && <span className="truncate max-w-[100px]">{r.legal_entity_name}</span>}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-bold text-sm">{parseFloat(r.total_amount || "0").toFixed(2)} ₴</div>
+                {r.fiscal_receipt_url && (
+                  <a href={r.fiscal_receipt_url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-primary hover:underline flex items-center gap-0.5 justify-end mt-0.5">
+                    <ExternalLink className="w-2.5 h-2.5" />чек
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function FbPrroPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
+  const [activeTab, setActiveTab] = useState<"shifts" | "receipts">("shifts");
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["fb-prro-status"],
@@ -369,74 +504,98 @@ export default function FbPrroPage() {
               Checkbox API · Управління змінами та фіскальними чеками
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching} className="gap-1.5">
-            <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`} />
-            Оновити
-          </Button>
-        </div>
-
-        {/* Summary */}
-        {statuses.length > 0 && (
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl border bg-card p-3 text-center">
-              <div className="text-2xl font-bold text-green-600">{openCount}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Відкритих змін</div>
-            </div>
-            <div className="rounded-xl border bg-card p-3 text-center">
-              <div className="text-2xl font-bold">{statuses.length}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Каси з ПРРО</div>
-            </div>
-            <div className="rounded-xl border bg-card p-3 text-center">
-              <div className="text-2xl font-bold text-amber-500">{statuses.filter(s => s.status === "error" || s.status === "not_configured").length}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Потребують уваги</div>
-            </div>
-          </div>
-        )}
-
-        {/* Entities */}
-        {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2].map(i => (
-              <div key={i} className="rounded-xl border bg-card p-4 animate-pulse h-24" />
-            ))}
-          </div>
-        ) : statuses.length === 0 ? (
-          <div className="border border-dashed rounded-xl p-12 text-center">
-            <Shield className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-            <p className="font-medium text-sm">Немає юридичних осіб з ПРРО</p>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">
-              Перейдіть до «Юр. особи» та увімкніть ПРРО (Checkbox) для кожної юр. особи.
-            </p>
-            <Button size="sm" variant="outline" onClick={() => setLocation("/fb/legal-entities")}>
-              Налаштувати юр. особи
+          {activeTab === "shifts" && (
+            <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching} className="gap-1.5">
+              <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`} />
+              Оновити
             </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {statuses.map(entity => (
-              <PrroEntityCard key={entity.id} entity={entity} onRefresh={() => qc.invalidateQueries({ queryKey: ["fb-prro-status"] })} />
-            ))}
-          </div>
-        )}
-
-        {/* Shifts history */}
-        {statuses.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Історія змін</p>
-            {statuses.map(entity => (
-              <ShiftsHistory key={entity.id} entityId={entity.id} entityName={entity.name} />
-            ))}
-          </div>
-        )}
-
-        {/* Info block */}
-        <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4 flex gap-3">
-          <Printer className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-          <div className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
-            <p className="font-semibold">Як працює Checkbox ПРРО</p>
-            <p>Кожна юр. особа має власну зміну в Checkbox. Відкрийте зміну перед початком роботи касира. X-звіт — проміжний (зміна не закривається). Z-звіт — фінальний (після закриття зміни). Всі чеки передаються до ДПС в реальному часі.</p>
-          </div>
+          )}
         </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 bg-muted rounded-xl p-1">
+          <button
+            onClick={() => setActiveTab("shifts")}
+            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === "shifts" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+            Зміни
+          </button>
+          <button
+            onClick={() => setActiveTab("receipts")}
+            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === "receipts" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+            Чеки
+          </button>
+        </div>
+
+        {/* ── Shifts tab ── */}
+        {activeTab === "shifts" && (
+          <>
+            {/* Summary */}
+            {statuses.length > 0 && (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border bg-card p-3 text-center">
+                  <div className="text-2xl font-bold text-green-600">{openCount}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Відкритих змін</div>
+                </div>
+                <div className="rounded-xl border bg-card p-3 text-center">
+                  <div className="text-2xl font-bold">{statuses.length}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Каси з ПРРО</div>
+                </div>
+                <div className="rounded-xl border bg-card p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-500">{statuses.filter(s => s.status === "error" || s.status === "not_configured").length}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Потребують уваги</div>
+                </div>
+              </div>
+            )}
+
+            {/* Entities */}
+            {isLoading ? (
+              <div className="space-y-3">
+                {[1, 2].map(i => (
+                  <div key={i} className="rounded-xl border bg-card p-4 animate-pulse h-24" />
+                ))}
+              </div>
+            ) : statuses.length === 0 ? (
+              <div className="border border-dashed rounded-xl p-12 text-center">
+                <Shield className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
+                <p className="font-medium text-sm">Немає юридичних осіб з ПРРО</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">
+                  Перейдіть до «Юр. особи» та увімкніть ПРРО (Checkbox) для кожної юр. особи.
+                </p>
+                <Button size="sm" variant="outline" onClick={() => setLocation("/fb/legal-entities")}>
+                  Налаштувати юр. особи
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {statuses.map(entity => (
+                  <PrroEntityCard key={entity.id} entity={entity} onRefresh={() => qc.invalidateQueries({ queryKey: ["fb-prro-status"] })} />
+                ))}
+              </div>
+            )}
+
+            {/* Shifts history */}
+            {statuses.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Історія змін</p>
+                {statuses.map(entity => (
+                  <ShiftsHistory key={entity.id} entityId={entity.id} entityName={entity.name} />
+                ))}
+              </div>
+            )}
+
+            {/* Info block */}
+            <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4 flex gap-3">
+              <Printer className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+              <div className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
+                <p className="font-semibold">Як працює Checkbox ПРРО</p>
+                <p>Кожна юр. особа має власну зміну в Checkbox. Відкрийте зміну перед початком роботи касира. X-звіт — проміжний (зміна не закривається). Z-звіт — фінальний (після закриття зміни). Всі чеки передаються до ДПС в реальному часі.</p>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Receipts tab ── */}
+        {activeTab === "receipts" && <LocalReceiptsTab />}
       </div>
     </AppLayout>
   );

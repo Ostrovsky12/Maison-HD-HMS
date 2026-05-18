@@ -714,7 +714,12 @@ router.get("/orders/:id", requireAuth, async (req: any, res) => {
               o.status, o.total_amount AS "totalAmount", o.paid_amount AS "paidAmount",
               o.notes, o.staff_notes AS "staffNotes",
               o.opened_at AS "openedAt", o.table_id AS "tableId",
-              o.tip_pct AS "tipPct",
+              o.tip_pct AS "tipPct", o.receipt_number AS "receiptNumber",
+              o.payment_method AS "paymentMethod", o.closed_at AS "closedAt",
+              o.fiscal_status AS "fiscalStatus",
+              o.fiscal_receipt_id AS "fiscalReceiptId",
+              o.fiscal_receipt_url AS "fiscalReceiptUrl",
+              o.fiscal_qr_url AS "fiscalQrUrl",
               ft.number AS "tableNumber"
        FROM fb_orders o
        LEFT JOIN fb_tables ft ON ft.id = o.table_id

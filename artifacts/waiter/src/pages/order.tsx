@@ -6,7 +6,7 @@ import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowLeft, Plus, Minus, Send, QrCode, CreditCard,
   ChefHat, CheckCircle2, Clock, X, Loader2, UtensilsCrossed,
-  Receipt, ExternalLink, Trash2, Printer,
+  Receipt, ExternalLink, Trash2, Printer, ShieldCheck, AlertTriangle,
 } from "lucide-react";
 
 const ITEM_STATUS: Record<string, { label: string; color: string }> = {
@@ -21,7 +21,7 @@ const ORDER_STATUS_LABEL: Record<string, string> = {
   open: "Відкрите", in_kitchen: "На кухні", ready: "Готово", billed: "Закрите", cancelled: "Скасоване",
 };
 
-type QRMode = null | "bill" | "pay";
+type QRMode = null | "bill" | "pay" | "fiscal";
 
 export default function Order() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -136,18 +136,23 @@ export default function Order() {
     </div>
   );
 
+  const hasFiscal = order.fiscalStatus === "done" && order.fiscalReceiptUrl;
+  const fiscalError = order.fiscalStatus === "error";
+
   // QR Dialog overlay
   if (qrMode) {
+    const isFiscalMode = qrMode === "fiscal";
     const isPayMode = qrMode === "pay";
-    const url = isPayMode ? payUrl : billUrl;
-    const title = isPayMode ? "QR для оплати" : "QR рахунку";
-    const subtitle = isPayMode
-      ? "Гість сканує та оплачує"
-      : "Гість сканує та бачить рахунок";
+    const url = isFiscalMode ? order.fiscalReceiptUrl : (isPayMode ? payUrl : billUrl);
+    const title = isFiscalMode ? "Фіскальний чек" : (isPayMode ? "QR для оплати" : "QR рахунку");
+    const subtitle = isFiscalMode
+      ? "Офіційний чек ДПС — Checkbox"
+      : (isPayMode ? "Гість сканує та оплачує" : "Гість сканує та бачить рахунок");
+    const headerColor = isFiscalMode ? "bg-emerald-600" : (isPayMode ? "bg-green-600" : "bg-blue-600");
 
     return (
       <div className="min-h-screen bg-background flex flex-col">
-        <div className={`text-white px-4 pt-12 pb-4 safe-top ${isPayMode ? "bg-green-600" : "bg-blue-600"}`}>
+        <div className={`text-white px-4 pt-12 pb-4 safe-top ${headerColor}`}>
           <div className="flex items-center gap-3">
             <button onClick={() => setQrMode(null)} className="p-2 -ml-1 rounded-xl bg-white/20">
               <ArrowLeft className="w-5 h-5" />
@@ -165,14 +170,29 @@ export default function Order() {
           </div>
 
           <div className="text-center space-y-1">
-            <div className="font-bold text-lg">Стіл №{order.tableNumber || "—"}</div>
-            <div className="text-2xl font-black text-blue-700">{parseFloat(order.totalAmount || "0").toFixed(2)} ₴</div>
+            {isFiscalMode ? (
+              <>
+                <div className="flex items-center justify-center gap-1.5 text-emerald-600 font-semibold">
+                  <ShieldCheck className="w-4 h-4" />
+                  Фіскалізовано · ДПС
+                </div>
+                {order.receiptNumber && (
+                  <div className="text-sm text-muted-foreground">Чек {order.receiptNumber}</div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="font-bold text-lg">Стіл №{order.tableNumber || "—"}</div>
+                <div className="text-2xl font-black text-blue-700">{parseFloat(order.totalAmount || "0").toFixed(2)} ₴</div>
+              </>
+            )}
             <div className="text-xs text-muted-foreground break-all max-w-xs">{url}</div>
           </div>
 
           <a href={url} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-2 text-blue-600 font-medium text-sm">
-            <ExternalLink className="w-4 h-4" /> Відкрити сторінку
+            className={`flex items-center gap-2 font-medium text-sm ${isFiscalMode ? "text-emerald-600" : "text-blue-600"}`}>
+            <ExternalLink className="w-4 h-4" />
+            {isFiscalMode ? "Відкрити фіскальний чек" : "Відкрити сторінку"}
           </a>
         </div>
       </div>
@@ -182,21 +202,74 @@ export default function Order() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="bg-blue-600 text-white px-4 pt-12 pb-4 safe-top">
+      <div className={`text-white px-4 pt-12 pb-4 safe-top ${order.status === "billed" ? "bg-emerald-600" : "bg-blue-600"}`}>
         <div className="flex items-center gap-3 mb-3">
           <button onClick={() => setLocation("/tables")} className="p-2 -ml-1 rounded-xl bg-white/20">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1">
             <h1 className="text-lg font-bold">Стіл №{order.tableNumber || "—"}</h1>
-            <p className="text-blue-200 text-sm">{order.guestName} · {ORDER_STATUS_LABEL[order.status] || order.status}</p>
+            <p className="text-white/80 text-sm">{order.guestName} · {ORDER_STATUS_LABEL[order.status] || order.status}</p>
           </div>
           <div className="text-right">
             <div className="text-xl font-black">{parseFloat(order.totalAmount || "0").toFixed(2)} ₴</div>
-            <div className="text-xs text-blue-200">{activeItems.length} позицій</div>
+            <div className="text-xs text-white/70">{activeItems.length} позицій</div>
           </div>
         </div>
       </div>
+
+      {/* Fiscal receipt banner — shown when billed */}
+      {order.status === "billed" && (
+        <div className={`mx-4 mt-4 rounded-2xl p-4 ${hasFiscal ? "bg-emerald-50 border border-emerald-200" : fiscalError ? "bg-amber-50 border border-amber-200" : "bg-gray-50 border border-gray-200"}`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${hasFiscal ? "bg-emerald-100" : fiscalError ? "bg-amber-100" : "bg-gray-100"}`}>
+              {hasFiscal
+                ? <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                : fiscalError
+                  ? <AlertTriangle className="w-5 h-5 text-amber-600" />
+                  : <Receipt className="w-5 h-5 text-gray-400" />
+              }
+            </div>
+            <div className="flex-1 min-w-0">
+              {hasFiscal ? (
+                <>
+                  <div className="text-sm font-semibold text-emerald-700">Фіскальний чек сформовано</div>
+                  <div className="text-xs text-emerald-600 mt-0.5">Checkbox · ДПС України</div>
+                </>
+              ) : fiscalError ? (
+                <>
+                  <div className="text-sm font-semibold text-amber-700">Помилка фіскалізації</div>
+                  <div className="text-xs text-amber-600 mt-0.5">Перевірте ПРРО в HMS</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-sm font-semibold text-gray-600">Замовлення закрито</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Фіскалізація не підключена</div>
+                </>
+              )}
+            </div>
+            {hasFiscal && (
+              <button
+                onClick={() => setQrMode("fiscal")}
+                className="shrink-0 bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-xl active:scale-95 transition-transform"
+              >
+                QR чек
+              </button>
+            )}
+          </div>
+          {hasFiscal && (
+            <a
+              href={order.fiscalReceiptUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2.5 flex items-center gap-1.5 text-xs text-emerald-600 hover:underline"
+            >
+              <ExternalLink className="w-3 h-3" />
+              Відкрити фіскальний чек на receipt.checkbox.ua
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Items list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 pb-safe">
@@ -253,7 +326,7 @@ export default function Order() {
         )}
 
         {/* Print bill + QR */}
-        {order.status !== "cancelled" && activeItems.length > 0 && (
+        {order.status !== "cancelled" && activeItems.length > 0 && order.status !== "billed" && (
           <div className="grid grid-cols-3 gap-2">
             <button onClick={printBill}
               className="py-3 rounded-2xl bg-gray-50 border border-gray-200 text-gray-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
@@ -268,6 +341,14 @@ export default function Order() {
               <CreditCard className="w-4 h-4" /> QR Опл.
             </button>
           </div>
+        )}
+
+        {/* Back to tables when billed */}
+        {order.status === "billed" && (
+          <button onClick={() => setLocation("/tables")}
+            className="w-full py-3.5 rounded-2xl bg-emerald-600 text-white font-bold text-base active:scale-95 transition-transform flex items-center justify-center gap-2">
+            <ArrowLeft className="w-5 h-5" /> Назад до столів
+          </button>
         )}
       </div>
     </div>

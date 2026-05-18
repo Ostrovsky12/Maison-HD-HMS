@@ -337,4 +337,33 @@ router.get("/:id/shifts", requireAuth, async (req, res) => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// GET /fb/prro/local-receipts  — чеки з нашої БД (fiscal_status = done|error)
+// ══════════════════════════════════════════════════════════════════════════════
+router.get("/local-receipts", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    if (!orgId) return res.status(403).json({ error: "No organization" });
+    const limit = Math.min(Number(req.query.limit || 50), 200);
+    const status = (req.query.status as string) || "done";
+
+    const { rows } = await pool().query(
+      `SELECT o.id, o.receipt_number, o.guest_name, o.total_amount, o.paid_amount,
+              o.payment_method, o.closed_at, o.fiscal_status,
+              o.fiscal_receipt_id, o.fiscal_receipt_url, o.fiscal_qr_url,
+              ft.number AS table_number,
+              le.name AS legal_entity_name
+       FROM fb_orders o
+       LEFT JOIN fb_tables ft ON ft.id = o.table_id
+       LEFT JOIN legal_entities le ON le.id = o.legal_entity_id
+       WHERE o.organization_id = $1
+         AND o.fiscal_status = ANY($2::text[])
+       ORDER BY o.closed_at DESC
+       LIMIT $3`,
+      [orgId, status === "all" ? ["done", "error"] : [status], limit]
+    );
+    res.json({ receipts: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
