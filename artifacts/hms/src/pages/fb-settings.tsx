@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
   Building2, Percent, CreditCard, Printer, Plus, Pencil, Trash2,
-  Check, AlertCircle, Wifi, Usb, Network,
+  Check, AlertCircle, Wifi, Usb, Network, QrCode, Clock, Wine,
 } from "lucide-react";
 
 const API = "/api";
@@ -55,6 +55,14 @@ type Printer = {
 };
 
 type LegalEntity = { id: number; name: string; type: string; };
+
+type TableGroup = {
+  id: number; name: string; description?: string;
+  icon: string; color: string;
+  is_24h: boolean; open_time: string; close_time: string;
+  is_minibar: boolean; sort_order: number; is_active: boolean;
+  table_count: number;
+};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +110,225 @@ const DEFAULT_PAYMENT_FORMS = [
   { name: "Термінал", code: "CARD", type: "card", sortOrder: 1 },
   { name: "LiqPay", code: "LIQPAY", type: "liqpay", sortOrder: 2 },
 ];
+
+// ── Table Groups Tab ───────────────────────────────────────────────────────────
+
+const GROUP_ICONS = ["🍽", "🍸", "🍹", "🍻", "🛏", "🏊", "🌿", "☕", "🎭", "🍕", "🥩", "🍣"];
+const GROUP_COLORS = [
+  "#6b7280", "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
+  "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316",
+];
+
+function TableGroupsTab() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<TableGroup | null>(null);
+  const [form, setForm] = useState({
+    name: "", description: "", icon: "🍽", color: "#6b7280",
+    is24h: false, openTime: "08:00", closeTime: "22:00",
+    isMinibar: false, sortOrder: "0",
+  });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["fb-table-groups"],
+    queryFn: () => apiFetch("/fb/settings/table-groups"),
+  });
+
+  const save = useMutation({
+    mutationFn: (body: any) => editing
+      ? apiFetch(`/fb/settings/table-groups/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) })
+      : apiFetch("/fb/settings/table-groups", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["fb-table-groups"] }); setOpen(false); toast({ title: "Збережено" }); },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: number) => apiFetch(`/fb/settings/table-groups/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fb-table-groups"] }),
+  });
+
+  function openNew() {
+    setEditing(null);
+    setForm({ name: "", description: "", icon: "🍽", color: "#6b7280", is24h: false, openTime: "08:00", closeTime: "22:00", isMinibar: false, sortOrder: "0" });
+    setOpen(true);
+  }
+
+  function openEdit(g: TableGroup) {
+    setEditing(g);
+    setForm({
+      name: g.name, description: g.description || "", icon: g.icon, color: g.color,
+      is24h: g.is_24h, openTime: g.open_time, closeTime: g.close_time,
+      isMinibar: g.is_minibar, sortOrder: String(g.sort_order),
+    });
+    setOpen(true);
+  }
+
+  const groups: TableGroup[] = data?.tableGroups || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-sm">Групи QR-кодів столів</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Об'єднайте столи у групи з розкладом роботи. Міні-бар — 24/7, без зміни касира.
+          </p>
+        </div>
+        <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" />Додати групу</Button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Завантаження...</div>
+      ) : groups.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center text-muted-foreground text-sm">
+          <QrCode className="w-8 h-8 mx-auto mb-2 opacity-30" />
+          Немає груп QR-кодів. Натисніть «Додати групу» щоб розпочати.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {groups.map(g => (
+            <div key={g.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 text-white font-bold"
+                   style={{ background: g.color }}>
+                {g.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium">{g.name}</span>
+                  {g.is_minibar && (
+                    <Badge className="text-[10px] h-4 gap-0.5 bg-purple-100 text-purple-700 border-purple-200">
+                      <Wine className="w-2.5 h-2.5" />Міні-бар
+                    </Badge>
+                  )}
+                  {g.is_24h ? (
+                    <Badge variant="secondary" className="text-[10px] h-4">24/7</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] h-4 gap-0.5">
+                      <Clock className="w-2.5 h-2.5" />{g.open_time}–{g.close_time}
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="text-[10px] h-4">{g.table_count} столів</Badge>
+                </div>
+                {g.description && <p className="text-xs text-muted-foreground mt-0.5 truncate">{g.description}</p>}
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(g)}>
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                  onClick={() => { if (confirm(`Видалити групу «${g.name}»?`)) remove.mutate(g.id); }}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-3 flex gap-2.5">
+        <Wine className="w-4 h-4 text-purple-500 shrink-0 mt-0.5" />
+        <p className="text-xs text-purple-700 dark:text-purple-400">
+          <span className="font-semibold">Міні-бар після 22:00:</span> Закон України забороняє продаж алкоголю з 22:00 до 08:00.
+          LiqPay-оплата автоматично переключиться на передавторизацію (hold), кошти підтвердяться після 08:00.
+        </p>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Редагувати групу" : "Нова група QR-кодів"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Назва *</Label>
+                <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ресторан, Бар, Міні-бар..." />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Порядок сортування</Label>
+                <Input type="number" value={form.sortOrder} onChange={e => setForm(f => ({ ...f, sortOrder: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Опис (необов'язково)</Label>
+              <Input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Короткий опис групи..." />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Іконка</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {GROUP_ICONS.map(ic => (
+                    <button key={ic} onClick={() => setForm(f => ({ ...f, icon: ic }))}
+                      className={`w-8 h-8 rounded-lg text-base flex items-center justify-center transition-all ${form.icon === ic ? "ring-2 ring-primary scale-110" : "bg-stone-100 hover:bg-stone-200"}`}>
+                      {ic}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Колір</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {GROUP_COLORS.map(c => (
+                    <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))}
+                      className={`w-7 h-7 rounded-lg transition-all ${form.color === c ? "ring-2 ring-offset-1 ring-stone-400 scale-110" : ""}`}
+                      style={{ background: c }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center gap-3 p-3 rounded-lg border">
+                <Switch id="is24h" checked={form.is24h} onCheckedChange={v => setForm(f => ({ ...f, is24h: v }))} />
+                <Label htmlFor="is24h" className="cursor-pointer text-sm">Цілодобово (24/7)</Label>
+              </div>
+              <div className="flex items-center gap-3 p-3 rounded-lg border">
+                <Switch id="isMinibar" checked={form.isMinibar} onCheckedChange={v => setForm(f => ({ ...f, isMinibar: v }))} />
+                <Label htmlFor="isMinibar" className="cursor-pointer text-sm flex items-center gap-1.5">
+                  <Wine className="w-3.5 h-3.5 text-purple-500" />Міні-бар
+                </Label>
+              </div>
+            </div>
+
+            {!form.is24h && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Відкривається</Label>
+                  <Input type="time" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Закривається</Label>
+                  <Input type="time" value={form.closeTime} onChange={e => setForm(f => ({ ...f, closeTime: e.target.value }))} />
+                </div>
+              </div>
+            )}
+
+            {form.isMinibar && (
+              <div className="rounded-lg bg-purple-50 border border-purple-200 p-3 text-xs text-purple-700">
+                Міні-бар завжди приймає замовлення (обходить перевірку зміни каси).
+                Після 22:00 LiqPay автоматично використовує hold-авторизацію.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Скасувати</Button>
+            <Button onClick={() => save.mutate({
+              name: form.name, description: form.description || undefined,
+              icon: form.icon, color: form.color,
+              is24h: form.is24h, openTime: form.openTime, closeTime: form.closeTime,
+              isMinibar: form.isMinibar, sortOrder: parseInt(form.sortOrder) || 0,
+            })} disabled={!form.name || save.isPending}>
+              {save.isPending ? "Збереження..." : "Зберегти"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 // ── Tax Groups Tab ─────────────────────────────────────────────────────────────
 
@@ -658,19 +885,25 @@ export default function FbSettingsPage() {
           </p>
         </div>
 
-        <Tabs defaultValue="tax">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="tax" className="gap-1.5 text-xs">
-              <Percent className="w-3.5 h-3.5" />Групи ПДВ
+        <Tabs defaultValue="groups">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="groups" className="gap-1 text-xs">
+              <QrCode className="w-3 h-3" />QR-Групи
             </TabsTrigger>
-            <TabsTrigger value="payment" className="gap-1.5 text-xs">
-              <CreditCard className="w-3.5 h-3.5" />Форми оплати
+            <TabsTrigger value="tax" className="gap-1 text-xs">
+              <Percent className="w-3 h-3" />Групи ПДВ
             </TabsTrigger>
-            <TabsTrigger value="printers" className="gap-1.5 text-xs">
-              <Printer className="w-3.5 h-3.5" />Принтери
+            <TabsTrigger value="payment" className="gap-1 text-xs">
+              <CreditCard className="w-3 h-3" />Форми оплати
+            </TabsTrigger>
+            <TabsTrigger value="printers" className="gap-1 text-xs">
+              <Printer className="w-3 h-3" />Принтери
             </TabsTrigger>
           </TabsList>
 
+          <TabsContent value="groups" className="mt-4">
+            <TableGroupsTab />
+          </TabsContent>
           <TabsContent value="tax" className="mt-4">
             <TaxGroupsTab />
           </TabsContent>

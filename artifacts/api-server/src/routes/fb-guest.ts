@@ -103,6 +103,31 @@ async function createPrintJobs(
   }
 }
 
+// ── Helper: check if a table group is currently open ─────────────────────────
+function isGroupOpen(group: { is_24h: boolean; open_time: string; close_time: string } | null): {
+  open: boolean; opensAt: string | null;
+} {
+  if (!group) return { open: true, opensAt: null }; // no group = always open
+  if (group.is_24h) return { open: true, opensAt: null };
+  // Use Kyiv time (UTC+3 in winter, UTC+2 in summer — approximate with UTC+2 for simplicity)
+  const now = new Date();
+  const kyivOffset = 3 * 60; // UTC+3 (approximate, doesn't need DST precision for shift logic)
+  const kyivMinutes = (now.getUTCHours() * 60 + now.getUTCMinutes() + kyivOffset) % (24 * 60);
+  const [oh, om] = group.open_time.split(":").map(Number);
+  const [ch, cm] = group.close_time.split(":").map(Number);
+  const openMinutes = oh * 60 + om;
+  const closeMinutes = ch * 60 + cm;
+  let open: boolean;
+  if (openMinutes <= closeMinutes) {
+    open = kyivMinutes >= openMinutes && kyivMinutes < closeMinutes;
+  } else {
+    // overnight: e.g. 22:00 – 06:00
+    open = kyivMinutes >= openMinutes || kyivMinutes < closeMinutes;
+  }
+  const opensAt = open ? null : group.open_time;
+  return { open, opensAt };
+}
+
 // ─── GET /fb/public/guest-menu?tid=<tableId> ─────────────────────────────────
 router.get("/public/guest-menu", async (req, res) => {
   const { tid } = req.query;
@@ -110,7 +135,7 @@ router.get("/public/guest-menu", async (req, res) => {
 
   try {
     const { rows: tableRows } = await pool.query(
-      `SELECT ft.id, ft.number, ft.location, ft.organization_id,
+      `SELECT ft.id, ft.number, ft.location, ft.organization_id, ft.group_id,
               o.name as org_name, o.slug as org_slug
        FROM fb_tables ft
        JOIN organizations o ON o.id = ft.organization_id
@@ -118,7 +143,25 @@ router.get("/public/guest-menu", async (req, res) => {
       [tid],
     );
     if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
-    const { organization_id: orgId, org_name, org_slug, number: tableNumber, location: tableLocation } = tableRows[0];
+    const { organization_id: orgId, org_name, org_slug, number: tableNumber, location: tableLocation, group_id } = tableRows[0];
+
+    // Fetch group info if assigned
+    let groupInfo: { id: number; name: string; icon: string; color: string; is_minibar: boolean; is_24h: boolean; open_time: string; close_time: string } | null = null;
+    let groupClosed = false;
+    let groupOpensAt: string | null = null;
+    if (group_id) {
+      const { rows: grRows } = await pool.query(
+        `SELECT id, name, icon, color, is_minibar, is_24h, open_time, close_time
+         FROM fb_table_groups WHERE id = $1 AND is_active = true LIMIT 1`,
+        [group_id],
+      );
+      if (grRows[0]) {
+        groupInfo = grRows[0];
+        const status = isGroupOpen(grRows[0]);
+        groupClosed = !status.open;
+        groupOpensAt = status.opensAt;
+      }
+    }
 
     const { rows: cats } = await pool.query(
       `SELECT id, name, description, color, parent_id, station FROM fb_categories
@@ -167,7 +210,16 @@ router.get("/public/guest-menu", async (req, res) => {
     const branding = brandingRows[0]?.data || {};
 
     const itemsWithMods = items.map((i: any) => ({ ...i, modifier_groups: modifiersByItem[i.id] || [] }));
-    res.json({ orgId, orgName: org_name, orgSlug: org_slug, tableNumber, tableLocation, categories: cats, items: itemsWithMods, branding });
+    res.json({
+      orgId, orgName: org_name, orgSlug: org_slug,
+      tableNumber, tableLocation,
+      categories: cats, items: itemsWithMods, branding,
+      group: groupInfo
+        ? { id: groupInfo.id, name: groupInfo.name, icon: groupInfo.icon, color: groupInfo.color, isMinibar: groupInfo.is_minibar }
+        : null,
+      groupClosed,
+      groupOpensAt,
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -182,11 +234,43 @@ router.post("/public/guest-orders", async (req, res) => {
 
   try {
     const { rows: tableRows } = await pool.query(
-      `SELECT id, number, organization_id FROM fb_tables WHERE id = $1 AND is_active = true LIMIT 1`,
+      `SELECT ft.id, ft.number, ft.organization_id, ft.group_id,
+              tg.is_minibar, tg.is_24h, tg.open_time, tg.close_time
+       FROM fb_tables ft
+       LEFT JOIN fb_table_groups tg ON tg.id = ft.group_id AND tg.is_active = true
+       WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
       [tableId],
     );
     if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
-    const orgId = tableRows[0].organization_id;
+    const { organization_id: orgId, is_minibar, is_24h, open_time, close_time } = tableRows[0];
+
+    // Minibar groups bypass cashbox/shift check (they operate 24/7 independently)
+    const isMinibar = is_minibar === true;
+
+    if (!isMinibar) {
+      // Check group working hours
+      const groupStatus = isGroupOpen(is_24h != null ? { is_24h, open_time, close_time } : null);
+      if (!groupStatus.open) {
+        return res.status(403).json({
+          error: "group_closed",
+          message: `Замовлення зараз недоступне. Відчиняємось о ${groupStatus.opensAt}`,
+          opensAt: groupStatus.opensAt,
+        });
+      }
+
+      // Check cashbox/shift is open for non-minibar tables
+      const { rows: shiftRows } = await pool.query(
+        `SELECT id FROM cashbox_sessions
+         WHERE organization_id = $1 AND status = 'open' LIMIT 1`,
+        [orgId],
+      );
+      if (!shiftRows[0]) {
+        return res.status(403).json({
+          error: "shift_closed",
+          message: "Ресторан зараз не приймає замовлення. Зміна закрита.",
+        });
+      }
+    }
 
     const safeTipPct = Math.max(0, Math.min(100, parseFloat(tipPct) || 0));
     const { rows: orderRows } = await pool.query(
@@ -245,15 +329,19 @@ router.post("/public/liqpay-checkout", async (req, res) => {
   if (!tableId) return res.status(400).json({ error: "tableId required" });
 
   try {
-    // 1. Resolve table → org
+    // 1. Resolve table → org + group (minibar check)
     const { rows: tableRows } = await pool.query(
-      `SELECT ft.id, ft.number, ft.location, ft.organization_id, o.name as org_name
-       FROM fb_tables ft JOIN organizations o ON o.id = ft.organization_id
+      `SELECT ft.id, ft.number, ft.location, ft.organization_id, o.name as org_name,
+              tg.is_minibar
+       FROM fb_tables ft
+       JOIN organizations o ON o.id = ft.organization_id
+       LEFT JOIN fb_table_groups tg ON tg.id = ft.group_id AND tg.is_active = true
        WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
       [tableId],
     );
     if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
-    const { organization_id: orgId, org_name, number: tableNumber } = tableRows[0];
+    const { organization_id: orgId, org_name, number: tableNumber, is_minibar } = tableRows[0];
+    const isMinibar = is_minibar === true;
 
     // 2. Get current open order
     const { rows: orderRows } = await pool.query(
@@ -287,18 +375,23 @@ router.post("/public/liqpay-checkout", async (req, res) => {
     const privateKey = decrypt(le.liqpay_private_key) || le.liqpay_private_key;
 
     // 4. Generate checkout URL
+    // Minibar + Kyiv time 22:00–08:00 → Ukrainian law forbids alcohol sale → use "hold" (pre-auth)
+    const kyivHour = (new Date().getUTCHours() + 3) % 24;
+    const alcoholRestricted = isMinibar && (kyivHour >= 22 || kyivHour < 8);
+    const liqpayAction = alcoholRestricted ? "hold" : "pay";
+
     const orderId = `fb-${order.id}-${Date.now()}`;
     const { url } = generateLiqPayForm({
-      action: "pay",
+      action: liqpayAction,
       amount,
       currency: "UAH",
-      description: `${org_name} · Стіл №${tableNumber} · Замовлення #${order.id}`,
+      description: `${org_name} · ${isMinibar ? "Міні-бар" : `Стіл №${tableNumber}`} · Замовлення #${order.id}`,
       orderId,
       publicKey,
       privateKey,
     });
 
-    res.json({ url, amount, orderId });
+    res.json({ url, amount, orderId, liqpayAction, alcoholRestricted });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

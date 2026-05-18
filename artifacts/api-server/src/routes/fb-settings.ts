@@ -365,4 +365,82 @@ router.delete("/admin-pin", requireAuth, async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════════
+// QR TABLE GROUPS
+// ══════════════════════════════════════════════════════════════════
+
+router.get("/table-groups", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    if (!orgId) return res.status(403).json({ error: "No organization" });
+    const r = await pool().query(
+      `SELECT tg.*, COUNT(ft.id)::int AS table_count
+       FROM fb_table_groups tg
+       LEFT JOIN fb_tables ft ON ft.group_id = tg.id AND ft.is_active = true
+       WHERE tg.organization_id = $1 AND tg.is_active = true
+       GROUP BY tg.id
+       ORDER BY tg.sort_order ASC, tg.name ASC`,
+      [orgId]
+    );
+    res.json({ tableGroups: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/table-groups", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    if (!orgId) return res.status(403).json({ error: "No organization" });
+    const { name, description, icon = "🍽", color = "#6b7280", is24h = false,
+            openTime = "08:00", closeTime = "22:00", isMinibar = false, sortOrder = 0 } = req.body;
+    if (!name) return res.status(400).json({ error: "name required" });
+    const r = await pool().query(
+      `INSERT INTO fb_table_groups
+         (organization_id, name, description, icon, color, is_24h, open_time, close_time, is_minibar, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [orgId, name, description || null, icon, color, is24h, openTime, closeTime, isMinibar, sortOrder]
+    );
+    res.status(201).json({ tableGroup: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/table-groups/:id", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = Number(req.params.id);
+    const { name, description, icon, color, is24h, openTime, closeTime, isMinibar, sortOrder, isActive } = req.body;
+    const r = await pool().query(
+      `UPDATE fb_table_groups SET
+         name        = COALESCE($1, name),
+         description = COALESCE($2, description),
+         icon        = COALESCE($3, icon),
+         color       = COALESCE($4, color),
+         is_24h      = COALESCE($5, is_24h),
+         open_time   = COALESCE($6, open_time),
+         close_time  = COALESCE($7, close_time),
+         is_minibar  = COALESCE($8, is_minibar),
+         sort_order  = COALESCE($9, sort_order),
+         is_active   = COALESCE($10, is_active),
+         updated_at  = NOW()
+       WHERE id = $11 AND organization_id = $12 RETURNING *`,
+      [name||null, description||null, icon||null, color||null, is24h??null,
+       openTime||null, closeTime||null, isMinibar??null, sortOrder??null, isActive??null, id, orgId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Not found" });
+    res.json({ tableGroup: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/table-groups/:id", requireAuth, async (req, res) => {
+  try {
+    const orgId = getOrg(req);
+    const id = Number(req.params.id);
+    await pool().query(
+      `UPDATE fb_table_groups SET is_active = false, updated_at = NOW()
+       WHERE id = $1 AND organization_id = $2`,
+      [id, orgId]
+    );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

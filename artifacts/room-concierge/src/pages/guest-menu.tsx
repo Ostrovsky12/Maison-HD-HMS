@@ -382,6 +382,10 @@ export default function GuestMenu() {
   const [showPayPanel, setShowPayPanel] = useState(false);
   const [payTipPct, setPayTipPct] = useState<0 | 5 | 10 | 15>(0);
 
+  const [groupInfo, setGroupInfo] = useState<{ id: number; name: string; icon: string; color: string; isMinibar: boolean } | null>(null);
+  const [groupClosed, setGroupClosed] = useState(false);
+  const [groupOpensAt, setGroupOpensAt] = useState<string | null>(null);
+
   // Home/Pay view navigation
   const [view, setView] = useState<"home" | "menu" | "pay">("home");
   const [callWaiterStatus, setCallWaiterStatus] = useState<null | "loading" | "sent">(null);
@@ -412,6 +416,9 @@ export default function GuestMenu() {
       setCategories(menu.categories || []);
       setItems(menu.items || []);
       setBranding(menu.branding || {});
+      setGroupInfo(menu.group || null);
+      setGroupClosed(!!menu.groupClosed);
+      setGroupOpensAt(menu.groupOpensAt || null);
       if (tableOrder?.order) {
         setExistingOrderId(tableOrder.order.id);
         setExistingOrderTotal(parseFloat(tableOrder.order.total_amount || "0"));
@@ -533,6 +540,33 @@ export default function GuestMenu() {
         <div className="text-5xl mb-4">🍽️</div>
         <p className="text-stone-500">{error}</p>
       </div>
+    </div>
+  );
+
+  if (groupClosed) return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-8 max-w-lg mx-auto text-center"
+         style={{ background: "linear-gradient(160deg, #1c1c1c 0%, #2d2d2d 100%)" }}>
+      <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring" }}>
+        <div className="text-7xl mb-6">{groupInfo?.icon || "🕐"}</div>
+        <h2 className="text-2xl font-bold text-white mb-3">
+          {groupInfo?.name || "Заклад"} зачинений
+        </h2>
+        <p className="text-stone-400 mb-6 leading-relaxed">
+          Замовлення через QR-меню наразі недоступне.
+          {groupOpensAt && (
+            <> Відчиняємось о <span className="text-white font-bold">{groupOpensAt}</span>.</>
+          )}
+        </p>
+        {branding.logo_url && (
+          <img src={branding.logo_url} alt={orgName} className="h-10 w-auto object-contain mx-auto mb-6 opacity-60" />
+        )}
+        <p className="text-stone-600 text-sm">
+          {orgName} · {tableLocation || `Стіл ${tableNumber}`}
+        </p>
+        <p className="text-stone-700 text-xs mt-4">
+          Для термінових питань — зверніться до персоналу
+        </p>
+      </motion.div>
     </div>
   );
 
@@ -831,6 +865,20 @@ export default function GuestMenu() {
                 </div>
               </button>
 
+              {groupInfo?.isMinibar && (() => {
+                const kyivHour = (new Date().getUTCHours() + 3) % 24;
+                const restricted = kyivHour >= 22 || kyivHour < 8;
+                if (!restricted) return null;
+                return (
+                  <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-left">
+                    <p className="text-xs font-bold text-amber-800 mb-1">⚠️ Обмеження продажу алкоголю</p>
+                    <p className="text-xs text-amber-700 leading-relaxed">
+                      Відповідно до Закону України (ст.&nbsp;15‑3), продаж алкогольних напоїв заборонено з&nbsp;22:00 до&nbsp;08:00.
+                      Оплата буде оформлена як <strong>передавторизація</strong> (hold) — кошти будуть підтверджені після 08:00.
+                    </p>
+                  </div>
+                );
+              })()}
               <LiqPayButton tableId={tableId} total={total} accent={accent} />
             </div>
           )}

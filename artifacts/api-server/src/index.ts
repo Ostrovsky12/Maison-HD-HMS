@@ -638,6 +638,28 @@ async function ensureSchema() {
     UPDATE cashbox_sessions SET cash_out = 0 WHERE cash_out IS NULL;
   `);
 
+  // QR Table Groups — grouping of tables with working hours & minibar flag
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS fb_table_groups (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      name            VARCHAR(100) NOT NULL,
+      description     TEXT,
+      icon            VARCHAR(10)  NOT NULL DEFAULT '🍽',
+      color           VARCHAR(20)  NOT NULL DEFAULT '#6b7280',
+      is_24h          BOOLEAN      NOT NULL DEFAULT false,
+      open_time       VARCHAR(5)   NOT NULL DEFAULT '08:00',
+      close_time      VARCHAR(5)   NOT NULL DEFAULT '22:00',
+      is_minibar      BOOLEAN      NOT NULL DEFAULT false,
+      sort_order      INTEGER      NOT NULL DEFAULT 0,
+      is_active       BOOLEAN      NOT NULL DEFAULT true,
+      created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_fb_table_groups_org ON fb_table_groups (organization_id, sort_order);
+    ALTER TABLE fb_tables ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES fb_table_groups(id) ON DELETE SET NULL;
+  `);
+
   // Table notifications (waiter calls, payment requests from QR menu)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS fb_table_notifications (
