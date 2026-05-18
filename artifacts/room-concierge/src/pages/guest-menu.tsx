@@ -647,7 +647,7 @@ export default function GuestMenu() {
           <div className="flex-1 min-w-0">
             <div className="font-bold text-stone-900 text-base">Оплатити рахунок</div>
             <div className="text-sm text-stone-500 mt-0.5">
-              {existingOrderTotal > 0 ? `До сплати: ${existingOrderTotal.toFixed(0)} ₴` : "Готівка, картка або онлайн"}
+              {existingOrderTotal > 0 ? `До сплати: ${existingOrderTotal.toFixed(0)} ₴` : "Готівка або банківська карта"}
             </div>
           </div>
           <div className="shrink-0">
@@ -675,10 +675,10 @@ export default function GuestMenu() {
             {payConfirmed === "cash" ? "💵" : "💳"}
           </div>
           <h2 className="text-2xl font-serif text-stone-900 mb-2">
-            {payConfirmed === "cash" ? "Офіціант іде до вас!" : "Термінал вже несуть!"}
+            {payConfirmed === "cash" ? "Офіціант іде до вас!" : "Офіціант несе термінал!"}
           </h2>
           <p className="text-stone-500 mb-2">
-            {payConfirmed === "cash" ? "Офіціант підготує здачу" : "Офіціант принесе платіжний термінал"}
+            {payConfirmed === "cash" ? "Офіціант принесе рахунок і здачу" : "Розрахунок банківською карткою"}
           </p>
           <p className="text-stone-400 text-sm mb-8">
             Стіл {tableNumber}{tableLocation ? ` · ${tableLocation}` : ""}
@@ -764,7 +764,7 @@ export default function GuestMenu() {
                 <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center text-xl shrink-0">💵</div>
                 <div>
                   <div className="font-bold text-stone-900 text-sm">Готівка</div>
-                  <div className="text-xs text-stone-500">Офіціант принесе здачу</div>
+                  <div className="text-xs text-stone-500">Офіціант принесе рахунок і здачу</div>
                 </div>
               </button>
 
@@ -772,24 +772,10 @@ export default function GuestMenu() {
                 className="w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 border-stone-200 hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all text-left">
                 <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl shrink-0">💳</div>
                 <div>
-                  <div className="font-bold text-stone-900 text-sm">Картка / Термінал</div>
-                  <div className="text-xs text-stone-500">Офіціант принесе термінал</div>
+                  <div className="font-bold text-stone-900 text-sm">Банківська карта</div>
+                  <div className="text-xs text-stone-500">Офіціант принесе термінал до столу</div>
                 </div>
               </button>
-
-              {orderId && (
-                <button onClick={goToPay}
-                  className="w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 border-stone-200 hover:border-purple-400 hover:bg-purple-50 active:scale-[0.98] transition-all text-left">
-                  <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-xl shrink-0">📱</div>
-                  <div>
-                    <div className="font-bold text-stone-900 text-sm">Apple Pay / Google Pay</div>
-                    <div className="text-xs text-stone-500">Оплатіть самостійно через QR</div>
-                  </div>
-                  <svg className="w-4 h-4 text-stone-300 ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              )}
             </div>
           )}
         </div>
