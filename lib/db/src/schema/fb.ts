@@ -116,6 +116,54 @@ export const fbOrderItemsTable = pgTable("fb_order_items", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── LEGACY F&B TABLES ────────────────────────────────────────────────────────
+// Kept in schema to prevent Drizzle from dropping them during deployment.
+// These tables exist in production and must not be removed.
+
+export const fbConfigSettingsTable = pgTable("fb_config_settings", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  section:        varchar("section", { length: 100 }).notNull(),
+  data:           jsonb("data").notNull().default({}),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const fbOrderSourcesTable = pgTable("fb_order_sources", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  name:           varchar("name", { length: 100 }).notNull(),
+  showOnPos:      boolean("show_on_pos").notNull().default(true),
+  sortOrder:      integer("sort_order").notNull().default(0),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
+export const fbPaymentMethodsTable = pgTable("fb_payment_methods", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  name:           varchar("name", { length: 100 }).notNull(),
+  type:           varchar("type", { length: 30 }).notNull().default("cash"),
+  commissionPct:  numeric("commission_pct", { precision: 5, scale: 2 }).notNull().default("0"),
+  showOnPos:      boolean("show_on_pos").notNull().default(true),
+  color:          varchar("color", { length: 20 }),
+  iconCode:       varchar("icon_code", { length: 50 }),
+  sortOrder:      integer("sort_order").notNull().default(0),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
+export const fbHallTablesTable = pgTable("fb_hall_tables", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  hallId:         integer("hall_id"),
+  hallName:       varchar("hall_name", { length: 100 }),
+  tableNumber:    integer("table_number").notNull(),
+  posX:           integer("pos_x").notNull().default(0),
+  posY:           integer("pos_y").notNull().default(0),
+  width:          integer("width").notNull().default(80),
+  height:         integer("height").notNull().default(80),
+  seats:          integer("seats").notNull().default(4),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
 export type FbCategory = typeof fbCategoriesTable.$inferSelect;
 export type FbItem = typeof fbItemsTable.$inferSelect;
 export type FbTable = typeof fbTablesTable.$inferSelect;
