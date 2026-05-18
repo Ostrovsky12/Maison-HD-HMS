@@ -45,6 +45,14 @@ function timeAgo(dateStr: string) {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+interface TableNotification {
+  id: number;
+  table_number: string;
+  table_location: string;
+  type: "waiter_call" | "payment_cash" | "payment_terminal";
+  payload: { total?: string; orderId?: number } | null;
+  created_at: string;
+}
 interface OrderItem { id: number; name: string; quantity: number; price: string; total_price: string; notes?: string; }
 interface GuestOrder {
   id: number; status: string; guest_name: string; guest_count: number;
@@ -1355,7 +1363,9 @@ export default function FbCashier() {
   const [leftTab, setLeftTab] = useState<"qr" | "archive">("qr");
   const [cashModalOpen, setCashModalOpen] = useState(false);
   const [xReportOpen, setXReportOpen] = useState(false);
+  const [notifications, setNotifications] = useState<TableNotification[]>([]);
   const knownIds = useRef<Set<number>>(new Set());
+  const knownNotifIds = useRef<Set<number>>(new Set());
 
   const fetchPending = useCallback(async () => {
     try {
@@ -1368,6 +1378,24 @@ export default function FbCashier() {
       if (newOnes.length > 0) { playAlert(); newOnes.forEach(o => knownIds.current.add(o.id)); }
     } catch { setConnected(false); }
   }, []);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const data = await apiFetch("/notifications");
+      const incoming: TableNotification[] = data.notifications || [];
+      setNotifications(incoming);
+      const newOnes = incoming.filter(n => !knownNotifIds.current.has(n.id));
+      if (newOnes.length > 0) { playAlert(); newOnes.forEach(n => knownNotifIds.current.add(n.id)); }
+    } catch {}
+  }, []);
+
+  const dismissNotification = async (id: number) => {
+    try {
+      await apiFetch(`/notifications/${id}/dismiss`, { method: "POST" });
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      knownNotifIds.current.delete(id);
+    } catch {}
+  };
 
   const fetchActive = useCallback(async () => {
     try {
@@ -1398,11 +1426,12 @@ export default function FbCashier() {
   }, []);
 
   useEffect(() => {
-    fetchPending(); fetchActive();
+    fetchPending(); fetchActive(); fetchNotifications();
     const t1 = setInterval(fetchPending, 3000);
     const t2 = setInterval(fetchActive, 10000);
-    return () => { clearInterval(t1); clearInterval(t2); };
-  }, [fetchPending, fetchActive]);
+    const t3 = setInterval(fetchNotifications, 4000);
+    return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); };
+  }, [fetchPending, fetchActive, fetchNotifications]);
 
   const handleAccept = async (id: number) => {
     setAccepting(id);
@@ -1474,9 +1503,9 @@ export default function FbCashier() {
             <div className="flex items-center gap-3">
               <div className="relative">
                 <Bell className="w-6 h-6 text-muted-foreground" />
-                {pendingOrders.length > 0 && (
+                {(pendingOrders.length + notifications.length) > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-bounce">
-                    {pendingOrders.length}
+                    {pendingOrders.length + notifications.length}
                   </span>
                 )}
               </div>
@@ -1530,6 +1559,46 @@ export default function FbCashier() {
               {/* Tab content */}
               {leftTab === "qr" ? (
                 <div className="flex-1 overflow-y-auto p-5">
+
+                  {/* ── Table notifications (waiter calls, payment requests) ── */}
+                  {notifications.length > 0 && (
+                    <div className="mb-4 space-y-2">
+                      {notifications.map(n => {
+                        const isWaiter = n.type === "waiter_call";
+                        const isCash = n.type === "payment_cash";
+                        const tableLabel = n.table_location
+                          ? `${n.table_location}${n.table_number ? ` · №${n.table_number}` : ""}`
+                          : `Стіл №${n.table_number}`;
+                        const total = n.payload?.total ? parseFloat(n.payload.total).toFixed(0) : null;
+
+                        return (
+                          <div key={n.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 animate-pulse-border ${
+                            isWaiter ? "bg-blue-50 border-blue-300" : isCash ? "bg-green-50 border-green-300" : "bg-purple-50 border-purple-300"
+                          }`}>
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 ${
+                              isWaiter ? "bg-blue-100" : isCash ? "bg-green-100" : "bg-purple-100"
+                            }`}>
+                              {isWaiter ? "🛎️" : isCash ? "💵" : "💳"}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-bold text-sm ${isWaiter ? "text-blue-800" : isCash ? "text-green-800" : "text-purple-800"}`}>
+                                {isWaiter ? "Виклик офіціанта" : isCash ? "Гість чекає здачу" : "Принесіть термінал"}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {tableLabel}{total ? ` · ${total} ₴` : ""} · {timeAgo(n.created_at)}
+                              </div>
+                            </div>
+                            <button onClick={() => dismissNotification(n.id)}
+                              className="shrink-0 w-7 h-7 rounded-full bg-white/80 flex items-center justify-center text-muted-foreground hover:bg-white transition-colors"
+                              title="Відхилити">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {pendingOrders.length > 0 && (
                     <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center shrink-0 animate-bounce">

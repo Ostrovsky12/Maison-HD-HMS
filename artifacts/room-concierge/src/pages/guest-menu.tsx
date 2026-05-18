@@ -328,6 +328,12 @@ export default function GuestMenu() {
   const [showPayPanel, setShowPayPanel] = useState(false);
   const [payTipPct, setPayTipPct] = useState<0 | 5 | 10 | 15>(0);
 
+  // Home/Pay view navigation
+  const [view, setView] = useState<"home" | "menu" | "pay">("home");
+  const [callWaiterStatus, setCallWaiterStatus] = useState<null | "loading" | "sent">(null);
+  const [payConfirmed, setPayConfirmed] = useState<null | "cash" | "terminal">(null);
+  const [payViewTip, setPayViewTip] = useState<0 | 5 | 10 | 15>(0);
+
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
 
   const [showAI, setShowAI] = useState(false);
@@ -482,6 +488,29 @@ export default function GuestMenu() {
     window.location.href = `${base}/pay/${orderId}`;
   };
 
+  const callWaiter = async () => {
+    if (!tid || callWaiterStatus === "loading" || callWaiterStatus === "sent") return;
+    setCallWaiterStatus("loading");
+    try {
+      await fetch(`${API}/fb/public/call-waiter`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableId: parseInt(tid) }),
+      });
+      setCallWaiterStatus("sent");
+    } catch { setCallWaiterStatus(null); }
+  };
+
+  const requestPayment = async (method: "cash" | "terminal") => {
+    if (!tid) return;
+    try {
+      await fetch(`${API}/fb/public/request-payment`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableId: parseInt(tid), method }),
+      });
+      setPayConfirmed(method);
+    } catch { alert("Помилка. Спробуйте ще раз."); }
+  };
+
   if (ordered) return (
     <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-6 text-center">
       <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring" }} className="w-full max-w-sm">
@@ -538,6 +567,236 @@ export default function GuestMenu() {
     </div>
   );
 
+  // ── Home view ──────────────────────────────────────────────────────────────
+  if (view === "home") return (
+    <div className="min-h-screen flex flex-col max-w-lg mx-auto" style={{ background: `linear-gradient(160deg, ${primary}08 0%, #fff8f0 100%)` }}>
+      {/* Top brand area */}
+      <div className="flex flex-col items-center pt-14 pb-8 px-6 text-center">
+        {branding.logo_url ? (
+          <img src={branding.logo_url} alt={orgName} className="h-16 w-auto object-contain rounded-2xl mb-4 shadow-sm" />
+        ) : (
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-4 shadow-md"
+            style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}>
+            🍽
+          </div>
+        )}
+        <h1 className="text-2xl font-serif text-stone-900 mb-1">{orgName}</h1>
+        <p className="text-sm text-stone-400">
+          {tableLocation ? tableLocation : `Стіл ${tableNumber}`}
+          {tableLocation && tableNumber ? ` · №${tableNumber}` : ""}
+        </p>
+        <p className="text-base text-stone-600 mt-3 font-medium">Ласкаво просимо! 👋</p>
+      </div>
+
+      {/* Action cards */}
+      <div className="flex-1 px-5 space-y-3 pb-10">
+        {/* Call waiter */}
+        <button onClick={callWaiter} disabled={callWaiterStatus === "loading"}
+          className={`w-full flex items-center gap-4 p-5 rounded-2xl border-2 text-left transition-all active:scale-[0.98] shadow-sm ${
+            callWaiterStatus === "sent"
+              ? "border-green-300 bg-green-50"
+              : "border-stone-200 bg-white hover:border-amber-300 hover:shadow-md"
+          }`}>
+          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 ${callWaiterStatus === "sent" ? "bg-green-100" : ""}`}
+            style={callWaiterStatus === "sent" ? {} : { background: `${accent}20` }}>
+            {callWaiterStatus === "loading" ? "⏳" : callWaiterStatus === "sent" ? "✅" : "🛎️"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-stone-900 text-base">
+              {callWaiterStatus === "sent" ? "Офіціанта викликано!" : "Виклик офіціанта"}
+            </div>
+            <div className="text-sm text-stone-500 mt-0.5">
+              {callWaiterStatus === "sent" ? "Офіціант вже спішить до вас" : "Офіціант підійде до вашого столу"}
+            </div>
+          </div>
+          {callWaiterStatus !== "sent" && (
+            <div className="shrink-0">
+              <svg className="w-5 h-5 text-stone-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          )}
+        </button>
+
+        {/* Menu */}
+        <button onClick={() => setView("menu")}
+          className="w-full flex items-center gap-4 p-5 rounded-2xl border-2 border-stone-200 bg-white text-left hover:border-amber-300 hover:shadow-md transition-all active:scale-[0.98] shadow-sm">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0"
+            style={{ background: `${primary}15` }}>
+            📖
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-stone-900 text-base">Меню</div>
+            <div className="text-sm text-stone-500 mt-0.5">Перегляньте страви та напої</div>
+          </div>
+          <div className="shrink-0">
+            <svg className="w-5 h-5 text-stone-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </button>
+
+        {/* Pay */}
+        <button onClick={() => setView("pay")}
+          className="w-full flex items-center gap-4 p-5 rounded-2xl border-2 text-left hover:shadow-md transition-all active:scale-[0.98] shadow-sm"
+          style={{ borderColor: `${accent}60`, background: `linear-gradient(135deg, ${accent}12, #fff)` }}>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0"
+            style={{ background: `${accent}25` }}>
+            💳
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-stone-900 text-base">Оплатити рахунок</div>
+            <div className="text-sm text-stone-500 mt-0.5">
+              {existingOrderTotal > 0 ? `До сплати: ${existingOrderTotal.toFixed(0)} ₴` : "Готівка, картка або онлайн"}
+            </div>
+          </div>
+          <div className="shrink-0">
+            <svg className="w-5 h-5 text-stone-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </button>
+      </div>
+
+      <p className="text-center text-stone-300 text-xs pb-6">Maison HD Hospitality OS</p>
+    </div>
+  );
+
+  // ── Pay view ───────────────────────────────────────────────────────────────
+  if (view === "pay") {
+    const baseTotal = existingOrderTotal;
+    const tipAmount = baseTotal * payViewTip / 100;
+    const total = baseTotal + tipAmount;
+
+    if (payConfirmed) return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-stone-50 p-6 text-center max-w-lg mx-auto">
+        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring" }}>
+          <div className="w-24 h-24 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6 text-5xl">
+            {payConfirmed === "cash" ? "💵" : "💳"}
+          </div>
+          <h2 className="text-2xl font-serif text-stone-900 mb-2">
+            {payConfirmed === "cash" ? "Офіціант іде до вас!" : "Термінал вже несуть!"}
+          </h2>
+          <p className="text-stone-500 mb-2">
+            {payConfirmed === "cash" ? "Офіціант підготує здачу" : "Офіціант принесе платіжний термінал"}
+          </p>
+          <p className="text-stone-400 text-sm mb-8">
+            Стіл {tableNumber}{tableLocation ? ` · ${tableLocation}` : ""}
+          </p>
+          <button onClick={() => { setPayConfirmed(null); setView("home"); }}
+            className="text-sm underline underline-offset-2" style={{ color: accent }}>
+            Повернутись на головну
+          </button>
+        </motion.div>
+      </div>
+    );
+
+    return (
+      <div className="min-h-screen bg-stone-50 flex flex-col max-w-lg mx-auto">
+        {/* Header */}
+        <div className="sticky top-0 z-40 bg-white border-b border-stone-100 shadow-sm px-4 py-3 flex items-center gap-3">
+          <button onClick={() => setView("home")} className="w-9 h-9 rounded-xl bg-stone-100 flex items-center justify-center">
+            <svg className="w-5 h-5 text-stone-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div className="flex-1">
+            <h1 className="font-semibold text-stone-900 text-sm">Оплата рахунку</h1>
+            <p className="text-xs text-stone-400">
+              {tableLocation || `Стіл ${tableNumber}`}{tableLocation && tableNumber ? ` · №${tableNumber}` : ""}
+            </p>
+          </div>
+          {branding.logo_url && <img src={branding.logo_url} alt={orgName} className="h-8 w-auto object-contain rounded-lg" />}
+        </div>
+
+        <div className="flex-1 px-5 py-5 space-y-4 pb-8">
+          {/* Bill amount */}
+          {baseTotal > 0 ? (
+            <div className="bg-white rounded-2xl border border-stone-200 p-5 text-center shadow-sm">
+              <p className="text-sm text-stone-500 mb-1">Рахунок замовлення</p>
+              <p className="text-4xl font-black text-stone-900">{baseTotal.toFixed(0)} <span className="text-2xl">₴</span></p>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center">
+              <p className="text-sm text-amber-700">Замовлення ще не створено. Спочатку оберіть страви в меню.</p>
+              <button onClick={() => setView("menu")} className="mt-2 text-sm font-semibold underline underline-offset-2" style={{ color: accent }}>
+                Перейти до меню
+              </button>
+            </div>
+          )}
+
+          {/* Service charge */}
+          {baseTotal > 0 && (
+            <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+              <p className="text-xs font-semibold text-stone-500 text-center mb-3">Сервісна винагорода (за бажанням)</p>
+              <div className="flex gap-2">
+                {([0, 5, 10, 15] as const).map(pct => (
+                  <button key={pct} onClick={() => setPayViewTip(pct)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${payViewTip === pct ? "border-transparent text-white" : "border-stone-200 text-stone-600 bg-white"}`}
+                    style={payViewTip === pct ? { background: accent } : {}}>
+                    {pct === 0 ? "—" : `+${pct}%`}
+                  </button>
+                ))}
+              </div>
+              {payViewTip > 0 && (
+                <div className="flex justify-between text-sm mt-3 pt-3 border-t border-stone-100">
+                  <span className="text-stone-500">Замовлення</span><span>{baseTotal.toFixed(0)} ₴</span>
+                </div>
+              )}
+              {payViewTip > 0 && (
+                <div className="flex justify-between text-sm" style={{ color: accent }}>
+                  <span>Сервіс {payViewTip}%</span><span>+{tipAmount.toFixed(0)} ₴</span>
+                </div>
+              )}
+              <div className="flex justify-between font-black text-stone-900 text-lg pt-2 mt-1 border-t border-stone-100">
+                <span>До сплати</span><span>{total.toFixed(0)} ₴</span>
+              </div>
+            </div>
+          )}
+
+          {/* Payment methods */}
+          {baseTotal > 0 && (
+            <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm space-y-3">
+              <p className="text-xs font-semibold text-stone-500">Оберіть спосіб оплати</p>
+
+              <button onClick={() => requestPayment("cash")}
+                className="w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 border-stone-200 hover:border-green-400 hover:bg-green-50 active:scale-[0.98] transition-all text-left">
+                <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center text-xl shrink-0">💵</div>
+                <div>
+                  <div className="font-bold text-stone-900 text-sm">Готівка</div>
+                  <div className="text-xs text-stone-500">Офіціант принесе здачу</div>
+                </div>
+              </button>
+
+              <button onClick={() => requestPayment("terminal")}
+                className="w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 border-stone-200 hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all text-left">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl shrink-0">💳</div>
+                <div>
+                  <div className="font-bold text-stone-900 text-sm">Картка / Термінал</div>
+                  <div className="text-xs text-stone-500">Офіціант принесе термінал</div>
+                </div>
+              </button>
+
+              {orderId && (
+                <button onClick={goToPay}
+                  className="w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 border-stone-200 hover:border-purple-400 hover:bg-purple-50 active:scale-[0.98] transition-all text-left">
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-xl shrink-0">📱</div>
+                  <div>
+                    <div className="font-bold text-stone-900 text-sm">Apple Pay / Google Pay</div>
+                    <div className="text-xs text-stone-500">Оплатіть самостійно через QR</div>
+                  </div>
+                  <svg className="w-4 h-4 text-stone-300 ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Banners from branding or auto-generated
   const promoBanners: PromoBanner[] = branding.banners || [];
 
@@ -547,12 +806,13 @@ export default function GuestMenu() {
       {/* ── Sticky header ─────────────────────────────────────────── */}
       <div className="sticky top-0 z-40 bg-white border-b border-stone-100 shadow-sm">
         <div className="flex items-center gap-3 px-4 py-3">
-          {/* Logo or icon */}
-          {branding.logo_url ? (
-            <img src={branding.logo_url} alt={orgName} className="h-9 w-auto object-contain rounded-lg shrink-0" />
-          ) : (
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0" style={{ background: `${primary}15` }}>🍽</div>
-          )}
+          {/* Back button */}
+          <button onClick={() => setView("home")}
+            className="w-9 h-9 rounded-xl bg-stone-100 flex items-center justify-center shrink-0">
+            <svg className="w-4 h-4 text-stone-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
 
           {/* Name + table */}
           <div className="flex-1 min-w-0">

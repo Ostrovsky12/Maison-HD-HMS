@@ -235,6 +235,72 @@ router.post("/public/guest-orders", async (req, res) => {
   }
 });
 
+// ─── POST /fb/public/call-waiter ─────────────────────────────────────────────
+router.post("/public/call-waiter", async (req, res) => {
+  const { tableId } = req.body;
+  if (!tableId) return res.status(400).json({ error: "tableId required" });
+  try {
+    const { rows: tableRows } = await pool.query(
+      `SELECT ft.id, ft.number, ft.location, ft.organization_id
+       FROM fb_tables ft WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
+      [tableId],
+    );
+    if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
+    const { organization_id, number: tableNumber, location: tableLocation } = tableRows[0];
+
+    // Check rate limit: no duplicate waiter call within last 2 minutes
+    const { rows: recent } = await pool.query(
+      `SELECT id FROM fb_table_notifications
+       WHERE organization_id=$1 AND table_id=$2 AND type='waiter_call' AND status='pending'
+         AND created_at > NOW() - INTERVAL '2 minutes' LIMIT 1`,
+      [organization_id, tableId],
+    );
+    if (recent[0]) return res.json({ ok: true, duplicate: true });
+
+    await pool.query(
+      `INSERT INTO fb_table_notifications (organization_id, table_id, table_number, table_location, type, status)
+       VALUES ($1, $2, $3, $4, 'waiter_call', 'pending')`,
+      [organization_id, tableId, tableNumber, tableLocation],
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── POST /fb/public/request-payment ─────────────────────────────────────────
+router.post("/public/request-payment", async (req, res) => {
+  const { tableId, method } = req.body;
+  if (!tableId || !method) return res.status(400).json({ error: "tableId and method required" });
+  const allowedMethods = ["cash", "terminal"];
+  if (!allowedMethods.includes(method)) return res.status(400).json({ error: "Invalid method" });
+  try {
+    const { rows: tableRows } = await pool.query(
+      `SELECT ft.id, ft.number, ft.location, ft.organization_id
+       FROM fb_tables ft WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
+      [tableId],
+    );
+    if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
+    const { organization_id, number: tableNumber, location: tableLocation } = tableRows[0];
+
+    // Get current open order total
+    const { rows: orderRows } = await pool.query(
+      `SELECT id, total_amount, tip_pct FROM fb_orders
+       WHERE table_id=$1 AND status NOT IN ('billed','cancelled','closed')
+       ORDER BY opened_at DESC LIMIT 1`,
+      [tableId],
+    );
+    const order = orderRows[0];
+
+    await pool.query(
+      `INSERT INTO fb_table_notifications (organization_id, table_id, table_number, table_location, type, payload, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending')`,
+      [organization_id, tableId, tableNumber, tableLocation,
+       `payment_${method}`,
+       JSON.stringify({ method, orderId: order?.id, total: order?.total_amount, tipPct: order?.tip_pct })],
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── GET /fb/public/table-order?tid= ─────────────────────────────────────────
 router.get("/public/table-order", async (req, res) => {
   const { tid } = req.query;

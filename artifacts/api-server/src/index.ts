@@ -638,6 +638,24 @@ async function ensureSchema() {
     UPDATE cashbox_sessions SET cash_out = 0 WHERE cash_out IS NULL;
   `);
 
+  // Table notifications (waiter calls, payment requests from QR menu)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS fb_table_notifications (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      table_id        INTEGER REFERENCES fb_tables(id) ON DELETE SET NULL,
+      table_number    VARCHAR(50),
+      table_location  VARCHAR(255),
+      type            VARCHAR(50) NOT NULL,
+      payload         JSONB,
+      status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      dismissed_at    TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_fb_table_notif_org_status
+      ON fb_table_notifications (organization_id, status, created_at DESC);
+  `);
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audit_logs (

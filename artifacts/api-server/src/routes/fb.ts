@@ -2463,5 +2463,38 @@ router.get("/settings/tax-groups", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Table Notifications (waiter calls, payment requests) ─────────────────────
+// GET /notifications
+router.get("/notifications", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    const { rows } = await db_.query(
+      `SELECT id, table_id, table_number, table_location, type, payload, status, created_at
+       FROM fb_table_notifications
+       WHERE organization_id = $1 AND status = 'pending'
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [orgId],
+    );
+    res.json({ notifications: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /notifications/:id/dismiss
+router.post("/notifications/:id/dismiss", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    await db_.query(
+      `UPDATE fb_table_notifications
+       SET status = 'dismissed', dismissed_at = NOW()
+       WHERE id = $1 AND organization_id = $2`,
+      [req.params.id, orgId],
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
 
