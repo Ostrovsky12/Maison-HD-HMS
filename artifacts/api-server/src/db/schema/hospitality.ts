@@ -260,6 +260,56 @@ export const restaurantCharges = pgTable("restaurant_charges", {
   idxReservation:  index("idx_restaurant_charges_reservation").on(t.reservationId),
 }));
 
+// ─── FB LEGACY TABLES (kept in schema to prevent Drizzle from dropping them) ──
+
+// fb_config_settings — per-org F&B configuration blobs (section → jsonb)
+export const fbConfigSettings = pgTable("fb_config_settings", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  section:        text("section").notNull(),
+  data:           jsonb("data").notNull().default({}),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
+});
+
+// fb_order_sources — order origin labels shown on POS
+export const fbOrderSources = pgTable("fb_order_sources", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  name:           text("name").notNull(),
+  showOnPos:      boolean("show_on_pos").notNull().default(true),
+  sortOrder:      integer("sort_order").notNull().default(0),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
+// fb_payment_methods — F&B-specific payment methods on POS
+export const fbPaymentMethods = pgTable("fb_payment_methods", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  name:           text("name").notNull(),
+  type:           text("type").notNull().default("cash"),
+  commissionPct:  numeric("commission_pct", { precision: 5, scale: 2 }).notNull().default("0"),
+  showOnPos:      boolean("show_on_pos").notNull().default(true),
+  color:          text("color"),
+  iconCode:       text("icon_code"),
+  sortOrder:      integer("sort_order").notNull().default(0),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
+// fb_hall_tables — visual hall-layout table positions (legacy floor-plan editor)
+export const fbHallTables = pgTable("fb_hall_tables", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  hallId:         integer("hall_id"),
+  hallName:       text("hall_name"),
+  tableNumber:    integer("table_number").notNull(),
+  posX:           integer("pos_x").notNull().default(0),
+  posY:           integer("pos_y").notNull().default(0),
+  width:          integer("width").notNull().default(80),
+  height:         integer("height").notNull().default(80),
+  seats:          integer("seats").notNull().default(4),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
 // ─── POS SYNC LOGS ────────────────────────────────────────────────────────────
 // Log of synchronization events between the PMS and external POS systems.
 export const posSyncLogs = pgTable("pos_sync_logs", {
