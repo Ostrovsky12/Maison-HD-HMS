@@ -5,6 +5,8 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { requireAuth } from "../lib/auth.js";
+import { generateLiqPayForm } from "../lib/liqpay.js";
+import { decrypt } from "../lib/encrypt.js";
 
 const router = Router();
 
@@ -230,6 +232,73 @@ router.post("/public/guest-orders", async (req, res) => {
 
     const { rows: finalRows } = await pool.query(`SELECT * FROM fb_orders WHERE id = $1`, [order.id]);
     res.json({ order: finalRows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /fb/public/liqpay-checkout ─────────────────────────────────────────
+// Generates a LiqPay checkout URL for the current open FB order at a table.
+// Returns { url } — guest is redirected to LiqPay (supports Apple Pay / Google Pay).
+router.post("/public/liqpay-checkout", async (req, res) => {
+  const { tableId, tipPct } = req.body;
+  if (!tableId) return res.status(400).json({ error: "tableId required" });
+
+  try {
+    // 1. Resolve table → org
+    const { rows: tableRows } = await pool.query(
+      `SELECT ft.id, ft.number, ft.location, ft.organization_id, o.name as org_name
+       FROM fb_tables ft JOIN organizations o ON o.id = ft.organization_id
+       WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
+      [tableId],
+    );
+    if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
+    const { organization_id: orgId, org_name, number: tableNumber } = tableRows[0];
+
+    // 2. Get current open order
+    const { rows: orderRows } = await pool.query(
+      `SELECT id, total_amount, tip_pct FROM fb_orders
+       WHERE table_id=$1 AND status NOT IN ('billed','cancelled','closed')
+       ORDER BY opened_at DESC LIMIT 1`,
+      [tableId],
+    );
+    if (!orderRows[0]) return res.status(404).json({ error: "No open order for this table" });
+    const order = orderRows[0];
+
+    const safeTipPct = Math.max(0, Math.min(50, parseFloat(tipPct) || parseFloat(order.tip_pct) || 0));
+    const base = parseFloat(order.total_amount) || 0;
+    const amount = parseFloat((base * (1 + safeTipPct / 100)).toFixed(2));
+    if (amount <= 0) return res.status(400).json({ error: "Order total is zero" });
+
+    // 3. Get LiqPay keys from org's default legal entity
+    const { rows: leRows } = await pool.query(
+      `SELECT liqpay_public_key, liqpay_private_key FROM legal_entities
+       WHERE organization_id=$1 AND is_active=true AND liqpay_public_key IS NOT NULL
+       ORDER BY is_default DESC NULLS LAST LIMIT 1`,
+      [orgId],
+    );
+
+    const le = leRows[0];
+    if (!le?.liqpay_public_key || !le?.liqpay_private_key) {
+      return res.status(422).json({ error: "LiqPay not configured for this venue" });
+    }
+
+    const publicKey = le.liqpay_public_key;
+    const privateKey = decrypt(le.liqpay_private_key) || le.liqpay_private_key;
+
+    // 4. Generate checkout URL
+    const orderId = `fb-${order.id}-${Date.now()}`;
+    const { url } = generateLiqPayForm({
+      action: "pay",
+      amount,
+      currency: "UAH",
+      description: `${org_name} · Стіл №${tableNumber} · Замовлення #${order.id}`,
+      orderId,
+      publicKey,
+      privateKey,
+    });
+
+    res.json({ url, amount, orderId });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
