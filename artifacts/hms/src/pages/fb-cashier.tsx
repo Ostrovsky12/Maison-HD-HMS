@@ -683,9 +683,10 @@ const PAY_LABELS: Record<string, string> = {
   invoice: "Рах. рахунок", certificate: "Сертифікат", deposit: "Депозит",
 };
 
-function ReportSalesBlock({ byPayment, totals, bgClass = "bg-green-50" }: {
-  byPayment: any[]; totals: any; bgClass?: string;
+function ReportSalesBlock({ byPayment, byOutlet, totals, bgClass = "bg-green-50" }: {
+  byPayment: any[]; byOutlet?: any[]; totals: any; bgClass?: string;
 }) {
+  const hasOutlets = byOutlet && byOutlet.length > 0;
   return (
     <div className="space-y-3">
       <div className={`${bgClass} rounded-xl p-3 flex justify-between items-center`}>
@@ -698,6 +699,30 @@ function ReportSalesBlock({ byPayment, totals, bgClass = "bg-green-50" }: {
           <div className="font-black text-xl text-gray-900">{parseFloat(totals?.revenue || "0").toFixed(2)} ₴</div>
         </div>
       </div>
+
+      {hasOutlets && (
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">По точках продажу</h4>
+          <div className="space-y-1">
+            {byOutlet!.map((r: any, i: number) => (
+              <div key={i} className="flex justify-between text-sm py-1.5 border-b border-gray-100 items-center">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                    style={{ background: r.outlet_color || "#6b7280" }}>
+                    {r.outlet_icon}
+                  </span>
+                  <span className="text-gray-700">{r.outlet_name}</span>
+                </div>
+                <div className="text-right">
+                  <span className="font-bold">{parseFloat(r.amount).toFixed(2)} ₴</span>
+                  <span className="text-gray-400 text-xs ml-2">({r.cnt} чек.)</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {byPayment?.length > 0 && (
         <div>
           <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">По способу оплати</h4>
@@ -799,7 +824,7 @@ function XReportModal({ onClose }: { onClose: () => void }) {
                     <span>Інкасовано:</span><span>{parseFloat(data.session.cash_out || "0").toFixed(2)} ₴</span>
                   </div>
                 </div>
-                <ReportSalesBlock byPayment={data.byPayment || []} totals={data.totals} />
+                <ReportSalesBlock byPayment={data.byPayment || []} byOutlet={data.byOutlet} totals={data.totals} />
               </>
             )}
           </div>
@@ -871,7 +896,7 @@ function YReportModal({ onClose }: { onClose: () => void }) {
                       <span>Відкриваючий залишок: {parseFloat(entry.session.opening_balance || "0").toFixed(2)} ₴</span>
                       <span>Каса: {parseFloat(entry.session.expected_balance || "0").toFixed(2)} ₴</span>
                     </div>
-                    <ReportSalesBlock byPayment={entry.byPayment || []} totals={entry.totals} bgClass="bg-purple-50" />
+                    <ReportSalesBlock byPayment={entry.byPayment || []} byOutlet={entry.byOutlet} totals={entry.totals} bgClass="bg-purple-50" />
                   </div>
                 </div>
               ))}
@@ -937,7 +962,7 @@ function PeriodReportModal({ onClose }: { onClose: () => void }) {
             <div className="flex items-center justify-center h-32 text-gray-400 text-sm">Завантаження...</div>
           ) : (
             <>
-              <ReportSalesBlock byPayment={data?.byPayment || []} totals={data?.totals} bgClass="bg-amber-50" />
+              <ReportSalesBlock byPayment={data?.byPayment || []} byOutlet={data?.byOutlet} totals={data?.totals} bgClass="bg-amber-50" />
 
               {data?.totals?.avg_check > 0 && (
                 <div className="flex justify-between text-sm px-1">

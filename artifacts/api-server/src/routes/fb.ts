@@ -1118,9 +1118,9 @@ router.get("/cashbox/x-report", requireAuth, async (req: any, res) => {
          AND ($2::int IS NULL OR cs.id = $2)
        ORDER BY cs.opened_at ASC LIMIT 1`, [orgId, sessionId]
     );
-    if (!sess.rows.length) { res.json({ session: null, byPayment: [], totals: {} }); return; }
+    if (!sess.rows.length) { res.json({ session: null, byPayment: [], byOutlet: [], totals: {} }); return; }
     const session = sess.rows[0];
-    const [byPayR, totR] = await Promise.all([
+    const [byPayR, totR, byOutletR] = await Promise.all([
       db_.query(
         `SELECT payment_method AS method, COUNT(*)::int AS cnt, COALESCE(SUM(total_amount),0)::numeric AS amount
          FROM fb_orders WHERE organization_id=$1 AND status='billed' AND closed_at >= $2
@@ -1132,8 +1132,20 @@ router.get("/cashbox/x-report", requireAuth, async (req: any, res) => {
          FROM fb_orders WHERE organization_id=$1 AND status='billed' AND closed_at >= $2`,
         [orgId, session.opened_at]
       ),
+      db_.query(
+        `SELECT COALESCE(o.name, 'Без точки') AS outlet_name,
+                COALESCE(o.icon, '🍽') AS outlet_icon,
+                COALESCE(o.color, '#6b7280') AS outlet_color,
+                COUNT(*)::int AS cnt,
+                COALESCE(SUM(r.total_amount),0)::numeric AS amount
+         FROM fb_orders r
+         LEFT JOIN fb_outlets o ON o.id = r.outlet_id
+         WHERE r.organization_id=$1 AND r.status='billed' AND r.closed_at >= $2
+         GROUP BY o.id, o.name, o.icon, o.color
+         ORDER BY amount DESC`, [orgId, session.opened_at]
+      ),
     ]);
-    res.json({ session, byPayment: byPayR.rows, totals: totR.rows[0] || {} });
+    res.json({ session, byPayment: byPayR.rows, byOutlet: byOutletR.rows, totals: totR.rows[0] || {} });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1144,7 +1156,6 @@ router.get("/cashbox/y-report", requireAuth, async (req: any, res) => {
     const db_ = (db as any).$client;
     const date = req.query.date ? String(req.query.date) : new Date().toISOString().split("T")[0];
     const sessionId = req.query.sessionId ? parseInt(req.query.sessionId as string) : null;
-    // Closed sessions for the given date
     const sessions = await db_.query(
       `SELECT cs.*, u.name AS cashier_name,
               le.name AS entity_name, le.short_name AS entity_short_name
@@ -1159,7 +1170,7 @@ router.get("/cashbox/y-report", requireAuth, async (req: any, res) => {
     if (!sessions.rows.length) { res.json({ sessions: [], date }); return; }
     const result = await Promise.all(sessions.rows.map(async (session: any) => {
       const endAt = session.closed_at || new Date().toISOString();
-      const [byPayR, totR] = await Promise.all([
+      const [byPayR, totR, byOutletR] = await Promise.all([
         db_.query(
           `SELECT payment_method AS method, COUNT(*)::int AS cnt, COALESCE(SUM(total_amount),0)::numeric AS amount
            FROM fb_orders WHERE organization_id=$1 AND status='billed'
@@ -1175,8 +1186,22 @@ router.get("/cashbox/y-report", requireAuth, async (req: any, res) => {
              AND closed_at BETWEEN $2 AND $3`,
           [orgId, session.opened_at, endAt]
         ),
+        db_.query(
+          `SELECT COALESCE(o.name, 'Без точки') AS outlet_name,
+                  COALESCE(o.icon, '🍽') AS outlet_icon,
+                  COALESCE(o.color, '#6b7280') AS outlet_color,
+                  COUNT(*)::int AS cnt,
+                  COALESCE(SUM(r.total_amount),0)::numeric AS amount
+           FROM fb_orders r
+           LEFT JOIN fb_outlets o ON o.id = r.outlet_id
+           WHERE r.organization_id=$1 AND r.status='billed'
+             AND r.closed_at BETWEEN $2 AND $3
+           GROUP BY o.id, o.name, o.icon, o.color
+           ORDER BY amount DESC`,
+          [orgId, session.opened_at, endAt]
+        ),
       ]);
-      return { session, byPayment: byPayR.rows, totals: totR.rows[0] || {} };
+      return { session, byPayment: byPayR.rows, byOutlet: byOutletR.rows, totals: totR.rows[0] || {} };
     }));
     res.json({ sessions: result, date });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -1188,7 +1213,7 @@ router.get("/cashbox/periodic-report", requireAuth, async (req: any, res) => {
     const orgId = getOrg(req);
     const { from, to } = dateRange(req.query.from as string, req.query.to as string);
     const db_ = (db as any).$client;
-    const [byPayR, totR, byDayR] = await Promise.all([
+    const [byPayR, totR, byDayR, byOutletR] = await Promise.all([
       db_.query(
         `SELECT payment_method AS method, COUNT(*)::int AS cnt, COALESCE(SUM(total_amount),0)::numeric AS amount
          FROM fb_orders WHERE organization_id=$1 AND status='billed'
@@ -1214,8 +1239,22 @@ router.get("/cashbox/periodic-report", requireAuth, async (req: any, res) => {
          GROUP BY DATE(closed_at) ORDER BY day ASC`,
         [orgId, from, to]
       ),
+      db_.query(
+        `SELECT COALESCE(o.name, 'Без точки') AS outlet_name,
+                COALESCE(o.icon, '🍽') AS outlet_icon,
+                COALESCE(o.color, '#6b7280') AS outlet_color,
+                COUNT(*)::int AS cnt,
+                COALESCE(SUM(r.total_amount),0)::numeric AS amount
+         FROM fb_orders r
+         LEFT JOIN fb_outlets o ON o.id = r.outlet_id
+         WHERE r.organization_id=$1 AND r.status='billed'
+           AND DATE(r.closed_at) BETWEEN $2 AND $3
+         GROUP BY o.id, o.name, o.icon, o.color
+         ORDER BY amount DESC`,
+        [orgId, from, to]
+      ),
     ]);
-    res.json({ from, to, byPayment: byPayR.rows, totals: totR.rows[0] || {}, byDay: byDayR.rows });
+    res.json({ from, to, byPayment: byPayR.rows, byOutlet: byOutletR.rows, totals: totR.rows[0] || {}, byDay: byDayR.rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
