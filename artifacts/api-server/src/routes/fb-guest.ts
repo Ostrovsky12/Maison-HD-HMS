@@ -334,7 +334,7 @@ router.post("/public/liqpay-checkout", async (req, res) => {
     // 2. Get current open order
     const { rows: orderRows } = await pool.query(
       `SELECT id, total_amount, tip_pct FROM fb_orders
-       WHERE table_id=$1 AND status NOT IN ('billed','cancelled','closed')
+       WHERE table_id=$1 AND status NOT IN ('billed','cancelled')
        ORDER BY opened_at DESC LIMIT 1`,
       [tableId],
     );
@@ -434,7 +434,7 @@ router.post("/public/request-payment", async (req, res) => {
     // Get current open order total
     const { rows: orderRows } = await pool.query(
       `SELECT id, total_amount, tip_pct FROM fb_orders
-       WHERE table_id=$1 AND status NOT IN ('billed','cancelled','closed')
+       WHERE table_id=$1 AND status NOT IN ('billed','cancelled')
        ORDER BY opened_at DESC LIMIT 1`,
       [tableId],
     );
