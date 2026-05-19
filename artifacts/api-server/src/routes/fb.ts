@@ -1085,17 +1085,21 @@ router.post("/cashbox/movement", requireAuth, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// ── X-REPORT (поточна зміна) ──────────────────────────────────────────────────
+// ── X-REPORT (поточна зміна, опц. sessionId) ──────────────────────────────────
 router.get("/cashbox/x-report", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const db_ = (db as any).$client;
+    const sessionId = req.query.sessionId ? parseInt(req.query.sessionId as string) : null;
     const sess = await db_.query(
-      `SELECT cs.*, u.name AS cashier_name, le.name AS entity_name
+      `SELECT cs.*, u.name AS cashier_name,
+              le.name AS entity_name, le.short_name AS entity_short_name
        FROM cashbox_sessions cs
        LEFT JOIN users u ON u.id = cs.cashier_id
        LEFT JOIN legal_entities le ON le.id = cs.legal_entity_id
-       WHERE cs.organization_id=$1 AND cs.status='open' ORDER BY cs.opened_at ASC LIMIT 1`, [orgId]
+       WHERE cs.organization_id=$1 AND cs.status='open'
+         AND ($2::int IS NULL OR cs.id = $2)
+       ORDER BY cs.opened_at ASC LIMIT 1`, [orgId, sessionId]
     );
     if (!sess.rows.length) { res.json({ session: null, byPayment: [], totals: {} }); return; }
     const session = sess.rows[0];
@@ -1113,6 +1117,88 @@ router.get("/cashbox/x-report", requireAuth, async (req: any, res) => {
       ),
     ]);
     res.json({ session, byPayment: byPayR.rows, totals: totR.rows[0] || {} });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Y-REPORT (звіт по закритій зміні) ─────────────────────────────────────────
+router.get("/cashbox/y-report", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const db_ = (db as any).$client;
+    const date = req.query.date ? String(req.query.date) : new Date().toISOString().split("T")[0];
+    const sessionId = req.query.sessionId ? parseInt(req.query.sessionId as string) : null;
+    // Closed sessions for the given date
+    const sessions = await db_.query(
+      `SELECT cs.*, u.name AS cashier_name,
+              le.name AS entity_name, le.short_name AS entity_short_name
+       FROM cashbox_sessions cs
+       LEFT JOIN users u ON u.id = cs.cashier_id
+       LEFT JOIN legal_entities le ON le.id = cs.legal_entity_id
+       WHERE cs.organization_id=$1
+         AND ($2::int IS NULL OR cs.id = $2)
+         AND (DATE(cs.opened_at) = $3::date OR ($2::int IS NULL AND DATE(cs.closed_at) = $3::date))
+       ORDER BY cs.opened_at DESC`, [orgId, sessionId, date]
+    );
+    if (!sessions.rows.length) { res.json({ sessions: [], date }); return; }
+    const result = await Promise.all(sessions.rows.map(async (session: any) => {
+      const endAt = session.closed_at || new Date().toISOString();
+      const [byPayR, totR] = await Promise.all([
+        db_.query(
+          `SELECT payment_method AS method, COUNT(*)::int AS cnt, COALESCE(SUM(total_amount),0)::numeric AS amount
+           FROM fb_orders WHERE organization_id=$1 AND status='billed'
+             AND closed_at BETWEEN $2 AND $3
+           GROUP BY payment_method ORDER BY amount DESC`,
+          [orgId, session.opened_at, endAt]
+        ),
+        db_.query(
+          `SELECT COUNT(*)::int AS checks, COALESCE(SUM(total_amount),0)::numeric AS revenue,
+                  COALESCE(SUM(guest_count),0)::int AS guests,
+                  COALESCE(SUM(discount_amount),0)::numeric AS discounts
+           FROM fb_orders WHERE organization_id=$1 AND status='billed'
+             AND closed_at BETWEEN $2 AND $3`,
+          [orgId, session.opened_at, endAt]
+        ),
+      ]);
+      return { session, byPayment: byPayR.rows, totals: totR.rows[0] || {} };
+    }));
+    res.json({ sessions: result, date });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── PERIODIC REPORT (звіт за период) ──────────────────────────────────────────
+router.get("/cashbox/periodic-report", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { from, to } = dateRange(req.query.from as string, req.query.to as string);
+    const db_ = (db as any).$client;
+    const [byPayR, totR, byDayR] = await Promise.all([
+      db_.query(
+        `SELECT payment_method AS method, COUNT(*)::int AS cnt, COALESCE(SUM(total_amount),0)::numeric AS amount
+         FROM fb_orders WHERE organization_id=$1 AND status='billed'
+           AND DATE(closed_at) BETWEEN $2 AND $3
+         GROUP BY payment_method ORDER BY amount DESC`,
+        [orgId, from, to]
+      ),
+      db_.query(
+        `SELECT COUNT(*)::int AS checks, COALESCE(SUM(total_amount),0)::numeric AS revenue,
+                COALESCE(SUM(guest_count),0)::int AS guests,
+                COALESCE(SUM(discount_amount),0)::numeric AS discounts,
+                COALESCE(AVG(total_amount),0)::numeric AS avg_check
+         FROM fb_orders WHERE organization_id=$1 AND status='billed'
+           AND DATE(closed_at) BETWEEN $2 AND $3`,
+        [orgId, from, to]
+      ),
+      db_.query(
+        `SELECT DATE(closed_at) AS day,
+                COUNT(*)::int AS checks,
+                COALESCE(SUM(total_amount),0)::numeric AS revenue
+         FROM fb_orders WHERE organization_id=$1 AND status='billed'
+           AND DATE(closed_at) BETWEEN $2 AND $3
+         GROUP BY DATE(closed_at) ORDER BY day ASC`,
+        [orgId, from, to]
+      ),
+    ]);
+    res.json({ from, to, byPayment: byPayR.rows, totals: totR.rows[0] || {}, byDay: byDayR.rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

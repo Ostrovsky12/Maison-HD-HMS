@@ -4,7 +4,7 @@ import {
   Bell, CheckCircle2, XCircle, Clock, ShoppingBag, RefreshCw,
   Wifi, Printer, ChefHat, Wine, ChevronDown, ChevronUp,
   Plus, CreditCard, Banknote, Search, X, UtensilsCrossed,
-  FileText, Gift, Wallet, Layers, Users, Hash,
+  FileText, Gift, Wallet, Layers, Users, Hash, Calendar,
   TrendingUp, Archive, DollarSign, Power, RotateCcw, Send,
   Receipt as ReceiptIcon,
 } from "lucide-react";
@@ -434,7 +434,9 @@ function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: 
 }
 
 // ─── Shift Bar ─────────────────────────────────────────────────────────────────
-function ShiftBar({ onCashMovement, onXReport }: { onCashMovement: () => void; onXReport: () => void }) {
+function ShiftBar({ onCashMovement, onXReport, onYReport, onPeriodReport }: {
+  onCashMovement: () => void; onXReport: () => void; onYReport: () => void; onPeriodReport: () => void;
+}) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
@@ -523,15 +525,23 @@ function ShiftBar({ onCashMovement, onXReport }: { onCashMovement: () => void; o
               </span>
               <span className="text-gray-400">·</span>
               <span className="font-semibold text-gray-700">Каса: {balance.toFixed(0)} ₴</span>
-              <div className="flex gap-1 ml-auto">
+              <div className="flex gap-1 ml-auto flex-wrap justify-end">
                 {idx === 0 && (
                   <>
                     <button onClick={onXReport}
                       className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 transition-colors">
                       X-звіт
                     </button>
-                    <button onClick={onCashMovement}
+                    <button onClick={onYReport}
+                      className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-700 font-bold hover:bg-purple-200 transition-colors">
+                      Y-звіт
+                    </button>
+                    <button onClick={onPeriodReport}
                       className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 font-bold hover:bg-amber-200 transition-colors flex items-center gap-0.5">
+                      <Calendar className="w-3 h-3" /> Период
+                    </button>
+                    <button onClick={onCashMovement}
+                      className="px-2 py-0.5 rounded-md bg-green-100 text-green-700 font-bold hover:bg-green-200 transition-colors flex items-center gap-0.5">
                       <DollarSign className="w-3 h-3" /> Рух
                     </button>
                   </>
@@ -597,12 +607,21 @@ function ShiftBar({ onCashMovement, onXReport }: { onCashMovement: () => void; o
 }
 
 // ─── Cash Movement Modal ──────────────────────────────────────────────────────
+type MovementType = "in" | "out" | "expense";
+const MOVEMENT_TYPES: { id: MovementType; label: string; btn: string; cls: string; actionLabel: string }[] = [
+  { id: "in",      label: "↓ Внесення",  btn: "Внести до каси",  cls: "bg-green-600 hover:bg-green-700",  actionLabel: "Внесення" },
+  { id: "out",     label: "↑ Інкасація", btn: "Інкасувати",       cls: "bg-red-500 hover:bg-red-600",      actionLabel: "Інкасація" },
+  { id: "expense", label: "↗ Витрата",   btn: "Провести витрату", cls: "bg-orange-500 hover:bg-orange-600", actionLabel: "Витрата" },
+];
+
 function CashMovementModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [type, setType] = useState<"in" | "out">("in");
+  const [type, setType] = useState<MovementType>("in");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const selected = MOVEMENT_TYPES.find(m => m.id === type)!;
 
   async function handleSave() {
     if (!amount || parseFloat(amount) <= 0) { setError("Введіть суму"); return; }
@@ -610,7 +629,7 @@ function CashMovementModal({ onClose, onDone }: { onClose: () => void; onDone: (
     try {
       await apiFetch("/cashbox/movement", {
         method: "POST",
-        body: JSON.stringify({ type, amount: parseFloat(amount), notes }),
+        body: JSON.stringify({ type: type === "expense" ? "out" : type, amount: parseFloat(amount), notes: notes || selected.actionLabel }),
       });
       onDone();
     } catch (e: any) { setError(e.message); }
@@ -628,10 +647,10 @@ function CashMovementModal({ onClose, onDone }: { onClose: () => void; onDone: (
         </div>
         <div className="p-4 space-y-4">
           <div className="flex rounded-xl border overflow-hidden">
-            {([["in", "↓ Внесення", "bg-green-600"], ["out", "↑ Інкасація", "bg-red-500"]] as const).map(([t, label, cls]) => (
-              <button key={t} onClick={() => setType(t)}
-                className={`flex-1 py-2.5 text-sm font-bold transition-colors ${type === t ? `${cls} text-white` : "hover:bg-gray-50 text-gray-600"}`}>
-                {label}
+            {MOVEMENT_TYPES.map(m => (
+              <button key={m.id} onClick={() => setType(m.id)}
+                className={`flex-1 py-2.5 text-xs font-bold transition-colors ${type === m.id ? `${m.cls} text-white` : "hover:bg-gray-50 text-gray-600"}`}>
+                {m.label}
               </button>
             ))}
           </div>
@@ -648,9 +667,9 @@ function CashMovementModal({ onClose, onDone }: { onClose: () => void; onDone: (
           {error && <p className="text-sm text-red-600 text-center">{error}</p>}
           <button
             onClick={handleSave} disabled={saving}
-            className={`w-full py-3 font-bold rounded-xl text-white transition-colors ${type === "in" ? "bg-green-600 hover:bg-green-700" : "bg-red-500 hover:bg-red-600"}`}
+            className={`w-full py-3 font-bold rounded-xl text-white transition-colors ${selected.cls}`}
           >
-            {saving ? "Зберігаємо..." : type === "in" ? "Внести до каси" : "Інкасувати"}
+            {saving ? "Зберігаємо..." : selected.btn}
           </button>
         </div>
       </div>
@@ -658,93 +677,302 @@ function CashMovementModal({ onClose, onDone }: { onClose: () => void; onDone: (
   );
 }
 
+// ─── Shared helpers ────────────────────────────────────────────────────────────
+const PAY_LABELS: Record<string, string> = {
+  cash: "Готівка", card: "Картка", mixed: "Змішана",
+  invoice: "Рах. рахунок", certificate: "Сертифікат", deposit: "Депозит",
+};
+
+function ReportSalesBlock({ byPayment, totals, bgClass = "bg-green-50" }: {
+  byPayment: any[]; totals: any; bgClass?: string;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className={`${bgClass} rounded-xl p-3 flex justify-between items-center`}>
+        <div>
+          <div className="text-xs text-gray-500">Чеків: {totals?.checks || 0}</div>
+          <div className="text-xs text-gray-500">Гостей: {totals?.guests || "—"}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-gray-500">Виручка</div>
+          <div className="font-black text-xl text-gray-900">{parseFloat(totals?.revenue || "0").toFixed(2)} ₴</div>
+        </div>
+      </div>
+      {byPayment?.length > 0 && (
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">По способу оплати</h4>
+          <div className="space-y-1">
+            {byPayment.map((r: any) => (
+              <div key={r.method} className="flex justify-between text-sm py-1 border-b border-gray-100">
+                <span className="text-gray-700">{PAY_LABELS[r.method] || r.method}</span>
+                <div className="text-right">
+                  <span className="font-bold">{parseFloat(r.amount).toFixed(2)} ₴</span>
+                  <span className="text-gray-400 text-xs ml-2">({r.cnt} чек.)</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!byPayment?.length && (
+        <p className="text-sm text-gray-400 text-center py-3">Продажів немає</p>
+      )}
+    </div>
+  );
+}
+
 // ─── X-Report Modal ───────────────────────────────────────────────────────────
 function XReportModal({ onClose }: { onClose: () => void }) {
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const METHOD_LABELS: Record<string, string> = {
-    cash: "Готівка", card: "Картка", mixed: "Змішана",
-    invoice: "Рах. рахунок", certificate: "Сертифікат", deposit: "Депозит",
-  };
 
   useEffect(() => {
-    apiFetch("/cashbox/x-report")
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+    apiFetch("/cashbox/session").then(d => {
+      const sess: any[] = d.sessions || (d.session ? [d.session] : []);
+      setSessions(sess);
+      if (sess.length > 0) setSelectedId(sess[0].id);
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    setData(null);
+    apiFetch(`/cashbox/x-report?sessionId=${selectedId}`).then(setData).catch(() => setData(null));
+  }, [selectedId]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="flex items-center justify-between p-4 border-b">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-4 border-b shrink-0">
           <h3 className="font-bold text-base flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-blue-500" /> X-Звіт (поточна зміна)
           </h3>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
         </div>
-        <div className="p-4">
+
+        {loading ? (
+          <div className="flex items-center justify-center h-32 text-gray-400">Завантаження...</div>
+        ) : sessions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-32 text-gray-400 gap-2">
+            <Power className="w-8 h-8" />
+            <p className="text-sm">Немає відкритих змін</p>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {sessions.length > 1 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-1.5">Юр. особа:</p>
+                <div className="flex flex-wrap gap-2">
+                  {sessions.map(s => (
+                    <button key={s.id} onClick={() => setSelectedId(s.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition-colors ${selectedId === s.id ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 hover:border-gray-300 text-gray-600"}`}>
+                      {s.entity_short_name || s.entity_name || `Зміна #${s.id}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!data ? (
+              <div className="flex items-center justify-center h-20 text-gray-400 text-sm">Завантаження...</div>
+            ) : (
+              <>
+                <div className="bg-green-50 rounded-xl p-3 space-y-1 text-sm">
+                  {data.session?.entity_name && (
+                    <div className="flex justify-between text-xs font-semibold text-blue-700 mb-1">
+                      <span>Юр. особа:</span><span>{data.session.entity_short_name || data.session.entity_name}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Відкрито о:</span>
+                    <span className="font-semibold">{new Date(data.session.opened_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Каса (готівка):</span>
+                    <span className="font-bold text-green-700">{parseFloat(data.session.expected_balance || "0").toFixed(2)} ₴</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Внесено:</span><span>{parseFloat(data.session.cash_in || "0").toFixed(2)} ₴</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Інкасовано:</span><span>{parseFloat(data.session.cash_out || "0").toFixed(2)} ₴</span>
+                  </div>
+                </div>
+                <ReportSalesBlock byPayment={data.byPayment || []} totals={data.totals} />
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="p-4 border-t shrink-0">
+          <button onClick={onClose}
+            className="w-full py-2.5 border-2 border-gray-200 rounded-xl font-semibold text-gray-600 hover:bg-gray-50">
+            Закрити
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Y-Report Modal ───────────────────────────────────────────────────────────
+function YReportModal({ onClose }: { onClose: () => void }) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [date, setDate] = useState(todayStr);
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback((d: string) => {
+    setLoading(true); setData(null);
+    apiFetch(`/cashbox/y-report?date=${d}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(date); }, [date, load]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-4 border-b shrink-0">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <FileText className="w-5 h-5 text-purple-500" /> Y-Звіт (закрита зміна)
+          </h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="px-4 pt-3 shrink-0">
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
-            <div className="flex items-center justify-center h-32 text-gray-400">Завантаження...</div>
-          ) : !data?.session ? (
+            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">Завантаження...</div>
+          ) : !data?.sessions?.length ? (
             <div className="flex flex-col items-center justify-center h-32 text-gray-400 gap-2">
-              <Power className="w-8 h-8" />
-              <p className="text-sm">Зміна не відкрита</p>
+              <FileText className="w-8 h-8" />
+              <p className="text-sm">Немає змін за {new Date(date + "T00:00").toLocaleDateString("uk-UA")}</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {/* Session info */}
-              <div className="bg-green-50 rounded-xl p-3 space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Відкрито о:</span>
-                  <span className="font-semibold">{new Date(data.session.opened_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Каса (готівка):</span>
-                  <span className="font-bold text-green-700">{parseFloat(data.session.expected_balance || "0").toFixed(2)} ₴</span>
-                </div>
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Внесено:</span><span>{parseFloat(data.session.cash_in || "0").toFixed(2)} ₴</span>
-                </div>
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Інкасовано:</span><span>{parseFloat(data.session.cash_out || "0").toFixed(2)} ₴</span>
-                </div>
-              </div>
-              {/* Sales */}
-              <div>
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Продажі за зміну</h4>
-                <div className="space-y-1">
-                  {(data.byPayment || []).map((r: any) => (
-                    <div key={r.method} className="flex justify-between text-sm py-1 border-b border-gray-100">
-                      <span className="text-gray-700">{METHOD_LABELS[r.method] || r.method}</span>
-                      <div className="text-right">
-                        <span className="font-bold">{parseFloat(r.amount).toFixed(2)} ₴</span>
-                        <span className="text-gray-400 text-xs ml-2">({r.cnt} чек.)</span>
-                      </div>
+            <div className="space-y-5">
+              {data.sessions.map((entry: any, idx: number) => (
+                <div key={idx} className="border rounded-xl overflow-hidden">
+                  <div className={`px-3 py-2 text-xs font-bold flex justify-between ${entry.session.status === "closed" ? "bg-gray-100 text-gray-700" : "bg-green-50 text-green-700"}`}>
+                    <span>{entry.session.entity_short_name || entry.session.entity_name || "Без юр. особи"}</span>
+                    <span>
+                      {new Date(entry.session.opened_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}
+                      {entry.session.closed_at && ` → ${new Date(entry.session.closed_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}`}
+                      {" · "}{entry.session.cashier_name || "Касир"}
+                      {" · "}<span className={entry.session.status === "closed" ? "text-gray-500" : "text-green-600"}>{entry.session.status === "closed" ? "Закрита" : "Відкрита"}</span>
+                    </span>
+                  </div>
+                  <div className="p-3">
+                    <div className="flex justify-between text-xs text-gray-500 mb-2">
+                      <span>Відкриваючий залишок: {parseFloat(entry.session.opening_balance || "0").toFixed(2)} ₴</span>
+                      <span>Каса: {parseFloat(entry.session.expected_balance || "0").toFixed(2)} ₴</span>
                     </div>
-                  ))}
-                  {!data.byPayment?.length && (
-                    <p className="text-sm text-gray-400 text-center py-4">Продажів за зміну немає</p>
-                  )}
-                </div>
-              </div>
-              {/* Totals */}
-              {data.totals?.checks > 0 && (
-                <div className="bg-gray-50 rounded-xl p-3 flex justify-between items-center">
-                  <div>
-                    <div className="text-xs text-gray-500">Чеків: {data.totals.checks}</div>
-                    <div className="text-xs text-gray-500">Гостей: {data.totals.guests || "—"}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-gray-500">Загальна виручка</div>
-                    <div className="font-black text-xl text-gray-900">{parseFloat(data.totals.revenue || "0").toFixed(2)} ₴</div>
+                    <ReportSalesBlock byPayment={entry.byPayment || []} totals={entry.totals} bgClass="bg-purple-50" />
                   </div>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>
-        <div className="p-4 border-t">
+
+        <div className="p-4 border-t shrink-0">
+          <button onClick={onClose}
+            className="w-full py-2.5 border-2 border-gray-200 rounded-xl font-semibold text-gray-600 hover:bg-gray-50">
+            Закрити
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Periodic Report Modal ─────────────────────────────────────────────────────
+function PeriodReportModal({ onClose }: { onClose: () => void }) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  const [from, setFrom] = useState(weekAgo);
+  const [to, setTo] = useState(todayStr);
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true); setData(null);
+    apiFetch(`/cashbox/periodic-report?from=${from}&to=${to}`)
+      .then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [from, to]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmt = (d: string) => new Date(d + "T00:00").toLocaleDateString("uk-UA", { day: "2-digit", month: "short" });
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-4 border-b shrink-0">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-amber-500" /> Періодичний звіт
+          </h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="px-4 pt-3 flex gap-2 items-center shrink-0">
+          <div className="flex-1">
+            <p className="text-xs text-gray-500 mb-1">З:</p>
+            <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)}
+              className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          </div>
+          <div className="flex-1">
+            <p className="text-xs text-gray-500 mb-1">По:</p>
+            <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)}
+              className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">Завантаження...</div>
+          ) : (
+            <>
+              <ReportSalesBlock byPayment={data?.byPayment || []} totals={data?.totals} bgClass="bg-amber-50" />
+
+              {data?.totals?.avg_check > 0 && (
+                <div className="flex justify-between text-sm px-1">
+                  <span className="text-gray-600">Середній чек:</span>
+                  <span className="font-bold">{parseFloat(data.totals.avg_check).toFixed(2)} ₴</span>
+                </div>
+              )}
+              {data?.totals?.discounts > 0 && (
+                <div className="flex justify-between text-sm px-1 text-red-600">
+                  <span>Знижки за період:</span>
+                  <span className="font-bold">− {parseFloat(data.totals.discounts).toFixed(2)} ₴</span>
+                </div>
+              )}
+
+              {(data?.byDay?.length ?? 0) > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">По днях</h4>
+                  <div className="space-y-1">
+                    {data.byDay.map((d: any) => (
+                      <div key={d.day} className="flex justify-between text-sm py-1 border-b border-gray-100">
+                        <span className="text-gray-600">{fmt(d.day)}</span>
+                        <div className="text-right">
+                          <span className="font-bold">{parseFloat(d.revenue).toFixed(2)} ₴</span>
+                          <span className="text-gray-400 text-xs ml-2">({d.checks} чек.)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="p-4 border-t shrink-0">
           <button onClick={onClose}
             className="w-full py-2.5 border-2 border-gray-200 rounded-xl font-semibold text-gray-600 hover:bg-gray-50">
             Закрити
@@ -1507,6 +1735,8 @@ export default function FbCashier() {
   const [leftTab, setLeftTab] = useState<"qr" | "archive">("qr");
   const [cashModalOpen, setCashModalOpen] = useState(false);
   const [xReportOpen, setXReportOpen] = useState(false);
+  const [yReportOpen, setYReportOpen] = useState(false);
+  const [periodReportOpen, setPeriodReportOpen] = useState(false);
   const [notifications, setNotifications] = useState<TableNotification[]>([]);
   const knownIds = useRef<Set<number>>(new Set());
   const knownNotifIds = useRef<Set<number>>(new Set());
@@ -1638,6 +1868,12 @@ export default function FbCashier() {
       )}
       {xReportOpen && (
         <XReportModal onClose={() => setXReportOpen(false)} />
+      )}
+      {yReportOpen && (
+        <YReportModal onClose={() => setYReportOpen(false)} />
+      )}
+      {periodReportOpen && (
+        <PeriodReportModal onClose={() => setPeriodReportOpen(false)} />
       )}
 
       <div className="flex flex-col h-[calc(100vh-4rem)]">
@@ -1805,6 +2041,8 @@ export default function FbCashier() {
               <ShiftBar
                 onCashMovement={() => setCashModalOpen(true)}
                 onXReport={() => setXReportOpen(true)}
+                onYReport={() => setYReportOpen(true)}
+                onPeriodReport={() => setPeriodReportOpen(true)}
               />
 
               {/* Orders list */}
