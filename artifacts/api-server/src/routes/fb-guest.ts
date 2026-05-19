@@ -258,18 +258,6 @@ router.post("/public/guest-orders", async (req, res) => {
         });
       }
 
-      // Check cashbox/shift is open for non-minibar tables
-      const { rows: shiftRows } = await pool.query(
-        `SELECT id FROM cashbox_sessions
-         WHERE organization_id = $1 AND status = 'open' LIMIT 1`,
-        [orgId],
-      );
-      if (!shiftRows[0]) {
-        return res.status(403).json({
-          error: "shift_closed",
-          message: "Ресторан зараз не приймає замовлення. Зміна закрита.",
-        });
-      }
     }
 
     const safeTipPct = Math.max(0, Math.min(100, parseFloat(tipPct) || 0));
