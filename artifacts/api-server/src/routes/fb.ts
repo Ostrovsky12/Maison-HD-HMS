@@ -237,14 +237,27 @@ router.delete("/categories/:id", requireAuth, async (req: any, res) => {
 router.get("/items", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const { categoryId, available } = req.query;
+    const { categoryId, available, outletId } = req.query;
     const db_ = (db as any).$client;
     const conditions: string[] = [`fi.organization_id = $1`];
     const params: any[] = [orgId];
     if (categoryId) { params.push(parseInt(categoryId as string)); conditions.push(`fi.category_id = $${params.length}`); }
     if (available === "true") conditions.push(`fi.is_available = true`);
+
+    // Outlet filter: hide items explicitly disabled for this outlet; apply price override
+    let outletJoin = "";
+    let priceSelect = "fi.price";
+    if (outletId) {
+      params.push(parseInt(outletId as string));
+      const oidx = params.length;
+      outletJoin = `LEFT JOIN fb_outlet_items foi ON foi.item_id = fi.id AND foi.outlet_id = $${oidx}`;
+      conditions.push(`(foi.item_id IS NULL OR foi.is_available IS NULL OR foi.is_available = true)`);
+      priceSelect = `COALESCE(foi.price_override, fi.price)`;
+    }
+
     const r = await db_.query(
       `SELECT fi.*,
+              ${priceSelect} AS price,
               fc.name AS "categoryName", fc.emoji AS "categoryEmoji",
               ing.name AS ingredient_name, ing.unit AS ingredient_unit,
               er.group_name  AS excise_group_name,
@@ -257,6 +270,7 @@ router.get("/items", requireAuth, async (req: any, res) => {
        LEFT JOIN fb_categories fc ON fc.id = fi.category_id
        LEFT JOIN fb_ingredients ing ON ing.id = fi.ingredient_id
        LEFT JOIN fb_excise_rates er ON er.group_key = fi.excise_group
+       ${outletJoin}
        WHERE ${conditions.join(" AND ")}
        ORDER BY fc.sort_order ASC NULLS LAST, fi.sort_order ASC`,
       params
@@ -753,18 +767,21 @@ router.post("/orders", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const db_ = (db as any).$client;
-    const { tableId, orderType, guestName, roomNumber, guestCount, notes, bookingId } = req.body;
+    const { tableId, orderType, guestName, roomNumber, guestCount, notes, bookingId, outletId } = req.body;
     const waiterUserId = (req as any).user?.id || null;
+
+    // ensure outlet_id column exists (idempotent migration)
+    await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS outlet_id INT REFERENCES fb_outlets(id) ON DELETE SET NULL`).catch(() => {});
 
     const { rows: [order] } = await db_.query(
       `INSERT INTO fb_orders
          (organization_id, table_id, order_type, guest_name, room_number,
-          guest_count, notes, booking_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          guest_count, notes, booking_id, outlet_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
       [orgId, tableId || null, orderType || "dine_in", guestName || null,
        roomNumber || null, parseInt(guestCount) || 1, notes || null,
-       bookingId || null]
+       bookingId || null, outletId || null]
     );
 
     if (tableId) {
@@ -1979,6 +1996,7 @@ async function ensureCustomersTable(db_: any) {
   await db_.query(`CREATE INDEX IF NOT EXISTS idx_fb_customers_phone ON fb_customers(phone)`);
   await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS customer_id INT REFERENCES fb_customers(id) ON DELETE SET NULL`);
   await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS discount_label TEXT`);
+  await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS outlet_id INT REFERENCES fb_outlets(id) ON DELETE SET NULL`);
 }
 
 router.get("/customers", requireAuth, async (req: any, res) => {
