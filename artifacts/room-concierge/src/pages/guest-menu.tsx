@@ -353,9 +353,12 @@ function PayPanel({ orderId, baseTotal, accent, primary, onClose, onPay }: {
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
+interface OutletInfo { id: number; name: string; slug: string; icon: string; color: string; description?: string; }
+
 export default function GuestMenu() {
   const params = new URLSearchParams(window.location.search);
   const tid = params.get("tid");
+  const outletSlug = params.get("outlet");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -365,6 +368,7 @@ export default function GuestMenu() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [branding, setBranding] = useState<Branding>({});
+  const [outletInfo, setOutletInfo] = useState<OutletInfo | null>(null);
 
   const [activeCat, setActiveCat] = useState<number | "all" | "popular">("all");
   const [search, setSearch] = useState("");
@@ -404,10 +408,16 @@ export default function GuestMenu() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!tid) { setError("Невірний QR-код. Зверніться до персоналу."); setLoading(false); return; }
+    if (!tid && !outletSlug) { setError("Невірний QR-код. Зверніться до персоналу."); setLoading(false); return; }
+    const menuUrl = tid
+      ? `${API}/fb/public/guest-menu?tid=${tid}`
+      : `${API}/fb/public/guest-menu?outlet=${outletSlug}`;
+    const orderPromise = tid
+      ? fetch(`${API}/fb/public/table-order?tid=${tid}`).then(r => r.json()).catch(() => null)
+      : Promise.resolve(null);
     Promise.all([
-      fetch(`${API}/fb/public/guest-menu?tid=${tid}`).then(r => r.json()),
-      fetch(`${API}/fb/public/table-order?tid=${tid}`).then(r => r.json()).catch(() => null),
+      fetch(menuUrl).then(r => r.json()),
+      orderPromise,
     ]).then(([menu, tableOrder]) => {
       if (menu.error) { setError(menu.error); return; }
       setOrgName(menu.orgName || "Maison HD");
@@ -416,6 +426,7 @@ export default function GuestMenu() {
       setCategories(menu.categories || []);
       setItems(menu.items || []);
       setBranding(menu.branding || {});
+      setOutletInfo(menu.outlet || null);
       setGroupInfo(menu.group || null);
       setGroupClosed(!!menu.groupClosed);
       setGroupOpensAt(menu.groupOpensAt || null);
@@ -427,7 +438,7 @@ export default function GuestMenu() {
     })
       .catch(() => setError("Помилка завантаження меню."))
       .finally(() => setLoading(false));
-  }, [tid]);
+  }, [tid, outletSlug]);
 
   useEffect(() => {
     if (showAI) aiEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -477,12 +488,18 @@ export default function GuestMenu() {
     setCart(prev => prev.map(c => cartKey(c.item, c.modifiers) === k ? { ...c, quantity: c.quantity + d } : c).filter(c => c.quantity > 0));
 
   const submitOrder = async () => {
-    if (!cart.length || !tid) return;
+    if (!cart.length || (!tid && !outletSlug)) return;
     setSubmitting(true);
     try {
+      const body: Record<string, any> = {
+        tipPct: tipPct || undefined,
+        items: cart.map(c => ({ itemId: c.item.id, quantity: c.quantity, modifiers: c.modifiers })),
+      };
+      if (tid) body.tableId = parseInt(tid);
+      if (outletSlug) body.outletSlug = outletSlug;
       const r = await fetch(`${API}/fb/public/guest-orders`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: parseInt(tid), tipPct: tipPct || undefined, items: cart.map(c => ({ itemId: c.item.id, quantity: c.quantity, modifiers: c.modifiers })) }),
+        body: JSON.stringify(body),
       });
       const d = await r.json();
       if (d.error) throw new Error(d.error);
@@ -669,10 +686,20 @@ export default function GuestMenu() {
           </div>
         )}
         <h1 className="text-2xl font-serif text-stone-900 mb-1">{orgName}</h1>
-        <p className="text-sm text-stone-400">
-          {tableLocation ? tableLocation : `Стіл ${tableNumber}`}
-          {tableLocation && tableNumber ? ` · №${tableNumber}` : ""}
-        </p>
+        {outletInfo ? (
+          <div className="flex flex-col items-center gap-1">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold text-white"
+              style={{ background: outletInfo.color || accent }}>
+              {outletInfo.icon} {outletInfo.name}
+            </span>
+            {outletInfo.description && <p className="text-xs text-stone-400 mt-0.5">{outletInfo.description}</p>}
+          </div>
+        ) : (
+          <p className="text-sm text-stone-400">
+            {tableLocation ? tableLocation : `Стіл ${tableNumber}`}
+            {tableLocation && tableNumber ? ` · №${tableNumber}` : ""}
+          </p>
+        )}
         <p className="text-base text-stone-600 mt-3 font-medium">Ласкаво просимо! 👋</p>
       </div>
 

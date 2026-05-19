@@ -128,25 +128,95 @@ function isGroupOpen(group: { is_24h: boolean; open_time: string; close_time: st
   return { open, opensAt };
 }
 
-// ─── GET /fb/public/guest-menu?tid=<tableId> ─────────────────────────────────
+// ─── Shared helper: fetch menu items with optional outlet filter ──────────────
+async function fetchMenuItems(orgId: number, outletId?: number | null) {
+  if (outletId) {
+    const { rows } = await pool.query(
+      `SELECT fi.id, fi.category_id, fi.name, fi.description,
+              COALESCE(foi.price_override, fi.price) AS price,
+              fi.is_popular, fi.is_vegetarian, fi.allergens, fi.image_url, fi.cook_minutes,
+              COALESCE(fi.station, 'kitchen_general') AS station
+       FROM fb_items fi
+       LEFT JOIN fb_outlet_items foi ON foi.item_id = fi.id AND foi.outlet_id = $2
+       WHERE fi.organization_id = $1
+         AND fi.is_available = true
+         AND (fi.is_stop_list IS NULL OR fi.is_stop_list = false)
+         AND (foi.item_id IS NULL OR foi.is_available IS NULL OR foi.is_available = true)
+       ORDER BY fi.sort_order ASC NULLS LAST, fi.name ASC`,
+      [orgId, outletId],
+    );
+    return rows;
+  }
+  const { rows } = await pool.query(
+    `SELECT id, category_id, name, description, price,
+            is_popular, is_vegetarian, allergens, image_url, cook_minutes,
+            COALESCE(station, 'kitchen_general') AS station
+     FROM fb_items
+     WHERE organization_id = $1 AND is_available = true AND (is_stop_list IS NULL OR is_stop_list = false)
+     ORDER BY sort_order ASC NULLS LAST, name ASC`,
+    [orgId],
+  );
+  return rows;
+}
+
+// ─── GET /fb/public/guest-menu?tid=<tableId>  OR  ?outlet=<slug> ─────────────
 router.get("/public/guest-menu", async (req, res) => {
-  const { tid } = req.query;
-  if (!tid) return res.status(400).json({ error: "tid required" });
+  const { tid, outlet: outletSlug } = req.query;
+  if (!tid && !outletSlug) return res.status(400).json({ error: "tid or outlet required" });
 
   try {
-    const { rows: tableRows } = await pool.query(
-      `SELECT ft.id, ft.number, ft.location, ft.organization_id, ft.group_id,
-              o.name as org_name, o.slug as org_slug
-       FROM fb_tables ft
-       JOIN organizations o ON o.id = ft.organization_id
-       WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
-      [tid],
-    );
-    if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
-    const { organization_id: orgId, org_name, org_slug, number: tableNumber, location: tableLocation, group_id } = tableRows[0];
+    let orgId: number;
+    let org_name: string;
+    let org_slug: string;
+    let tableNumber: string | null = null;
+    let tableLocation: string | null = null;
+    let group_id: number | null = null;
+    let outletInfo: { id: number; name: string; slug: string; icon: string; color: string; description?: string } | null = null;
 
-    // Fetch group info if assigned
-    let groupInfo: { id: number; name: string; icon: string; color: string; is_minibar: boolean; is_24h: boolean; open_time: string; close_time: string } | null = null;
+    if (outletSlug) {
+      // Outlet-based QR — load org from the outlet slug
+      const { rows: outletRows } = await pool.query(
+        `SELECT o.id as outlet_id, o.name as outlet_name, o.slug, o.icon, o.color, o.description, o.is_active,
+                org.id as org_id, org.name as org_name, org.slug as org_slug
+         FROM fb_outlets o
+         JOIN organizations org ON org.id = o.organization_id
+         WHERE o.slug = $1 LIMIT 1`,
+        [outletSlug],
+      );
+      if (!outletRows[0]) return res.status(404).json({ error: "Outlet not found" });
+      if (!outletRows[0].is_active) return res.status(403).json({ error: "outlet_closed", message: "Ця зона зараз не працює" });
+      orgId = outletRows[0].org_id;
+      org_name = outletRows[0].org_name;
+      org_slug = outletRows[0].org_slug;
+      outletInfo = {
+        id: outletRows[0].outlet_id,
+        name: outletRows[0].outlet_name,
+        slug: outletRows[0].slug,
+        icon: outletRows[0].icon,
+        color: outletRows[0].color,
+        description: outletRows[0].description,
+      };
+    } else {
+      // Table-based QR (legacy path)
+      const { rows: tableRows } = await pool.query(
+        `SELECT ft.id, ft.number, ft.location, ft.organization_id, ft.group_id,
+                o.name as org_name, o.slug as org_slug
+         FROM fb_tables ft
+         JOIN organizations o ON o.id = ft.organization_id
+         WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
+        [tid],
+      );
+      if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
+      orgId = tableRows[0].organization_id;
+      org_name = tableRows[0].org_name;
+      org_slug = tableRows[0].org_slug;
+      tableNumber = tableRows[0].number;
+      tableLocation = tableRows[0].location;
+      group_id = tableRows[0].group_id;
+    }
+
+    // Fetch group info if assigned (table-based only)
+    let groupInfo: any = null;
     let groupClosed = false;
     let groupOpensAt: string | null = null;
     if (group_id) {
@@ -185,24 +255,14 @@ router.get("/public/guest-menu", async (req, res) => {
        GROUP BY mg.id ORDER BY mg.sort_order`,
       [orgId],
     );
-    // Map itemId → groups
     const modifiersByItem: Record<number, any[]> = {};
     for (const g of modGroups) {
       if (!modifiersByItem[g.item_id]) modifiersByItem[g.item_id] = [];
       modifiersByItem[g.item_id].push(g);
     }
 
-    const { rows: items } = await pool.query(
-      `SELECT id, category_id, name, description, price,
-              is_popular, is_vegetarian, allergens, image_url, cook_minutes,
-              COALESCE(station, 'kitchen_general') AS station
-       FROM fb_items
-       WHERE organization_id = $1 AND is_available = true AND (is_stop_list IS NULL OR is_stop_list = false)
-       ORDER BY sort_order ASC NULLS LAST, name ASC`,
-      [orgId],
-    );
+    const items = await fetchMenuItems(orgId, outletInfo?.id ?? null);
 
-    // Fetch guest branding config (logo_url, colors)
     const { rows: brandingRows } = await pool.query(
       `SELECT data FROM fb_config_settings WHERE organization_id=$1 AND section='guest_branding' LIMIT 1`,
       [orgId],
@@ -214,6 +274,7 @@ router.get("/public/guest-menu", async (req, res) => {
       orgId, orgName: org_name, orgSlug: org_slug,
       tableNumber, tableLocation,
       categories: cats, items: itemsWithMods, branding,
+      outlet: outletInfo,
       group: groupInfo
         ? { id: groupInfo.id, name: groupInfo.name, icon: groupInfo.icon, color: groupInfo.color, isMinibar: groupInfo.is_minibar }
         : null,
@@ -227,52 +288,71 @@ router.get("/public/guest-menu", async (req, res) => {
 
 // ─── POST /fb/public/guest-orders ────────────────────────────────────────────
 router.post("/public/guest-orders", async (req, res) => {
-  const { tableId, items, guestName, guestCount, notes, tipPct } = req.body;
-  if (!tableId || !Array.isArray(items) || !items.length) {
-    return res.status(400).json({ error: "tableId and items required" });
+  const { tableId, items, guestName, guestCount, notes, tipPct, outletId, outletSlug } = req.body;
+  if (!Array.isArray(items) || !items.length) {
+    return res.status(400).json({ error: "items required" });
   }
 
   try {
-    const { rows: tableRows } = await pool.query(
-      `SELECT ft.id, ft.number, ft.organization_id, ft.group_id,
-              tg.is_minibar, tg.is_24h, tg.open_time, tg.close_time
-       FROM fb_tables ft
-       LEFT JOIN fb_table_groups tg ON tg.id = ft.group_id AND tg.is_active = true
-       WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
-      [tableId],
-    );
-    if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
-    const { organization_id: orgId, is_minibar, is_24h, open_time, close_time } = tableRows[0];
+    let orgId: number;
+    let resolvedTableId = tableId || null;
+    let resolvedOutletId = outletId || null;
 
-    // Minibar groups bypass cashbox/shift check (they operate 24/7 independently)
-    const isMinibar = is_minibar === true;
+    if (outletSlug && !outletId) {
+      // Resolve outletId from slug
+      const { rows } = await pool.query(
+        `SELECT id, organization_id FROM fb_outlets WHERE slug = $1 AND is_active = true LIMIT 1`,
+        [outletSlug],
+      );
+      if (!rows[0]) return res.status(404).json({ error: "Outlet not found" });
+      resolvedOutletId = rows[0].id;
+      orgId = rows[0].organization_id;
+    } else if (resolvedTableId) {
+      const { rows: tableRows } = await pool.query(
+        `SELECT ft.id, ft.number, ft.organization_id, ft.group_id,
+                tg.is_minibar, tg.is_24h, tg.open_time, tg.close_time
+         FROM fb_tables ft
+         LEFT JOIN fb_table_groups tg ON tg.id = ft.group_id AND tg.is_active = true
+         WHERE ft.id = $1 AND ft.is_active = true LIMIT 1`,
+        [resolvedTableId],
+      );
+      if (!tableRows[0]) return res.status(404).json({ error: "Table not found" });
+      const { organization_id, is_minibar, is_24h, open_time, close_time } = tableRows[0];
+      orgId = organization_id;
 
-    if (!isMinibar) {
-      // Check group working hours
-      const groupStatus = isGroupOpen(is_24h != null ? { is_24h, open_time, close_time } : null);
-      if (!groupStatus.open) {
-        return res.status(403).json({
-          error: "group_closed",
-          message: `Замовлення зараз недоступне. Відчиняємось о ${groupStatus.opensAt}`,
-          opensAt: groupStatus.opensAt,
-        });
+      const isMinibar = is_minibar === true;
+      if (!isMinibar) {
+        const groupStatus = isGroupOpen(is_24h != null ? { is_24h, open_time, close_time } : null);
+        if (!groupStatus.open) {
+          return res.status(403).json({
+            error: "group_closed",
+            message: `Замовлення зараз недоступне. Відчиняємось о ${groupStatus.opensAt}`,
+            opensAt: groupStatus.opensAt,
+          });
+        }
       }
-
+    } else {
+      return res.status(400).json({ error: "tableId or outletSlug required" });
     }
+
+    // Also resolve outletId if provided directly (without slug)
+    if (outletId && !resolvedOutletId) resolvedOutletId = outletId;
 
     const safeTipPct = Math.max(0, Math.min(100, parseFloat(tipPct) || 0));
     const { rows: orderRows } = await pool.query(
-      `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, status, notes, tip_pct, opened_at)
-       VALUES ($1, $2, 'dine_in', $3, $4, 'new_guest', $5, $6, NOW())
+      `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, status, notes, tip_pct, outlet_id, opened_at)
+       VALUES ($1, $2, 'dine_in', $3, $4, 'new_guest', $5, $6, $7, NOW())
        RETURNING *`,
-      [orgId, tableId, guestName || "Гість (QR)", parseInt(guestCount) || 1, notes || null, safeTipPct],
+      [orgId!, resolvedTableId, guestName || "Гість (QR)", parseInt(guestCount) || 1, notes || null, safeTipPct, resolvedOutletId],
     );
     const order = orderRows[0];
 
-    await pool.query(
-      `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2`,
-      [order.id, tableId],
-    );
+    if (resolvedTableId) {
+      await pool.query(
+        `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2`,
+        [order.id, resolvedTableId],
+      );
+    }
 
     for (const item of items) {
       const { rows: itemRows } = await pool.query(

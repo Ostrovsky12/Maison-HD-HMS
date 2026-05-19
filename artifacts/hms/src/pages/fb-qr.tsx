@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   QrCode, Download, Printer, Grid3X3, List, Plus, Pencil,
   Trash2, Settings2, CheckCircle2, Copy, ExternalLink, Layers,
-  Clock, Wine,
+  Clock, Wine, Store,
 } from "lucide-react";
 
 // ─── API helper ───────────────────────────────────────────────────────────────
@@ -701,6 +701,146 @@ function QrCodesTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TAB 3: OUTLET QR CODES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface Outlet {
+  id: number; name: string; slug: string; icon: string; color: string;
+  description?: string; is_active: boolean;
+}
+
+function buildOutletQrUrl(slug: string): string {
+  const base = window.location.origin;
+  const rcBase = base + (import.meta.env.BASE_URL || "").replace(/hms\/?$/, "room-concierge");
+  return `${rcBase}/guest-menu?outlet=${slug}`;
+}
+
+function OutletQrCard({ outlet, size, fgColor }: {
+  outlet: Outlet; size: number; fgColor: string;
+}) {
+  const { toast } = useToast();
+  const url = buildOutletQrUrl(outlet.slug);
+  const canvasId = `qr-outlet-${outlet.id}`;
+
+  function downloadQr() {
+    const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.download = `qr-outlet-${outlet.slug}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }
+
+  return (
+    <div className="border rounded-xl p-4 bg-card flex flex-col items-center gap-3 group hover:shadow-md transition-shadow">
+      <div className="bg-white p-3 rounded-lg border">
+        <QRCodeCanvas value={url} size={size} fgColor={fgColor} bgColor="#FFFFFF" level="M" includeMargin={false} id={canvasId} />
+      </div>
+      <div className="text-center space-y-1">
+        <div className="flex items-center justify-center gap-1.5">
+          <span className="text-lg">{outlet.icon}</span>
+          <span className="font-bold text-base">{outlet.name}</span>
+        </div>
+        {outlet.description && <div className="text-xs text-muted-foreground">{outlet.description}</div>}
+        <div>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${outlet.is_active ? "bg-green-100 text-green-700" : "bg-stone-100 text-stone-400"}`}>
+            {outlet.is_active ? "Активний" : "Неактивний"}
+          </span>
+        </div>
+      </div>
+      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={() => { navigator.clipboard.writeText(url); toast({ title: "URL скопійовано" }); }}
+          title="Копіювати URL" className="p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground">
+          <Copy className="w-3.5 h-3.5" />
+        </button>
+        <a href={url} target="_blank" rel="noopener noreferrer" title="Відкрити меню"
+          className="p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground">
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+        <button onClick={downloadQr} title="Завантажити PNG"
+          className="p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground">
+          <Download className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OutletsQrTab() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["fb-outlets"],
+    queryFn: () => apiFetch("/outlets"),
+  });
+  const [qrSize, setQrSize] = useState(140);
+  const [fgColor, setFgColor] = useState("#1c1917");
+
+  const outlets: Outlet[] = data?.outlets || [];
+
+  return (
+    <div className="space-y-4 p-5">
+      <div>
+        <h3 className="font-semibold text-sm">QR-коди точок продажу</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Розмістіть ці QR-коди у відповідних зонах закладу (ресторан, бар, тераса). Гість сканує і бачить меню своєї зони.
+        </p>
+      </div>
+
+      <div className="border rounded-xl p-4 bg-card space-y-3">
+        <div className="text-sm font-semibold flex items-center gap-2"><Settings2 className="w-4 h-4" /> Параметри QR</div>
+        <div className="flex items-center gap-6">
+          <div>
+            <Label className="text-xs">Розмір</Label>
+            <Select value={String(qrSize)} onValueChange={v => setQrSize(parseInt(v))}>
+              <SelectTrigger className="h-8 mt-1 text-xs w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="100">Малий (100px)</SelectItem>
+                <SelectItem value="140">Середній (140px)</SelectItem>
+                <SelectItem value="180">Великий (180px)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Колір QR</Label>
+            <div className="flex items-center gap-2 mt-1">
+              <input type="color" value={fgColor} onChange={e => setFgColor(e.target.value)}
+                className="h-8 w-10 rounded border cursor-pointer p-0.5" />
+              <span className="text-xs text-muted-foreground font-mono">{fgColor}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground py-6 text-center">Завантаження...</div>
+      ) : outlets.length === 0 ? (
+        <div className="border-2 border-dashed rounded-xl p-10 text-center text-muted-foreground">
+          <Store className="w-10 h-10 mx-auto mb-3 opacity-20" />
+          <p className="text-sm font-medium mb-1">Точок продажу ще немає</p>
+          <p className="text-xs mb-4">Спочатку створіть точки продажу у розділі «Ресторан → Точки продажу»</p>
+          <Button size="sm" variant="outline" onClick={() => window.location.href = "/hms/fb/outlets"}>
+            <Store className="w-4 h-4 mr-1" />Перейти до точок продажу
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          {outlets.map(o => (
+            <OutletQrCard key={o.id} outlet={o} size={qrSize} fgColor={fgColor} />
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 flex gap-2.5">
+        <Store className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+        <p className="text-xs text-blue-700 dark:text-blue-400">
+          <span className="font-semibold">Відмінність від QR столів:</span> QR точки продажу — зональний (один на всю зону).
+          QR столу — персональний для кожного столу. Обидва відкривають меню у гостя на смартфоні.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function FbQrCodes() {
@@ -736,6 +876,9 @@ export default function FbQrCodes() {
             <TabsTrigger value="groups" className="gap-1.5">
               <Layers className="w-3.5 h-3.5" />Групи
             </TabsTrigger>
+            <TabsTrigger value="outlets" className="gap-1.5">
+              <Store className="w-3.5 h-3.5" />Точки продажу
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="qr" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col">
@@ -744,6 +887,10 @@ export default function FbQrCodes() {
 
           <TabsContent value="groups" className="flex-1 overflow-y-auto mt-0">
             <GroupsTab />
+          </TabsContent>
+
+          <TabsContent value="outlets" className="flex-1 overflow-y-auto mt-0">
+            <OutletsQrTab />
           </TabsContent>
         </Tabs>
       </div>
