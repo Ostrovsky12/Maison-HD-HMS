@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { QRCodeSVG } from "qrcode.react";
 import {
   CreditCard, Loader2, UtensilsCrossed, CheckCircle2,
-  Banknote, ArrowLeft, Bell, Smartphone,
+  Smartphone, Banknote, ArrowLeft, Bell,
 } from "lucide-react";
 
 const API_BASE = import.meta.env.BASE_URL.replace(/\/room-concierge\/?$/, "") + "/api";
@@ -41,12 +42,11 @@ export default function Pay() {
     setSending(true);
     try {
       await requestPayment(data.order.table_id, method);
-      setSent(method);
     } catch {
-      // silently ignore — notification might still arrive
-      setSent(method);
+      // best-effort
     } finally {
       setSending(false);
+      setSent(method);
     }
   }
 
@@ -66,6 +66,8 @@ export default function Pay() {
   const { order } = data;
   const total = parseFloat(order.total_amount || "0");
   const isPaid = order.status === "billed";
+
+  const monobankQrValue = `https://pay.monobank.ua/?amount=${Math.round(total * 100)}&ccy=980&t=Maison+HD+%D0%A1%D1%82%D1%96%D0%BB+%E2%84%96${order.table_number || orderId}`;
 
   return (
     <div className="min-h-screen bg-[#F8F5F0] flex flex-col items-center py-8 px-4">
@@ -88,8 +90,8 @@ export default function Pay() {
           <p className="text-4xl font-black text-stone-900">{total.toFixed(2)} <span className="text-2xl">₴</span></p>
         </div>
 
-        {/* Paid */}
         {isPaid ? (
+          /* ── Paid ── */
           <div className="bg-green-50 border border-green-200 rounded-2xl px-5 py-6 flex flex-col items-center gap-3">
             <CheckCircle2 className="w-12 h-12 text-green-600" />
             <div className="text-center">
@@ -98,7 +100,7 @@ export default function Pay() {
             </div>
           </div>
         ) : sent ? (
-          /* ── Confirmation after choosing payment method ── */
+          /* ── Confirmation after notification sent ── */
           <div className="bg-white rounded-2xl p-6 shadow-sm flex flex-col items-center gap-4 text-center">
             <div className="w-16 h-16 rounded-2xl bg-amber-100 flex items-center justify-center">
               <Bell className="w-8 h-8 text-amber-600" />
@@ -109,8 +111,8 @@ export default function Pay() {
               </div>
               <div className="text-stone-500 text-sm mt-1">
                 {sent === "terminal"
-                  ? "Очікуйте — персонал вже отримав сповіщення про термінал"
-                  : "Очікуйте — персонал вже отримав сповіщення про готівку"}
+                  ? "Персонал вже отримав сповіщення"
+                  : "Персонал вже отримав сповіщення"}
               </div>
             </div>
             <button
@@ -121,46 +123,63 @@ export default function Pay() {
             </button>
           </div>
         ) : (
-          /* ── Payment method selection ── */
-          <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-            <h2 className="font-semibold text-stone-800 text-sm">Оберіть спосіб оплати</h2>
+          <>
+            {/* QR Pay block */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm">
+              <h2 className="font-semibold text-stone-800 text-sm mb-4 flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-amber-600" /> Scan QR для онлайн-оплати
+              </h2>
+              <div className="flex justify-center mb-3">
+                <div className="bg-white rounded-2xl p-3 border border-stone-200 shadow-sm">
+                  <QRCodeSVG value={monobankQrValue} size={180} level="M" />
+                </div>
+              </div>
+              <p className="text-xs text-center text-stone-400">
+                Відскануйте QR-код через ваш банківський додаток
+              </p>
+            </div>
 
-            {/* Terminal */}
-            <button
-              onClick={() => handlePayment("terminal")}
-              disabled={sending}
-              className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform disabled:opacity-60"
-            >
-              <div className="w-9 h-9 rounded-xl bg-yellow-100 flex items-center justify-center shrink-0">
-                <CreditCard className="w-5 h-5 text-yellow-600" />
-              </div>
-              <div className="text-left flex-1">
-                <div className="font-semibold text-stone-800 text-sm">Банківська картка</div>
-                <div className="text-xs text-stone-500">Офіціант принесе термінал</div>
-              </div>
-              {sending ? <Loader2 className="w-4 h-4 animate-spin text-stone-400 shrink-0" /> : <Bell className="w-4 h-4 text-stone-300 shrink-0" />}
-            </button>
+            {/* Payment method buttons */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+              <h2 className="font-semibold text-stone-800 text-sm">Або оберіть спосіб оплати</h2>
 
-            {/* Cash */}
-            <button
-              onClick={() => handlePayment("cash")}
-              disabled={sending}
-              className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform disabled:opacity-60"
-            >
-              <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
-                <Banknote className="w-5 h-5 text-green-600" />
-              </div>
-              <div className="text-left flex-1">
-                <div className="font-semibold text-stone-800 text-sm">Готівка</div>
-                <div className="text-xs text-stone-500">Офіціант принесе рахунок</div>
-              </div>
-              {sending ? <Loader2 className="w-4 h-4 animate-spin text-stone-400 shrink-0" /> : <Bell className="w-4 h-4 text-stone-300 shrink-0" />}
-            </button>
-          </div>
+              <button
+                onClick={() => handlePayment("terminal")}
+                disabled={sending}
+                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform disabled:opacity-60"
+              >
+                <div className="w-9 h-9 rounded-xl bg-yellow-100 flex items-center justify-center shrink-0">
+                  <CreditCard className="w-5 h-5 text-yellow-600" />
+                </div>
+                <div className="text-left flex-1">
+                  <div className="font-semibold text-stone-800 text-sm">Банківська картка</div>
+                  <div className="text-xs text-stone-500">Офіціант принесе термінал</div>
+                </div>
+                {sending ? <Loader2 className="w-4 h-4 animate-spin text-stone-400 shrink-0" /> : <Bell className="w-4 h-4 text-stone-300 shrink-0" />}
+              </button>
+
+              <button
+                onClick={() => handlePayment("cash")}
+                disabled={sending}
+                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform disabled:opacity-60"
+              >
+                <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
+                  <Banknote className="w-5 h-5 text-green-600" />
+                </div>
+                <div className="text-left flex-1">
+                  <div className="font-semibold text-stone-800 text-sm">Готівка</div>
+                  <div className="text-xs text-stone-500">Офіціант принесе рахунок</div>
+                </div>
+                {sending ? <Loader2 className="w-4 h-4 animate-spin text-stone-400 shrink-0" /> : <Bell className="w-4 h-4 text-stone-300 shrink-0" />}
+              </button>
+            </div>
+          </>
         )}
 
-        <button onClick={() => setLocation(`/bill/${orderId}`)}
-          className="w-full py-3 rounded-2xl border border-stone-300 text-stone-600 font-medium text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
+        <button
+          onClick={() => setLocation(`/bill/${orderId}`)}
+          className="w-full py-3 rounded-2xl border border-stone-300 text-stone-600 font-medium text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform"
+        >
           <ArrowLeft className="w-4 h-4" /> Переглянути рахунок
         </button>
 
