@@ -53,7 +53,7 @@ interface TableNotification {
   payload: { total?: string; orderId?: number } | null;
   created_at: string;
 }
-interface OrderItem { id: number; name: string; quantity: number; price: string; total_price: string; notes?: string; }
+interface OrderItem { id: number; name: string; quantity: number; price: string; total_price: string; notes?: string; is_alcohol?: boolean; status?: string; }
 interface GuestOrder {
   id: number; status: string; guest_name: string; guest_count: number;
   notes?: string; total_amount: string; opened_at: string;
@@ -435,90 +435,151 @@ function AddItemModal({ orderId, onClose, onDone }: { orderId: number; onClose: 
 
 // ─── Shift Bar ─────────────────────────────────────────────────────────────────
 function ShiftBar({ onCashMovement, onXReport }: { onCashMovement: () => void; onXReport: () => void }) {
-  const [session, setSession] = useState<any>(null);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [openBalance, setOpenBalance] = useState("");
+  const [closingId, setClosingId] = useState<number | null>(null);
   const [showOpenForm, setShowOpenForm] = useState(false);
+  const [legalEntities, setLegalEntities] = useState<any[]>([]);
+  const [balances, setBalances] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
-    try { const d = await apiFetch("/cashbox/session"); setSession(d.session || null); }
-    catch {} finally { setLoading(false); }
+    try {
+      const d = await apiFetch("/cashbox/session");
+      setSessions(d.sessions || (d.session ? [d.session] : []));
+    } catch {} finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
 
+  async function handleShowOpen() {
+    setShowOpenForm(true);
+    try {
+      const d = await apiFetch("/cashbox/legal-entities");
+      const entities: any[] = d.legalEntities || [];
+      setLegalEntities(entities);
+      const init: Record<number, string> = {};
+      entities.forEach(e => { if (!e.session_id) init[e.id] = ""; });
+      setBalances(init);
+    } catch {}
+  }
+
   async function handleOpen() {
     setOpening(true);
     try {
-      await apiFetch("/cashbox/session", {
-        method: "POST",
-        body: JSON.stringify({ openingBalance: parseFloat(openBalance || "0"), cashboxName: "Каса 1" }),
-      });
-      setShowOpenForm(false); load();
+      const unopened = legalEntities.filter(e => !e.session_id);
+      if (unopened.length === 0) {
+        await apiFetch("/cashbox/session", {
+          method: "POST",
+          body: JSON.stringify({ openingBalance: 0, cashboxName: "Каса 1" }),
+        });
+      } else {
+        for (const e of unopened) {
+          try {
+            await apiFetch("/cashbox/session", {
+              method: "POST",
+              body: JSON.stringify({
+                openingBalance: parseFloat(balances[e.id] || "0"),
+                cashboxName: e.short_name || e.name,
+                legalEntityId: e.id,
+              }),
+            });
+          } catch (err: any) {
+            if (!err.message?.includes("вже відкрита")) throw err;
+          }
+        }
+      }
+      setShowOpenForm(false);
+      load();
     } catch (e: any) { alert(e.message); }
     finally { setOpening(false); }
   }
 
-  async function handleClose() {
-    if (!session || !confirm("Закрити зміну? Переконайтесь що всі замовлення закриті.")) return;
-    setClosing(true);
+  async function handleClose(sessionId: number) {
+    if (!confirm("Закрити зміну? Переконайтесь що всі замовлення закриті.")) return;
+    setClosingId(sessionId);
     try {
-      await apiFetch(`/cashbox/session/${session.id}/close`, { method: "PATCH", body: JSON.stringify({}) });
+      await apiFetch(`/cashbox/session/${sessionId}/close`, { method: "PATCH", body: JSON.stringify({}) });
       load();
     } catch (e: any) { alert(e.message); }
-    finally { setClosing(false); }
+    finally { setClosingId(null); }
   }
 
   if (loading) return <div className="h-8 border-b bg-gray-50 animate-pulse" />;
 
-  if (session) {
-    const balance = parseFloat(session.expected_balance || "0");
+  if (sessions.length > 0) {
     return (
-      <div className="px-3 py-1.5 border-b bg-green-50 flex items-center gap-2 text-xs flex-wrap shrink-0">
-        <div className="w-2 h-2 rounded-full bg-green-500 shrink-0 animate-pulse" />
-        <span className="font-bold text-green-800">Зміна відкрита</span>
-        <span className="text-green-600">
-          з {new Date(session.opened_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}
-        </span>
-        <span className="text-gray-400">·</span>
-        <span className="font-semibold text-gray-700">Каса: {balance.toFixed(0)} ₴</span>
-        <div className="flex gap-1 ml-auto">
-          <button onClick={onXReport}
-            className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 transition-colors">
-            X-звіт
-          </button>
-          <button onClick={onCashMovement}
-            className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 font-bold hover:bg-amber-200 transition-colors flex items-center gap-0.5">
-            <DollarSign className="w-3 h-3" /> Рух
-          </button>
-          <button onClick={handleClose} disabled={closing}
-            className="px-2 py-0.5 rounded-md bg-red-100 text-red-700 font-bold hover:bg-red-200 transition-colors flex items-center gap-0.5">
-            <Power className="w-3 h-3" /> Закрити
-          </button>
-        </div>
+      <div className="border-b bg-green-50 shrink-0">
+        {sessions.map((session, idx) => {
+          const balance = parseFloat(session.expected_balance || "0");
+          return (
+            <div key={session.id} className="px-3 py-1.5 flex items-center gap-2 text-xs flex-wrap">
+              <div className="w-2 h-2 rounded-full bg-green-500 shrink-0 animate-pulse" />
+              <span className="font-bold text-green-800">
+                {session.entity_short_name || session.entity_name || "Зміна"} відкрита
+              </span>
+              <span className="text-green-600">
+                з {new Date(session.opened_at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+              <span className="text-gray-400">·</span>
+              <span className="font-semibold text-gray-700">Каса: {balance.toFixed(0)} ₴</span>
+              <div className="flex gap-1 ml-auto">
+                {idx === 0 && (
+                  <>
+                    <button onClick={onXReport}
+                      className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 transition-colors">
+                      X-звіт
+                    </button>
+                    <button onClick={onCashMovement}
+                      className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 font-bold hover:bg-amber-200 transition-colors flex items-center gap-0.5">
+                      <DollarSign className="w-3 h-3" /> Рух
+                    </button>
+                  </>
+                )}
+                <button onClick={() => handleClose(session.id)} disabled={closingId === session.id}
+                  className="px-2 py-0.5 rounded-md bg-red-100 text-red-700 font-bold hover:bg-red-200 transition-colors flex items-center gap-0.5">
+                  <Power className="w-3 h-3" /> Закрити
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
 
   if (showOpenForm) {
+    const unopened = legalEntities.filter(e => !e.session_id);
     return (
-      <div className="px-3 py-1.5 border-b bg-amber-50 flex items-center gap-2 text-xs shrink-0 flex-wrap">
-        <span className="font-semibold text-amber-800">Залишок готівки при відкритті:</span>
-        <input
-          type="number" value={openBalance} onChange={e => setOpenBalance(e.target.value)}
-          placeholder="0.00" min={0} step={0.01} autoFocus
-          className="w-24 px-2 py-0.5 border rounded-lg text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
-        />
-        <button onClick={handleOpen} disabled={opening}
-          className="px-3 py-0.5 rounded-md bg-green-600 text-white font-bold hover:bg-green-700">
-          {opening ? "..." : "Відкрити"}
-        </button>
-        <button onClick={() => setShowOpenForm(false)}
-          className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">
-          Скасувати
-        </button>
+      <div className="border-b bg-amber-50 shrink-0 px-3 py-2">
+        <p className="text-xs font-semibold text-amber-800 mb-2">Внесення готівки при відкритті зміни:</p>
+        {unopened.length > 0 ? unopened.map(e => (
+          <div key={e.id} className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-medium text-gray-700 flex-1 truncate min-w-0">
+              {e.short_name || e.name}
+            </span>
+            <input
+              type="number"
+              value={balances[e.id] ?? ""}
+              onChange={ev => setBalances(prev => ({ ...prev, [e.id]: ev.target.value }))}
+              placeholder="0.00" min={0} step={0.01}
+              className="w-28 px-2 py-1 border rounded-lg text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <span className="text-xs text-gray-500 shrink-0">₴</span>
+          </div>
+        )) : (
+          <p className="text-xs text-gray-500 mb-1.5">Немає зареєстрованих юр. осіб</p>
+        )}
+        <div className="flex gap-2 mt-2">
+          <button onClick={handleOpen} disabled={opening}
+            className="px-3 py-1 rounded-md bg-green-600 text-white text-xs font-bold hover:bg-green-700">
+            {opening ? "Відкриваємо..." : "Відкрити зміни"}
+          </button>
+          <button onClick={() => setShowOpenForm(false)}
+            className="px-2 py-1 rounded-md bg-gray-100 text-gray-600 text-xs hover:bg-gray-200">
+            Скасувати
+          </button>
+        </div>
       </div>
     );
   }
@@ -527,7 +588,7 @@ function ShiftBar({ onCashMovement, onXReport }: { onCashMovement: () => void; o
     <div className="px-3 py-1.5 border-b bg-amber-50 flex items-center gap-2 text-xs shrink-0">
       <div className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
       <span className="text-amber-800 font-semibold">Зміна не відкрита</span>
-      <button onClick={() => setShowOpenForm(true)}
+      <button onClick={handleShowOpen}
         className="ml-auto px-3 py-0.5 rounded-md bg-green-600 text-white font-bold hover:bg-green-700 flex items-center gap-1">
         <Power className="w-3 h-3" /> Відкрити зміну
       </button>
@@ -834,6 +895,11 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
   const [error, setError] = useState("");
   const [isFiscal, setIsFiscal] = useState(true);
 
+  // ── Uncorking (розкоркування пляшок) ──
+  const alcoholItems = (order.items || []).filter(i => i.is_alcohol && i.status !== "cancelled");
+  const [step, setStep] = useState<"uncork" | "pay">(alcoholItems.length > 0 ? "uncork" : "pay");
+  const [uncorked, setUncorked] = useState<Set<number>>(new Set());
+
   // ── Discount ──
   const [discountEnabled, setDiscountEnabled] = useState(false);
   const [discountType, setDiscountType] = useState<"pct" | "fixed">("pct");
@@ -918,6 +984,84 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
 
   const selectedInfo = PAY_METHODS.find(m => m.id === mode)!;
 
+  // ── Uncorking step ────────────────────────────────────────────────────────────
+  if (step === "uncork") {
+    const allUncorked = alcoholItems.every(i => uncorked.has(i.id));
+    return (
+      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[95vh]">
+          <div className="flex items-center justify-between p-4 border-b shrink-0">
+            <div>
+              <h3 className="font-bold text-base">🍾 Розкоркування пляшок</h3>
+              <p className="text-xs text-gray-500">
+                {order.tableNumber ? `Стіл ${order.tableNumber}` : "Замовлення"} · {order.guest_name}
+              </p>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="p-4 flex-1 overflow-y-auto">
+            <p className="text-xs text-gray-500 mb-3">
+              Підтвердіть розкоркування кожної алкогольної позиції перед оплатою
+            </p>
+            <div className="space-y-2">
+              {alcoholItems.map(item => {
+                const done = uncorked.has(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setUncorked(prev => {
+                      const next = new Set(prev);
+                      if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                      return next;
+                    })}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left ${
+                      done ? "border-green-400 bg-green-50" : "border-gray-200 hover:border-amber-300 hover:bg-amber-50"
+                    }`}
+                  >
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0 ${done ? "bg-green-100" : "bg-amber-100"}`}>
+                      {done ? "✅" : "🍾"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{item.name}</p>
+                      <p className="text-xs text-gray-500">{item.quantity} × {parseFloat(item.price).toFixed(2)} ₴</p>
+                    </div>
+                    <span className={`text-xs font-bold shrink-0 ${done ? "text-green-600" : "text-gray-400"}`}>
+                      {done ? "Відкорковано" : "Натисніть"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {alcoholItems.length > 1 && (
+              <button
+                onClick={() => setUncorked(new Set(alcoholItems.map(i => i.id)))}
+                className="mt-3 w-full py-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-colors"
+              >
+                Підтвердити всі ({alcoholItems.length})
+              </button>
+            )}
+          </div>
+          <div className="p-4 border-t shrink-0">
+            <button
+              disabled={!allUncorked}
+              onClick={() => setStep("pay")}
+              className={`w-full py-3 rounded-xl font-bold text-sm transition-all ${
+                allUncorked
+                  ? "bg-green-600 text-white hover:bg-green-700 shadow-md"
+                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
+              }`}
+            >
+              {allUncorked
+                ? "Перейти до оплати →"
+                : `Підтвердіть ще ${alcoholItems.length - uncorked.size} позиції`}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Payment step ─────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[95vh] overflow-y-auto">
