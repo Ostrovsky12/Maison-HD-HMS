@@ -1,9 +1,9 @@
+import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { QRCodeSVG } from "qrcode.react";
 import {
   CreditCard, Loader2, UtensilsCrossed, CheckCircle2,
-  Coffee, Smartphone, Banknote, Building2, ArrowLeft,
+  Banknote, ArrowLeft, Bell, Smartphone,
 } from "lucide-react";
 
 const API_BASE = import.meta.env.BASE_URL.replace(/\/room-concierge\/?$/, "") + "/api";
@@ -14,15 +14,41 @@ async function fetchPublicBill(orderId: string) {
   return r.json();
 }
 
+async function requestPayment(tableId: number, method: "cash" | "terminal") {
+  const r = await fetch(`${API_BASE}/fb/public/request-payment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tableId, method }),
+  });
+  if (!r.ok) throw new Error("Помилка сповіщення");
+  return r.json();
+}
+
 export default function Pay() {
   const { orderId } = useParams<{ orderId: string }>();
   const [, setLocation] = useLocation();
+  const [sent, setSent] = useState<"cash" | "terminal" | null>(null);
+  const [sending, setSending] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["public-bill", orderId],
     queryFn: () => fetchPublicBill(orderId!),
     refetchInterval: 15000,
   });
+
+  async function handlePayment(method: "cash" | "terminal") {
+    if (!data?.order?.table_id || sending) return;
+    setSending(true);
+    try {
+      await requestPayment(data.order.table_id, method);
+      setSent(method);
+    } catch {
+      // silently ignore — notification might still arrive
+      setSent(method);
+    } finally {
+      setSending(false);
+    }
+  }
 
   if (isLoading) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-[#F8F5F0] gap-3">
@@ -41,12 +67,10 @@ export default function Pay() {
   const total = parseFloat(order.total_amount || "0");
   const isPaid = order.status === "billed";
 
-  // Monobank QR link (standard deeplink, will open in app or browser)
-  const monobankQrValue = `https://pay.monobank.ua/?amount=${Math.round(total * 100)}&ccy=980&t=Maison+HD+%D0%A1%D1%82%D1%96%D0%BB+%E2%84%96${order.table_number || orderId}`;
-
   return (
     <div className="min-h-screen bg-[#F8F5F0] flex flex-col items-center py-8 px-4">
       <div className="w-full max-w-sm space-y-4">
+
         {/* Header */}
         <div className="text-center space-y-1">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-green-600 mb-2">
@@ -73,55 +97,66 @@ export default function Pay() {
               <div className="text-green-600 text-sm mt-1">Дякуємо за ваш візит у Maison HD</div>
             </div>
           </div>
-        ) : (
-          <>
-            {/* QR Pay block */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm">
-              <h2 className="font-semibold text-stone-800 text-sm mb-4 flex items-center gap-2">
-                <Smartphone className="w-4 h-4 text-amber-600" /> Scan QR для онлайн-оплати
-              </h2>
-              <div className="flex justify-center mb-3">
-                <div className="bg-white rounded-2xl p-3 border border-stone-200 shadow-sm">
-                  <QRCodeSVG value={monobankQrValue} size={180} level="M" />
-                </div>
+        ) : sent ? (
+          /* ── Confirmation after choosing payment method ── */
+          <div className="bg-white rounded-2xl p-6 shadow-sm flex flex-col items-center gap-4 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-amber-100 flex items-center justify-center">
+              <Bell className="w-8 h-8 text-amber-600" />
+            </div>
+            <div>
+              <div className="font-bold text-stone-900 text-lg">
+                {sent === "terminal" ? "Офіціант несе термінал" : "Офіціант іде до вас"}
               </div>
-              <p className="text-xs text-center text-stone-400">
-                Відскануйте QR-код через ваш банківський додаток
-              </p>
+              <div className="text-stone-500 text-sm mt-1">
+                {sent === "terminal"
+                  ? "Очікуйте — персонал вже отримав сповіщення про термінал"
+                  : "Очікуйте — персонал вже отримав сповіщення про готівку"}
+              </div>
             </div>
+            <button
+              onClick={() => setSent(null)}
+              className="text-sm text-stone-400 underline underline-offset-2"
+            >
+              Змінити спосіб оплати
+            </button>
+          </div>
+        ) : (
+          /* ── Payment method selection ── */
+          <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+            <h2 className="font-semibold text-stone-800 text-sm">Оберіть спосіб оплати</h2>
 
-            {/* Payment method buttons */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-              <h2 className="font-semibold text-stone-800 text-sm">Або оберіть спосіб оплати</h2>
-              <button className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform">
-                <div className="w-9 h-9 rounded-xl bg-yellow-100 flex items-center justify-center">
-                  <CreditCard className="w-5 h-5 text-yellow-600" />
-                </div>
-                <div className="text-left">
-                  <div className="font-semibold text-stone-800 text-sm">Банківська картка</div>
-                  <div className="text-xs text-stone-500">Термінал у офіціанта</div>
-                </div>
-              </button>
-              <button className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform">
-                <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center">
-                  <Banknote className="w-5 h-5 text-green-600" />
-                </div>
-                <div className="text-left">
-                  <div className="font-semibold text-stone-800 text-sm">Готівка</div>
-                  <div className="text-xs text-stone-500">Попросіть офіціанта</div>
-                </div>
-              </button>
-              <button className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform">
-                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
-                  <Building2 className="w-5 h-5 text-blue-600" />
-                </div>
-                <div className="text-left">
-                  <div className="font-semibold text-stone-800 text-sm">Безготівкова оплата</div>
-                  <div className="text-xs text-stone-500">Рахунок для юр. особи</div>
-                </div>
-              </button>
-            </div>
-          </>
+            {/* Terminal */}
+            <button
+              onClick={() => handlePayment("terminal")}
+              disabled={sending}
+              className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform disabled:opacity-60"
+            >
+              <div className="w-9 h-9 rounded-xl bg-yellow-100 flex items-center justify-center shrink-0">
+                <CreditCard className="w-5 h-5 text-yellow-600" />
+              </div>
+              <div className="text-left flex-1">
+                <div className="font-semibold text-stone-800 text-sm">Банківська картка</div>
+                <div className="text-xs text-stone-500">Офіціант принесе термінал</div>
+              </div>
+              {sending ? <Loader2 className="w-4 h-4 animate-spin text-stone-400 shrink-0" /> : <Bell className="w-4 h-4 text-stone-300 shrink-0" />}
+            </button>
+
+            {/* Cash */}
+            <button
+              onClick={() => handlePayment("cash")}
+              disabled={sending}
+              className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-stone-200 hover:bg-stone-50 active:scale-95 transition-transform disabled:opacity-60"
+            >
+              <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
+                <Banknote className="w-5 h-5 text-green-600" />
+              </div>
+              <div className="text-left flex-1">
+                <div className="font-semibold text-stone-800 text-sm">Готівка</div>
+                <div className="text-xs text-stone-500">Офіціант принесе рахунок</div>
+              </div>
+              {sending ? <Loader2 className="w-4 h-4 animate-spin text-stone-400 shrink-0" /> : <Bell className="w-4 h-4 text-stone-300 shrink-0" />}
+            </button>
+          </div>
         )}
 
         <button onClick={() => setLocation(`/bill/${orderId}`)}
