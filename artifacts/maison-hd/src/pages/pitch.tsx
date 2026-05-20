@@ -159,7 +159,7 @@ export default function PitchPage() {
       <div className="flex-1 overflow-y-auto">
 
         {/* ━━━ SLIDE 1: HERO ━━━ */}
-        {(slide === "hero" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "hero" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center text-center px-8 relative overflow-hidden py-16">
             <div className="absolute -top-40 -left-40 w-[700px] h-[700px] rounded-full bg-indigo-600/10 blur-3xl pointer-events-none" />
             <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full bg-violet-600/10 blur-3xl pointer-events-none" />
@@ -222,10 +222,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 2: OVERVIEW ━━━ */}
-        {(slide === "overview" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "overview" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -307,10 +307,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 3: HOTEL PMS ━━━ */}
-        {(slide === "hotel" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "hotel" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-6xl w-full">
               <SlideHeader
@@ -387,10 +387,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 4: GUEST PORTAL ━━━ */}
-        {(slide === "guest-portal" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "guest-portal" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -506,10 +506,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 5: GUEST GUIDE ━━━ */}
-        {(slide === "guest-guide" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "guest-guide" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -609,10 +609,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 6: F&B ━━━ */}
-        {(slide === "fb" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "fb" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-6xl w-full">
               <SlideHeader
@@ -685,10 +685,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 7: WAITER ━━━ */}
-        {(slide === "waiter" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "waiter" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -801,10 +801,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 8: BOSS ━━━ */}
-        {(slide === "boss" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "boss" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -907,10 +907,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
         {/* ━━━ SLIDE 9: AI ━━━ */}
-        {(slide === "ai" || printAll) && (<div className="print-slide">{true && (
+        {(slide === "ai" || printAll) && (<div className="print-slide">
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -1019,7 +1019,7 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}</div>)}
+        </div>)}
 
       </div>
 
