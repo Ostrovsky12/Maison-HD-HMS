@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Loader2, Settings, ImageIcon } from "lucide-react";
+import { Save, Loader2, Settings, ImageIcon, Upload, X } from "lucide-react";
 
 const API = "/api/fb/config";
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -26,9 +26,30 @@ const LANGUAGES = ["Українська","English","Polski","Deutsch"];
 const SERVICE_PCTS = ["0%","5%","10%","12%","15%","18%","20%"];
 const NOTIFY_OPTIONS = ["Не сповіщати","Щодня","Щотижня"];
 
+function toSlug(name: string) {
+  return name.toLowerCase()
+    .replace(/[іїєґ]/g, (c: string) => ({ "і": "i", "ї": "yi", "є": "ye", "ґ": "g" }[c] ?? c))
+    .replace(/[а-яёa-z0-9]+/g, m => m)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function uploadLogo(file: File): Promise<string> {
+  const token = localStorage.getItem("hms_token");
+  const r = await fetch("/api/storage/uploads/request-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+  });
+  if (!r.ok) throw new Error("Не вдалось отримати URL для завантаження");
+  const { uploadURL, objectPath } = await r.json();
+  const up = await fetch(uploadURL, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+  if (!up.ok) throw new Error("Помилка завантаження файлу");
+  return `/api/storage${objectPath}`;
+}
+
 interface GeneralConfig {
   company_name?: string;
-  poster_address?: string;
   timezone?: string;
   shift_end_time?: string;
   currency?: string;
@@ -66,6 +87,8 @@ export default function FbConfigGeneral() {
   });
 
   const [branding, setBranding] = useState<GuestBranding>({ logo_url: "", primary_color: "#2C2416", accent_color: "#C9A96E" });
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   const { isLoading } = useQuery({
     queryKey: ["fb-config-general"],
@@ -147,9 +170,22 @@ export default function FbConfigGeneral() {
               <Input value={cfg.company_name||""} onChange={e => set("company_name", e.target.value)}
                 placeholder="Назва вашої компанії" className="max-w-xs" />
             </Row>
-            <Row label="Адреса у Poster">
-              <Input value={cfg.poster_address||""} onChange={e => set("poster_address", e.target.value)}
-                placeholder="your-place.joinposter.com" className="max-w-xs" />
+            <Row label="Адреса у Maison HD">
+              {(() => {
+                const slug = toSlug(cfg.company_name || "");
+                const url = slug ? `${slug}.maisonhd.com` : "";
+                return (
+                  <div className="max-w-xs">
+                    <div className="flex items-center rounded-md border bg-muted/40 overflow-hidden h-9">
+                      <span className="px-3 text-sm text-muted-foreground bg-muted border-r h-full flex items-center shrink-0">https://</span>
+                      <span className={`px-3 text-sm flex-1 ${url ? "text-foreground font-mono" : "text-muted-foreground"}`}>
+                        {url || "введіть назву компанії вище"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">Формується автоматично з назви компанії.</p>
+                  </div>
+                );
+              })()}
             </Row>
             <Row label="Логотип" hint="Друкуватиметься у шапці чека.">
               <Input value={cfg.company_name ? "" : ""} placeholder="(файл: завантаження в розробці)" disabled className="max-w-xs opacity-50" />
@@ -240,16 +276,55 @@ export default function FbConfigGeneral() {
               </div>
               <p className="text-xs text-muted-foreground mb-4">Налаштування відображаються у гостьовому QR-меню. Логотип з'являється на головному екрані меню.</p>
               <div className="space-y-3">
-                <Row label="URL логотипу" hint="Вставте пряме посилання на зображення (PNG, SVG, JPEG). Рекомендований розмір: 200×80 px.">
+                <Row label="Логотип" hint="З'являється на головному екрані QR-меню. Рекомендований розмір: 200×80 px, PNG або SVG.">
                   <div className="space-y-2 max-w-sm">
-                    <Input value={branding.logo_url||""} onChange={e => setBrand("logo_url", e.target.value)}
-                      placeholder="https://example.com/logo.png" />
-                    {branding.logo_url && (
-                      <div className="w-full h-16 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden">
-                        <img src={branding.logo_url} alt="Logo preview" className="max-h-12 max-w-full object-contain"
-                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setLogoUploading(true);
+                        try {
+                          const url = await uploadLogo(file);
+                          setBrand("logo_url", url);
+                        } catch (err: any) {
+                          toast({ title: "Помилка завантаження", description: err.message, variant: "destructive" });
+                        } finally {
+                          setLogoUploading(false);
+                          if (logoInputRef.current) logoInputRef.current.value = "";
+                        }
+                      }}
+                    />
+                    {branding.logo_url ? (
+                      <div className="relative w-fit">
+                        <div className="h-16 min-w-[120px] max-w-xs rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden px-3">
+                          <img src={branding.logo_url} alt="Логотип" className="max-h-12 max-w-full object-contain"
+                            onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setBrand("logo_url", "")}
+                          className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-white rounded-full flex items-center justify-center hover:bg-destructive/80"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
-                    )}
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={logoUploading}
+                      onClick={() => logoInputRef.current?.click()}
+                    >
+                      {logoUploading
+                        ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Завантаження...</>
+                        : <><Upload className="w-3.5 h-3.5 mr-1.5" /> {branding.logo_url ? "Замінити логотип" : "Завантажити логотип"}</>
+                      }
+                    </Button>
                   </div>
                 </Row>
                 <div className="grid grid-cols-[180px_1fr] gap-4 items-center py-2">
