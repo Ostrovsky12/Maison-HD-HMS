@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
-  ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight,
+  ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, Download,
   CalendarDays, BarChart3, MessageSquare, Sparkles, Users, CreditCard,
   Globe, Zap, Shield, Clock, TrendingUp, Check, Star,
   Smartphone, FileText, Wrench, Utensils, Activity,
@@ -87,6 +87,7 @@ function BulletList({ items, color = "text-indigo-400" }: { items: string[]; col
 export default function PitchPage() {
   const [slide, setSlide] = useState<Slide>("hero");
   const [fullscreen, setFullscreen] = useState(false);
+  const [printAll, setPrintAll] = useState(false);
   const idx = SLIDES.indexOf(slide);
 
   const prev = () => idx > 0 && setSlide(SLIDES[idx - 1]);
@@ -96,12 +97,19 @@ export default function PitchPage() {
     else document.exitFullscreen?.().catch(() => {});
     setFullscreen(f => !f);
   };
+  const handlePrint = () => {
+    setPrintAll(true);
+    setTimeout(() => {
+      window.print();
+      setPrintAll(false);
+    }, 300);
+  };
 
   return (
     <div className="min-h-screen bg-[#07091a] text-white font-sans flex flex-col select-none">
 
       {/* ── Control bar ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-6 py-3 bg-black/60 border-b border-white/10 sticky top-0 z-50">
+      <div className="no-print flex items-center justify-between px-6 py-3 bg-black/60 border-b border-white/10 sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <button onClick={() => window.history.back()}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-white font-medium transition-all">
@@ -128,17 +136,30 @@ export default function PitchPage() {
             className="p-1.5 rounded-lg hover:bg-white/10 disabled:opacity-30 transition-colors">
             <ChevronRight className="w-4 h-4" />
           </button>
+          <button onClick={handlePrint} title="Завантажити PDF" className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-gray-400 hover:text-white">
+            <Download className="w-4 h-4" />
+          </button>
           <button onClick={toggleFs} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-gray-400 hover:text-white">
             {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
+      <style>{`
+        @media print {
+          @page { size: A4 landscape; margin: 0; }
+          body { background: #07091a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .no-print { display: none !important; }
+          .print-slide { display: block !important; page-break-after: always; break-after: page; min-height: 100vh; overflow: hidden; }
+        }
+        @media screen { .print-slide { display: contents; } }
+      `}</style>
+
       {/* ── Slides ──────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
 
         {/* ━━━ SLIDE 1: HERO ━━━ */}
-        {slide === "hero" && (
+        {(slide === "hero" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center text-center px-8 relative overflow-hidden py-16">
             <div className="absolute -top-40 -left-40 w-[700px] h-[700px] rounded-full bg-indigo-600/10 blur-3xl pointer-events-none" />
             <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full bg-violet-600/10 blur-3xl pointer-events-none" />
@@ -201,10 +222,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 2: OVERVIEW ━━━ */}
-        {slide === "overview" && (
+        {(slide === "overview" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -286,10 +307,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 3: HOTEL PMS ━━━ */}
-        {slide === "hotel" && (
+        {(slide === "hotel" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-6xl w-full">
               <SlideHeader
@@ -366,10 +387,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 4: GUEST PORTAL ━━━ */}
-        {slide === "guest-portal" && (
+        {(slide === "guest-portal" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -485,10 +506,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 5: GUEST GUIDE ━━━ */}
-        {slide === "guest-guide" && (
+        {(slide === "guest-guide" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -588,10 +609,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 6: F&B ━━━ */}
-        {slide === "fb" && (
+        {(slide === "fb" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-6xl w-full">
               <SlideHeader
@@ -664,10 +685,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 7: WAITER ━━━ */}
-        {slide === "waiter" && (
+        {(slide === "waiter" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -780,10 +801,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 8: BOSS ━━━ */}
-        {slide === "boss" && (
+        {(slide === "boss" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -886,10 +907,10 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
         {/* ━━━ SLIDE 9: AI ━━━ */}
-        {slide === "ai" && (
+        {(slide === "ai" || printAll) && (<div className="print-slide">{true && (
           <div className="min-h-[90vh] flex flex-col items-center justify-center px-8 py-16">
             <div className="max-w-5xl w-full">
               <SlideHeader
@@ -998,12 +1019,12 @@ export default function PitchPage() {
               </div>
             </div>
           </div>
-        )}
+        )}</div>)}
 
       </div>
 
       {/* ── Bottom nav hint ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-6 py-3 bg-black/40 border-t border-white/10 text-xs text-white/30">
+      <div className="no-print flex items-center justify-between px-6 py-3 bg-black/40 border-t border-white/10 text-xs text-white/30">
         <span>{SLIDE_LABELS[slide]}</span>
         <div className="flex items-center gap-4">
           {idx > 0 && (
