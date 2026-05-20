@@ -1724,25 +1724,36 @@ export default function FbMenu() {
               );
             })}
 
-            {/* Standalone leaf categories (legacy) */}
+            {/* Standalone leaf categories (no station yet — draggable onto stations) */}
             {standaloneLeafs.length > 0 && (
               <div className="mt-1">
-                {standaloneLeafs.length > 0 && <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Без станції</div>}
+                <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <span>Без станції</span>
+                  <span className="text-muted-foreground/50 normal-case font-normal">— перетягніть у станцію</span>
+                </div>
                 {standaloneLeafs.map(cat => {
                   const catCount = allItems.filter(i => ((i as any).category_id ?? i.categoryId) === cat.id).length;
                   const isSel = selectedCatId === cat.id;
+                  const isBeingDragged = draggingCatId === cat.id;
                   return (
                     <div key={cat.id}
-                      className={`group relative flex items-center gap-2 px-3 py-2 cursor-pointer text-sm hover:bg-muted transition-colors ${isSel ? "bg-muted font-medium" : ""} ${!cat.isActive ? "opacity-50" : ""}`}
-                      onClick={() => setSelectedCatId(cat.id)}>
-                      <span className="text-base">{cat.emoji}</span>
+                      draggable
+                      onDragStart={e => handleCatRowDragStart(e, cat.id)}
+                      onDragEnd={handleDragEnd}
+                      className={`group relative flex items-center gap-1.5 px-2 py-2 cursor-grab text-sm transition-colors
+                        ${isSel ? "bg-muted font-medium" : "hover:bg-muted"}
+                        ${!cat.isActive ? "opacity-50" : ""}
+                        ${isBeingDragged ? "opacity-40 scale-95" : ""}`}
+                      onClick={() => !isBeingDragged && setSelectedCatId(cat.id)}>
+                      <GripVertical className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 cursor-grab" />
+                      <span className="text-base shrink-0">{cat.emoji}</span>
                       <span className="flex-1 truncate">{cat.name}</span>
                       <span className="text-xs text-muted-foreground">{catCount}</span>
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
-                        <button className="p-1 hover:bg-muted rounded" onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: cat }); }}>
+                        <button className="p-1 hover:bg-muted rounded cursor-pointer" onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: cat }); }}>
                           <Pencil className="w-3 h-3" />
                         </button>
-                        <button className="p-1 hover:bg-destructive/10 text-destructive rounded" onClick={e => { e.stopPropagation(); setDeleteCat(cat); }}>
+                        <button className="p-1 hover:bg-destructive/10 text-destructive rounded cursor-pointer" onClick={e => { e.stopPropagation(); setDeleteCat(cat); }}>
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
