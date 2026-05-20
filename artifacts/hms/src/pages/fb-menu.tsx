@@ -1289,6 +1289,8 @@ export default function FbMenu() {
   const [deleteItem, setDeleteItem] = useState<Item | null>(null);
   const [draggingItemId, setDraggingItemId] = useState<number | null>(null);
   const [dragOverCatId, setDragOverCatId] = useState<number | null>(null);
+  const [draggingCatId, setDraggingCatId] = useState<number | null>(null);
+  const [dragOverStationId, setDragOverStationId] = useState<number | null>(null);
 
   const { data: catsData } = useQuery({ queryKey: ["fb-categories"], queryFn: () => apiFetch("/api/fb/categories") });
   const { data: itemsData, isLoading: itemsLoading } = useQuery({ queryKey: ["fb-items"], queryFn: () => apiFetch("/api/fb/items") });
@@ -1475,15 +1477,35 @@ export default function FbMenu() {
     }
   };
 
+  const moveCategoryToStation = async (subcatId: number, targetStationId: number) => {
+    const subcat = categories.find(c => c.id === subcatId);
+    if (!subcat || subcat.parent_id === targetStationId) return;
+    const targetStation = categories.find(c => c.id === targetStationId);
+    try {
+      await apiFetch(`/api/fb/categories/${subcatId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ parent_id: targetStationId, station: null }),
+      });
+      qc.invalidateQueries({ queryKey: ["fb-categories"] });
+      toast({ title: `«${subcat.name}» переміщено до ${targetStation?.name || "станції"}` });
+    } catch (e: any) {
+      toast({ title: e.message, variant: "destructive" });
+    }
+  };
+
+  // ── Item drag handlers ──────────────────────────────────────────────────────
   const handleDragStart = (e: React.DragEvent, itemId: number) => {
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("itemId", String(itemId));
+    e.dataTransfer.setData("dragType", "item");
     setDraggingItemId(itemId);
   };
 
   const handleDragEnd = () => {
     setDraggingItemId(null);
     setDragOverCatId(null);
+    setDraggingCatId(null);
+    setDragOverStationId(null);
   };
 
   const handleCatDragOver = (e: React.DragEvent, catId: number) => {
@@ -1498,14 +1520,63 @@ export default function FbMenu() {
 
   const handleCatDrop = (e: React.DragEvent, catId: number) => {
     e.preventDefault();
-    const itemId = parseInt(e.dataTransfer.getData("itemId"));
+    const dragType = e.dataTransfer.getData("dragType");
     setDragOverCatId(null);
     setDraggingItemId(null);
-    if (!itemId || !catId) return;
-    const item = allItems.find(i => i.id === itemId);
-    const catId_current = (item as any)?.category_id ?? item?.categoryId;
-    if (catId_current === catId) return;
-    moveItemToCategory(itemId, catId);
+    if (dragType === "item") {
+      const itemId = parseInt(e.dataTransfer.getData("itemId"));
+      if (!itemId || !catId) return;
+      const item = allItems.find(i => i.id === itemId);
+      const catId_current = (item as any)?.category_id ?? item?.categoryId;
+      if (catId_current === catId) return;
+      moveItemToCategory(itemId, catId);
+    }
+  };
+
+  // ── Category drag handlers (move subcat → station) ─────────────────────────
+  const handleCatRowDragStart = (e: React.DragEvent, subcatId: number) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("subcatId", String(subcatId));
+    e.dataTransfer.setData("dragType", "category");
+    setDraggingCatId(subcatId);
+  };
+
+  const handleStationDragOver = (e: React.DragEvent, stationId: number) => {
+    const dragType = e.dataTransfer.types.includes("dragtype") ? e.dataTransfer.getData("dragType") : null;
+    // Allow both category and item drags over stations
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverStationId(stationId);
+  };
+
+  const handleStationDragLeave = (e: React.DragEvent) => {
+    // Only clear if leaving the station container itself (not entering a child)
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+      setDragOverStationId(null);
+    }
+  };
+
+  const handleStationDrop = (e: React.DragEvent, stationId: number) => {
+    e.preventDefault();
+    const dragType = e.dataTransfer.getData("dragType");
+    setDragOverStationId(null);
+    setDraggingCatId(null);
+    if (dragType === "category") {
+      const subcatId = parseInt(e.dataTransfer.getData("subcatId"));
+      if (!subcatId || !stationId) return;
+      moveCategoryToStation(subcatId, stationId);
+    } else if (dragType === "item") {
+      // If an item is dropped on a station header, move to first subcat or keep station
+      const itemId = parseInt(e.dataTransfer.getData("itemId"));
+      setDraggingItemId(null);
+      if (!itemId) return;
+      const firstSubcat = categories.find(c => c.parent_id === stationId);
+      const targetCatId = firstSubcat?.id ?? stationId;
+      const item = allItems.find(i => i.id === itemId);
+      const catId_current = (item as any)?.category_id ?? item?.categoryId;
+      if (catId_current !== targetCatId) moveItemToCategory(itemId, targetCatId);
+    }
   };
 
   const selectedCat = categories.find(c => c.id === selectedCatId);
@@ -1556,17 +1627,25 @@ export default function FbMenu() {
               const count = stationItemCount(station.id);
               const stationEmoji = STATION_TYPES.find(s => s.value === station.station)?.emoji || station.emoji;
 
+              const isStationDragTarget = dragOverStationId === station.id;
+              const isDraggingCat = draggingCatId !== null;
+
               return (
-                <div key={station.id}>
+                <div key={station.id}
+                  onDragOver={e => handleStationDragOver(e, station.id)}
+                  onDragLeave={handleStationDragLeave}
+                  onDrop={e => handleStationDrop(e, station.id)}>
                   {/* Station row */}
-                  <div className={`group relative flex items-center gap-1.5 px-2 py-2 cursor-pointer text-sm hover:bg-muted transition-colors ${isSelected ? "bg-muted font-medium" : ""}`}
+                  <div className={`group relative flex items-center gap-1.5 px-2 py-2 cursor-pointer text-sm transition-colors
+                    ${isSelected ? "bg-muted font-medium" : "hover:bg-muted"}
+                    ${isStationDragTarget && isDraggingCat ? "bg-blue-50 ring-2 ring-inset ring-blue-400 rounded" : ""}`}
                     onClick={() => { setSelectedCatId(station.id); if (!isExpanded) toggleExpanded(station.id); }}>
                     <button
                       className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
                       onClick={e => { e.stopPropagation(); toggleExpanded(station.id); }}>
                       {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                     </button>
-                    <span className="text-base shrink-0">{stationEmoji}</span>
+                    <span className="text-base shrink-0">{isStationDragTarget && isDraggingCat ? "📂" : stationEmoji}</span>
                     <span className="flex-1 truncate font-medium uppercase text-xs tracking-wide text-muted-foreground">{station.name}</span>
                     <span className="text-xs text-muted-foreground shrink-0">{count}</span>
                     {/* Hover actions */}
@@ -1593,22 +1672,32 @@ export default function FbMenu() {
                         const subCount = allItems.filter(i => ((i as any).category_id ?? i.categoryId) === subcat.id).length;
                         const isSubSelected = selectedCatId === subcat.id;
                         const isDragTarget = dragOverCatId === subcat.id;
+                        const isBeingDragged = draggingCatId === subcat.id;
                         return (
                           <div key={subcat.id}
-                            className={`group relative flex items-center gap-2 pl-8 pr-2 py-1.5 cursor-pointer text-sm transition-colors ${isSubSelected ? "bg-muted font-medium" : "hover:bg-muted"} ${!subcat.isActive ? "opacity-50" : ""} ${isDragTarget ? "bg-primary/10 ring-1 ring-inset ring-primary/40 rounded" : ""}`}
-                            onClick={() => setSelectedCatId(subcat.id)}
+                            draggable
+                            onDragStart={e => handleCatRowDragStart(e, subcat.id)}
+                            onDragEnd={handleDragEnd}
+                            className={`group relative flex items-center gap-1.5 pl-6 pr-2 py-1.5 cursor-grab text-sm transition-colors
+                              ${isSubSelected ? "bg-muted font-medium" : "hover:bg-muted"}
+                              ${!subcat.isActive ? "opacity-50" : ""}
+                              ${isDragTarget ? "bg-primary/10 ring-1 ring-inset ring-primary/40 rounded" : ""}
+                              ${isBeingDragged ? "opacity-40 scale-95" : ""}`}
+                            onClick={() => !isBeingDragged && setSelectedCatId(subcat.id)}
                             onDragOver={e => handleCatDragOver(e, subcat.id)}
                             onDragLeave={handleCatDragLeave}
                             onDrop={e => handleCatDrop(e, subcat.id)}>
+                            {/* Grip handle */}
+                            <GripVertical className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 cursor-grab" />
                             <span className="text-sm shrink-0">{isDragTarget ? "📥" : subcat.emoji}</span>
                             <span className="flex-1 truncate">{subcat.name}</span>
                             <span className="text-xs text-muted-foreground shrink-0">{subCount}</span>
                             <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
-                              <button className="p-1 hover:bg-muted rounded" title="Редагувати"
+                              <button className="p-1 hover:bg-muted rounded cursor-pointer" title="Редагувати"
                                 onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: subcat }); }}>
                                 <Pencil className="w-3 h-3" />
                               </button>
-                              <button className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Видалити"
+                              <button className="p-1 hover:bg-destructive/10 text-destructive rounded cursor-pointer" title="Видалити"
                                 onClick={e => { e.stopPropagation(); setDeleteCat(subcat); }}>
                                 <Trash2 className="w-3 h-3" />
                               </button>
@@ -1616,6 +1705,12 @@ export default function FbMenu() {
                           </div>
                         );
                       })}
+                      {/* Drop hint when dragging a category over this station */}
+                      {isStationDragTarget && isDraggingCat && (
+                        <div className="flex items-center gap-2 pl-8 pr-2 py-1.5 text-xs text-blue-500 bg-blue-50 border border-dashed border-blue-300 rounded mx-2 mb-1">
+                          <span>↓ Перемістити сюди</span>
+                        </div>
+                      )}
                       {/* Add subcategory row */}
                       <button
                         className="flex items-center gap-1.5 pl-8 pr-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 w-full transition-colors"
