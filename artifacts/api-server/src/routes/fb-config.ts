@@ -13,9 +13,20 @@ async function ensureTables() {
       organization_id INT NOT NULL,
       section VARCHAR(64) NOT NULL,
       data JSONB NOT NULL DEFAULT '{}',
-      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      UNIQUE(organization_id, section)
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
+  `);
+  // Add unique constraint if it doesn't exist yet (table may have been created without it)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fb_config_settings_org_section_uq'
+      ) THEN
+        ALTER TABLE fb_config_settings
+          ADD CONSTRAINT fb_config_settings_org_section_uq UNIQUE (organization_id, section);
+      END IF;
+    END $$
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS fb_order_sources (

@@ -50,6 +50,7 @@ async function uploadLogo(file: File): Promise<string> {
 
 interface GeneralConfig {
   company_name?: string;
+  logo_url?: string;
   timezone?: string;
   shift_end_time?: string;
   currency?: string;
@@ -89,6 +90,8 @@ export default function FbConfigGeneral() {
   const [branding, setBranding] = useState<GuestBranding>({ logo_url: "", primary_color: "#2C2416", accent_color: "#C9A96E" });
   const [logoUploading, setLogoUploading] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
+  const companyLogoInputRef = useRef<HTMLInputElement>(null);
 
   const { isLoading } = useQuery({
     queryKey: ["fb-config-general"],
@@ -188,7 +191,48 @@ export default function FbConfigGeneral() {
               })()}
             </Row>
             <Row label="Логотип" hint="Друкуватиметься у шапці чека.">
-              <Input value={cfg.company_name ? "" : ""} placeholder="(файл: завантаження в розробці)" disabled className="max-w-xs opacity-50" />
+              <div className="space-y-2 max-w-sm">
+                <input
+                  ref={companyLogoInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setCompanyLogoUploading(true);
+                    try {
+                      const url = await uploadLogo(file);
+                      set("logo_url", url);
+                    } catch (err: any) {
+                      toast({ title: "Помилка завантаження", description: err.message, variant: "destructive" });
+                    } finally {
+                      setCompanyLogoUploading(false);
+                      if (companyLogoInputRef.current) companyLogoInputRef.current.value = "";
+                    }
+                  }}
+                />
+                {cfg.logo_url ? (
+                  <div className="relative w-fit">
+                    <div className="h-16 min-w-[120px] max-w-xs rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden px-3">
+                      <img src={cfg.logo_url} alt="Логотип" className="max-h-12 max-w-full object-contain"
+                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    </div>
+                    <button type="button" onClick={() => set("logo_url", "")}
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-white rounded-full flex items-center justify-center hover:bg-destructive/80">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : null}
+                <Button type="button" variant="outline" size="sm"
+                  disabled={companyLogoUploading}
+                  onClick={() => companyLogoInputRef.current?.click()}>
+                  {companyLogoUploading
+                    ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Завантаження...</>
+                    : <><Upload className="w-3.5 h-3.5 mr-1.5" /> {cfg.logo_url ? "Замінити логотип" : "Завантажити логотип"}</>
+                  }
+                </Button>
+              </div>
             </Row>
 
             <Section title="Загальні налаштування" />
