@@ -5,7 +5,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { requireAuth } from "../lib/auth.js";
-import { generateLiqPayForm } from "../lib/liqpay.js";
+import { generateLiqPayForm, verifyLiqPayCallbackWithKey, parseLiqPayData, sendLiqPayP2P } from "../lib/liqpay.js";
 import { decrypt } from "../lib/encrypt.js";
 
 const router = Router();
@@ -449,6 +449,7 @@ router.post("/public/liqpay-checkout", async (req, res) => {
     const liqpayAction = alcoholRestricted ? "hold" : "pay";
 
     const orderId = `fb-${order.id}-${Date.now()}`;
+    const baseUrl = process.env.APP_URL || "https://dogoda.me";
     const { url } = generateLiqPayForm({
       action: liqpayAction,
       amount,
@@ -457,11 +458,101 @@ router.post("/public/liqpay-checkout", async (req, res) => {
       orderId,
       publicKey,
       privateKey,
+      serverUrl: `${baseUrl}/api/fb/public/liqpay-callback`,
     });
 
     res.json({ url, amount, orderId, liqpayAction, alcoholRestricted });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /fb/public/liqpay-callback ─────────────────────────────────────────
+// LiqPay server callback after guest pays via QR.
+// If payment is successful AND order has tip → auto p2p to service_card.
+router.post("/public/liqpay-callback", async (req, res) => {
+  res.sendStatus(200); // LiqPay requires 200 immediately
+
+  const { data, signature } = req.body;
+  if (!data || !signature) return;
+
+  let parsed: Record<string, any>;
+  try { parsed = parseLiqPayData(data); } catch { return; }
+
+  // Only handle successful pay/hold confirmations
+  const successStatuses = ["success", "sandbox", "processing"];
+  if (!successStatuses.includes(parsed.status)) return;
+
+  // Extract FB order ID from order_id like "fb-123-1716000000000"
+  const match = String(parsed.order_id || "").match(/^fb-(\d+)-/);
+  if (!match) return;
+  const fbOrderId = parseInt(match[1]);
+
+  try {
+    // 1. Load order + org info
+    const { rows: orderRows } = await pool.query(
+      `SELECT o.id, o.organization_id, o.total_amount, o.tip_amount, o.tip_pct, o.status
+       FROM fb_orders o WHERE o.id = $1 LIMIT 1`,
+      [fbOrderId],
+    );
+    if (!orderRows[0]) return;
+    const order = orderRows[0];
+    const orgId = order.organization_id;
+
+    // 2. Verify signature with the org's LiqPay private key
+    const { rows: leRows } = await pool.query(
+      `SELECT liqpay_public_key, liqpay_private_key FROM legal_entities
+       WHERE organization_id=$1 AND is_active=true AND liqpay_public_key IS NOT NULL
+       ORDER BY is_default DESC NULLS LAST LIMIT 1`,
+      [orgId],
+    );
+    const le = leRows[0];
+    if (!le) return;
+    const privateKey = decrypt(le.liqpay_private_key) || le.liqpay_private_key;
+    if (!verifyLiqPayCallbackWithKey(data, signature, privateKey)) {
+      console.warn(`[fb-liqpay-callback] Signature mismatch for order ${fbOrderId}`);
+      return;
+    }
+
+    // 3. Calculate tip amount if not already stored
+    const base = parseFloat(order.total_amount) || 0;
+    const tipPct = parseFloat(order.tip_pct) || 0;
+    let tipAmount = parseFloat(order.tip_amount) || 0;
+    if (tipAmount === 0 && tipPct > 0) {
+      tipAmount = Math.round(base * tipPct) / 100;
+    }
+
+    // 4. Get service_card from guest_branding config
+    const { rows: cfgRows } = await pool.query(
+      `SELECT data FROM fb_config_settings WHERE organization_id=$1 AND section='guest_branding' LIMIT 1`,
+      [orgId],
+    );
+    const serviceCard: string = cfgRows[0]?.data?.service_card || "";
+    if (!serviceCard || tipAmount < 1) return;
+
+    // 5. Send p2p tip transfer
+    const p2pResult = await sendLiqPayP2P({
+      amount: tipAmount,
+      cardNumber: serviceCard,
+      description: `Чайові · Замовлення #${fbOrderId}`,
+      orderId: `tip-${fbOrderId}-${Date.now()}`,
+      publicKey: le.liqpay_public_key,
+      privateKey,
+    });
+
+    if (p2pResult.ok) {
+      console.log(`[fb-tips] p2p OK: order=${fbOrderId} tip=${tipAmount} card=****${serviceCard.slice(-4)} liqpay=${p2pResult.liqpayStatus}`);
+      // Record tip transfer in order notes for audit trail
+      await pool.query(
+        `UPDATE fb_orders SET tip_amount = $1, notes = CONCAT(COALESCE(notes,''), ' [Чайові ' || $2::text || ' ₴ → картка ****' || $3 || ']')
+         WHERE id = $4`,
+        [tipAmount, tipAmount.toFixed(2), serviceCard.replace(/\s/g, "").slice(-4), fbOrderId],
+      ).catch(() => {});
+    } else {
+      console.error(`[fb-tips] p2p FAILED: order=${fbOrderId} tip=${tipAmount} error=${p2pResult.error}`);
+    }
+  } catch (e: any) {
+    console.error(`[fb-liqpay-callback] Error processing order ${fbOrderId}:`, e.message);
   }
 });
 
