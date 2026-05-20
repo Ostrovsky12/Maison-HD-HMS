@@ -206,7 +206,8 @@ router.post("/execute", async (req, res) => {
     const stockMap: Record<string, number> = {};
     for (const si of storageItems) {
       const id = String(si.ingredient_id ?? si.id ?? "");
-      const qty = parseFloat(si.quantity_units ?? si.quantity ?? si.current_stock ?? 0) || 0;
+      // Poster storage.getIngredients returns current balance in `ingredient_left`
+      const qty = parseFloat(si.ingredient_left ?? si.quantity_units ?? si.quantity ?? si.current_stock ?? 0) || 0;
       if (id) stockMap[id] = qty;
     }
 
