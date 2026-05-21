@@ -2323,6 +2323,312 @@ router.get("/payroll/sheet", async (req: any, res) => {
   res.json({ period: { year: y, month: m }, employees: rows, totals });
 });
 
+// ── Timesheet ──────────────────────────────────────────────────────────────
+
+async function ensureTimesheetTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_payroll_timesheet (
+      id              SERIAL PRIMARY KEY,
+      organization_id INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      employee_id     INT NOT NULL REFERENCES acc_payroll_employees(id) ON DELETE CASCADE,
+      period_year     INT NOT NULL,
+      period_month    INT NOT NULL,
+      day_num         INT NOT NULL CHECK(day_num BETWEEN 1 AND 31),
+      day_code        VARCHAR(3) NOT NULL DEFAULT 'Р',
+      hours           NUMERIC(4,1) NOT NULL DEFAULT 8,
+      UNIQUE(employee_id, period_year, period_month, day_num)
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_ts_org ON acc_payroll_timesheet(organization_id, period_year, period_month);
+  `);
+}
+
+// GET /payroll/timesheet?year=&month= — повна сітка (employees × days)
+router.get("/payroll/timesheet", async (req: any, res) => {
+  try {
+    await ensurePayrollTables();
+    await ensureTimesheetTable();
+    const orgId = await resolveOrgId(req);
+    const y = parseInt(String(req.query.year  ?? new Date().getFullYear()));
+    const m = parseInt(String(req.query.month ?? new Date().getMonth() + 1));
+
+    const { rows: emps } = await pool.query(
+      `SELECT DISTINCT e.id, e.full_name, e.position
+       FROM acc_payroll_employees e
+       WHERE e.organization_id=$1
+         AND (e.is_active=true OR EXISTS (
+           SELECT 1 FROM acc_payroll_timesheet t
+           WHERE t.employee_id=e.id AND t.organization_id=$1
+             AND t.period_year=$2 AND t.period_month=$3
+         ))
+       ORDER BY e.full_name`,
+      [orgId, y, m],
+    );
+
+    const { rows: entries } = await pool.query(
+      `SELECT employee_id, day_num, day_code, hours FROM acc_payroll_timesheet
+       WHERE organization_id=$1 AND period_year=$2 AND period_month=$3`,
+      [orgId, y, m],
+    );
+
+    // Build map: employee_id → { day_num → {code, hours} }
+    const map: Record<number, Record<number, { code: string; hours: number }>> = {};
+    for (const e of entries) {
+      if (!map[e.employee_id]) map[e.employee_id] = {};
+      map[e.employee_id][e.day_num] = { code: e.day_code, hours: +e.hours };
+    }
+
+    // Days in month
+    const daysInMonth = new Date(y, m, 0).getDate();
+
+    // Build rows with summary
+    const rows = emps.map((emp: any) => {
+      const empMap = map[emp.id] ?? {};
+      const days: any[] = [];
+      let workDays = 0, sickDays = 0, vacDays = 0, tripDays = 0, totalHours = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const entry = empMap[d];
+        const dow = new Date(y, m - 1, d).getDay(); // 0=Sun,6=Sat
+        const isWeekend = dow === 0 || dow === 6;
+        const code = entry?.code ?? (isWeekend ? "В" : "Р");
+        const hours = entry?.hours ?? (isWeekend ? 0 : 8);
+        days.push({ d, code, hours, isWeekend });
+        if (code === "Р") { workDays++; totalHours += hours; }
+        else if (code === "Л") sickDays++;
+        else if (code === "ВД") vacDays++;
+        else if (code === "К") { tripDays++; totalHours += hours; }
+      }
+      return { employee_id: emp.id, full_name: emp.full_name, position: emp.position, days, workDays, sickDays, vacDays, tripDays, totalHours };
+    });
+
+    res.json({ year: y, month: m, days_in_month: daysInMonth, rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /payroll/timesheet — upsert single cell
+router.post("/payroll/timesheet", async (req: any, res) => {
+  try {
+    await ensureTimesheetTable();
+    const orgId = await resolveOrgId(req);
+    const { employee_id, period_year, period_month, day_num, day_code, hours } = req.body;
+    if (!employee_id || !period_year || !period_month || !day_num)
+      return res.status(400).json({ error: "employee_id, period_year, period_month, day_num required" });
+    const { rows } = await pool.query(`
+      INSERT INTO acc_payroll_timesheet (organization_id, employee_id, period_year, period_month, day_num, day_code, hours)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (employee_id, period_year, period_month, day_num)
+      DO UPDATE SET day_code=$6, hours=$7
+      RETURNING *
+    `, [orgId, employee_id, period_year, period_month, day_num, day_code ?? "Р", hours ?? 8]);
+    res.json(rows[0]);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /payroll/timesheet/fill — авто-заповнення місяця для співробітника
+router.post("/payroll/timesheet/fill", async (req: any, res) => {
+  try {
+    await ensureTimesheetTable();
+    const orgId = await resolveOrgId(req);
+    const { employee_id, period_year, period_month, hours_per_day } = req.body;
+    const y = parseInt(String(period_year));
+    const m = parseInt(String(period_month));
+    const hpd = parseFloat(String(hours_per_day ?? 8));
+    const daysInMonth = new Date(y, m, 0).getDate();
+    let filled = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dow = new Date(y, m - 1, d).getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      await pool.query(`
+        INSERT INTO acc_payroll_timesheet (organization_id, employee_id, period_year, period_month, day_num, day_code, hours)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT (employee_id, period_year, period_month, day_num) DO NOTHING
+      `, [orgId, employee_id, y, m, d, isWeekend ? "В" : "Р", isWeekend ? 0 : hpd]);
+      filled++;
+    }
+    res.json({ ok: true, filled });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Statutory Reports ───────────────────────────────────────────────────────
+
+// GET /payroll/report/d4?year=&month= — Додаток 4 (ЄСВ) до Об'єднаної звітності
+router.get("/payroll/report/d4", async (req: any, res) => {
+  try {
+    await ensurePayrollTables();
+    await ensureTimesheetTable();
+    const orgId = await resolveOrgId(req);
+    const y = parseInt(String(req.query.year  ?? new Date().getFullYear()));
+    const m = parseInt(String(req.query.month ?? new Date().getMonth() + 1));
+
+    const { rows } = await pool.query(`
+      SELECT
+        e.full_name,
+        e.ipn,
+        a.accrual_type,
+        a.gross_amount,
+        a.esv_amount,
+        -- days worked from timesheet (or 0 if no timesheet)
+        COALESCE(ts.work_days, 0) AS work_days,
+        COALESCE(ts.total_hours, 0) AS total_hours
+      FROM acc_payroll_accruals a
+      JOIN acc_payroll_employees e ON e.id = a.employee_id
+      LEFT JOIN (
+        SELECT employee_id,
+          COUNT(*) FILTER (WHERE day_code='Р') AS work_days,
+          SUM(hours) AS total_hours
+        FROM acc_payroll_timesheet
+        WHERE organization_id=$1 AND period_year=$2 AND period_month=$3
+        GROUP BY employee_id
+      ) ts ON ts.employee_id = a.employee_id
+      WHERE a.organization_id=$1 AND a.period_year=$2 AND a.period_month=$3
+      ORDER BY e.full_name, a.accrual_type
+    `, [orgId, y, m]);
+
+    // Map accrual_type → D4 category code (ознака)
+    const oznakaMap: Record<string, number> = { salary: 1, bonus: 1, sick: 29, vacation: 39, other: 1 };
+
+    // Group by employee
+    const byEmp: Record<string, any> = {};
+    for (const r of rows) {
+      const key = r.ipn ?? r.full_name;
+      if (!byEmp[key]) byEmp[key] = {
+        full_name: r.full_name, ipn: r.ipn ?? "—",
+        rows: [], total_gross: 0, total_esv: 0,
+        work_days: +r.work_days, total_hours: +r.total_hours,
+      };
+      byEmp[key].rows.push({
+        oznaka: oznakaMap[r.accrual_type] ?? 1,
+        accrual_type: r.accrual_type,
+        gross: +r.gross_amount,
+        esv:   +r.esv_amount,
+      });
+      byEmp[key].total_gross += +r.gross_amount;
+      byEmp[key].total_esv  += +r.esv_amount;
+    }
+
+    const totals = Object.values(byEmp).reduce((s: any, e: any) => ({
+      gross: s.gross + e.total_gross,
+      esv:   s.esv  + e.total_esv,
+    }), { gross: 0, esv: 0 });
+
+    res.json({
+      report_type: "D4",
+      period: { year: y, month: m },
+      employees: Object.values(byEmp),
+      totals,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /payroll/report/1df?year=&quarter= — Форма 1-ДФ (ПДФО/ВЗ квартальна)
+router.get("/payroll/report/1df", async (req: any, res) => {
+  try {
+    await ensurePayrollTables();
+    const orgId = await resolveOrgId(req);
+    const y = parseInt(String(req.query.year    ?? new Date().getFullYear()));
+    const q = parseInt(String(req.query.quarter ?? Math.ceil((new Date().getMonth() + 1) / 3)));
+    const monthFrom = (q - 1) * 3 + 1;
+    const monthTo   = q * 3;
+
+    const { rows } = await pool.query(`
+      SELECT
+        e.full_name,
+        e.ipn,
+        SUM(a.gross_amount) AS gross_accrued,
+        SUM(a.gross_amount) AS gross_paid,
+        SUM(a.pdfo_amount)  AS pdfo_accrued,
+        SUM(a.pdfo_amount)  AS pdfo_paid,
+        SUM(a.vz_amount)    AS vz_accrued,
+        SUM(a.vz_amount)    AS vz_paid,
+        COUNT(DISTINCT a.period_month) AS months_count
+      FROM acc_payroll_accruals a
+      JOIN acc_payroll_employees e ON e.id = a.employee_id
+      WHERE a.organization_id=$1 AND a.period_year=$2
+        AND a.period_month BETWEEN $3 AND $4
+      GROUP BY e.id, e.full_name, e.ipn
+      ORDER BY e.full_name
+    `, [orgId, y, monthFrom, monthTo]);
+
+    const totals = rows.reduce((s: any, r: any) => ({
+      gross_accrued: s.gross_accrued + +r.gross_accrued,
+      pdfo_accrued:  s.pdfo_accrued  + +r.pdfo_accrued,
+      vz_accrued:    s.vz_accrued    + +r.vz_accrued,
+    }), { gross_accrued: 0, pdfo_accrued: 0, vz_accrued: 0 });
+
+    res.json({
+      report_type: "1DF",
+      period: { year: y, quarter: q, month_from: monthFrom, month_to: monthTo },
+      employees: rows.map((r: any, i: number) => ({
+        row_num: i + 1,
+        full_name: r.full_name,
+        ipn: r.ipn ?? "—",
+        oznaka_dokhodu: 101, // salary
+        gross_accrued: +r.gross_accrued,
+        gross_paid:    +r.gross_paid,
+        pdfo_accrued:  +r.pdfo_accrued,
+        pdfo_paid:     +r.pdfo_paid,
+        vz_accrued:    +r.vz_accrued,
+        vz_paid:       +r.vz_paid,
+        months_count:  +r.months_count,
+        sign_of_income: "1", // hired employee
+      })),
+      totals,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /payroll/payslip/:employee_id?year=&month= — розрахунковий листок
+router.get("/payroll/payslip/:employee_id", async (req: any, res) => {
+  try {
+    await ensurePayrollTables();
+    await ensureTimesheetTable();
+    const orgId = await resolveOrgId(req);
+    const empId = parseInt(req.params.employee_id);
+    const y = parseInt(String(req.query.year  ?? new Date().getFullYear()));
+    const m = parseInt(String(req.query.month ?? new Date().getMonth() + 1));
+
+    const { rows: empRows } = await pool.query(
+      `SELECT * FROM acc_payroll_employees WHERE id=$1 AND organization_id=$2`,
+      [empId, orgId],
+    );
+    if (!empRows[0]) return res.status(404).json({ error: "Employee not found" });
+    const emp = empRows[0];
+
+    const { rows: accruals } = await pool.query(
+      `SELECT * FROM acc_payroll_accruals WHERE employee_id=$1 AND period_year=$2 AND period_month=$3 AND organization_id=$4`,
+      [empId, y, m, orgId],
+    );
+
+    const { rows: tsRows } = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE day_code='Р') AS work_days,
+        COUNT(*) FILTER (WHERE day_code='Л') AS sick_days,
+        COUNT(*) FILTER (WHERE day_code='ВД') AS vacation_days,
+        SUM(hours) FILTER (WHERE day_code='Р') AS total_hours
+      FROM acc_payroll_timesheet
+      WHERE employee_id=$1 AND period_year=$2 AND period_month=$3 AND organization_id=$4
+    `, [empId, y, m, orgId]);
+
+    const totals = accruals.reduce((s: any, a: any) => ({
+      gross: s.gross + +a.gross_amount,
+      pdfo:  s.pdfo  + +a.pdfo_amount,
+      vz:    s.vz    + +a.vz_amount,
+      esv:   s.esv   + +a.esv_amount,
+      net:   s.net   + +a.net_amount,
+    }), { gross: 0, pdfo: 0, vz: 0, esv: 0, net: 0 });
+
+    res.json({
+      employee: emp,
+      period: { year: y, month: m },
+      accruals,
+      timesheet: tsRows[0] ?? { work_days: 0, sick_days: 0, vacation_days: 0, total_hours: 0 },
+      totals,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // Провести зарплату (створити проводки 661/641/642/651)
 router.post("/payroll/post", requireRole("admin","owner"), async (req: any, res) => {
   await ensurePayrollTables();

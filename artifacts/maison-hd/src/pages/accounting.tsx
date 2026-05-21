@@ -33,7 +33,7 @@ import {
   Target, Clipboard, ArrowRight, Info, SlidersHorizontal, Bell,
   GanttChart, ArrowUpRight, SquareCheck, Square, Layers,
   PlugZap, Timer, Play, Pause, FileSpreadsheet, Webhook, Globe,
-  ChevronUp, Eye, EyeOff, Link, Copy, Check,
+  ChevronUp, Eye, EyeOff, Link, Copy, Check, BarChart2,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
@@ -7393,7 +7393,7 @@ function AccTouristTaxTab() {
 // ─── ACC: PAYROLL (ЗАРПЛАТА) ───────────────────────────────────────────────────
 function AccPayrollTab() {
   const now = new Date();
-  const [view, setView]   = useState<"sheet" | "employees">("sheet");
+  const [view, setView]   = useState<"sheet" | "timesheet" | "reports" | "employees">("sheet");
   const [year, setYear]   = useState(String(now.getFullYear()));
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [showEmpForm, setShowEmpForm]   = useState(false);
@@ -7427,6 +7427,73 @@ function AccPayrollTab() {
 
   const [accrualForm, setAccrualForm]       = useState({ gross_amount:"", accrual_type:"salary", notes:"" });
   const [accrualLoading, setAccrualLoading] = useState(false);
+
+  // ── Timesheet state ──
+  const [tsCell, setTsCell]   = useState<{empId:number;dayNum:number} | null>(null);
+  const [tsCellCode, setTsCellCode] = useState("Р");
+  const [tsCellHours, setTsCellHours] = useState("8");
+  const [tsCellSaving, setTsCellSaving] = useState(false);
+  const [fillingEmp, setFillingEmp] = useState<number|null>(null);
+
+  // ── Reports state ──
+  const [rptType, setRptType] = useState<"d4"|"1df">("d4");
+  const [rptQuarter, setRptQuarter] = useState(String(Math.ceil((now.getMonth()+1)/3)));
+
+  // ── Queries ──
+  const tsKey  = `payroll/timesheet?year=${year}&month=${month}`;
+  const d4Key  = `payroll/report/d4?year=${year}&month=${month}`;
+  const dfKey  = `payroll/report/1df?year=${year}&quarter=${rptQuarter}`;
+  const { data: tsData,  isLoading: tsLoading  } = useAccLedger(tsKey,  { enabled: view === "timesheet" });
+  const { data: d4Data,  isLoading: d4Loading  } = useAccLedger(d4Key,  { enabled: view === "reports" && rptType === "d4" });
+  const { data: dfData,  isLoading: dfLoading  } = useAccLedger(dfKey,  { enabled: view === "reports" && rptType === "1df" });
+
+  const TS_CODES = [
+    { code:"Р",  label:"Р — Відпрацьовано",  cls:"bg-blue-100 text-blue-800 border-blue-300" },
+    { code:"В",  label:"В — Вихідний",        cls:"bg-gray-100 text-gray-500 border-gray-300" },
+    { code:"Л",  label:"Л — Лікарняний",      cls:"bg-red-100 text-red-700 border-red-300" },
+    { code:"ВД", label:"ВД — Відпустка",      cls:"bg-green-100 text-green-700 border-green-300" },
+    { code:"К",  label:"К — Відрядження",     cls:"bg-purple-100 text-purple-700 border-purple-300" },
+    { code:"Г",  label:"Г — Прогул",          cls:"bg-orange-100 text-orange-700 border-orange-300" },
+  ];
+
+  const tsCodeCls = (code: string) =>
+    TS_CODES.find(c => c.code === code)?.cls ?? "bg-gray-100 text-gray-500 border-gray-300";
+
+  const openTsCell = (empId: number, dayNum: number, currentCode: string, currentHours: number) => {
+    setTsCell({ empId, dayNum });
+    setTsCellCode(currentCode);
+    setTsCellHours(String(currentHours));
+  };
+
+  const saveTsCell = async () => {
+    if (!tsCell) return;
+    setTsCellSaving(true);
+    try {
+      await accFetch("payroll/timesheet", { method:"POST", body: JSON.stringify({
+        employee_id:  tsCell.empId,
+        period_year:  +year,
+        period_month: +month,
+        day_num:      tsCell.dayNum,
+        day_code:     tsCellCode,
+        hours:        parseFloat(tsCellHours) || 0,
+      }) });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+      setTsCell(null);
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setTsCellSaving(false); }
+  };
+
+  const fillTimesheet = async (empId: number) => {
+    setFillingEmp(empId);
+    try {
+      await accFetch("payroll/timesheet/fill", { method:"POST", body: JSON.stringify({
+        employee_id: empId, period_year: +year, period_month: +month, hours_per_day: 8,
+      }) });
+      qc.invalidateQueries({ queryKey:["acc-ledger"] });
+      toast({ title:"Табель заповнено", description:"Робочі дні = Р (8 год), вихідні = В" });
+    } catch(e:any) { toast({ title:"Помилка", description: e.message, variant:"destructive" }); }
+    finally { setFillingEmp(null); }
+  };
 
   const openAddEmp = () => { setEmpForm(emptyEmp); setEditEmp(null); setShowEmpForm(true); };
 
@@ -7524,23 +7591,28 @@ function AccPayrollTab() {
       {/* ── Top bar ── */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-          {(["sheet","employees"] as const).map(v => (
+          {([
+            { v:"sheet",     icon:<FileText className="w-3.5 h-3.5" />,   label:"Відомість" },
+            { v:"timesheet", icon:<Calendar className="w-3.5 h-3.5" />,   label:"Табель" },
+            { v:"reports",   icon:<BarChart2 className="w-3.5 h-3.5" />,  label:"Звіти" },
+            { v:"employees", icon:<Users className="w-3.5 h-3.5" />,      label:"Співробітники",
+              badge: activeEmps.length > 0 ? activeEmps.length : null },
+          ] as const).map(({ v, icon, label, badge }: any) => (
             <button key={v} onClick={() => setView(v)}
-              className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 ${
                 v === view ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
               }`}>
-              {v === "sheet" ? <><FileText className="w-3.5 h-3.5" />Відомість</> : <><Users className="w-3.5 h-3.5" />Співробітники
-                {activeEmps.length > 0 && (
-                  <span className={`ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                    v === view ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-600"
-                  }`}>{activeEmps.length}</span>
-                )}
-              </>}
+              {icon}{label}
+              {badge != null && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  v === view ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-600"
+                }`}>{badge}</span>
+              )}
             </button>
           ))}
         </div>
 
-        {view === "sheet" && (
+        {(view === "sheet" || view === "timesheet") && (
           <>
             <Select value={year} onValueChange={setYear}>
               <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
@@ -7552,6 +7624,27 @@ function AccPayrollTab() {
             </Select>
           </>
         )}
+        {view === "reports" && (
+          <>
+            <Select value={year} onValueChange={setYear}>
+              <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>{[2023,2024,2025,2026,2027].map(y=><SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+            </Select>
+            {rptType === "d4" ? (
+              <Select value={month} onValueChange={setMonth}>
+                <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{MONTHS_UK.map((m,i)=><SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
+              </Select>
+            ) : (
+              <Select value={rptQuarter} onValueChange={setRptQuarter}>
+                <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[1,2,3,4].map(q => <SelectItem key={q} value={String(q)}>Кв. {q} ({["Січ–Бер","Кві–Чер","Лип–Вер","Жов–Гру"][q-1]})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </>
+        )}
 
         <div className="ml-auto flex gap-2">
           {view === "sheet" && empList.length > 0 && (
@@ -7560,6 +7653,23 @@ function AccPayrollTab() {
               {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
               {isPosted ? "Проведено" : "Провести зарплату"}
             </Button>
+          )}
+          {view === "timesheet" && (
+            <div className="flex gap-1.5 items-center text-xs text-gray-400">
+              {TS_CODES.map(c => (
+                <span key={c.code} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${c.cls}`}>{c.code}</span>
+              ))}
+            </div>
+          )}
+          {view === "reports" && (
+            <div className="flex border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+              {([{ v:"d4",  l:"Д4 — ЄСВ" },{ v:"1df", l:"1-ДФ — ПДФО" }] as const).map(({ v, l }) => (
+                <button key={v} onClick={() => setRptType(v)}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${rptType===v ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
           )}
           {view === "employees" && (
             <Button size="sm" className="h-9 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={openAddEmp}>
@@ -7674,6 +7784,208 @@ function AccPayrollTab() {
                 </TableRow>
               </TableBody>
             </Table>
+          )}
+        </div>
+      )}
+
+      {/* ── ТАБЕЛЬ ── */}
+      {view === "timesheet" && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {tsLoading ? (
+            <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-400" /></div>
+          ) : !tsData?.rows?.length ? (
+            <div className="py-14 flex flex-col items-center gap-3 text-center">
+              <Calendar className="w-10 h-10 text-blue-300" />
+              <p className="font-semibold text-gray-700">Немає активних співробітників</p>
+              <p className="text-sm text-gray-400">Додайте співробітників, щоб вести табель</p>
+              <Button size="sm" variant="outline" onClick={() => setView("employees")}>Перейти до Співробітників</Button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="text-xs w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="text-left px-3 py-2.5 font-semibold text-gray-700 min-w-[160px] sticky left-0 bg-gray-50 z-10">ПІБ / Посада</th>
+                    {tsData.rows[0]?.days.map((day: any) => (
+                      <th key={day.d} className={`px-0.5 py-2.5 font-bold text-center w-8 ${day.isWeekend ? "text-red-400 bg-red-50" : "text-gray-600"}`}>
+                        {day.d}
+                      </th>
+                    ))}
+                    <th className="px-2 py-2.5 font-semibold text-center text-blue-700 min-w-[36px]">Р</th>
+                    <th className="px-2 py-2.5 font-semibold text-center text-green-700 min-w-[36px]">Год</th>
+                    <th className="px-2 py-2.5 font-semibold text-center text-red-600 min-w-[32px]">Л</th>
+                    <th className="px-2 py-2.5 font-semibold text-center text-green-600 min-w-[36px]">ВД</th>
+                    <th className="text-right px-3 py-2.5 font-semibold text-gray-500 min-w-[80px]">Авто-заповнити</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tsData.rows.map((emp: any) => (
+                    <tr key={emp.employee_id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      <td className="px-3 py-2 sticky left-0 bg-white z-10 border-r border-gray-100">
+                        <div className="font-semibold text-gray-800 leading-tight">{emp.full_name}</div>
+                        <div className="text-[10px] text-gray-400">{emp.position || "—"}</div>
+                      </td>
+                      {emp.days.map((day: any) => (
+                        <td key={day.d} className={`px-0 py-1 text-center ${day.isWeekend ? "bg-red-50/40" : ""}`}>
+                          <button
+                            onClick={() => openTsCell(emp.employee_id, day.d, day.code, day.hours)}
+                            className={`w-7 h-7 rounded text-[10px] font-bold border transition-all hover:scale-110 hover:shadow-sm ${tsCodeCls(day.code)}`}
+                            title={`${emp.full_name} — ${day.d} число: ${day.code} (${day.hours}г)`}
+                          >
+                            {day.code}
+                          </button>
+                        </td>
+                      ))}
+                      <td className="px-2 py-2 text-center font-bold text-blue-700">{emp.workDays}</td>
+                      <td className="px-2 py-2 text-center font-semibold text-green-700">{emp.totalHours}</td>
+                      <td className="px-2 py-2 text-center font-semibold text-red-500">{emp.sickDays || "—"}</td>
+                      <td className="px-2 py-2 text-center font-semibold text-green-500">{emp.vacDays || "—"}</td>
+                      <td className="px-3 py-2 text-right">
+                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-gray-400 hover:text-blue-600 gap-1"
+                          disabled={fillingEmp === emp.employee_id}
+                          onClick={() => fillTimesheet(emp.employee_id)}>
+                          {fillingEmp === emp.employee_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                          Авто
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ЗВІТИ ── */}
+      {view === "reports" && (
+        <div className="space-y-3">
+          {rptType === "d4" && (
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <div>
+                  <div className="font-semibold text-sm text-gray-800">Додаток Д4 — Відомість ЄСВ за місяць</div>
+                  <div className="text-[11px] text-gray-500">Щомісячна звітність до ПФУ · ставка 22% від нарахувань</div>
+                </div>
+                <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[10px]">ЄСВ</Badge>
+              </div>
+              {d4Loading ? (
+                <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-400" /></div>
+              ) : !d4Data?.employees?.length ? (
+                <div className="py-10 text-center text-gray-400 text-sm">Немає нарахувань за обраний місяць</div>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead className="w-10 text-center">№</TableHead>
+                        <TableHead>ПІБ</TableHead>
+                        <TableHead className="w-28 font-mono">ІПН</TableHead>
+                        <TableHead className="text-center w-20">Ознака</TableHead>
+                        <TableHead className="text-center w-20">Дні</TableHead>
+                        <TableHead className="text-center w-20">Год.</TableHead>
+                        <TableHead className="text-right w-36 text-blue-700">База ЄСВ</TableHead>
+                        <TableHead className="text-right w-36 text-purple-700">ЄСВ 22%</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {d4Data.employees.map((emp: any, idx: number) =>
+                        emp.rows.map((r: any, ri: number) => (
+                          <TableRow key={`${idx}-${ri}`} className={ri === 0 ? "" : "border-0"}>
+                            {ri === 0 ? <TableCell className="text-center text-gray-400 text-xs" rowSpan={emp.rows.length}>{idx+1}</TableCell> : null}
+                            {ri === 0 ? <TableCell rowSpan={emp.rows.length} className="font-medium">
+                              <div>{emp.full_name}</div>
+                              <div className="text-[10px] text-gray-400 font-mono">{emp.ipn}</div>
+                            </TableCell> : null}
+                            <TableCell className="font-mono text-xs text-gray-500 hidden-dup">{ri > 0 ? "" : ""}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge className={`text-[9px] px-1.5 ${r.oznaka===1?"bg-blue-100 text-blue-700":r.oznaka===29?"bg-red-100 text-red-700":"bg-green-100 text-green-700"}`}>
+                                {r.oznaka}
+                              </Badge>
+                            </TableCell>
+                            {ri === 0 ? <TableCell className="text-center text-xs text-gray-600" rowSpan={emp.rows.length}>{emp.work_days||"—"}</TableCell> : null}
+                            {ri === 0 ? <TableCell className="text-center text-xs text-gray-600" rowSpan={emp.rows.length}>{emp.total_hours||"—"}</TableCell> : null}
+                            <TableCell className="text-right font-mono text-sm text-blue-700">{fmt(r.gross)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-semibold text-purple-700">{fmt(r.esv)}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                  <div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
+                    <div className="text-xs text-gray-500">{d4Data.employees.length} застрахованих осіб</div>
+                    <div className="flex gap-6 text-sm font-bold">
+                      <span className="text-blue-700">База: {fmt(d4Data.totals?.gross)} грн</span>
+                      <span className="text-purple-700">ЄСВ: {fmt(d4Data.totals?.esv)} грн</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {rptType === "1df" && (
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <div>
+                  <div className="font-semibold text-sm text-gray-800">Форма 1-ДФ — Квартальний звіт з ПДФО та ВЗ</div>
+                  <div className="text-[11px] text-gray-500">
+                    Квартал {rptQuarter} {year} · ознака доходу 101 (зарплата) · подається до 40 днів після кварталу
+                  </div>
+                </div>
+                <Badge className="bg-red-100 text-red-700 border-red-200 text-[10px]">ПДФО</Badge>
+              </div>
+              {dfLoading ? (
+                <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-400" /></div>
+              ) : !dfData?.employees?.length ? (
+                <div className="py-10 text-center text-gray-400 text-sm">Немає нарахувань за обраний квартал</div>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead className="w-8 text-center">№</TableHead>
+                        <TableHead>ПІБ</TableHead>
+                        <TableHead className="w-28 font-mono">ІПН</TableHead>
+                        <TableHead className="text-center w-20">Озн.</TableHead>
+                        <TableHead className="text-right w-32 text-blue-700">Нараховано</TableHead>
+                        <TableHead className="text-right w-32 text-blue-600">Виплачено</TableHead>
+                        <TableHead className="text-right w-28 text-red-600">ПДФО утр.</TableHead>
+                        <TableHead className="text-right w-28 text-red-500">ПДФО пер.</TableHead>
+                        <TableHead className="text-right w-24 text-orange-600">ВЗ</TableHead>
+                        <TableHead className="text-center w-16">Міс.</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {dfData.employees.map((emp: any) => (
+                        <TableRow key={emp.row_num} className="hover:bg-gray-50">
+                          <TableCell className="text-center text-xs text-gray-400">{emp.row_num}</TableCell>
+                          <TableCell className="font-medium text-sm">{emp.full_name}</TableCell>
+                          <TableCell className="font-mono text-xs text-gray-500">{emp.ipn}</TableCell>
+                          <TableCell className="text-center">
+                            <Badge className="bg-blue-100 text-blue-700 text-[9px] px-1.5">{emp.oznaka_dokhodu}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm text-blue-700">{fmt(emp.gross_accrued)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm text-blue-600">{fmt(emp.gross_paid)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm text-red-600">{fmt(emp.pdfo_accrued)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm text-red-500">{fmt(emp.pdfo_paid)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm text-orange-600">{fmt(emp.vz_accrued)}</TableCell>
+                          <TableCell className="text-center text-xs text-gray-500">{emp.months_count}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
+                    <div className="text-xs text-gray-500">{dfData.employees.length} платників</div>
+                    <div className="flex gap-6 text-sm font-bold">
+                      <span className="text-blue-700">Нараховано: {fmt(dfData.totals?.gross_accrued)} грн</span>
+                      <span className="text-red-600">ПДФО: {fmt(dfData.totals?.pdfo_accrued)} грн</span>
+                      <span className="text-orange-600">ВЗ: {fmt(dfData.totals?.vz_accrued)} грн</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -7827,6 +8139,46 @@ function AccPayrollTab() {
               <Button onClick={handleSaveEmployee} disabled={empSaving} className="bg-blue-600 hover:bg-blue-700 gap-1.5">
                 {empSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
                 {editEmp ? "Зберегти зміни" : "Додати співробітника"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ════ DIALOG: Timesheet Cell ════ */}
+      <Dialog open={!!tsCell} onOpenChange={v => !v && setTsCell(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              День {tsCell?.dayNum} — редагування
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-1">
+            <div>
+              <Label className="text-xs font-semibold mb-2 block">Код явки</Label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {TS_CODES.map(c => (
+                  <button key={c.code} onClick={() => setTsCellCode(c.code)}
+                    className={`px-2 py-2.5 rounded-lg text-xs font-bold border transition-all text-center ${
+                      tsCellCode === c.code ? c.cls + " ring-2 ring-offset-1 ring-blue-400" : "bg-white border-gray-200 text-gray-500 hover:border-gray-400"
+                    }`}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold">Годин відпрацьовано</Label>
+              <Input type="number" step="0.5" min="0" max="24" value={tsCellHours}
+                onChange={e => setTsCellHours(e.target.value)}
+                className="mt-1" disabled={tsCellCode === "В"} />
+            </div>
+            <div className="flex justify-end gap-2 pt-1 border-t">
+              <Button variant="outline" size="sm" onClick={() => setTsCell(null)}>Скасувати</Button>
+              <Button size="sm" onClick={saveTsCell} disabled={tsCellSaving} className="bg-blue-600 hover:bg-blue-700 gap-1">
+                {tsCellSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                Зберегти
               </Button>
             </div>
           </div>
