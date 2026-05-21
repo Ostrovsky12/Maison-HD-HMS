@@ -163,7 +163,7 @@ type Tab = "acc-workspace" | "overview" | "documents" | "counterparties" | "enti
          | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync"
          | "acc-monthclose" | "acc-card" | "acc-cash"
          | "acc-tourist" | "acc-payroll" | "acc-assets"
-         | "acc-audit";
+         | "acc-audit" | "acc-cost";
 
 // ─── SIDEBAR NAVIGATION ────────────────────────────────────────────────────────
 const ACC_NAV = [
@@ -195,6 +195,7 @@ const ACC_NAV = [
       { id: "acc-sync",       label: "Синхронізація",      icon: RefreshCw },
       { id: "acc-monthclose", label: "Закриття місяця",    icon: CheckCircle2 },
       { id: "acc-audit",      label: "Журнал аудиту",      icon: ShieldCheck },
+      { id: "acc-cost",       label: "Собівартість",        icon: Layers },
     ],
   },
   {
@@ -237,6 +238,7 @@ const TAB_TITLES: Partial<Record<Tab, { title: string; desc: string }>> = {
   "acc-tourist":    { title: "Туристичний збір",        desc: "Облік нічліг та ставок" },
   "acc-assets":     { title: "Основні засоби",          desc: "Картки ОЗ · Амортизація (прямолінійна)" },
   "acc-audit":      { title: "Журнал аудиту",           desc: "Незмінний слід змін · Закон №996-XIV · Ст.9" },
+  "acc-cost":       { title: "Собівартість та запаси",   desc: "Рах. 281 · WAC · Дт 902/947 · НП(С)БО 9" },
   "entities":       { title: "Юридичні особи",          desc: "Реквізити, підписанти, банк" },
   "counterparties": { title: "Контрагенти",             desc: "Клієнти, постачальники, партнери" },
   "acc-accounts":   { title: "План рахунків",           desc: "Стандартний план НП(С)БО" },
@@ -348,6 +350,7 @@ export default function AccountingPage() {
             {tab === "acc-payroll"    && <AccPayrollTab />}
             {tab === "acc-assets"     && <AccFixedAssetsTab />}
             {tab === "acc-audit"      && <AccAuditLogTab />}
+            {tab === "acc-cost"       && <AccCostAccountingTab />}
           </div>
         </div>
       </div>
@@ -7366,6 +7369,363 @@ function AccAuditLogTab() {
             </TableBody>
           </Table>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Phase 2: Собівартість та запаси ────────────────────────────────────────
+const warehouseFetch = async (path: string) => {
+  const token = localStorage.getItem("hms_token");
+  const r = await fetch(`${API_BASE}/api/fb/warehouse/${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return r.json();
+};
+
+function fmtUAH(n: number | string | null | undefined) {
+  const v = parseFloat(String(n ?? 0));
+  return isNaN(v) ? "—" : v.toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₴";
+}
+
+function fmtPct(n: number | string | null | undefined) {
+  const v = parseFloat(String(n ?? ""));
+  return isNaN(v) ? "—" : v.toFixed(1) + "%";
+}
+
+const ENTRY_TYPE: Record<string, { label: string; color: string; bg: string }> = {
+  "281-631": { label: "Прихід товарів",      color: "text-emerald-700", bg: "bg-emerald-50" },
+  "902-281": { label: "Собівартість (СВОТ)", color: "text-orange-700",  bg: "bg-orange-50"  },
+  "947-281": { label: "Нестача/псування",    color: "text-red-700",     bg: "bg-red-50"     },
+  "281-719": { label: "Надлишок (інв.)",     color: "text-blue-700",    bg: "bg-blue-50"    },
+};
+
+function AccCostAccountingTab() {
+  const [days, setDays] = useState(30);
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["acc-cost", days],
+    queryFn: () => warehouseFetch(`cost-accounting?days=${days}`),
+    staleTime: 30_000,
+  });
+
+  const stock   = data?.stock   ?? {};
+  const fc      = data?.food_cost ?? {};
+  const accMvmt = data?.acc?.movements ?? [];
+  const accSum  = data?.acc?.summary   ?? [];
+  const receipts  = data?.recent_receipts  ?? [];
+  const writeoffs = data?.recent_writeoffs ?? [];
+
+  const totalValue      = parseFloat(stock.total_value ?? 0);
+  const revenue         = parseFloat(fc.revenue ?? 0);
+  const theoreticalCost = parseFloat(fc.theoretical_cost ?? 0);
+  const fcPct           = fc.food_cost_pct != null ? parseFloat(fc.food_cost_pct) : null;
+
+  // Total inventory movements auto-posted to acc
+  const totalAccPosted = accSum.reduce((s: number, r: any) => s + parseFloat(r.total_amount ?? 0), 0);
+
+  return (
+    <div className="space-y-5">
+      {/* Banner */}
+      <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+        <Layers className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600" />
+        <span>
+          <strong>НП(С)БО 9 «Запаси»</strong> — складський облік інтегровано з бухгалтерським журналом.
+          Прихід → <span className="font-mono">Дт 281 Кт 631</span>,
+          Списання → <span className="font-mono">Дт 902/947 Кт 281</span>,
+          Інвентаризація → <span className="font-mono">Дт/Кт 281 ↔ 719/947</span>.
+          WAC (середньозважена собівартість) обчислюється автоматично.
+        </span>
+      </div>
+
+      {/* Period selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500">Період:</span>
+        {[7, 30, 90].map(d => (
+          <button
+            key={d}
+            onClick={() => setDays(d)}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors
+              ${days === d ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+          >
+            {d} днів
+          </button>
+        ))}
+        <button
+          onClick={() => refetch()}
+          className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+        >
+          <RefreshCw className="h-3 w-3" /> Оновити
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="py-16 text-center"><Loader2 className="w-7 h-7 animate-spin mx-auto text-blue-500" /></div>
+      ) : (
+        <>
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card className="border-0 shadow-sm bg-emerald-50">
+              <CardContent className="p-4">
+                <div className="text-[11px] text-emerald-600 font-medium uppercase tracking-wide mb-1">Рах. 281 — Запаси</div>
+                <div className="text-2xl font-bold text-emerald-800">{fmtUAH(totalValue)}</div>
+                <div className="text-[11px] text-emerald-600 mt-1">{stock.item_count ?? 0} позицій · {stock.zero_stock ?? 0} нульових</div>
+              </CardContent>
+            </Card>
+            <Card className="border-0 shadow-sm bg-blue-50">
+              <CardContent className="p-4">
+                <div className="text-[11px] text-blue-600 font-medium uppercase tracking-wide mb-1">Виручка (période)</div>
+                <div className="text-2xl font-bold text-blue-800">{fmtUAH(revenue)}</div>
+                <div className="text-[11px] text-blue-600 mt-1">За {days} днів</div>
+              </CardContent>
+            </Card>
+            <Card className={`border-0 shadow-sm ${fcPct != null && fcPct > 35 ? "bg-red-50" : fcPct != null && fcPct > 28 ? "bg-yellow-50" : "bg-green-50"}`}>
+              <CardContent className="p-4">
+                <div className={`text-[11px] font-medium uppercase tracking-wide mb-1 ${fcPct != null && fcPct > 35 ? "text-red-600" : fcPct != null && fcPct > 28 ? "text-yellow-700" : "text-green-700"}`}>
+                  Food Cost %
+                </div>
+                <div className={`text-2xl font-bold ${fcPct != null && fcPct > 35 ? "text-red-800" : fcPct != null && fcPct > 28 ? "text-yellow-800" : "text-green-800"}`}>
+                  {fcPct != null ? fmtPct(fcPct) : "—"}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  {fcPct != null && fcPct <= 28 && "✓ Норма (≤28%)"}
+                  {fcPct != null && fcPct > 28 && fcPct <= 35 && "⚠ Підвищений (28–35%)"}
+                  {fcPct != null && fcPct > 35 && "✗ Критично (>35%)"}
+                  {fcPct == null && "Немає даних продажів"}
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border-0 shadow-sm bg-purple-50">
+              <CardContent className="p-4">
+                <div className="text-[11px] text-purple-600 font-medium uppercase tracking-wide mb-1">Авто-проводки</div>
+                <div className="text-2xl font-bold text-purple-800">{fmtUAH(totalAccPosted)}</div>
+                <div className="text-[11px] text-purple-600 mt-1">{accMvmt.length} записів в журналі</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Запаси по категоріях */}
+            <Card className="border shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-emerald-600" />
+                  Рах. 281 — Залишки по категоріях
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                {(stock.by_category ?? []).length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-8">Немає даних</p>
+                ) : (
+                  <Table>
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead className="text-xs">Категорія</TableHead>
+                        <TableHead className="text-xs text-right">Позицій</TableHead>
+                        <TableHead className="text-xs text-right">Сума, ₴</TableHead>
+                        <TableHead className="text-xs text-right">Частка</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(stock.by_category ?? []).map((c: any) => {
+                        const share = totalValue > 0 ? (parseFloat(c.value ?? 0) / totalValue * 100) : 0;
+                        return (
+                          <TableRow key={c.category} className="hover:bg-gray-50">
+                            <TableCell className="text-xs font-medium py-2">{c.category}</TableCell>
+                            <TableCell className="text-xs text-right text-gray-500">{c.item_count}</TableCell>
+                            <TableCell className="text-xs text-right font-mono">{fmtUAH(c.value)}</TableCell>
+                            <TableCell className="text-xs text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${Math.min(100, share)}%` }} />
+                                </div>
+                                <span className="text-gray-400 w-8">{share.toFixed(0)}%</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Тип проводок (зведення) */}
+            <Card className="border shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <GanttChart className="h-4 w-4 text-blue-600" />
+                  Авто-проводки по типах (за {days} днів)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                {accSum.length === 0 ? (
+                  <div className="text-center py-8 text-xs text-gray-400">
+                    <GanttChart className="h-8 w-8 mx-auto mb-2 text-gray-200" />
+                    Проводки ще не створювались.<br />
+                    Підтвердіть прихід або списання у складі.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead className="text-xs">Тип операції</TableHead>
+                        <TableHead className="text-xs text-center">К-сть</TableHead>
+                        <TableHead className="text-xs text-right">Сума, ₴</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {accSum.map((s: any) => {
+                        const key = `${s.debit_code}-${s.credit_code}`;
+                        const cfg = ENTRY_TYPE[key] ?? { label: `Дт${s.debit_code} Кт${s.credit_code}`, color: "text-gray-700", bg: "bg-gray-50" };
+                        return (
+                          <TableRow key={key} className="hover:bg-gray-50">
+                            <TableCell className="py-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${cfg.bg} ${cfg.color}`}>
+                                  Дт{s.debit_code}→Кт{s.credit_code}
+                                </span>
+                                <span className={`text-xs font-medium ${cfg.color}`}>{cfg.label}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-xs text-center text-gray-500">{s.count}</TableCell>
+                            <TableCell className="text-xs text-right font-mono font-semibold">{fmtUAH(s.total_amount)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Журнал авто-проводок */}
+          {accMvmt.length > 0 && (
+            <Card className="border shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <FileCheck className="h-4 w-4 text-gray-600" />
+                  Автоматичні проводки по запасах
+                  <Badge variant="outline" className="ml-auto text-[10px]">{accMvmt.length}</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead className="text-xs w-28">Дата</TableHead>
+                      <TableHead className="text-xs w-36">Проводка</TableHead>
+                      <TableHead className="text-xs">Опис</TableHead>
+                      <TableHead className="text-xs text-right w-32">Сума, ₴</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {accMvmt.slice(0, 20).map((e: any) => {
+                      const key = `${e.debit_code}-${e.credit_code}`;
+                      const cfg = ENTRY_TYPE[key] ?? { label: "", color: "text-gray-600", bg: "bg-gray-50" };
+                      return (
+                        <TableRow key={e.id} className="hover:bg-gray-50">
+                          <TableCell className="text-xs font-mono text-gray-500 py-2">
+                            {e.entry_date ? format(new Date(e.entry_date), "dd.MM.yyyy") : "—"}
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${cfg.bg} ${cfg.color}`}>
+                              Дт{e.debit_code}→Кт{e.credit_code}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs text-gray-600 py-2 max-w-[300px] truncate" title={e.description}>
+                            {e.description}
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono font-semibold py-2">
+                            {fmtUAH(e.amount)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Нещодавні операції (прихід / списання) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card className="border shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-emerald-600" />
+                  Прийняті накладні (Дт 281 Кт 631)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                {receipts.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-6">Немає підтверджених приходів</p>
+                ) : (
+                  <Table>
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead className="text-xs">Дата</TableHead>
+                        <TableHead className="text-xs">Примітка</TableHead>
+                        <TableHead className="text-xs text-right">Сума ₴</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {receipts.map((r: any) => (
+                        <TableRow key={r.id} className="hover:bg-gray-50">
+                          <TableCell className="text-xs font-mono text-gray-500 py-2">
+                            {r.date ? format(new Date(r.date), "dd.MM.yy") : "—"}
+                          </TableCell>
+                          <TableCell className="text-xs py-2 max-w-[160px] truncate">{r.notes || `#${r.id}`}</TableCell>
+                          <TableCell className="text-xs text-right font-mono font-semibold text-emerald-700 py-2">
+                            {fmtUAH(r.total_amount)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <TrendingDown className="h-4 w-4 text-orange-600" />
+                  Списання (Дт 902/947 Кт 281)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                {writeoffs.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-6">Немає підтверджених списань</p>
+                ) : (
+                  <Table>
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead className="text-xs">Дата</TableHead>
+                        <TableHead className="text-xs">Причина</TableHead>
+                        <TableHead className="text-xs text-right">Сума ₴</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {writeoffs.map((w: any) => (
+                        <TableRow key={w.id} className="hover:bg-gray-50">
+                          <TableCell className="text-xs font-mono text-gray-500 py-2">
+                            {w.date ? format(new Date(w.date), "dd.MM.yy") : "—"}
+                          </TableCell>
+                          <TableCell className="text-xs py-2 max-w-[160px] truncate">{w.reason || w.notes || `#${w.id}`}</TableCell>
+                          <TableCell className="text-xs text-right font-mono font-semibold text-orange-700 py-2">
+                            {fmtUAH(w.total_amount)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </>
       )}
     </div>
   );

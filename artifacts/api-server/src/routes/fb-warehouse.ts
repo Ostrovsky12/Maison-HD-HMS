@@ -10,6 +10,66 @@ const org = (req: any): number => req.user.organizationId;
 const uid = (req: any): number => req.user.userId;
 
 // ═══════════════════════════════════════════════════════════════════════════
+// COST ACCOUNTING BRIDGE — автоматичні бухгалтерські проводки для складу
+// НП(С)БО 9 «Запаси»: 281 Товари, 631 Пост., 902 СВОТ, 947 Нестача, 719 Надлишок
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureAccPeriodWH(db_: any, orgId: number, dateStr: string): Promise<number | null> {
+  const d = new Date(dateStr);
+  const year = d.getFullYear(), month = d.getMonth() + 1;
+  const { rows } = await db_.query(
+    `SELECT id FROM acc_periods WHERE organization_id=$1 AND year=$2 AND month=$3 LIMIT 1`,
+    [orgId, year, month]
+  );
+  if (rows[0]) return rows[0].id;
+  const { rows: ins } = await db_.query(
+    `INSERT INTO acc_periods (organization_id, year, month, status)
+     VALUES ($1,$2,$3,'open') ON CONFLICT DO NOTHING RETURNING id`,
+    [orgId, year, month]
+  );
+  if (ins[0]) return ins[0].id;
+  const { rows: sel2 } = await db_.query(
+    `SELECT id FROM acc_periods WHERE organization_id=$1 AND year=$2 AND month=$3 LIMIT 1`,
+    [orgId, year, month]
+  );
+  return sel2[0]?.id ?? null;
+}
+
+async function getAccIdWH(db_: any, orgId: number, code: string): Promise<number | null> {
+  const { rows } = await db_.query(
+    `SELECT id FROM acc_accounts WHERE organization_id=$1 AND code=$2 LIMIT 1`,
+    [orgId, code]
+  );
+  return rows[0]?.id ?? null;
+}
+
+async function postInventoryEntry(db_: any, params: {
+  orgId: number; dateStr: string;
+  debitCode: string; creditCode: string;
+  amount: number; description: string; userId: number;
+}): Promise<number | null> {
+  if (params.amount < 0.01) return null;
+  try {
+    const periodId = await ensureAccPeriodWH(db_, params.orgId, params.dateStr);
+    if (!periodId) return null;
+    const debitId  = await getAccIdWH(db_, params.orgId, params.debitCode);
+    const creditId = await getAccIdWH(db_, params.orgId, params.creditCode);
+    if (!debitId || !creditId) return null;
+    const { rows } = await db_.query(`
+      INSERT INTO acc_entries
+        (organization_id, entry_date, period_id, debit_account_id, credit_account_id,
+         amount, currency, description, is_manual, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,'UAH',$7,false,$8) RETURNING id`,
+      [params.orgId, params.dateStr, periodId, debitId, creditId,
+       params.amount, params.description, params.userId]
+    );
+    return rows[0]?.id ?? null;
+  } catch {
+    return null; // ніколи не ламає складську операцію через бухгалтерію
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SUPPLIERS — Постачальники
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -415,35 +475,72 @@ router.put("/receipts/:id/items", async (req, res) => {
 router.post("/receipts/:id/confirm", async (req, res) => {
   try {
     const receiptId = parseInt(req.params.id);
-    const [receipt] = (await db.execute(sql`SELECT * FROM fb_stock_receipts WHERE id = ${receiptId} AND organization_id = ${org(req)}`)).rows as any[];
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const [receipt] = (await db.execute(sql`SELECT * FROM fb_stock_receipts WHERE id = ${receiptId} AND organization_id = ${orgId}`)).rows as any[];
     if (!receipt) return res.status(404).json({ error: "Not found" });
     if (receipt.status === "confirmed") return res.status(400).json({ error: "Already confirmed" });
 
     const items = (await db.execute(sql`SELECT * FROM fb_stock_receipt_items WHERE receipt_id = ${receiptId}`)).rows as any[];
 
     const summary: any[] = [];
+    let totalReceiptAmount = 0;
+
     for (const item of items) {
       if (!item.ingredient_id || item.item_type === "product") continue;
       // conversion_factor: скільки базових одиниць у 1 одиниці приходу
-      // напр. 1 ящик = 24 шт → conv=24; 5 ящик → +120 шт; ціна/ящик÷24=собівартість/шт
       const conv = parseFloat(item.conversion_factor) > 0 ? parseFloat(item.conversion_factor) : 1;
       const stockAdded = parseFloat(item.quantity) * conv;
       const costPerBaseUnit = parseFloat(item.price_per_unit) / conv;
+
+      // WAC (Weighted Average Cost / Метод середньозваженої собівартості — НП(С)БО 9 п.18)
+      const prevRow = await db_.query(
+        `SELECT current_stock, cost_per_unit FROM fb_ingredients WHERE id=$1`, [item.ingredient_id]
+      );
+      const prev = prevRow.rows[0];
+      const prevStock = parseFloat(prev?.current_stock ?? 0);
+      const prevCost  = parseFloat(prev?.cost_per_unit  ?? 0);
+      const newTotalStock = prevStock + stockAdded;
+      const wacCost = newTotalStock > 0
+        ? (prevStock * prevCost + stockAdded * costPerBaseUnit) / newTotalStock
+        : costPerBaseUnit;
+
       await db.execute(sql`
         UPDATE fb_ingredients SET
           current_stock = current_stock + ${stockAdded},
-          cost_per_unit = ${costPerBaseUnit},
+          cost_per_unit = ${Math.round(wacCost * 10000) / 10000},
           updated_at = NOW()
         WHERE id = ${item.ingredient_id}
       `);
-      summary.push({ ingredient_id: item.ingredient_id, name: item.name, stock_added: stockAdded, base_unit: item.unit, cost_per_unit: costPerBaseUnit });
+
+      const lineAmount = parseFloat(item.price_per_unit) * parseFloat(item.quantity);
+      totalReceiptAmount += lineAmount;
+      summary.push({
+        ingredient_id: item.ingredient_id, name: item.name,
+        stock_added: stockAdded, base_unit: item.unit,
+        cost_per_unit: costPerBaseUnit, wac_cost: Math.round(wacCost * 10000) / 10000,
+        line_amount: lineAmount,
+      });
     }
 
     await db.execute(sql`
       UPDATE fb_stock_receipts SET status = 'confirmed', confirmed_at = NOW(), updated_at = NOW()
       WHERE id = ${receiptId}
     `);
-    res.json({ success: true, summary });
+
+    // Бухгалтерська проводка: Дт 281 Товари → Кт 631 Розрахунки з постачальниками
+    const receiptDate = receipt.receipt_date
+      ? new Date(receipt.receipt_date).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const accEntryId = await postInventoryEntry(db_, {
+      orgId, dateStr: receiptDate,
+      debitCode: "281", creditCode: "631",
+      amount: Math.round(totalReceiptAmount * 100) / 100,
+      description: `Прихід товарів від постачальника: ${receipt.notes || `накладна #${receiptId}`}`,
+      userId: uid(req),
+    });
+
+    res.json({ success: true, summary, acc_entry_id: accEntryId });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -893,22 +990,54 @@ router.post("/writeoffs", async (req, res) => {
 router.post("/writeoffs/:id/confirm", async (req, res) => {
   try {
     const writeoffId = parseInt(req.params.id);
-    const [wo] = (await db.execute(sql`SELECT * FROM fb_stock_writeoffs WHERE id = ${writeoffId} AND organization_id = ${org(req)}`)).rows as any[];
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const [wo] = (await db.execute(sql`SELECT * FROM fb_stock_writeoffs WHERE id = ${writeoffId} AND organization_id = ${orgId}`)).rows as any[];
     if (!wo) return res.status(404).json({ error: "Not found" });
     if (wo.status === "confirmed") return res.status(400).json({ error: "Already confirmed" });
 
-    const items = (await db.execute(sql`SELECT * FROM fb_stock_writeoff_items WHERE writeoff_id = ${writeoffId}`)).rows as any[];
+    // Приєднуємо cost_per_unit з fb_ingredients для розрахунку собівартості
+    const itemsRows = await db_.query(`
+      SELECT wi.*, i.cost_per_unit, i.name AS ingredient_name
+      FROM fb_stock_writeoff_items wi
+      JOIN fb_ingredients i ON i.id = wi.ingredient_id
+      WHERE wi.writeoff_id = $1
+    `, [writeoffId]);
+    const items = itemsRows.rows;
+
+    let totalCost = 0;
     for (const item of items) {
+      const qty = parseFloat(item.quantity);
+      const cpu = parseFloat(item.cost_per_unit ?? 0);
+      totalCost += qty * cpu;
       await db.execute(sql`
         UPDATE fb_ingredients SET
-          current_stock = GREATEST(0, current_stock - ${parseFloat(item.quantity)}),
+          current_stock = GREATEST(0, current_stock - ${qty}),
           updated_at = NOW()
         WHERE id = ${item.ingredient_id}
       `);
     }
 
     await db.execute(sql`UPDATE fb_stock_writeoffs SET status = 'confirmed', confirmed_at = NOW() WHERE id = ${writeoffId}`);
-    res.json({ success: true });
+
+    // Бухгалтерська проводка:
+    // Дт 902 (СВОТ) → Кт 281 для реалізації/виробництва
+    // Дт 947 (Нестача/псування) → Кт 281 для відходів/псування
+    const reason = (wo.reason || wo.writeoff_type || "").toLowerCase();
+    const isWaste = reason.includes("псув") || reason.includes("брак") || reason.includes("нестач") || reason.includes("waste");
+    const debitCode = isWaste ? "947" : "902";
+    const writeoffDate = wo.writeoff_date
+      ? new Date(wo.writeoff_date).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const accEntryId = await postInventoryEntry(db_, {
+      orgId, dateStr: writeoffDate,
+      debitCode, creditCode: "281",
+      amount: Math.round(totalCost * 100) / 100,
+      description: `Списання: ${wo.reason || wo.notes || `акт #${writeoffId}`}`,
+      userId: uid(req),
+    });
+
+    res.json({ success: true, total_cost: Math.round(totalCost * 100) / 100, acc_entry_id: accEntryId });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1384,26 +1513,86 @@ router.post("/inventory/:id/complete", async (req, res) => {
     const sr = await db_.query(`SELECT * FROM fb_inventory_sessions WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     if (!sr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
     if (sr.rows[0].status === "completed") return res.status(400).json({ error: "Вже завершено" });
+    const session = sr.rows[0];
 
-    const lr = await db_.query(`
-      SELECT l.*, i.name FROM fb_inventory_lines l
-      JOIN fb_warehouse_ingredients i ON i.id = l.ingredient_id
-      WHERE l.session_id = $1 AND l.actual_qty IS NOT NULL
-    `, [id]);
-
-    for (const line of lr.rows) {
-      await db_.query(`UPDATE fb_warehouse_ingredients SET current_stock = $1 WHERE id = $2`, [parseFloat(line.actual_qty), line.ingredient_id]);
+    // Намагаємось joinити fb_ingredients (основна таблиця), fallback на fb_warehouse_ingredients
+    let lr: any;
+    try {
+      lr = await db_.query(`
+        SELECT l.*, i.name, i.cost_per_unit FROM fb_inventory_lines l
+        JOIN fb_ingredients i ON i.id = l.ingredient_id
+        WHERE l.session_id = $1 AND l.actual_qty IS NOT NULL
+      `, [id]);
+    } catch {
+      lr = await db_.query(`
+        SELECT l.*, i.name FROM fb_inventory_lines l
+        JOIN fb_warehouse_ingredients i ON i.id = l.ingredient_id
+        WHERE l.session_id = $1 AND l.actual_qty IS NOT NULL
+      `, [id]);
     }
 
-    const varTot = lr.rows.reduce((s: number, l: any) => {
-      return s + Math.abs((parseFloat(l.actual_qty) - parseFloat(l.system_qty)) * parseFloat(l.cost_per_unit || 0));
-    }, 0);
+    let varTot = 0;
+    let surplusTotal = 0, shortageTotal = 0;
+    const accEntryIds: number[] = [];
+    const invDate = new Date().toISOString().slice(0, 10);
+
+    for (const line of lr.rows) {
+      const actualQty  = parseFloat(line.actual_qty);
+      const systemQty  = parseFloat(line.system_qty ?? 0);
+      const cpu        = parseFloat(line.cost_per_unit ?? line.cost_per_unit ?? 0);
+      const variance   = actualQty - systemQty;
+      const varValue   = variance * cpu;
+
+      // Оновлюємо залишок
+      try {
+        await db_.query(`UPDATE fb_ingredients SET current_stock=$1, updated_at=NOW() WHERE id=$2`,
+          [actualQty, line.ingredient_id]);
+      } catch {
+        await db_.query(`UPDATE fb_warehouse_ingredients SET current_stock=$1 WHERE id=$2`,
+          [actualQty, line.ingredient_id]);
+      }
+
+      varTot += Math.abs(varValue);
+
+      if (Math.abs(varValue) < 0.01) continue;
+
+      // Бухгалтерська проводка за результатами інвентаризації (НП(С)БО 9 п.27-28)
+      if (variance > 0) {
+        // Надлишок: Дт 281 → Кт 719 «Інші операційні доходи»
+        surplusTotal += varValue;
+        const eid = await postInventoryEntry(db_, {
+          orgId, dateStr: invDate,
+          debitCode: "281", creditCode: "719",
+          amount: Math.round(varValue * 100) / 100,
+          description: `Надлишок при інвентаризації: ${line.name} (+${variance.toFixed(3)} ${session.name})`,
+          userId: uid(req),
+        });
+        if (eid) accEntryIds.push(eid);
+      } else {
+        // Нестача: Дт 947 «Нестача та втрати від псування» → Кт 281
+        shortageTotal += Math.abs(varValue);
+        const eid = await postInventoryEntry(db_, {
+          orgId, dateStr: invDate,
+          debitCode: "947", creditCode: "281",
+          amount: Math.round(Math.abs(varValue) * 100) / 100,
+          description: `Нестача при інвентаризації: ${line.name} (${variance.toFixed(3)} ${session.name})`,
+          userId: uid(req),
+        });
+        if (eid) accEntryIds.push(eid);
+      }
+    }
 
     await db_.query(`
       UPDATE fb_inventory_sessions SET status='completed', completed_at=NOW(), variance_total=$1 WHERE id=$2
-    `, [varTot, id]);
+    `, [Math.round(varTot * 100) / 100, id]);
 
-    res.json({ ok: true, updated: lr.rows.length, variance_total: varTot });
+    res.json({
+      ok: true, updated: lr.rows.length,
+      variance_total: Math.round(varTot * 100) / 100,
+      surplus_total: Math.round(surplusTotal * 100) / 100,
+      shortage_total: Math.round(shortageTotal * 100) / 100,
+      acc_entry_ids: accEntryIds,
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1834,6 +2023,125 @@ router.get("/movement-report", async (req, res) => {
       .filter((r: any) => r.received_qty > 0 || r.writeoff_qty > 0 || r.closing_qty !== 0);
 
     res.json({ rows, from, to, total: rows.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COST ACCOUNTING SUMMARY — Дашборд собівартості (Phase 2)
+// Рах. 281 «Товари», 902 «СВОТ», 947 «Нестача», 631 «Постачальники», 719 «Доходи»
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get("/cost-accounting", async (req, res) => {
+  try {
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"))));
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    // 1. Поточна вартість запасів (рах. 281) — з fb_ingredients
+    const stockVal = await db_.query(`
+      SELECT
+        COUNT(*)::int                                              AS item_count,
+        ROUND(SUM(current_stock * cost_per_unit)::numeric, 2)    AS total_value,
+        COUNT(*) FILTER (WHERE current_stock = 0)::int           AS zero_stock,
+        COUNT(*) FILTER (WHERE current_stock > 0
+          AND current_stock <= min_stock)::int                   AS low_stock
+      FROM fb_ingredients
+      WHERE organization_id=$1 AND is_active=true
+    `, [orgId]);
+
+    // 2. Вартість по категоріях
+    const byCategory = await db_.query(`
+      SELECT
+        COALESCE(category, 'Без категорії')                          AS category,
+        COUNT(*)::int                                                 AS item_count,
+        ROUND(SUM(current_stock * cost_per_unit)::numeric, 2)        AS value,
+        ROUND(AVG(cost_per_unit)::numeric, 4)                        AS avg_cost
+      FROM fb_ingredients
+      WHERE organization_id=$1 AND is_active=true
+      GROUP BY category
+      ORDER BY value DESC NULLS LAST
+    `, [orgId]);
+
+    // 3. Автоматичні проводки з журналу (за останні N днів)
+    const accMovements = await db_.query(`
+      SELECT
+        e.id, e.entry_date, e.amount, e.description,
+        da.code AS debit_code, da.name AS debit_name,
+        ca.code AS credit_code, ca.name AS credit_name
+      FROM acc_entries e
+      JOIN acc_accounts da ON da.id = e.debit_account_id
+      JOIN acc_accounts ca ON ca.id = e.credit_account_id
+      WHERE e.organization_id=$1
+        AND e.is_manual = false
+        AND e.entry_date >= $2::date
+        AND (da.code IN ('281','902','947') OR ca.code IN ('281','631','719'))
+      ORDER BY e.entry_date DESC, e.id DESC
+      LIMIT 50
+    `, [orgId, cutoffStr]);
+
+    // 4. Підсумки по типах проводок
+    const accSummary = await db_.query(`
+      SELECT
+        da.code AS debit_code, ca.code AS credit_code,
+        COUNT(*)::int                                AS count,
+        ROUND(SUM(e.amount)::numeric, 2)             AS total_amount
+      FROM acc_entries e
+      JOIN acc_accounts da ON da.id = e.debit_account_id
+      JOIN acc_accounts ca ON ca.id = e.credit_account_id
+      WHERE e.organization_id=$1
+        AND e.is_manual = false
+        AND e.entry_date >= $2::date
+        AND (da.code IN ('281','902','947') OR ca.code IN ('281','631','719'))
+      GROUP BY da.code, ca.code
+      ORDER BY total_amount DESC
+    `, [orgId, cutoffStr]);
+
+    // 5. Food cost (теоретичний) з продажів
+    const foodCost = await db_.query(`
+      SELECT
+        COALESCE(SUM(oi.total_price), 0)::numeric              AS revenue,
+        COALESCE(SUM(oi.quantity * fi.cost_price), 0)::numeric AS theoretical_cost,
+        CASE WHEN COALESCE(SUM(oi.total_price),0) > 0
+             THEN ROUND(
+               SUM(oi.quantity * COALESCE(fi.cost_price,0))
+               / SUM(oi.total_price) * 100, 1)
+             ELSE NULL END                                      AS food_cost_pct
+      FROM fb_order_items oi
+      JOIN fb_items fi ON fi.id = oi.item_id AND fi.organization_id=$1
+      WHERE oi.organization_id=$1 AND oi.created_at >= $2::date
+    `, [orgId, cutoffStr]);
+
+    // 6. Нещодавні прихід/списання
+    const recentReceipts = await db_.query(`
+      SELECT id, receipt_date AS date, notes, total_amount, status
+      FROM fb_stock_receipts
+      WHERE organization_id=$1 AND status='confirmed' AND receipt_date >= $2::date
+      ORDER BY receipt_date DESC LIMIT 10
+    `, [orgId, cutoffStr]);
+
+    const recentWriteoffs = await db_.query(`
+      SELECT id, writeoff_date AS date, reason, notes, total_amount, status
+      FROM fb_stock_writeoffs
+      WHERE organization_id=$1 AND status='confirmed' AND writeoff_date >= $2::date
+      ORDER BY writeoff_date DESC LIMIT 10
+    `, [orgId, cutoffStr]);
+
+    res.json({
+      period: { days, from: cutoffStr },
+      stock: {
+        ...stockVal.rows[0],
+        by_category: byCategory.rows,
+      },
+      food_cost: foodCost.rows[0] ?? { revenue: 0, theoretical_cost: 0, food_cost_pct: null },
+      acc: {
+        movements: accMovements.rows,
+        summary: accSummary.rows,
+      },
+      recent_receipts: recentReceipts.rows,
+      recent_writeoffs: recentWriteoffs.rows,
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

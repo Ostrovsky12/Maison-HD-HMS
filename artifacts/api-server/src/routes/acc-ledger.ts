@@ -113,6 +113,7 @@ const UA_PLAN: Array<{ code: string; name: string; type: string; class: number; 
   { code: "92",   name: "Адміністративні витрати",                 type: "expense",   class: 9 },
   { code: "93",   name: "Витрати на збут",                         type: "expense",   class: 9 },
   { code: "94",   name: "Інші операційні витрати",                 type: "expense",   class: 9 },
+  { code: "947",  name: "Нестача та втрати від псування цінностей",type: "expense",   class: 9, parent: "94" },
   { code: "95",   name: "Фінансові витрати",                       type: "expense",   class: 9 },
   { code: "97",   name: "Інші витрати",                            type: "expense",   class: 9 },
   { code: "98",   name: "Податок на прибуток",                     type: "expense",   class: 9 },
