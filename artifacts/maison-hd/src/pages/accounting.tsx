@@ -162,7 +162,8 @@ type Tab = "acc-workspace" | "overview" | "documents" | "counterparties" | "enti
          | "acc-accounts" | "acc-journal" | "acc-documents" | "acc-contractors"
          | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync"
          | "acc-monthclose" | "acc-card" | "acc-cash"
-         | "acc-tourist" | "acc-payroll" | "acc-assets";
+         | "acc-tourist" | "acc-payroll" | "acc-assets"
+         | "acc-audit";
 
 // ─── SIDEBAR NAVIGATION ────────────────────────────────────────────────────────
 const ACC_NAV = [
@@ -193,6 +194,7 @@ const ACC_NAV = [
       { id: "acc-cash",       label: "Каса ПКО/ВКО",      icon: Wallet },
       { id: "acc-sync",       label: "Синхронізація",      icon: RefreshCw },
       { id: "acc-monthclose", label: "Закриття місяця",    icon: CheckCircle2 },
+      { id: "acc-audit",      label: "Журнал аудиту",      icon: ShieldCheck },
     ],
   },
   {
@@ -234,6 +236,7 @@ const TAB_TITLES: Partial<Record<Tab, { title: string; desc: string }>> = {
   "acc-payroll":    { title: "Зарплата",                desc: "Нарахування · ПДФО · ВЗ · ЄСВ" },
   "acc-tourist":    { title: "Туристичний збір",        desc: "Облік нічліг та ставок" },
   "acc-assets":     { title: "Основні засоби",          desc: "Картки ОЗ · Амортизація (прямолінійна)" },
+  "acc-audit":      { title: "Журнал аудиту",           desc: "Незмінний слід змін · Закон №996-XIV · Ст.9" },
   "entities":       { title: "Юридичні особи",          desc: "Реквізити, підписанти, банк" },
   "counterparties": { title: "Контрагенти",             desc: "Клієнти, постачальники, партнери" },
   "acc-accounts":   { title: "План рахунків",           desc: "Стандартний план НП(С)БО" },
@@ -344,6 +347,7 @@ export default function AccountingPage() {
             {tab === "acc-tourist"    && <AccTouristTaxTab />}
             {tab === "acc-payroll"    && <AccPayrollTab />}
             {tab === "acc-assets"     && <AccFixedAssetsTab />}
+            {tab === "acc-audit"      && <AccAuditLogTab />}
           </div>
         </div>
       </div>
@@ -3814,6 +3818,9 @@ function AccJournalTab() {
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState<any>({});
+  const [stornoTarget, setStornoTarget] = useState<any>(null);
+  const [stornoReason, setStornoReason] = useState("");
+  const { toast } = useToast();
   const qc = useQueryClient();
 
   const { data, isLoading } = useAccLedger(`entries?from=${dateFrom}&to=${dateTo}&account_code=${search}`);
@@ -3822,22 +3829,34 @@ function AccJournalTab() {
   const createMut = useMutation({
     mutationFn: (body: any) => accFetch("entries", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["acc-ledger"] }); setAddOpen(false); setForm({}); },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
   });
-  
-  const deleteMut = useMutation({
-    mutationFn: (id: number) => accFetch(`entries/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["acc-ledger"] }),
+
+  const stornoMut = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      accFetch(`entries/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      setStornoTarget(null); setStornoReason("");
+      toast({ title: "Сторно виконано", description: data?.message ?? "Сторно-проводку створено" });
+    },
+    onError: (e: any) => toast({ title: "Помилка сторно", description: e.message, variant: "destructive" }),
   });
 
   const entries = Array.isArray(data) ? data : [];
-
   const fmtNumLoc = (n: number | string) => n ? Number(n).toFixed(2) : "0.00";
 
   return (
     <div className="space-y-4">
+      {/* Legal notice banner */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+        <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+        <span>Видалення проводок заборонено (Наказ МФУ №88, п.4.4). Виправлення — тільки методом <strong>сторно</strong>.</span>
+      </div>
+
       <div className="flex gap-2 items-center flex-wrap">
         <Input type="date" className="w-40 h-9 text-sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <span className="text-gray-400">-</span>
+        <span className="text-gray-400">—</span>
         <Input type="date" className="w-40 h-9 text-sm" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         <Input className="w-48 h-9 text-sm" placeholder="Код рахунку..." value={search} onChange={e => setSearch(e.target.value)} />
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -3849,54 +3868,124 @@ function AccJournalTab() {
               <div><Label>Дебет</Label>
                 <Select value={form.debit_account_id ? String(form.debit_account_id) : ""} onValueChange={v => setForm({ ...form, debit_account_id: parseInt(v) })}>
                   <SelectTrigger><SelectValue placeholder="Дт" /></SelectTrigger>
-                  <SelectContent>{(accs?.accounts||[]).filter((a: any)=>a.is_active).map((a: any) => <SelectItem key={a.id} value={String(a.id)}>{a.code} - {a.name}</SelectItem>)}</SelectContent>
+                  <SelectContent>{(accs?.accounts||[]).filter((a: any)=>a.is_active).map((a: any) => <SelectItem key={a.id} value={String(a.id)}>{a.code} — {a.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div><Label>Кредит</Label>
                 <Select value={form.credit_account_id ? String(form.credit_account_id) : ""} onValueChange={v => setForm({ ...form, credit_account_id: parseInt(v) })}>
                   <SelectTrigger><SelectValue placeholder="Кт" /></SelectTrigger>
-                  <SelectContent>{(accs?.accounts||[]).filter((a: any)=>a.is_active).map((a: any) => <SelectItem key={a.id} value={String(a.id)}>{a.code} - {a.name}</SelectItem>)}</SelectContent>
+                  <SelectContent>{(accs?.accounts||[]).filter((a: any)=>a.is_active).map((a: any) => <SelectItem key={a.id} value={String(a.id)}>{a.code} — {a.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div><Label>Сума</Label><Input type="number" value={form.amount || ""} onChange={e => setForm({ ...form, amount: e.target.value })} /></div>
               <div><Label>Опис</Label><Input value={form.description || ""} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
-              <Button className="w-full" onClick={() => createMut.mutate({ ...form, amount: parseFloat(form.amount) })} disabled={createMut.isPending}>Зберегти</Button>
+              <Button className="w-full" onClick={() => createMut.mutate({ ...form, amount: parseFloat(form.amount) })} disabled={createMut.isPending}>
+                {createMut.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Зберегти
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Storno confirmation dialog */}
+      <Dialog open={!!stornoTarget} onOpenChange={open => { if (!open) { setStornoTarget(null); setStornoReason(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <Shuffle className="h-4 w-4" /> Сторно проводки №{stornoTarget?.id}
+            </DialogTitle>
+          </DialogHeader>
+          {stornoTarget && (
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm space-y-1">
+                <div className="font-semibold text-red-800">Буде сторновано:</div>
+                <div className="text-red-700 font-mono">Дт {stornoTarget.debit_code} / Кт {stornoTarget.credit_code} — {fmtNumLoc(stornoTarget.amount)} ₴</div>
+                <div className="text-red-600 text-xs">{stornoTarget.description}</div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+                Метод «червоного сторна» (Наказ МФУ №88, п.4.4): буде створено нову дзеркальну проводку
+                Дт {stornoTarget.credit_code} / Кт {stornoTarget.debit_code} на ту саму суму.
+              </div>
+              <div>
+                <Label className="text-xs">Причина сторно (необов'язково)</Label>
+                <Input className="mt-1" placeholder="Напр.: Помилка у сумі документа №123" value={stornoReason} onChange={e => setStornoReason(e.target.value)} />
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => { setStornoTarget(null); setStornoReason(""); }}>Скасувати</Button>
+                <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                  disabled={stornoMut.isPending}
+                  onClick={() => stornoMut.mutate({ id: stornoTarget.id, reason: stornoReason })}>
+                  {stornoMut.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Shuffle className="h-4 w-4 mr-2" />}
+                  Виконати сторно
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
         <div className="bg-white border rounded-xl overflow-hidden">
           <Table>
             <TableHeader className="bg-gray-50">
               <TableRow>
-                <TableHead>Дата</TableHead><TableHead>Дт</TableHead><TableHead>Назва Дт</TableHead>
-                <TableHead>Кт</TableHead><TableHead>Назва Кт</TableHead><TableHead className="text-right">Сума</TableHead>
-                <TableHead>Опис</TableHead><TableHead>Документ</TableHead><TableHead></TableHead>
+                <TableHead className="w-8">#</TableHead>
+                <TableHead>Дата</TableHead>
+                <TableHead>Дт</TableHead><TableHead className="hidden lg:table-cell">Назва Дт</TableHead>
+                <TableHead>Кт</TableHead><TableHead className="hidden lg:table-cell">Назва Кт</TableHead>
+                <TableHead className="text-right">Сума</TableHead>
+                <TableHead>Опис</TableHead>
+                <TableHead>Статус</TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {entries.map((e: any) => (
-                <TableRow key={e.id}>
+                <TableRow key={e.id} className={e.is_reversal ? "bg-red-50/40" : e.reversed_by_entry_id ? "bg-gray-50 opacity-75" : ""}>
+                  <TableCell className="text-xs text-gray-400">{e.id}</TableCell>
                   <TableCell className="text-xs">{e.entry_date ? format(new Date(e.entry_date), "dd.MM.yyyy") : "—"}</TableCell>
                   <TableCell className="font-mono text-xs font-semibold">{e.debit_code}</TableCell>
-                  <TableCell className="text-xs max-w-[120px] truncate">{e.debit_name}</TableCell>
+                  <TableCell className="text-xs max-w-[100px] truncate hidden lg:table-cell">{e.debit_name}</TableCell>
                   <TableCell className="font-mono text-xs font-semibold">{e.credit_code}</TableCell>
-                  <TableCell className="text-xs max-w-[120px] truncate">{e.credit_name}</TableCell>
-                  <TableCell className="text-right text-sm font-semibold">{fmtNumLoc(e.amount)}</TableCell>
-                  <TableCell className="text-xs text-gray-600">{e.description}</TableCell>
-                  <TableCell className="text-xs text-gray-400">{e.doc_id ? `Doc #${e.doc_id}` : e.is_manual ? "Ручна" : "—"}</TableCell>
+                  <TableCell className="text-xs max-w-[100px] truncate hidden lg:table-cell">{e.credit_name}</TableCell>
+                  <TableCell className={`text-right text-sm font-semibold ${e.is_reversal ? "text-red-600" : ""}`}>
+                    {e.is_reversal ? "−" : ""}{fmtNumLoc(e.amount)}
+                  </TableCell>
+                  <TableCell className="text-xs text-gray-600 max-w-[160px] truncate">{e.description}</TableCell>
+                  <TableCell className="text-xs">
+                    {e.is_reversal && (
+                      <Badge className="bg-red-100 text-red-700 border-red-200 text-[10px] font-normal">
+                        СТОРНО #{e.reversal_of_entry_id}
+                      </Badge>
+                    )}
+                    {e.reversed_by_entry_id && !e.is_reversal && (
+                      <Badge className="bg-gray-100 text-gray-500 border-gray-300 text-[10px] font-normal">
+                        Сторновано
+                      </Badge>
+                    )}
+                    {!e.is_reversal && !e.reversed_by_entry_id && e.is_manual && (
+                      <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-200">Ручна</Badge>
+                    )}
+                  </TableCell>
                   <TableCell>
-                    {e.is_manual && <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500" onClick={() => deleteMut.mutate(e.id)}><XCircle className="h-4 w-4"/></Button>}
+                    {!e.is_reversal && !e.reversed_by_entry_id && (
+                      <Button variant="ghost" size="sm" className="h-7 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2"
+                        onClick={() => setStornoTarget(e)}>
+                        <Shuffle className="h-3 w-3 mr-1" />Сторно
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
+              {!entries.length && (
+                <TableRow><TableCell colSpan={10} className="text-center text-xs text-gray-400 py-8">Проводок не знайдено за вказаний період</TableCell></TableRow>
+              )}
             </TableBody>
           </Table>
-          <div className="bg-gray-50 p-4 border-t text-sm font-semibold flex justify-end gap-4">
-            <span>Всього оборот:</span>
-            <span className="text-blue-600">{fmtNumLoc(entries.reduce((a:number, e:any)=>a + parseFloat(e.amount), 0))} ₴</span>
+          <div className="bg-gray-50 p-3 border-t text-sm font-semibold flex justify-end gap-4">
+            <span className="text-gray-500">{entries.length} проводок</span>
+            <span>Оборот:</span>
+            <span className="text-blue-600">{fmtNumLoc(entries.filter((e:any)=>!e.is_reversal).reduce((a:number, e:any)=>a + parseFloat(e.amount), 0))} ₴</span>
           </div>
         </div>
       )}
@@ -7165,6 +7254,119 @@ function AccFixedAssetsTab() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ─── ACC: AUDIT LOG (ЖУРНАЛ АУДИТУ) ───────────────────────────────────────────
+// Незмінний журнал усіх змін бухгалтерського обліку (Ст.9 Закону №996-XIV)
+function AccAuditLogTab() {
+  const [entityType, setEntityType] = useState("");
+  const [actionFilter, setActionFilter] = useState("");
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["acc-audit-log", entityType, actionFilter],
+    queryFn: () => accFetch(
+      `audit-log?limit=300${entityType ? `&entity_type=${entityType}` : ""}${actionFilter ? `&action=${encodeURIComponent(actionFilter)}` : ""}`
+    ),
+    staleTime: 15_000,
+  });
+
+  const rows: any[] = data?.rows ?? [];
+
+  const ACTION_LABELS: Record<string, { label: string; color: string }> = {
+    entry_created:      { label: "Проводку створено",  color: "bg-blue-100 text-blue-700" },
+    entry_reversed:     { label: "Сторно",             color: "bg-red-100 text-red-700" },
+    document_posted:    { label: "Документ проведено", color: "bg-green-100 text-green-700" },
+    document_cancelled: { label: "Скасовано",          color: "bg-gray-100 text-gray-600" },
+  };
+
+  const ENTITY_LABELS: Record<string, string> = {
+    entry: "Проводка", document: "Документ", period: "Період",
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+        <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+        <span>
+          <strong>Незмінний журнал аудиту</strong> — Закон України №996-XIV, Ст.9.
+          Всі операції фіксуються автоматично і не можуть бути видалені.
+        </span>
+      </div>
+
+      <div className="flex gap-2 flex-wrap items-center">
+        <Select value={entityType} onValueChange={setEntityType}>
+          <SelectTrigger className="w-40 h-9 text-xs"><SelectValue placeholder="Всі об'єкти" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Всі об'єкти</SelectItem>
+            <SelectItem value="entry">Проводки</SelectItem>
+            <SelectItem value="document">Документи</SelectItem>
+            <SelectItem value="period">Період</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={actionFilter} onValueChange={setActionFilter}>
+          <SelectTrigger className="w-48 h-9 text-xs"><SelectValue placeholder="Всі дії" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Всі дії</SelectItem>
+            <SelectItem value="entry_created">Проводку створено</SelectItem>
+            <SelectItem value="entry_reversed">Сторно</SelectItem>
+            <SelectItem value="document_posted">Документ проведено</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button size="sm" variant="outline" onClick={() => refetch()}>
+          <RefreshCw className="h-3.5 w-3.5 mr-1" />Оновити
+        </Button>
+        <span className="ml-auto text-xs text-gray-400">{rows.length} записів</span>
+      </div>
+
+      {isLoading ? (
+        <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div>
+      ) : (
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <Table>
+            <TableHeader className="bg-gray-50">
+              <TableRow>
+                <TableHead className="w-40">Час</TableHead>
+                <TableHead>Дія</TableHead>
+                <TableHead>Об'єкт</TableHead>
+                <TableHead className="w-20">ID</TableHead>
+                <TableHead>Користувач</TableHead>
+                <TableHead>Деталі</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r: any) => {
+                const cfg = ACTION_LABELS[r.action] ?? { label: r.action, color: "bg-gray-100 text-gray-600" };
+                const note = r.note || (r.after_data ? JSON.stringify(r.after_data).slice(0, 100) : "—");
+                return (
+                  <TableRow key={r.id} className="hover:bg-gray-50">
+                    <TableCell className="text-xs font-mono text-gray-500">
+                      {r.created_at ? format(new Date(r.created_at), "dd.MM.yy HH:mm:ss") : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${cfg.color}`}>{cfg.label}</span>
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-600">{ENTITY_LABELS[r.entity_type] ?? r.entity_type}</TableCell>
+                    <TableCell className="font-mono text-xs text-gray-400">{r.entity_id ? `#${r.entity_id}` : "—"}</TableCell>
+                    <TableCell className="text-xs">{r.user_display_name || r.user_name || (r.user_id ? `ID ${r.user_id}` : "Система")}</TableCell>
+                    <TableCell className="text-xs text-gray-500 max-w-[280px] truncate" title={note}>{note}</TableCell>
+                  </TableRow>
+                );
+              })}
+              {!rows.length && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-12 text-gray-400 text-sm">
+                    <ShieldCheck className="h-8 w-8 mx-auto mb-2 text-gray-200" />
+                    Журнал аудиту порожній.<br />
+                    <span className="text-xs">Записи з'являться після перших бухгалтерських операцій.</span>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 }

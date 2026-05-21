@@ -368,6 +368,88 @@ router.post("/periods/:id/reopen", requireRole("admin", "owner"), async (req: an
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PHASE 1 — ACCOUNTING KERNEL STABILITY
+// Закон України №996-XIV від 16.07.1999 «Про бухгалтерський облік»
+// Наказ МФУ №88 від 24.05.1995 (Порядок виправлення помилок — тільки сторно)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Migration: audit log + reversal columns (idempotent — safe to call repeatedly)
+async function ensureKernelTables() {
+  await pool.query(`
+    ALTER TABLE acc_entries
+      ADD COLUMN IF NOT EXISTS is_reversal           BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS reversal_of_entry_id  INTEGER,
+      ADD COLUMN IF NOT EXISTS reversed_by_entry_id  INTEGER
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_audit_log (
+      id              SERIAL PRIMARY KEY,
+      organization_id INTEGER      NOT NULL,
+      action          TEXT         NOT NULL,
+      entity_type     TEXT         NOT NULL,
+      entity_id       INTEGER,
+      user_id         INTEGER,
+      user_name       TEXT,
+      before_data     JSONB,
+      after_data      JSONB,
+      note            TEXT,
+      created_at      TIMESTAMPTZ  DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS acc_audit_log_org_idx
+      ON acc_audit_log(organization_id, created_at DESC)
+  `);
+}
+
+// Append-only audit record (Ст.9 Закону №996-XIV)
+async function logAudit(p: {
+  organizationId: number;
+  action: string;
+  entityType: string;
+  entityId?: number | null;
+  userId?: number | null;
+  userName?: string | null;
+  beforeData?: any;
+  afterData?: any;
+  note?: string | null;
+}) {
+  try {
+    await ensureKernelTables();
+    await pool.query(
+      `INSERT INTO acc_audit_log
+         (organization_id,action,entity_type,entity_id,user_id,user_name,before_data,after_data,note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        p.organizationId, p.action, p.entityType, p.entityId ?? null,
+        p.userId ?? null, p.userName ?? null,
+        p.beforeData ? JSON.stringify(p.beforeData) : null,
+        p.afterData  ? JSON.stringify(p.afterData)  : null,
+        p.note ?? null,
+      ],
+    );
+  } catch { /* audit failure must never break business logic */ }
+}
+
+// Period guard — Наказ МФУ №291: проведення у закритий період заборонено
+async function assertPeriodOpen(orgId: number, dateVal: Date | string) {
+  const d    = typeof dateVal === "string" ? new Date(dateVal) : dateVal;
+  const year = d.getFullYear();
+  const mo   = d.getMonth() + 1;
+  const { rows } = await pool.query(
+    `SELECT status FROM acc_periods WHERE organization_id=$1 AND year=$2 AND month=$3 LIMIT 1`,
+    [orgId, year, mo],
+  );
+  if (rows[0]?.status === "closed") {
+    const label = `${year}-${String(mo).padStart(2, "0")}`;
+    throw Object.assign(
+      new Error(`Період ${label} закрито. Проведення заборонено (Наказ МФУ №291). Відкрийте період або створіть сторно.`),
+      { statusCode: 422 },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // DOCUMENTS — первинні документи
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -521,6 +603,10 @@ router.post("/documents/:id/post", async (req: any, res) => {
   if (doc.status === "posted") return res.status(400).json({ error: "Вже проведено" });
   if (doc.status === "cancelled") return res.status(400).json({ error: "Скасовано" });
 
+  try { await assertPeriodOpen(orgId, doc.doc_date); } catch (e: any) {
+    return res.status(e.statusCode ?? 422).json({ error: e.message });
+  }
+
   await seedChart(orgId);
   const rules = POSTING_RULES[doc.doc_type] ?? [];
 
@@ -567,6 +653,12 @@ router.post("/documents/:id/post", async (req: any, res) => {
     `UPDATE acc_documents SET status='posted', posted_at=NOW(), posted_by=$1 WHERE id=$2 RETURNING *`,
     [userId, doc.id],
   );
+  await logAudit({
+    organizationId: orgId, action: "document_posted", entityType: "document",
+    entityId: doc.id, userId,
+    afterData: { doc_type: doc.doc_type, doc_number: doc.doc_number, total: doc.total },
+    note: `Проведено ${doc.doc_type.toUpperCase()} №${doc.doc_number}`,
+  });
   res.json(rows[0]);
 });
 
@@ -624,6 +716,9 @@ router.post("/entries", async (req: any, res) => {
   const { entry_date, debit_account_id, credit_account_id, amount, description, currency = "UAH" } = req.body;
   if (!entry_date || !debit_account_id || !credit_account_id || !amount)
     return res.status(400).json({ error: "entry_date, debit_account_id, credit_account_id, amount required" });
+  try { await assertPeriodOpen(orgId, entry_date); } catch (e: any) {
+    return res.status(e.statusCode ?? 422).json({ error: e.message });
+  }
   const periodId = await ensurePeriod(orgId, new Date(entry_date));
   const { rows } = await pool.query(
     `INSERT INTO acc_entries
@@ -632,18 +727,98 @@ router.post("/entries", async (req: any, res) => {
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9) RETURNING *`,
     [orgId, entry_date, periodId, debit_account_id, credit_account_id, amount, currency, description ?? null, userId],
   );
+  await logAudit({
+    organizationId: orgId, action: "entry_created", entityType: "entry",
+    entityId: rows[0].id, userId, afterData: rows[0],
+    note: `Ручна проводка Дт${debit_account_id} Кт${credit_account_id} ${amount}`,
+  });
   res.status(201).json(rows[0]);
 });
 
-router.delete("/entries/:id", async (req: any, res) => {
+// DELETE /entries/:id — ЗАБОРОНЕНО (Наказ МФУ №88, п.4.4)
+// Виправлення помилок здійснюється виключно методом «червоного сторна»
+// Використовуйте POST /entries/:id/reverse
+router.delete("/entries/:id", (_req, res) => {
+  res.status(405).json({
+    error: "Видалення проводок заборонено законодавством України (Наказ МФУ №88, п.4.4). " +
+           "Використайте метод сторнування: POST /api/acc/entries/:id/reverse",
+    hint: "storno",
+  });
+});
+
+// POST /entries/:id/reverse — Сторнування (червоне сторно, Наказ МФУ №88 п.4.4)
+// Створює дзеркальну від'ємну проводку; оригінал позначається як reversed
+router.post("/entries/:id/reverse", async (req: any, res) => {
   const orgId = await resolveOrgId(req);
-  const { rows } = await pool.query(
-    `SELECT is_manual FROM acc_entries WHERE id=$1 AND organization_id=$2`, [req.params.id, orgId],
+  const userId = req.user.userId;
+  const { reason, reversal_date } = req.body;
+
+  await ensureKernelTables();
+
+  const { rows: orig } = await pool.query(
+    `SELECT e.*,
+       da.code as debit_code, da.name as debit_name,
+       ca.code as credit_code, ca.name as credit_name
+     FROM acc_entries e
+     JOIN acc_accounts da ON da.id=e.debit_account_id
+     JOIN acc_accounts ca ON ca.id=e.credit_account_id
+     WHERE e.id=$1 AND e.organization_id=$2`,
+    [req.params.id, orgId],
   );
-  if (!rows[0]) return res.status(404).json({ error: "Not found" });
-  if (!rows[0].is_manual) return res.status(400).json({ error: "Можна видалити лише ручні проводки" });
-  await pool.query(`DELETE FROM acc_entries WHERE id=$1`, [req.params.id]);
-  res.json({ ok: true });
+  if (!orig[0]) return res.status(404).json({ error: "Проводку не знайдено" });
+
+  const entry = orig[0];
+
+  if (entry.reversed_by_entry_id)
+    return res.status(400).json({ error: "Цю проводку вже сторновано" });
+
+  if (entry.is_reversal)
+    return res.status(400).json({ error: "Не можна сторнувати сторно-проводку" });
+
+  const revDate = reversal_date ?? entry.entry_date;
+  try { await assertPeriodOpen(orgId, revDate); } catch (e: any) {
+    return res.status(e.statusCode ?? 422).json({ error: e.message });
+  }
+
+  const periodId = await ensurePeriod(orgId, new Date(revDate));
+
+  // Сторно: дебет↔кредит міняються місцями (метод «червоного сторна»)
+  const stornDesc = `[СТОРНО №${entry.id}] ${entry.description ?? ""}${reason ? ` — ${reason}` : ""}`;
+  const { rows: rev } = await pool.query(
+    `INSERT INTO acc_entries
+       (organization_id,entry_date,period_id,
+        debit_account_id,credit_account_id,
+        amount,currency,description,
+        is_manual,is_reversal,reversal_of_entry_id,created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,true,$9,$10) RETURNING *`,
+    [orgId, revDate, periodId,
+     entry.credit_account_id, entry.debit_account_id,
+     entry.amount, entry.currency, stornDesc,
+     entry.id, userId],
+  );
+
+  // Позначаємо оригінал як сторнований
+  await pool.query(
+    `UPDATE acc_entries SET reversed_by_entry_id=$1 WHERE id=$2`,
+    [rev[0].id, entry.id],
+  );
+
+  await logAudit({
+    organizationId: orgId,
+    action: "entry_reversed",
+    entityType: "entry",
+    entityId: entry.id,
+    userId,
+    beforeData: { id: entry.id, debit: entry.debit_code, credit: entry.credit_code, amount: entry.amount },
+    afterData:  { reversal_id: rev[0].id, reversal_date: revDate, reason: reason ?? null },
+    note: `Сторно проводки #${entry.id}: ${entry.debit_code}→${entry.credit_code} ${entry.amount}`,
+  });
+
+  res.status(201).json({
+    reversal: rev[0],
+    original_id: entry.id,
+    message: `Сторно-проводку №${rev[0].id} створено. Оригінал №${entry.id} позначено як сторнований.`,
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2079,6 +2254,28 @@ router.get("/fixed-assets/report", async (req: any, res) => {
     residual_value:           s.residual_value           + parseFloat(r.residual_value),
   }), { initial_cost: 0, accumulated_depreciation: 0, residual_value: 0 });
   res.json({ rows, totals, as_of: date ?? null });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT LOG — незмінний журнал аудиту (Ст.9 Закону №996-XIV)
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get("/audit-log", requireRole("admin", "owner"), async (req: any, res) => {
+  const orgId = await resolveOrgId(req);
+  await ensureKernelTables();
+  const { entity_type, entity_id, action, limit = 200, offset = 0 } = req.query;
+  let q = `SELECT a.*, u.name as user_display_name
+           FROM acc_audit_log a
+           LEFT JOIN users u ON u.id=a.user_id
+           WHERE a.organization_id=$1`;
+  const p: any[] = [orgId];
+  if (entity_type) { p.push(entity_type); q += ` AND a.entity_type=$${p.length}`; }
+  if (entity_id)   { p.push(entity_id);   q += ` AND a.entity_id=$${p.length}`; }
+  if (action)      { p.push(`%${action}%`); q += ` AND a.action ILIKE $${p.length}`; }
+  p.push(Number(limit), Number(offset));
+  q += ` ORDER BY a.created_at DESC LIMIT $${p.length-1} OFFSET $${p.length}`;
+  const { rows } = await pool.query(q, p);
+  res.json({ rows, total: rows.length });
 });
 
 export default router;
