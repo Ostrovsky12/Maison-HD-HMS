@@ -2279,4 +2279,374 @@ router.get("/audit-log", requireRole("admin", "owner"), async (req: any, res) =>
   res.json({ rows, total: rows.length });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — TAX ENGINE
+// ПДВ (ПКУ Розділ V) · ЄСВ (ЗУ №2464-VI) · ПДФО+ВЗ (ПКУ ст.167-168)
+// Податок на прибуток 18% (ПКУ ст.133) · Туристичний збір (ПКУ ст.268)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureTaxPaymentsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS acc_tax_payments (
+      id              SERIAL PRIMARY KEY,
+      organization_id INT  NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      payment_date    DATE NOT NULL,
+      tax_type        VARCHAR(30) NOT NULL,
+      period_year     INT  NOT NULL,
+      period_month    INT  NOT NULL,
+      amount          NUMERIC(14,2) NOT NULL,
+      bank_ref        VARCHAR(100),
+      notes           TEXT,
+      entry_id        INT,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_acc_tax_pay_org
+      ON acc_tax_payments(organization_id, period_year, period_month);
+  `);
+}
+
+async function ensureVatRecordsNotes() {
+  await pool.query(`ALTER TABLE acc_vat_records ADD COLUMN IF NOT EXISTS notes TEXT`);
+}
+
+// --- POST /vat — manual VAT record creation + auto acc_entry
+router.post("/vat", async (req: any, res) => {
+  try {
+    await ensureVatRecordsNotes();
+    const orgId = await resolveOrgId(req);
+    const { record_date, record_type, vat_rate, amount_excl_vat, vat_amount, contractor_id, notes } = req.body;
+    if (!record_date || !record_type || vat_amount == null)
+      return res.status(400).json({ error: "record_date, record_type, vat_amount required" });
+
+    try { await assertPeriodOpen(orgId, record_date); }
+    catch (e: any) { return res.status(e.statusCode ?? 422).json({ error: e.message }); }
+
+    const rate      = parseFloat(String(vat_rate ?? 20));
+    const vat       = parseFloat(String(vat_amount));
+    const base      = parseFloat(String(amount_excl_vat ?? 0)) || (rate > 0 ? vat / (rate / 100) : 0);
+    const periodId  = await ensurePeriod(orgId, new Date(record_date));
+
+    const { rows } = await pool.query(
+      `INSERT INTO acc_vat_records
+         (organization_id, record_type, record_date, contractor_id,
+          amount_excl_vat, vat_amount, vat_rate, period_id, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [orgId, record_type, record_date, contractor_id ?? null, base, vat, rate, periodId, notes ?? null],
+    );
+
+    // Auto accounting: issued → Дт 703 Кт 6411 | received → Дт 644 Кт 631
+    await seedChart(orgId);
+    const [debitCode, creditCode] = record_type === "issued"
+      ? ["703", "6411"]
+      : ["644", "631"];
+    const debitId  = await getAccId(orgId, debitCode);
+    const creditId = await getAccId(orgId, creditCode);
+    let entryId: number | null = null;
+    if (debitId && creditId && vat > 0) {
+      const { rows: er } = await pool.query(
+        `INSERT INTO acc_entries
+           (organization_id,entry_date,period_id,debit_account_id,credit_account_id,
+            amount,description,is_manual,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8) RETURNING id`,
+        [orgId, record_date, periodId, debitId, creditId, vat,
+         `ПДВ ${record_type === "issued" ? "зобов'язання" : "вхідний кредит"} ${vat}₴ (${rate}%)`,
+         req.user?.userId ?? req.user?.id ?? null],
+      );
+      entryId = er[0]?.id ?? null;
+    }
+
+    await logAudit({
+      organizationId: orgId, action: "vat_record_created", entityType: "vat_record",
+      entityId: rows[0].id, userId: req.user?.userId ?? req.user?.id ?? null,
+      afterData: rows[0], note: `ПДВ ${record_type} ${vat}₴ (${rate}%)`,
+    });
+    res.json({ ...rows[0], entry_id: entryId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- DELETE /vat/:id — remove VAT record
+router.delete("/vat/:id", requireRole("admin", "owner"), async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { rows } = await pool.query(
+      `DELETE FROM acc_vat_records WHERE id=$1 AND organization_id=$2 RETURNING *`,
+      [req.params.id, orgId],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    await logAudit({
+      organizationId: orgId, action: "vat_record_deleted", entityType: "vat_record",
+      entityId: rows[0].id, userId: req.user?.userId ?? req.user?.id ?? null,
+      beforeData: rows[0], note: `Видалено ПДВ запис ${rows[0].vat_amount}₴`,
+    });
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- GET /tax-calendar — live tax calendar with real amounts from DB
+router.get("/tax-calendar", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const now   = new Date();
+    const y  = parseInt(String(req.query.year  ?? now.getFullYear()));
+    const m  = parseInt(String(req.query.month ?? (now.getMonth() + 1)));
+    const q  = Math.ceil(m / 3);
+
+    await ensureTaxPaymentsTable();
+    await ensurePayrollTables();
+    await ensureTouristTaxTable();
+
+    const [vatQ, payrollQ, touristQ, incQ, expQ, paidQ] = await Promise.all([
+      pool.query(
+        `SELECT record_type, COALESCE(SUM(vat_amount),0) as vat
+         FROM acc_vat_records WHERE organization_id=$1
+           AND EXTRACT(YEAR FROM record_date)=$2 AND EXTRACT(MONTH FROM record_date)=$3
+         GROUP BY record_type`,
+        [orgId, y, m],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(gross_amount),0) as gross,
+                COALESCE(SUM(esv_amount),0)   as esv,
+                COALESCE(SUM(pdfo_amount),0)  as pdfo,
+                COALESCE(SUM(vz_amount),0)    as vz
+         FROM acc_payroll_accruals
+         WHERE organization_id=$1 AND period_year=$2 AND period_month=$3`,
+        [orgId, y, m],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN NOT is_paid THEN amount ELSE 0 END),0) as unpaid
+         FROM acc_tourist_tax WHERE organization_id=$1
+           AND EXTRACT(YEAR FROM record_date)=$2
+           AND CEIL(EXTRACT(MONTH FROM record_date)/3.0) = $3`,
+        [orgId, y, q],
+      ),
+      // Income (кл.7 — доходи) for quarter
+      pool.query(
+        `SELECT COALESCE(SUM(e.amount),0) as total
+         FROM acc_entries e JOIN acc_accounts a ON a.id=e.credit_account_id
+         WHERE e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+           AND CEIL(EXTRACT(MONTH FROM e.entry_date)/3.0)=$3 AND a.class=7`,
+        [orgId, y, q],
+      ),
+      // Expenses (кл.9 — витрати) for quarter
+      pool.query(
+        `SELECT COALESCE(SUM(e.amount),0) as total
+         FROM acc_entries e JOIN acc_accounts a ON a.id=e.debit_account_id
+         WHERE e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+           AND CEIL(EXTRACT(MONTH FROM e.entry_date)/3.0)=$3 AND a.class=9`,
+        [orgId, y, q],
+      ),
+      // Already paid taxes this period
+      pool.query(
+        `SELECT tax_type, COALESCE(SUM(amount),0) as paid
+         FROM acc_tax_payments WHERE organization_id=$1
+           AND period_year=$2 AND period_month=$3
+         GROUP BY tax_type`,
+        [orgId, y, m],
+      ),
+    ]);
+
+    const paid = (type: string) =>
+      parseFloat(paidQ.rows.find((r: any) => r.tax_type === type)?.paid ?? 0);
+
+    const vatIssued   = parseFloat(vatQ.rows.find((r: any) => r.record_type === "issued")?.vat   ?? 0);
+    const vatReceived = parseFloat(vatQ.rows.find((r: any) => r.record_type === "received")?.vat ?? 0);
+    const vatToPay    = Math.max(0, vatIssued - vatReceived);
+    const pw          = payrollQ.rows[0];
+    const esv         = parseFloat(pw?.esv  ?? 0);
+    const pdfo        = parseFloat(pw?.pdfo ?? 0);
+    const vz          = parseFloat(pw?.vz   ?? 0);
+    const touristUnpaid = parseFloat(touristQ.rows[0]?.unpaid ?? 0);
+    const income      = parseFloat(incQ.rows[0]?.total ?? 0);
+    const expenses    = parseFloat(expQ.rows[0]?.total ?? 0);
+    const profit      = income - expenses;
+    const incomeTax   = Math.max(0, profit * 0.18);
+
+    const dt = (yr: number, mo0: number, day: number) =>
+      new Date(yr, mo0, day).toISOString().slice(0, 10);
+
+    const makeItem = (
+      id: string, label: string, amount: number,
+      deadline: string, type: string, tab: string, paidKey: string, hint: string,
+    ) => {
+      const paidAmt   = paid(paidKey);
+      const remaining = Math.max(0, amount - paidAmt);
+      const daysLeft  = Math.ceil((new Date(deadline).getTime() - now.getTime()) / 86400000);
+      const status    = amount === 0                       ? "zero"
+                      : paidAmt >= amount                  ? "paid"
+                      : daysLeft < 0                       ? "overdue"
+                      : daysLeft <= 5                      ? "critical"
+                      : daysLeft <= 14                     ? "warning"
+                      :                                      "pending";
+      return { id, label, amount, paid: paidAmt, remaining, deadline, days_left: daysLeft,
+               status, type, tab, hint, period_year: y, period_month: m };
+    };
+
+    const items = [
+      makeItem("vat_monthly",  "ПДВ декларація (Р18)",
+        vatToPay,    dt(y, m, 20), "vat",     "acc-vat",
+        "vat",     `Зобов'язання ${vatIssued.toFixed(2)} − Кредит ${vatReceived.toFixed(2)} = до сплати`),
+      makeItem("esv_monthly",  "ЄСВ 22% (роботодавець)",
+        esv,         dt(y, m, 20), "esv",     "acc-payroll",
+        "esv",     "ЄСВ роботодавця 22% від нарахованої зарплати (ЗУ №2464-VI, ст.7)"),
+      makeItem("pdfo_vz",      "ПДФО 18% + ВЗ 1.5%",
+        pdfo + vz,   dt(y, m, 30), "pdfo",    "acc-payroll",
+        "pdfo",    "Утримані з зарплати ПДФО 18% і військовий збір 1.5% (ПКУ ст.167-168)"),
+      makeItem("tourist_q",    `Тур. збір Q${q}`,
+        touristUnpaid, dt(y, q * 3, 10), "tourist", "acc-tourist",
+        "tourist", "Туристичний збір (ст.268 ПКУ) — щоквартально до 10-го числа наступного місяця"),
+      makeItem("income_tax_q", `Податок на прибуток Q${q}`,
+        incomeTax,   dt(y, q * 3, 10), "income",  "acc-tax-hub",
+        "income_tax", `Прибуток Q${q}: ${profit.toFixed(0)} ₴ × 18% (ПКУ ст.133). Квартальний аванс.`),
+    ].sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+
+    const totalPending = items.reduce((s, i) => s + i.remaining, 0);
+    res.json({ year: y, month: m, quarter: q, items, total_pending: totalPending });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- GET /income-tax — quarterly corporate income tax (ПКУ ст.133, ставка 18%)
+router.get("/income-tax", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const now   = new Date();
+    const y = parseInt(String(req.query.year    ?? now.getFullYear()));
+    const q = parseInt(String(req.query.quarter ?? Math.ceil((now.getMonth() + 1) / 3)));
+
+    await ensureTaxPaymentsTable();
+
+    const [incQ, expQ, paidQ, monthQ] = await Promise.all([
+      pool.query(
+        `SELECT COALESCE(SUM(e.amount),0) as total
+         FROM acc_entries e JOIN acc_accounts a ON a.id=e.credit_account_id
+         WHERE e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+           AND CEIL(EXTRACT(MONTH FROM e.entry_date)/3.0)=$3 AND a.class=7`,
+        [orgId, y, q],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(e.amount),0) as total
+         FROM acc_entries e JOIN acc_accounts a ON a.id=e.debit_account_id
+         WHERE e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+           AND CEIL(EXTRACT(MONTH FROM e.entry_date)/3.0)=$3 AND a.class=9`,
+        [orgId, y, q],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount),0) as paid FROM acc_tax_payments
+         WHERE organization_id=$1 AND tax_type='income_tax' AND period_year=$2
+           AND period_month BETWEEN ($3-1)*3+1 AND $3*3`,
+        [orgId, y, q],
+      ),
+      // Monthly breakdown by class
+      pool.query(
+        `SELECT EXTRACT(MONTH FROM e.entry_date) as month, a.class,
+                a.type as acc_type, COALESCE(SUM(e.amount),0) as total
+         FROM acc_entries e JOIN acc_accounts a ON a.id=e.debit_account_id
+         WHERE e.organization_id=$1 AND EXTRACT(YEAR FROM e.entry_date)=$2
+           AND CEIL(EXTRACT(MONTH FROM e.entry_date)/3.0)=$3
+         GROUP BY 1,2,3 ORDER BY 1,2`,
+        [orgId, y, q],
+      ),
+    ]);
+
+    const income    = parseFloat(incQ.rows[0]?.total   ?? 0);
+    const expenses  = parseFloat(expQ.rows[0]?.total   ?? 0);
+    const profit    = income - expenses;
+    const taxRate   = 0.18;
+    const taxAmount = Math.max(0, profit * taxRate);
+    const paidAmt   = parseFloat(paidQ.rows[0]?.paid   ?? 0);
+
+    const months = [1, 2, 3].map(i => {
+      const mo = (q - 1) * 3 + i;
+      const inc = monthQ.rows.filter((r: any) => +r.month === mo && r.class === 7)
+                            .reduce((s: number, r: any) => s + parseFloat(r.total), 0);
+      const exp = monthQ.rows.filter((r: any) => +r.month === mo && r.class === 9)
+                            .reduce((s: number, r: any) => s + parseFloat(r.total), 0);
+      return { month: mo, income: inc, expenses: exp, profit: inc - exp };
+    });
+
+    res.json({
+      year: y, quarter: q,
+      income, expenses, profit,
+      tax_rate: taxRate, tax_amount: taxAmount,
+      paid: paidAmt, to_pay: Math.max(0, taxAmount - paidAmt),
+      months,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- GET /tax-payments — list registered payments
+router.get("/tax-payments", async (req: any, res) => {
+  try {
+    await ensureTaxPaymentsTable();
+    const orgId = await resolveOrgId(req);
+    const { year, month, tax_type, limit = 50, offset = 0 } = req.query;
+    let q = `SELECT * FROM acc_tax_payments WHERE organization_id=$1`;
+    const p: any[] = [orgId];
+    if (year)     { p.push(year);     q += ` AND period_year=$${p.length}`; }
+    if (month)    { p.push(month);    q += ` AND period_month=$${p.length}`; }
+    if (tax_type) { p.push(tax_type); q += ` AND tax_type=$${p.length}`; }
+    p.push(Number(limit), Number(offset));
+    q += ` ORDER BY payment_date DESC LIMIT $${p.length - 1} OFFSET $${p.length}`;
+    const { rows } = await pool.query(q, p);
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- POST /tax-payments — register a tax payment → creates acc_entry Дт 64x Кт 311
+router.post("/tax-payments", async (req: any, res) => {
+  try {
+    await ensureTaxPaymentsTable();
+    const orgId = await resolveOrgId(req);
+    const { payment_date, tax_type, period_year, period_month, amount, bank_ref, notes } = req.body;
+    if (!payment_date || !tax_type || amount == null || !period_year || !period_month)
+      return res.status(400).json({ error: "payment_date, tax_type, amount, period_year, period_month required" });
+
+    try { await assertPeriodOpen(orgId, payment_date); }
+    catch (e: any) { return res.status(e.statusCode ?? 422).json({ error: e.message }); }
+
+    // Debit = tax liability account, Credit = bank 311
+    const DEBIT_MAP: Record<string, string> = {
+      vat: "6411", esv: "651", pdfo: "641", vz: "642",
+      income_tax: "6412", tourist: "64",
+    };
+    await seedChart(orgId);
+    const debitCode = DEBIT_MAP[tax_type] ?? "641";
+    const periodId  = await ensurePeriod(orgId, new Date(payment_date));
+    const debitId   = await getAccId(orgId, debitCode);
+    const creditId  = await getAccId(orgId, "311");
+
+    let entryId: number | null = null;
+    if (debitId && creditId) {
+      const yr = parseInt(String(period_year));
+      const mo = parseInt(String(period_month));
+      const { rows: er } = await pool.query(
+        `INSERT INTO acc_entries
+           (organization_id,entry_date,period_id,debit_account_id,credit_account_id,
+            amount,description,is_manual,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8) RETURNING id`,
+        [orgId, payment_date, periodId, debitId, creditId, parseFloat(String(amount)),
+         `Сплата ${tax_type.toUpperCase()} за ${yr}-${String(mo).padStart(2, "0")}${bank_ref ? ` (${bank_ref})` : ""}`,
+         req.user?.userId ?? req.user?.id ?? null],
+      );
+      entryId = er[0]?.id ?? null;
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO acc_tax_payments
+         (organization_id,payment_date,tax_type,period_year,period_month,amount,bank_ref,notes,entry_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [orgId, payment_date, tax_type, parseInt(String(period_year)),
+       parseInt(String(period_month)), parseFloat(String(amount)),
+       bank_ref ?? null, notes ?? null, entryId],
+    );
+
+    await logAudit({
+      organizationId: orgId, action: "tax_payment_created", entityType: "tax_payment",
+      entityId: rows[0].id, userId: req.user?.userId ?? req.user?.id ?? null,
+      afterData: rows[0], note: `Сплата ${tax_type} ${amount}₴`,
+    });
+    res.json({ ...rows[0], entry_id: entryId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
+

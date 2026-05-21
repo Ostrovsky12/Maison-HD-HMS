@@ -163,7 +163,7 @@ type Tab = "acc-workspace" | "overview" | "documents" | "counterparties" | "enti
          | "acc-vat" | "acc-reports" | "acc-bank" | "acc-sync"
          | "acc-monthclose" | "acc-card" | "acc-cash"
          | "acc-tourist" | "acc-payroll" | "acc-assets"
-         | "acc-audit" | "acc-cost";
+         | "acc-audit" | "acc-cost" | "acc-tax-hub";
 
 // ─── SIDEBAR NAVIGATION ────────────────────────────────────────────────────────
 const ACC_NAV = [
@@ -201,6 +201,7 @@ const ACC_NAV = [
   {
     section: "НАРАХУВАННЯ",
     items: [
+      { id: "acc-tax-hub",    label: "Податковий хаб",     icon: ShieldCheck },
       { id: "acc-vat",        label: "ПДВ",                icon: Landmark },
       { id: "acc-payroll",    label: "Зарплата",           icon: Users },
       { id: "acc-tourist",    label: "Тур. збір",          icon: MapPin },
@@ -233,6 +234,7 @@ const TAB_TITLES: Partial<Record<Tab, { title: string; desc: string }>> = {
   "acc-cash":       { title: "Каса ПКО/ВКО",           desc: "Прибутково-видаткові ордери" },
   "acc-sync":       { title: "Синхронізація",           desc: "Poster POS · LiqPay · Servio" },
   "acc-monthclose": { title: "Закриття місяця",         desc: "Фінальна перевірка та закриття" },
+  "acc-tax-hub":    { title: "Податковий хаб",           desc: "Календар · Платежі · Податок на прибуток · ПКУ" },
   "acc-vat":        { title: "ПДВ",                     desc: "Декларація · Д5 · Реєстр ПН" },
   "acc-payroll":    { title: "Зарплата",                desc: "Нарахування · ПДФО · ВЗ · ЄСВ" },
   "acc-tourist":    { title: "Туристичний збір",        desc: "Облік нічліг та ставок" },
@@ -346,6 +348,7 @@ export default function AccountingPage() {
             {tab === "acc-monthclose" && <AccMonthCloseTab />}
             {tab === "acc-card"       && <AccAccountCardTab />}
             {tab === "acc-cash"       && <AccCashTab />}
+            {tab === "acc-tax-hub"    && <AccTaxHubTab />}
             {tab === "acc-tourist"    && <AccTouristTaxTab />}
             {tab === "acc-payroll"    && <AccPayrollTab />}
             {tab === "acc-assets"     && <AccFixedAssetsTab />}
@@ -1108,6 +1111,7 @@ function AccWorkspaceTab({ setTab }: { setTab: (t: Tab) => void }) {
   const criticalCount = deadlines.filter(d => d.status === "critical").length;
 
   const QUICK_ACTIONS = [
+    { label: "Податковий хаб",     icon: ShieldCheck,  tab: "acc-tax-hub" as Tab,    color: "border-rose-200 hover:border-rose-400 hover:bg-rose-50" },
     { label: "Журнал проводок",    icon: GanttChart,   tab: "acc-journal" as Tab,    color: "border-blue-200 hover:border-blue-400 hover:bg-blue-50" },
     { label: "ОСВ / Ф1 / Ф2",    icon: BarChart3,    tab: "acc-reports" as Tab,    color: "border-purple-200 hover:border-purple-400 hover:bg-purple-50" },
     { label: "ПДВ декларація",     icon: Landmark,     tab: "acc-vat" as Tab,        color: "border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50" },
@@ -1115,7 +1119,6 @@ function AccWorkspaceTab({ setTab }: { setTab: (t: Tab) => void }) {
     { label: "Каса ПКО/ВКО",      icon: Wallet,       tab: "acc-cash" as Tab,       color: "border-teal-200 hover:border-teal-400 hover:bg-teal-50" },
     { label: "Закриття місяця",    icon: CheckCircle2, tab: "acc-monthclose" as Tab, color: "border-amber-200 hover:border-amber-400 hover:bg-amber-50" },
     { label: "Основні засоби",     icon: Building2,    tab: "acc-assets" as Tab,     color: "border-orange-200 hover:border-orange-400 hover:bg-orange-50" },
-    { label: "Синхронізація",      icon: RefreshCw,    tab: "acc-sync" as Tab,       color: "border-gray-200 hover:border-gray-400 hover:bg-gray-50" },
   ];
 
   return (
@@ -4134,12 +4137,69 @@ function AccVatTab() {
   const now = new Date();
   const [year, setYear]   = useState(now.getFullYear().toString());
   const [month, setMonth] = useState((now.getMonth() + 1).toString());
-  const [view, setView]   = useState<"declaration" | "d5">("declaration");
+  const [view, setView]   = useState<"declaration" | "d5" | "records">("declaration");
+  const [showAddVat, setShowAddVat] = useState(false);
+  const [addVatLoading, setAddVatLoading] = useState(false);
+  const emptyVatForm = {
+    record_date: format(now, "yyyy-MM-dd"),
+    record_type: "issued" as "issued" | "received" | "exempt",
+    vat_rate: "20",
+    amount_excl_vat: "",
+    vat_amount: "",
+    notes: "",
+  };
+  const [addVatForm, setAddVatForm] = useState(emptyVatForm);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
   const { data, isLoading } = useAccLedger(`vat/declaration?year=${year}&month=${month}`);
   const { data: d5, isLoading: d5Loading } = useAccLedger(`vat/declaration/d5?year=${year}&month=${month}`);
+  const { data: records, isLoading: recLoading } = useAccLedger(`vat?year=${year}&month=${month}`, { enabled: view === "records" });
   const fmt2 = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+
+  const handleAddVat = async () => {
+    if (!addVatForm.vat_amount || +addVatForm.vat_amount <= 0) {
+      toast({ title: "Вкажіть суму ПДВ", variant: "destructive" }); return;
+    }
+    setAddVatLoading(true);
+    try {
+      await accFetch("vat", {
+        method: "POST",
+        body: JSON.stringify({
+          record_date:    addVatForm.record_date,
+          record_type:    addVatForm.record_type,
+          vat_rate:       +addVatForm.vat_rate,
+          amount_excl_vat: addVatForm.amount_excl_vat ? +addVatForm.amount_excl_vat : undefined,
+          vat_amount:     +addVatForm.vat_amount,
+          notes:          addVatForm.notes || undefined,
+        }),
+      });
+      toast({ title: "ПДВ запис додано", description: `${addVatForm.record_type === "issued" ? "Зобов'язання" : "Кредит"}: ${addVatForm.vat_amount} ₴` });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      setShowAddVat(false);
+      setAddVatForm(emptyVatForm);
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setAddVatLoading(false); }
+  };
+
+  const handleDeleteVat = async (id: number) => {
+    if (!confirm("Видалити цей ПДВ запис?")) return;
+    try {
+      await accFetch(`vat/${id}`, { method: "DELETE" });
+      toast({ title: "Запис видалено" });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+  };
+
+  const autoFillVatAmount = (base: string) => {
+    const rate = +addVatForm.vat_rate;
+    if (base && rate) {
+      const vat = Math.round(+base * rate / 100 * 100) / 100;
+      setAddVatForm(f => ({ ...f, amount_excl_vat: base, vat_amount: String(vat) }));
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -4153,14 +4213,81 @@ function AccVatTab() {
           <SelectContent>{MONTHS_UK.map((m, i) => <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
         </Select>
         <div className="flex border rounded-lg overflow-hidden ml-auto">
-          {(["declaration","d5"] as const).map(v => (
+          {(["declaration","d5","records"] as const).map(v => (
             <button key={v} onClick={() => setView(v)}
               className={`px-4 py-2 text-sm font-medium transition-colors ${view===v ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
-              {v === "declaration" ? "Декларація" : "Додаток Д5"}
+              {v === "declaration" ? "Декларація" : v === "d5" ? "Додаток Д5" : "Реєстр ПДВ"}
             </button>
           ))}
         </div>
+        <Button size="sm" className="h-9 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={() => setShowAddVat(true)}>
+          <Plus className="w-3.5 h-3.5" /> Додати ПДВ запис
+        </Button>
       </div>
+
+      {/* Add VAT record dialog */}
+      <Dialog open={showAddVat} onOpenChange={setShowAddVat}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="text-base font-bold">Додати ПДВ запис</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs mb-1 block">Тип *</Label>
+                <Select value={addVatForm.record_type} onValueChange={v => setAddVatForm(f => ({ ...f, record_type: v as any }))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="issued">Зобов'язання (видана ПН)</SelectItem>
+                    <SelectItem value="received">Кредит (отримана ПН)</SelectItem>
+                    <SelectItem value="exempt">Звільнена операція</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Ставка ПДВ</Label>
+                <Select value={addVatForm.vat_rate} onValueChange={v => setAddVatForm(f => ({ ...f, vat_rate: v }))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="20">20%</SelectItem>
+                    <SelectItem value="7">7%</SelectItem>
+                    <SelectItem value="0">0% (експорт)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Дата</Label>
+              <Input type="date" value={addVatForm.record_date}
+                onChange={e => setAddVatForm(f => ({ ...f, record_date: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs mb-1 block">База (без ПДВ), ₴</Label>
+                <Input type="number" step="0.01" value={addVatForm.amount_excl_vat} placeholder="авто"
+                  onChange={e => autoFillVatAmount(e.target.value)} className="h-9 text-sm" />
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Сума ПДВ, ₴ *</Label>
+                <Input type="number" step="0.01" value={addVatForm.vat_amount}
+                  onChange={e => setAddVatForm(f => ({ ...f, vat_amount: e.target.value }))} className="h-9 text-sm" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Примітки</Label>
+              <Input value={addVatForm.notes} placeholder="Контрагент, підстава..."
+                onChange={e => setAddVatForm(f => ({ ...f, notes: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
+              Автопроводка: {addVatForm.record_type === "issued" ? "Дт 703 → Кт 6411 (ПЗ)" : addVatForm.record_type === "received" ? "Дт 644 → Кт 631 (ПК)" : "без проводки"}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => { setShowAddVat(false); setAddVatForm(emptyVatForm); }}>Скасувати</Button>
+              <Button size="sm" onClick={handleAddVat} disabled={addVatLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+                {addVatLoading ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Зберігаємо...</> : "Додати запис"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {view === "declaration" && (
         isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
@@ -4313,6 +4440,63 @@ function AccVatTab() {
                       <TableCell />
                     </TableRow>
                   )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )
+      )}
+
+      {view === "records" && (
+        recLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
+          <Card>
+            <CardHeader className="pb-2 border-b bg-gray-50/60 rounded-t-lg">
+              <CardTitle className="text-sm font-bold text-gray-800 flex items-center justify-between">
+                <span>Реєстр ПДВ — {MONTHS_UK[+month - 1]} {year}</span>
+                <span className="text-xs font-normal text-gray-500">{(records as any[])?.length ?? 0} записів</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="text-xs w-28">Дата</TableHead>
+                    <TableHead className="text-xs">Тип</TableHead>
+                    <TableHead className="text-xs">Контрагент</TableHead>
+                    <TableHead className="text-right text-xs">Ставка</TableHead>
+                    <TableHead className="text-right text-xs">База, ₴</TableHead>
+                    <TableHead className="text-right text-xs">ПДВ, ₴</TableHead>
+                    <TableHead className="text-xs">Примітки</TableHead>
+                    <TableHead className="w-10" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {!records || (records as any[]).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-10 text-gray-400 text-sm">
+                        Немає ПДВ записів за вказаний місяць.<br />
+                        <button className="text-blue-500 underline text-xs mt-1" onClick={() => setShowAddVat(true)}>Додати перший запис</button>
+                      </TableCell>
+                    </TableRow>
+                  ) : (records as any[]).map((r: any) => (
+                    <TableRow key={r.id} className="hover:bg-gray-50/50">
+                      <TableCell className="font-mono text-xs text-gray-600">{r.record_date?.slice(0,10)}</TableCell>
+                      <TableCell>
+                        <Badge className={`text-xs ${r.record_type === "issued" ? "bg-red-100 text-red-700" : r.record_type === "received" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>
+                          {r.record_type === "issued" ? "ПЗ" : r.record_type === "received" ? "ПК" : "Звільн."}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-700">{r.contractor_name || r.doc_number || "—"}</TableCell>
+                      <TableCell className="text-right text-xs text-gray-500">{r.vat_rate}%</TableCell>
+                      <TableCell className="text-right font-mono text-xs">{fmt2(r.amount_excl_vat)}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm font-semibold ${r.record_type === "issued" ? "text-red-700" : "text-blue-700"}`}>{fmt2(r.vat_amount)}</TableCell>
+                      <TableCell className="text-xs text-gray-400 max-w-32 truncate">{r.notes || "—"}</TableCell>
+                      <TableCell>
+                        <button className="text-gray-300 hover:text-red-500 transition-colors text-xs p-1"
+                          onClick={() => handleDeleteVat(r.id)} title="Видалити">✕</button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </CardContent>
@@ -6189,6 +6373,360 @@ function AccCashTab() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── ACC: TAX HUB (ПОДАТКОВИЙ ХАБ) — Phase 3 ──────────────────────────────────
+function AccTaxHubTab() {
+  const now = new Date();
+  const [year, setYear]   = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [quarter, setQuarter] = useState(Math.ceil((now.getMonth() + 1) / 3));
+  const [payDialog, setPayDialog] = useState<any>(null);
+  const [payForm, setPayForm] = useState({ payment_date: format(now, "yyyy-MM-dd"), amount: "", bank_ref: "", notes: "" });
+  const [paying, setPaying] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+  const fmt2 = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const calKey = `tax-calendar?year=${year}&month=${month}`;
+  const itKey  = `income-tax?year=${year}&quarter=${quarter}`;
+  const pyKey  = `tax-payments?year=${year}&month=${month}`;
+
+  const { data: cal,  isLoading: calLoading  } = useAccLedger(calKey);
+  const { data: it,   isLoading: itLoading   } = useAccLedger(itKey);
+  const { data: pays, isLoading: paysLoading } = useAccLedger(pyKey);
+
+  const TAX_LABELS: Record<string, string> = {
+    vat: "ПДВ", esv: "ЄСВ", pdfo: "ПДФО+ВЗ",
+    tourist: "Тур. збір", income_tax: "Под. на прибуток",
+  };
+  const TYPE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+    vat:        { bg: "bg-purple-50",  text: "text-purple-800",  border: "border-purple-200" },
+    esv:        { bg: "bg-blue-50",    text: "text-blue-800",    border: "border-blue-200"   },
+    pdfo:       { bg: "bg-indigo-50",  text: "text-indigo-800",  border: "border-indigo-200" },
+    tourist:    { bg: "bg-teal-50",    text: "text-teal-800",    border: "border-teal-200"   },
+    income:     { bg: "bg-amber-50",   text: "text-amber-800",   border: "border-amber-200"  },
+  };
+
+  const statusBadge = (s: string, remaining: number) => {
+    if (s === "zero")    return <Badge className="bg-gray-100 text-gray-500 text-xs">Нуль</Badge>;
+    if (s === "paid")    return <Badge className="bg-green-100 text-green-700 text-xs">✓ Сплачено</Badge>;
+    if (s === "overdue") return <Badge className="bg-red-100 text-red-700 text-xs">⚠ Прострочено</Badge>;
+    if (s === "critical") return <Badge className="bg-orange-100 text-orange-700 text-xs">Критично</Badge>;
+    if (s === "warning") return <Badge className="bg-amber-100 text-amber-700 text-xs">Незабаром</Badge>;
+    return <Badge className="bg-gray-100 text-gray-600 text-xs">В строк</Badge>;
+  };
+
+  const openPayDialog = (item: any) => {
+    setPayDialog(item);
+    setPayForm({ payment_date: format(now, "yyyy-MM-dd"), amount: String(Math.round(item.remaining * 100) / 100), bank_ref: "", notes: "" });
+  };
+
+  const handlePay = async () => {
+    if (!payDialog || !payForm.amount || +payForm.amount <= 0) {
+      toast({ title: "Вкажіть суму", variant: "destructive" }); return;
+    }
+    setPaying(true);
+    try {
+      await accFetch("tax-payments", {
+        method: "POST",
+        body: JSON.stringify({
+          payment_date: payForm.payment_date,
+          tax_type: payDialog.id === "vat_monthly"  ? "vat"
+                  : payDialog.id === "esv_monthly"  ? "esv"
+                  : payDialog.id === "pdfo_vz"       ? "pdfo"
+                  : payDialog.id === "tourist_q"     ? "tourist"
+                  : "income_tax",
+          period_year:  payDialog.period_year,
+          period_month: payDialog.period_month,
+          amount:       +payForm.amount,
+          bank_ref:     payForm.bank_ref || undefined,
+          notes:        payForm.notes || undefined,
+        }),
+      });
+      toast({ title: "Платіж зареєстровано", description: `${fmt2(+payForm.amount)} ₴ → ${payDialog.label}` });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      setPayDialog(null);
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setPaying(false); }
+  };
+
+  const totalPending = Number(cal?.total_pending ?? 0);
+  const items: any[] = cal?.items ?? [];
+  const overdueItems = items.filter((i: any) => i.status === "overdue");
+  const criticalItems = items.filter((i: any) => i.status === "critical");
+
+  return (
+    <div className="space-y-5">
+      {/* Period selector */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <Select value={String(year)} onValueChange={v => { setYear(+v); setQuarter(Math.ceil(month/3)); }}>
+          <SelectTrigger className="w-24 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>{[2023,2024,2025,2026].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={String(month)} onValueChange={v => { setMonth(+v); setQuarter(Math.ceil(+v/3)); }}>
+          <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>{MONTHS_UK.map((m, i) => <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
+        </Select>
+        <div className="ml-auto text-xs text-gray-500">Q{Math.ceil(month/3)} {year} · оновлено щойно</div>
+      </div>
+
+      {/* Summary bar */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card className={totalPending > 0 ? "border-rose-300 bg-rose-50" : "border-green-300 bg-green-50"}>
+          <CardContent className="p-4">
+            <div className="text-xs font-medium text-gray-500 mb-1">Разом до сплати</div>
+            <div className={`text-2xl font-bold ${totalPending > 0 ? "text-rose-700" : "text-green-700"}`}>{fmt2(totalPending)} ₴</div>
+          </CardContent>
+        </Card>
+        <Card className={overdueItems.length > 0 ? "border-red-300 bg-red-50" : "border-gray-200"}>
+          <CardContent className="p-4">
+            <div className="text-xs font-medium text-gray-500 mb-1">Прострочено</div>
+            <div className={`text-2xl font-bold ${overdueItems.length > 0 ? "text-red-700" : "text-gray-400"}`}>{overdueItems.length}</div>
+          </CardContent>
+        </Card>
+        <Card className={criticalItems.length > 0 ? "border-orange-300 bg-orange-50" : "border-gray-200"}>
+          <CardContent className="p-4">
+            <div className="text-xs font-medium text-gray-500 mb-1">Критичний строк (≤5 днів)</div>
+            <div className={`text-2xl font-bold ${criticalItems.length > 0 ? "text-orange-700" : "text-gray-400"}`}>{criticalItems.length}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tax calendar items */}
+      <Card>
+        <CardHeader className="pb-2 border-b bg-gray-50/60 rounded-t-lg">
+          <CardTitle className="text-sm font-bold text-gray-800 flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-rose-600" /> Календар податкових зобов'язань
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {calLoading ? (
+            <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div>
+          ) : (
+            <div className="divide-y">
+              {items.map((item: any) => {
+                const c = TYPE_COLORS[item.type] ?? TYPE_COLORS.vat;
+                const canPay = item.status !== "paid" && item.status !== "zero" && item.remaining > 0;
+                return (
+                  <div key={item.id} className={`flex items-center gap-4 px-4 py-3.5 hover:bg-gray-50/50 ${item.status === "overdue" ? "bg-red-50/40" : ""}`}>
+                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                      item.status === "paid"     ? "bg-green-500"  :
+                      item.status === "overdue"  ? "bg-red-500"    :
+                      item.status === "critical" ? "bg-orange-500" :
+                      item.status === "warning"  ? "bg-amber-500"  :
+                      item.status === "zero"     ? "bg-gray-300"   : "bg-blue-400"
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-800">{item.label}</span>
+                        {statusBadge(item.status, item.remaining)}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">{item.hint}</div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm font-bold text-gray-800">{fmt2(item.amount)} ₴</div>
+                      {item.paid > 0 && (
+                        <div className="text-xs text-green-600">сплачено: {fmt2(item.paid)} ₴</div>
+                      )}
+                    </div>
+                    <div className="text-right w-32 flex-shrink-0">
+                      <div className="text-xs font-mono text-gray-600">{item.deadline}</div>
+                      <div className={`text-xs font-semibold mt-0.5 ${
+                        item.days_left < 0 ? "text-red-600" : item.days_left <= 5 ? "text-orange-600" : "text-gray-500"
+                      }`}>
+                        {item.days_left < 0 ? `${Math.abs(item.days_left)} дн тому` : item.days_left === 0 ? "Сьогодні!" : `${item.days_left} дн`}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm" variant="outline"
+                      disabled={!canPay}
+                      className={`h-8 text-xs px-3 ${canPay ? "hover:bg-rose-50 hover:border-rose-300" : "opacity-40"}`}
+                      onClick={() => canPay && openPayDialog(item)}
+                    >
+                      {item.status === "paid" ? "✓" : "Сплатити"}
+                    </Button>
+                  </div>
+                );
+              })}
+              {items.length === 0 && !calLoading && (
+                <div className="text-center py-10 text-sm text-gray-400">Немає даних за цей період</div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Corporate income tax section */}
+      <Card>
+        <CardHeader className="pb-2 border-b bg-amber-50/50 rounded-t-lg">
+          <CardTitle className="text-sm font-bold text-amber-800 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" /> Податок на прибуток 18% — Q{quarter} {year} (ПКУ ст.133)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-4">
+          {itLoading ? (
+            <div className="py-6 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-amber-500" /></div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-4 gap-3">
+                {[
+                  { label: "Доходи (кл.7)", val: it?.income,    color: "text-green-700" },
+                  { label: "Витрати (кл.9)", val: it?.expenses,  color: "text-red-700" },
+                  { label: "Прибуток",       val: it?.profit,    color: it?.profit >= 0 ? "text-green-700" : "text-red-700" },
+                  { label: "Податок 18%",    val: it?.tax_amount, color: "text-amber-700" },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="bg-gray-50 rounded-lg p-3 border">
+                    <div className="text-xs text-gray-500">{label}</div>
+                    <div className={`text-lg font-bold ${color}`}>{fmt2(val)}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Monthly breakdown */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 mb-2">Помісячна розбивка кварталу</div>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50">
+                      <TableHead className="text-xs">Місяць</TableHead>
+                      <TableHead className="text-right text-xs">Доходи</TableHead>
+                      <TableHead className="text-right text-xs">Витрати</TableHead>
+                      <TableHead className="text-right text-xs">Прибуток</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(it?.months ?? []).map((m: any) => (
+                      <TableRow key={m.month} className="hover:bg-amber-50/30">
+                        <TableCell className="text-xs">{MONTHS_UK[m.month - 1]}</TableCell>
+                        <TableCell className="text-right font-mono text-xs text-green-700">{fmt2(m.income)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs text-red-700">{fmt2(m.expenses)}</TableCell>
+                        <TableCell className={`text-right font-mono text-xs font-semibold ${m.profit >= 0 ? "text-green-700" : "text-red-700"}`}>{fmt2(m.profit)}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="bg-amber-100 border-t-2 border-amber-300 font-bold">
+                      <TableCell className="text-xs font-bold text-amber-900">РАЗОМ Q{quarter}</TableCell>
+                      <TableCell className="text-right font-mono text-xs font-bold text-green-800">{fmt2(it?.income)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs font-bold text-red-800">{fmt2(it?.expenses)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs font-bold text-amber-900">{fmt2(it?.profit)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div>
+                  <div className="text-xs text-amber-700">До сплати (після сплачених авансів)</div>
+                  <div className="text-xl font-bold text-amber-800">{fmt2(it?.to_pay)} ₴</div>
+                  {(it?.paid ?? 0) > 0 && <div className="text-xs text-green-600">Сплачено авансів: {fmt2(it?.paid)} ₴</div>}
+                </div>
+                <Button size="sm" variant="outline" className="h-9 hover:bg-amber-100 border-amber-300"
+                  disabled={(it?.to_pay ?? 0) <= 0}
+                  onClick={() => openPayDialog({ id: "income_tax_q", label: `Податок на прибуток Q${quarter}`, remaining: it?.to_pay ?? 0, period_year: year, period_month: month })}>
+                  Сплатити
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Recent payments */}
+      <Card>
+        <CardHeader className="pb-2 border-b">
+          <CardTitle className="text-sm font-bold text-gray-800 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-600" /> Зареєстровані платежі
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {paysLoading ? (
+            <div className="py-6 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
+          ) : (!pays || pays.length === 0) ? (
+            <div className="text-center py-8 text-sm text-gray-400">Платежів за вказаний місяць не знайдено</div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead className="text-xs">Дата</TableHead>
+                  <TableHead className="text-xs">Тип податку</TableHead>
+                  <TableHead className="text-right text-xs">Сума, ₴</TableHead>
+                  <TableHead className="text-xs">Банк. реф.</TableHead>
+                  <TableHead className="text-xs">Примітки</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pays.map((p: any) => (
+                  <TableRow key={p.id} className="hover:bg-green-50/30">
+                    <TableCell className="font-mono text-xs">{p.payment_date?.slice(0,10)}</TableCell>
+                    <TableCell>
+                      <Badge className="text-xs bg-gray-100 text-gray-700">{TAX_LABELS[p.tax_type] ?? p.tax_type}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm font-semibold text-green-700">{fmt2(p.amount)}</TableCell>
+                    <TableCell className="text-xs text-gray-500 font-mono">{p.bank_ref || "—"}</TableCell>
+                    <TableCell className="text-xs text-gray-500">{p.notes || "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Payment dialog */}
+      <Dialog open={!!payDialog} onOpenChange={open => !open && setPayDialog(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold">Реєстрація платежу</DialogTitle>
+          </DialogHeader>
+          {payDialog && (
+            <div className="space-y-4 pt-2">
+              <div className="bg-gray-50 rounded-lg p-3 border">
+                <div className="text-xs text-gray-500">Податок</div>
+                <div className="font-semibold text-gray-800">{payDialog.label}</div>
+                <div className="text-xs text-gray-500 mt-1">Залишок до сплати: <span className="font-bold text-rose-700">{fmt2(payDialog.remaining)} ₴</span></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs mb-1 block">Дата платежу</Label>
+                  <Input type="date" value={payForm.payment_date}
+                    onChange={e => setPayForm(f => ({ ...f, payment_date: e.target.value }))} className="h-9 text-sm" />
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">Сума, ₴ *</Label>
+                  <Input type="number" step="0.01" value={payForm.amount}
+                    onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} className="h-9 text-sm" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Банківський референс / квитанція</Label>
+                <Input value={payForm.bank_ref} placeholder="наприклад: №123456789"
+                  onChange={e => setPayForm(f => ({ ...f, bank_ref: e.target.value }))} className="h-9 text-sm" />
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Примітки</Label>
+                <Textarea value={payForm.notes} rows={2}
+                  onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))} className="text-sm resize-none" />
+              </div>
+              <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
+                Система автоматично створить проводку: Дт {
+                  payDialog.id === "vat_monthly" ? "6411 (ПДВ)" :
+                  payDialog.id === "esv_monthly" ? "651 (ЄСВ)" :
+                  payDialog.id === "pdfo_vz"     ? "641 (ПДФО)" :
+                  payDialog.id === "tourist_q"   ? "64 (тур. збір)" : "6412 (под. прибуток)"
+                } → Кт 311 (поточний рахунок)
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPayDialog(null)}>Скасувати</Button>
+                <Button size="sm" onClick={handlePay} disabled={paying} className="bg-green-600 hover:bg-green-700">
+                  {paying ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Зберігаємо...</> : "Зареєструвати платіж"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
