@@ -6,6 +6,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { requireAuth, requireRole } from "../lib/auth.js";
+import { openai } from "@workspace/integrations-openai-ai-server";
 
 const router = Router();
 router.use(requireAuth);
@@ -3707,6 +3708,556 @@ router.post("/tax-payments", async (req: any, res) => {
     res.json({ ...rows[0], entry_id: entryId });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 7 — AI FEATURES
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Helper: fetch chart of accounts for org (condensed for AI prompt) ───────
+async function getAccountsForAI(orgId: number): Promise<string> {
+  const { rows } = await pool.query(
+    `SELECT code, name, type FROM acc_accounts WHERE organization_id=$1 ORDER BY code LIMIT 120`,
+    [orgId],
+  );
+  // Also include standard UA plan codes as fallback
+  const standard = [
+    "301-Каса(готівка),asset", "311-Поточний рахунок,asset", "361-Дебітори за товари,asset",
+    "371-Аванси видані,asset", "281-Товари на складі,asset", "201-Сировина,asset",
+    "631-Кредитори за товари,liability", "641-Розрахунки з бюджетом,liability",
+    "661-Розрахунки з зарплати,liability", "651-Розрахунки зі страхування,liability",
+    "685-Інші кредитори,liability", "701-Дохід від реалізації продукції,revenue",
+    "702-Дохід від реалізації товарів,revenue", "703-Дохід від послуг,revenue",
+    "791-Фінансові результати,equity", "901-Собівартість продукції,expense",
+    "902-Собівартість товарів,expense", "92-Адміністративні витрати,expense",
+    "93-Витрати на збут,expense", "94-Інші операційні витрати,expense",
+    "6411-ПДВ зобов'язання,liability", "644-ПДВ кредит,asset",
+  ];
+  const orgRows = rows.map((r: any) => `${r.code}-${r.name},${r.type}`).join("\n");
+  return orgRows.length > 100 ? orgRows : standard.join("\n");
+}
+
+// ─── AI CATEGORIZE — single bank statement entry ──────────────────────────────
+router.post("/bank/ai-categorize/:id", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const stmtId = parseInt(req.params.id);
+
+    const { rows: stmtRows } = await pool.query(
+      `SELECT b.*, c.name as contractor_name
+       FROM acc_bank_statements b
+       LEFT JOIN acc_contractors c ON c.id=b.contractor_id
+       WHERE b.id=$1 AND b.organization_id=$2`,
+      [stmtId, orgId],
+    );
+    if (!stmtRows[0]) return res.status(404).json({ error: "Not found" });
+    const stmt = stmtRows[0];
+
+    const accounts = await getAccountsForAI(orgId);
+    const amount = parseFloat(stmt.amount);
+    const direction = amount > 0 ? "НАДХОДЖЕННЯ (гроші прийшли на рахунок)" : "ВИТРАТА (гроші пішли з рахунку)";
+
+    const { rows: contractorRows } = await pool.query(
+      `SELECT name FROM acc_contractors WHERE organization_id=$1 LIMIT 30`,
+      [orgId],
+    );
+    const contractorNames = contractorRows.map((c: any) => c.name).join(", ");
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `Ти — бухгалтер-асистент для українського бізнесу (готель/ресторан).
+Тобі потрібно категоризувати банківську транзакцію згідно з Планом рахунків України (НП(С)БО).
+
+Правила:
+- Готівкова виплата зарплати: Дт 661 / Кт 301
+- Безготівкова виплата зарплати: Дт 661 / Кт 311
+- Надходження від клієнтів: Дт 311 / Кт 361 або Дт 311 / Кт 703
+- Оплата постачальнику: Дт 631 / Кт 311
+- Аванс постачальнику: Дт 371 / Кт 311
+- Отримання авансу від клієнта: Дт 311 / Кт 681
+- Оплата податків: Дт 641 / Кт 311
+- Оплата ЄСВ: Дт 651 / Кт 311
+- Закупка продуктів (METRO, Сільпо, АТБ): Дт 281 / Кт 631 (якщо в кредит) або Дт 902 / Кт 311 (якщо за готівку)
+- Комунальні послуги: Дт 92 / Кт 311
+- Оренда: Дт 92 / Кт 311
+- Реклама: Дт 93 / Кт 311
+- Банківська комісія: Дт 92 / Кт 311
+- ПДВ: якщо є ПДВ 20%, то для доходів відраховуємо: Дт 703 / Кт 6411
+
+РАХУНКИ ОРГАНІЗАЦІЇ:
+${accounts}
+
+ІСНУЮЧІ КОНТРАГЕНТИ:
+${contractorNames}
+
+Поверни JSON з полями:
+{
+  "debit_code": "код рахунку дебету (тільки числа, наприклад: 311)",
+  "credit_code": "код рахунку кредиту",
+  "vat_percent": 0 або 20 або 7,
+  "contractor_name": "назва контрагента (або null якщо невідомо)",
+  "category": "коротка категорія (наприклад: Зарплата, Постачальник, Клієнт, Податки, Комунальні, Оренда, Банк, Реклама, Інше)",
+  "description": "пояснення проводки українською (1 речення)",
+  "confidence": число від 0 до 1,
+  "reasoning": "чому так (1 речення)"
+}`,
+        },
+        {
+          role: "user",
+          content: `Банківська операція:
+Дата: ${stmt.statement_date}
+Опис: ${stmt.description}
+Сума: ${Math.abs(amount).toFixed(2)} грн (${direction})
+Банк: ${stmt.bank_name ?? "невідомо"}
+Контрагент у базі: ${stmt.contractor_name ?? "невідомо"}`,
+        },
+      ],
+    });
+
+    const suggestion = JSON.parse(completion.choices[0].message.content ?? "{}");
+
+    // Save suggestion to DB
+    await pool.query(
+      `UPDATE acc_bank_statements
+       SET ai_suggestion=to_jsonb($1::text)::jsonb,
+           match_status = CASE WHEN match_status='unmatched' THEN 'suggested' ELSE match_status END
+       WHERE id=$2 AND organization_id=$3`,
+      [JSON.stringify(suggestion), stmtId, orgId],
+    ).catch(() => {/* column may not exist yet — non-fatal */});
+
+    res.json({ suggestion, stmt_id: stmtId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── AI CATEGORIZE BULK — all unmatched entries ───────────────────────────────
+router.post("/bank/ai-categorize-bulk", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { from, to, limit: lim = 20 } = req.body as any;
+
+    let q = `SELECT b.*, c.name as contractor_name
+             FROM acc_bank_statements b
+             LEFT JOIN acc_contractors c ON c.id=b.contractor_id
+             WHERE b.organization_id=$1 AND b.match_status IN ('unmatched','suggested')`;
+    const params: any[] = [orgId];
+    if (from) { params.push(from); q += ` AND b.statement_date>=$${params.length}`; }
+    if (to)   { params.push(to);   q += ` AND b.statement_date<=$${params.length}`; }
+    params.push(Math.min(Number(lim), 50));
+    q += ` ORDER BY b.statement_date DESC LIMIT $${params.length}`;
+
+    const { rows: stmts } = await pool.query(q, params);
+    if (stmts.length === 0) return res.json({ processed: 0, results: [] });
+
+    const accounts = await getAccountsForAI(orgId);
+    const results: any[] = [];
+
+    // Process in parallel batches of 5
+    const BATCH = 5;
+    for (let i = 0; i < stmts.length; i += BATCH) {
+      const batch = stmts.slice(i, i + BATCH);
+      const batchResults = await Promise.all(batch.map(async (stmt: any) => {
+        try {
+          const amount = parseFloat(stmt.amount);
+          const direction = amount > 0 ? "НАДХОДЖЕННЯ" : "ВИТРАТА";
+          const completion = await openai.chat.completions.create({
+            model: "gpt-5-mini",
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: `Бухгалтер UA. Категоризуй транзакцію. Рахунки:\n${accounts}\nJSON: {debit_code,credit_code,vat_percent,contractor_name,category,description,confidence}` },
+              { role: "user", content: `Дата:${stmt.statement_date} Опис:${stmt.description} Сума:${Math.abs(amount)}грн ${direction}` },
+            ],
+          });
+          const suggestion = JSON.parse(completion.choices[0].message.content ?? "{}");
+          await pool.query(
+            `UPDATE acc_bank_statements SET ai_suggestion=to_jsonb($1::text)::jsonb WHERE id=$2 AND organization_id=$3`,
+            [JSON.stringify(suggestion), stmt.id, orgId],
+          ).catch(() => {});
+          return { id: stmt.id, suggestion };
+        } catch {
+          return { id: stmt.id, suggestion: null };
+        }
+      }));
+      results.push(...batchResults);
+    }
+
+    res.json({ processed: results.length, results });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── AI APPLY — create journal entry from AI suggestion ─────────────────────
+router.post("/bank/ai-apply/:id", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const stmtId = parseInt(req.params.id);
+    const { debit_code, credit_code, description, vat_percent, contractor_id } = req.body;
+
+    const { rows: stmtRows } = await pool.query(
+      `SELECT * FROM acc_bank_statements WHERE id=$1 AND organization_id=$2`,
+      [stmtId, orgId],
+    );
+    if (!stmtRows[0]) return res.status(404).json({ error: "Not found" });
+    const stmt = stmtRows[0];
+    const amount = Math.abs(parseFloat(stmt.amount));
+
+    // Resolve account IDs
+    const getAccId = async (code: string) => {
+      const { rows } = await pool.query(
+        `SELECT id FROM acc_accounts WHERE organization_id=$1 AND code=$2 LIMIT 1`,
+        [orgId, code],
+      );
+      return rows[0]?.id ?? null;
+    };
+
+    const [debitId, creditId] = await Promise.all([getAccId(debit_code), getAccId(credit_code)]);
+    if (!debitId || !creditId) {
+      // Try to auto-create accounts from UA standard plan
+      const ensureAccount = async (code: string) => {
+        const existing = await pool.query(`SELECT id FROM acc_accounts WHERE organization_id=$1 AND code=$2`, [orgId, code]);
+        if (existing.rows[0]) return existing.rows[0].id;
+        const plan = UA_PLAN.find(p => p.code === code);
+        if (!plan) return null;
+        const ins = await pool.query(
+          `INSERT INTO acc_accounts (organization_id,code,name,type,class) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING id`,
+          [orgId, plan.code, plan.name, plan.type, plan.class],
+        );
+        return ins.rows[0]?.id;
+      };
+      const [dId, cId] = await Promise.all([ensureAccount(debit_code), ensureAccount(credit_code)]);
+      if (!dId || !cId) return res.status(400).json({ error: `Account not found: debit=${debit_code} credit=${credit_code}` });
+    }
+
+    const [finalDebitId, finalCreditId] = await Promise.all([getAccId(debit_code), getAccId(credit_code)]);
+
+    // Create journal entry
+    const { rows: entryRows } = await pool.query(
+      `INSERT INTO acc_entries (organization_id, entry_date, debit_account_id, credit_account_id, amount, description, contractor_id, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'ai_categorized') RETURNING *`,
+      [orgId, stmt.statement_date, finalDebitId, finalCreditId, amount,
+       description || stmt.description,
+       contractor_id || stmt.contractor_id || null],
+    );
+
+    // Mark bank statement as matched
+    await pool.query(
+      `UPDATE acc_bank_statements SET match_status='matched', entry_id=$1 WHERE id=$2`,
+      [entryRows[0].id, stmtId],
+    );
+
+    res.json({ entry: entryRows[0], stmt_id: stmtId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── SMART ALERTS ENGINE ──────────────────────────────────────────────────────
+router.get("/reports/alerts", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const alerts: any[] = [];
+    const now = new Date();
+    const todayStr = now.toISOString().split("T")[0];
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString().split("T")[0];
+    const threeDaysAgo = new Date(now.getTime() - 3 * 86400000).toISOString().split("T")[0];
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000).toISOString().split("T")[0];
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,"0")}-01`;
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split("T")[0];
+    const prevMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split("T")[0];
+
+    const [
+      cashRow,
+      unmatchedRow,
+      draftDocsRow,
+      overdueRecRow,
+      curRevRow,
+      prevRevRow,
+      curCostRow,
+      prevCostRow,
+      largeTxRow,
+      dupRow,
+    ] = await Promise.all([
+      // 1. Cash balance
+      pool.query(`
+        SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE -e.amount END),0) AS cash
+        FROM acc_accounts a
+        LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+          AND e.organization_id=$1
+        WHERE a.organization_id=$1 AND (a.code LIKE '30%' OR a.code LIKE '31%' OR a.code LIKE '33%')`,
+        [orgId]),
+
+      // 2. Unreconciled bank entries > 7 days
+      pool.query(`
+        SELECT COUNT(*) AS cnt, COALESCE(SUM(ABS(amount)),0) AS total
+        FROM acc_bank_statements
+        WHERE organization_id=$1 AND match_status='unmatched' AND statement_date<=$2`,
+        [orgId, sevenDaysAgo]),
+
+      // 3. Draft documents > 3 days
+      pool.query(`
+        SELECT COUNT(*) AS cnt FROM acc_documents
+        WHERE organization_id=$1 AND status='draft' AND doc_date<=$2`,
+        [orgId, threeDaysAgo]),
+
+      // 4. Overdue receivables > 30 days
+      pool.query(`
+        SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE -e.amount END),0) AS amount,
+               COUNT(DISTINCT a.id) AS accounts
+        FROM acc_accounts a
+        LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+          AND e.organization_id=$1
+        WHERE a.organization_id=$1 AND (a.code LIKE '36%' OR a.code LIKE '37%')`,
+        [orgId]),
+
+      // 5. Current month revenue
+      pool.query(`
+        SELECT COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE -e.amount END),0) AS rev
+        FROM acc_accounts a
+        LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+          AND e.organization_id=$1 AND e.entry_date>=$2
+        WHERE a.organization_id=$1 AND (a.code LIKE '70%' OR a.code LIKE '71%')`,
+        [orgId, monthStart]),
+
+      // 6. Previous month revenue
+      pool.query(`
+        SELECT COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE -e.amount END),0) AS rev
+        FROM acc_accounts a
+        LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+          AND e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+        WHERE a.organization_id=$1 AND (a.code LIKE '70%' OR a.code LIKE '71%')`,
+        [orgId, prevMonthStart, prevMonthEnd]),
+
+      // 7. Current month costs
+      pool.query(`
+        SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE -e.amount END),0) AS cost
+        FROM acc_accounts a
+        LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+          AND e.organization_id=$1 AND e.entry_date>=$2
+        WHERE a.organization_id=$1 AND (a.code LIKE '90%' OR a.code LIKE '91%')`,
+        [orgId, monthStart]),
+
+      // 8. Previous month costs
+      pool.query(`
+        SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE -e.amount END),0) AS cost
+        FROM acc_accounts a
+        LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+          AND e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+        WHERE a.organization_id=$1 AND (a.code LIKE '90%' OR a.code LIKE '91%')`,
+        [orgId, prevMonthStart, prevMonthEnd]),
+
+      // 9. Unusually large transactions (> 3x average)
+      pool.query(`
+        WITH avg AS (SELECT AVG(amount) AS a, STDDEV(amount) AS s FROM acc_entries WHERE organization_id=$1)
+        SELECT COUNT(*) AS cnt FROM acc_entries, avg
+        WHERE organization_id=$1 AND amount > avg.a + 3 * COALESCE(avg.s, avg.a)
+          AND entry_date >= $2`,
+        [orgId, sevenDaysAgo]),
+
+      // 10. Duplicate transactions (same amount + date + accounts)
+      pool.query(`
+        SELECT COUNT(*) AS cnt FROM (
+          SELECT debit_account_id, credit_account_id, amount, DATE(entry_date), COUNT(*) AS c
+          FROM acc_entries WHERE organization_id=$1 AND entry_date>=$2
+          GROUP BY debit_account_id, credit_account_id, amount, DATE(entry_date)
+          HAVING COUNT(*) > 1
+        ) t`,
+        [orgId, sevenDaysAgo]),
+    ]);
+
+    const cash       = parseFloat(cashRow.rows[0]?.cash ?? 0);
+    const unmatched  = parseInt(unmatchedRow.rows[0]?.cnt ?? 0);
+    const unmTotal   = parseFloat(unmatchedRow.rows[0]?.total ?? 0);
+    const draftDocs  = parseInt(draftDocsRow.rows[0]?.cnt ?? 0);
+    const overdue    = parseFloat(overdueRecRow.rows[0]?.amount ?? 0);
+    const curRev     = parseFloat(curRevRow.rows[0]?.rev ?? 0);
+    const prevRev    = parseFloat(prevRevRow.rows[0]?.rev ?? 0);
+    const curCost    = parseFloat(curCostRow.rows[0]?.cost ?? 0);
+    const prevCost   = parseFloat(prevCostRow.rows[0]?.cost ?? 0);
+    const largeTx    = parseInt(largeTxRow.rows[0]?.cnt ?? 0);
+    const dups       = parseInt(dupRow.rows[0]?.cnt ?? 0);
+
+    const fmt2 = (n: number) => n.toLocaleString("uk-UA", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+    if (cash < 5000 && cash >= 0)
+      alerts.push({ id: "low_cash", severity: "critical", type: "cash",
+        title: "Низький залишок коштів", description: `Залишок на рахунках 30/31: ₴${fmt2(cash)}. Загроза касового розриву.`,
+        value: cash, action: "acc-bank" });
+
+    if (cash < 0)
+      alerts.push({ id: "negative_cash", severity: "critical", type: "cash",
+        title: "Від'ємний залишок коштів", description: `Балансовий залишок коштів: –₴${fmt2(Math.abs(cash))}. Перевірте проводки.`,
+        value: cash, action: "acc-bank" });
+
+    if (unmatched > 0)
+      alerts.push({ id: "unmatched_bank", severity: unmatched > 10 ? "high" : "medium", type: "bank",
+        title: `${unmatched} незвірених банківських операцій`, description: `Операцій старше 7 днів без проводки: ₴${fmt2(unmTotal)}`,
+        value: unmatched, action: "acc-bank" });
+
+    if (draftDocs > 0)
+      alerts.push({ id: "draft_docs", severity: "medium", type: "documents",
+        title: `${draftDocs} непроведених документів`, description: `Документи у статусі "Чернетка" більше 3 днів. Ризик невідображення в обліку.`,
+        value: draftDocs, action: "acc-documents" });
+
+    if (overdue > 1000)
+      alerts.push({ id: "overdue_receivables", severity: overdue > 50000 ? "high" : "medium", type: "receivables",
+        title: "Прострочена дебіторська заборгованість", description: `Залишок на рах. 36/37: ₴${fmt2(overdue)}. Можливий ризик незакритих розрахунків.`,
+        value: overdue, action: "acc-reports" });
+
+    if (prevRev > 0 && curRev < prevRev * 0.8)
+      alerts.push({ id: "revenue_drop", severity: "high", type: "revenue",
+        title: "Падіння виручки", description: `Дохід цього місяця ₴${fmt2(curRev)} vs ₴${fmt2(prevRev)} минулого місяця (–${Math.round((prevRev - curRev) / prevRev * 100)}%).`,
+        value: curRev - prevRev, action: "acc-reports" });
+
+    if (prevCost > 0 && curCost > prevCost * 1.2 && curRev > 0) {
+      const curFoodcost = curCost / curRev;
+      const prevFoodcost = prevCost / prevRev;
+      if (curFoodcost > prevFoodcost * 1.1)
+        alerts.push({ id: "foodcost_spike", severity: "medium", type: "cost",
+          title: "Зростання foodcost/собівартості", description: `Собівартість зросла з ₴${fmt2(prevCost)} до ₴${fmt2(curCost)} (+${Math.round((curCost - prevCost) / prevCost * 100)}% vs попер. місяць).`,
+          value: curCost - prevCost, action: "acc-reports" });
+    }
+
+    if (largeTx > 0)
+      alerts.push({ id: "large_transactions", severity: "medium", type: "anomaly",
+        title: `${largeTx} нетипових транзакцій`, description: `За останні 7 днів виявлено ${largeTx} транзакцій значно більших за середній розмір.`,
+        value: largeTx, action: "acc-journal" });
+
+    if (dups > 0)
+      alerts.push({ id: "duplicates", severity: "high", type: "anomaly",
+        title: `Можливі дублікати проводок`, description: `${dups} груп проводок з однаковою сумою, датою та рахунками за останні 7 днів.`,
+        value: dups, action: "acc-journal" });
+
+    // Sort by severity
+    const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+    alerts.sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9));
+
+    res.json({ alerts, count: alerts.length, generated_at: new Date().toISOString() });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── OCR DOCUMENT SCANNING ────────────────────────────────────────────────────
+router.post("/documents/ocr", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { image_base64, mime_type = "image/jpeg" } = req.body as { image_base64: string; mime_type?: string };
+    if (!image_base64) return res.status(400).json({ error: "image_base64 required" });
+
+    const contractors = await pool.query(
+      `SELECT name FROM acc_contractors WHERE organization_id=$1 LIMIT 40`, [orgId],
+    );
+    const contractorList = contractors.rows.map((c: any) => c.name).join(", ");
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `Ти — OCR-асистент для бухгалтерії. Прочитай документ (накладну/рахунок/акт) і поверни JSON.
+Існуючі контрагенти: ${contractorList}
+
+Поверни JSON:
+{
+  "doc_type": "invoice_in" | "invoice_out" | "act_in" | "act_out" | "receipt",
+  "doc_number": "номер документу або null",
+  "doc_date": "YYYY-MM-DD або null",
+  "supplier_name": "назва постачальника або null",
+  "supplier_edrpou": "ЄДРПОУ або null",
+  "buyer_name": "назва покупця або null",
+  "line_items": [
+    {
+      "description": "назва товару/послуги",
+      "qty": число,
+      "unit": "шт/кг/л/пос/год або null",
+      "unit_price": число без ПДВ,
+      "vat_rate": 0 або 20 або 7,
+      "total_with_vat": загальна сума з ПДВ
+    }
+  ],
+  "subtotal_without_vat": число,
+  "vat_total": число,
+  "total_with_vat": загальна сума,
+  "currency": "UAH" або інша,
+  "notes": "примітки якщо є або null",
+  "confidence": число від 0 до 1,
+  "ocr_warnings": ["попередження якщо текст нечіткий"]
+}
+
+Якщо поле не видно — повертай null. НЕ вигадуй дані.`,
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Розпізнай цей документ:" },
+            { type: "image_url", image_url: { url: `data:${mime_type};base64,${image_base64}`, detail: "high" } },
+          ] as any,
+        },
+      ],
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content ?? "{}");
+    res.json({ ...result, raw_prompt_tokens: completion.usage?.prompt_tokens });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── OCR CREATE DOCUMENT — from OCR result create acc_document + entries ──────
+router.post("/documents/ocr/create", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { ocr_data, contractor_id, debit_code = "281", credit_code = "631", auto_post = false } = req.body as any;
+    const { doc_type, doc_number, doc_date, total_with_vat, vat_total, line_items, supplier_name } = ocr_data;
+
+    // Resolve or create contractor
+    let contractorId = contractor_id ?? null;
+    if (!contractorId && supplier_name) {
+      const ex = await pool.query(
+        `SELECT id FROM acc_contractors WHERE organization_id=$1 AND name ILIKE $2 LIMIT 1`,
+        [orgId, `%${supplier_name}%`],
+      );
+      contractorId = ex.rows[0]?.id ?? null;
+    }
+
+    // Create document
+    const { rows: docRows } = await pool.query(
+      `INSERT INTO acc_documents (organization_id, doc_type, doc_number, doc_date, contractor_id, total, vat, status, notes)
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,'draft','OCR auto-created') RETURNING *`,
+      [orgId, doc_type ?? "invoice_in", doc_number ?? `OCR-${Date.now()}`,
+       doc_date ?? new Date().toISOString().split("T")[0],
+       contractorId, total_with_vat ?? 0, vat_total ?? 0],
+    );
+    const doc = docRows[0];
+
+    // If auto_post, create journal entry
+    let entry = null;
+    if (auto_post) {
+      const getAccId = async (code: string) => {
+        const { rows } = await pool.query(
+          `SELECT id FROM acc_accounts WHERE organization_id=$1 AND code=$2 LIMIT 1`, [orgId, code],
+        );
+        return rows[0]?.id;
+      };
+      const [dId, cId] = await Promise.all([getAccId(debit_code), getAccId(credit_code)]);
+      if (dId && cId) {
+        const amount = parseFloat(total_with_vat) - parseFloat(vat_total ?? 0);
+        const { rows: entryRows } = await pool.query(
+          `INSERT INTO acc_entries (organization_id, entry_date, debit_account_id, credit_account_id, amount, description, contractor_id, document_id, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ocr') RETURNING *`,
+          [orgId, doc.doc_date, dId, cId, amount,
+           `OCR: ${supplier_name ?? "Постачальник"} — ${doc_number ?? "накладна"}`,
+           contractorId, doc.id],
+        );
+        entry = entryRows[0];
+        await pool.query(`UPDATE acc_documents SET status='posted' WHERE id=$1`, [doc.id]);
+      }
+    }
+
+    res.json({ document: doc, entry, contractor_id: contractorId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── ADD ai_suggestion column if not exists ───────────────────────────────────
+pool.query(`
+  ALTER TABLE acc_bank_statements ADD COLUMN IF NOT EXISTS ai_suggestion JSONB;
+`).catch(() => {});
 
 export default router;
 

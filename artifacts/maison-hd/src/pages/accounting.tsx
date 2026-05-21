@@ -35,6 +35,8 @@ import {
   PlugZap, Timer, Play, Pause, FileSpreadsheet, Webhook, Globe,
   ChevronUp, Eye, EyeOff, Link, Copy, Check, BarChart2,
   Activity, Percent, Banknote, Package,
+  Sparkles, Camera, ScanLine, Bot, Wand2, AlertOctagon,
+  ShieldAlert, CircleAlert, ShieldX, ArrowUpDown,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
@@ -4004,8 +4006,19 @@ function AccJournalTab() {
 function AccDocumentsTab() {
   const [type, setType] = useState("");
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data, isLoading } = useAccLedger(`documents${type ? `?doc_type=${type}` : ""}`);
   const docs = Array.isArray(data) ? data : [];
+
+  // ── OCR state ──
+  const [ocrOpen, setOcrOpen] = useState(false);
+  const [ocrImageBase64, setOcrImageBase64] = useState<string | null>(null);
+  const [ocrMime, setOcrMime] = useState("image/jpeg");
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrResult, setOcrResult] = useState<any>(null);
+  const [ocrPosting, setOcrPosting] = useState(false);
+  const [ocrDebitCode, setOcrDebitCode] = useState("281");
+  const [ocrCreditCode, setOcrCreditCode] = useState("631");
 
   const postMut = useMutation({
     mutationFn: (id: number) => accFetch(`documents/${id}/post`, { method: "POST" }),
@@ -4022,9 +4035,51 @@ function AccDocumentsTab() {
 
   const fmtNumLoc = (n: number | string) => n ? Number(n).toFixed(2) : "0.00";
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setOcrMime(file.type || "image/jpeg");
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const base64 = dataUrl.split(",")[1];
+      setOcrImageBase64(base64);
+      setOcrResult(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleOcrScan = async () => {
+    if (!ocrImageBase64) { toast({ title: "Завантажте фото", variant: "destructive" }); return; }
+    setOcrLoading(true);
+    try {
+      const res = await accFetch("documents/ocr", { method: "POST", body: JSON.stringify({ image_base64: ocrImageBase64, mime_type: ocrMime }) });
+      setOcrResult(res);
+      toast({ title: "OCR завершено", description: `Впевненість: ${Math.round((res.confidence ?? 0) * 100)}%` });
+    } catch (e: any) { toast({ title: "OCR помилка", description: e.message, variant: "destructive" }); }
+    finally { setOcrLoading(false); }
+  };
+
+  const handleOcrCreate = async (autoPost: boolean) => {
+    if (!ocrResult) return;
+    setOcrPosting(true);
+    try {
+      const res = await accFetch("documents/ocr/create", { method: "POST", body: JSON.stringify({
+        ocr_data: ocrResult,
+        debit_code: ocrDebitCode,
+        credit_code: ocrCreditCode,
+        auto_post: autoPost,
+      }) });
+      toast({ title: autoPost ? "Документ проведено" : "Чернетку збережено", description: `#${res.document?.doc_number}` });
+      qc.invalidateQueries({ queryKey: ["acc-ledger"] });
+      setOcrOpen(false); setOcrImageBase64(null); setOcrResult(null);
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setOcrPosting(false); }
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         <Select value={type} onValueChange={setType}>
           <SelectTrigger className="w-48 h-9 text-sm"><SelectValue placeholder="Всі типи" /></SelectTrigger>
           <SelectContent>
@@ -4032,8 +4087,16 @@ function AccDocumentsTab() {
             {Object.entries(Types).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Button size="sm" className="ml-auto"><Plus className="h-4 w-4 mr-1"/>Створити документ</Button>
+        <div className="ml-auto flex gap-2">
+          {/* ── OCR SCAN BUTTON ── */}
+          <Button size="sm" variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 gap-1.5"
+            onClick={() => { setOcrOpen(true); setOcrImageBase64(null); setOcrResult(null); }}>
+            <ScanLine className="h-4 w-4" /> OCR Сканування
+          </Button>
+          <Button size="sm"><Plus className="h-4 w-4 mr-1"/>Створити документ</Button>
+        </div>
       </div>
+
       {isLoading ? <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div> : (
         <div className="bg-white border rounded-xl overflow-hidden">
           <Table>
@@ -4041,7 +4104,13 @@ function AccDocumentsTab() {
               <TableRow><TableHead>Дата</TableHead><TableHead>Номер</TableHead><TableHead>Тип</TableHead><TableHead>Контрагент</TableHead><TableHead className="text-right">Сума</TableHead><TableHead>Статус</TableHead><TableHead></TableHead></TableRow>
             </TableHeader>
             <TableBody>
-              {docs.map((d: any) => (
+              {docs.length === 0 ? (
+                <TableRow><TableCell colSpan={7} className="text-center py-12 text-gray-400">
+                  <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <div className="text-sm">Документів не знайдено</div>
+                  <div className="text-xs mt-1 text-emerald-600 cursor-pointer font-medium" onClick={() => setOcrOpen(true)}>📷 Відскануйте накладну для швидкого введення</div>
+                </TableCell></TableRow>
+              ) : docs.map((d: any) => (
                 <TableRow key={d.id}>
                   <TableCell className="text-xs">{d.doc_date ? format(new Date(d.doc_date), "dd.MM.yyyy") : "—"}</TableCell>
                   <TableCell className="text-xs font-semibold">{d.doc_number}</TableCell>
@@ -4062,6 +4131,140 @@ function AccDocumentsTab() {
           </Table>
         </div>
       )}
+
+      {/* ── OCR DIALOG ── */}
+      <Dialog open={ocrOpen} onOpenChange={setOcrOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ScanLine className="w-5 h-5 text-emerald-600" />
+              OCR Сканування накладної
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Upload area */}
+            <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center relative hover:border-emerald-400 transition-colors">
+              <input type="file" accept="image/*" onChange={handleImageUpload}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+              {ocrImageBase64 ? (
+                <div className="space-y-2">
+                  <img src={`data:${ocrMime};base64,${ocrImageBase64}`} alt="preview"
+                    className="max-h-48 mx-auto rounded-lg object-contain shadow-sm" />
+                  <div className="text-xs text-gray-500">Натисніть щоб замінити</div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Camera className="w-10 h-10 mx-auto text-gray-300" />
+                  <div className="text-sm font-medium text-gray-600">Завантажте фото накладної</div>
+                  <div className="text-xs text-gray-400">JPG, PNG, WebP · до 10 МБ · натисніть або перетягніть</div>
+                </div>
+              )}
+            </div>
+
+            {ocrImageBase64 && (
+              <Button onClick={handleOcrScan} disabled={ocrLoading} className="w-full bg-emerald-600 hover:bg-emerald-700 gap-2">
+                {ocrLoading ? <><Loader2 className="w-4 h-4 animate-spin" />Розпізнаємо...</> : <><Sparkles className="w-4 h-4" />Розпізнати документ (AI)</>}
+              </Button>
+            )}
+
+            {/* OCR Result */}
+            {ocrResult && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-semibold text-gray-800">Результат розпізнавання</div>
+                  <Badge className={`text-xs ${ocrResult.confidence >= 0.8 ? "bg-green-100 text-green-700" : ocrResult.confidence >= 0.5 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                    {Math.round((ocrResult.confidence ?? 0) * 100)}% точність
+                  </Badge>
+                </div>
+
+                {ocrResult.ocr_warnings?.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-700">
+                    ⚠️ {ocrResult.ocr_warnings.join(", ")}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 bg-gray-50 rounded-xl p-3">
+                  {[
+                    { label: "Тип документу",    val: Types[ocrResult.doc_type] ?? ocrResult.doc_type ?? "—" },
+                    { label: "Дата",              val: ocrResult.doc_date ?? "—" },
+                    { label: "Номер",             val: ocrResult.doc_number ?? "—" },
+                    { label: "Постачальник",      val: ocrResult.supplier_name ?? "—" },
+                    { label: "ЄДРПОУ",            val: ocrResult.supplier_edrpou ?? "—" },
+                    { label: "Покупець",          val: ocrResult.buyer_name ?? "—" },
+                  ].map(({ label, val }) => (
+                    <div key={label}>
+                      <div className="text-[10px] text-gray-500 font-medium">{label}</div>
+                      <div className="text-xs text-gray-800 font-semibold mt-0.5">{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {(ocrResult.line_items ?? []).length > 0 && (
+                  <div className="bg-white border rounded-lg overflow-hidden">
+                    <div className="text-[10px] font-semibold text-gray-500 px-3 py-1.5 bg-gray-50 border-b">Позиції</div>
+                    <Table>
+                      <TableHeader><TableRow className="text-[10px]">
+                        <TableHead className="text-[10px]">Опис</TableHead>
+                        <TableHead className="text-[10px] text-right w-16">К-сть</TableHead>
+                        <TableHead className="text-[10px] text-right w-24">Ціна</TableHead>
+                        <TableHead className="text-[10px] text-right w-16">ПДВ</TableHead>
+                        <TableHead className="text-[10px] text-right w-24">Сума</TableHead>
+                      </TableRow></TableHeader>
+                      <TableBody>
+                        {(ocrResult.line_items ?? []).map((item: any, i: number) => (
+                          <TableRow key={i} className="text-xs">
+                            <TableCell className="text-xs py-1.5">{item.description}</TableCell>
+                            <TableCell className="text-right py-1.5">{item.qty} {item.unit ?? ""}</TableCell>
+                            <TableCell className="text-right py-1.5">{fmtNumLoc(item.unit_price)}</TableCell>
+                            <TableCell className="text-right py-1.5">{item.vat_rate}%</TableCell>
+                            <TableCell className="text-right py-1.5 font-semibold">{fmtNumLoc(item.total_with_vat)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {[
+                    { label: "Без ПДВ", val: fmtNumLoc(ocrResult.subtotal_without_vat ?? 0), color: "text-gray-700" },
+                    { label: "ПДВ",     val: fmtNumLoc(ocrResult.vat_total ?? 0),            color: "text-orange-600" },
+                    { label: "Разом",   val: fmtNumLoc(ocrResult.total_with_vat ?? 0),        color: "text-blue-700 font-bold text-base" },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="bg-gray-50 rounded-lg p-2">
+                      <div className="text-[10px] text-gray-500">{label}</div>
+                      <div className={`text-sm ${color}`}>{val} ₴</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs font-medium">Рах. Дт (Актив)</Label>
+                    <Input value={ocrDebitCode} onChange={e => setOcrDebitCode(e.target.value)} className="h-8 text-xs font-mono mt-1" placeholder="281" />
+                    <div className="text-[10px] text-gray-400 mt-0.5">281=Товари, 201=Сировина, 92=АВ</div>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium">Рах. Кт (Зобов'язання)</Label>
+                    <Input value={ocrCreditCode} onChange={e => setOcrCreditCode(e.target.value)} className="h-8 text-xs font-mono mt-1" placeholder="631" />
+                    <div className="text-[10px] text-gray-400 mt-0.5">631=Постачальники, 311=Банк</div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={() => handleOcrCreate(false)} disabled={ocrPosting} variant="outline" className="flex-1 gap-1.5">
+                    <FileText className="w-4 h-4" /> Зберегти як чернетку
+                  </Button>
+                  <Button onClick={() => handleOcrCreate(true)} disabled={ocrPosting} className="flex-1 gap-1.5 bg-emerald-600 hover:bg-emerald-700">
+                    {ocrPosting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    Провести документ
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -4533,6 +4736,9 @@ function AccReportsTab() {
   const { data: balData, isLoading: balLoading  } = useQuery({ queryKey: ["acc-ledger", balPath],    queryFn: () => accFetch(balPath),    staleTime: 30_000, enabled: reportType === "balance" });
   const { data: cfData,  isLoading: cfLoading   } = useQuery({ queryKey: ["acc-ledger", cfPath],     queryFn: () => accFetch(cfPath),     staleTime: 30_000, enabled: reportType === "cashflow" });
   const { data: kpiData, isLoading: kpiLoading  } = useQuery({ queryKey: ["acc-ledger", kpiPath],    queryFn: () => accFetch(kpiPath),    staleTime: 30_000, enabled: reportType === "kpi" });
+  const { data: alertsData } = useQuery({ queryKey: ["acc-ledger", "alerts"], queryFn: () => accFetch("reports/alerts"), staleTime: 60_000, refetchInterval: 120_000 });
+  const alertsList: any[] = alertsData?.alerts ?? [];
+  const critAlerts = alertsList.filter((a: any) => a.severity === "critical" || a.severity === "high");
 
   const osvData: any[] = osvRaw?.rows ?? (Array.isArray(osvRaw) ? osvRaw : []);
   const loading = osvLoading || pnlLoading || balLoading || cfLoading || kpiLoading;
@@ -4562,8 +4768,13 @@ function AccReportsTab() {
             { id:"cashflow", label:"Ф3 — Рух коштів" },
           ] as const).map(({ id, label }) => (
             <button key={id} onClick={() => setReportType(id)}
-              className={`px-3.5 py-2 text-sm font-medium transition-colors ${reportType === id ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+              className={`px-3.5 py-2 text-sm font-medium transition-colors relative ${reportType === id ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
               {label}
+              {id === "kpi" && critAlerts.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                  {critAlerts.length}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -4649,6 +4860,35 @@ function AccReportsTab() {
             };
             return (
               <div className="space-y-4">
+                {/* ── Smart Alerts Panel ── */}
+                {alertsList.length > 0 && (
+                  <div className="space-y-2">
+                    {alertsList.map((alert: any) => {
+                      const severityConfig: Record<string, { bg: string; border: string; icon: any; label: string }> = {
+                        critical: { bg: "bg-red-50",    border: "border-red-300",   icon: ShieldX,      label: "Критично" },
+                        high:     { bg: "bg-orange-50", border: "border-orange-300", icon: ShieldAlert,  label: "Увага" },
+                        medium:   { bg: "bg-yellow-50", border: "border-yellow-200", icon: CircleAlert,  label: "Попередження" },
+                        low:      { bg: "bg-blue-50",   border: "border-blue-200",   icon: AlertCircle,  label: "Інфо" },
+                      };
+                      const cfg = severityConfig[alert.severity] ?? severityConfig.medium;
+                      const Icon = cfg.icon;
+                      return (
+                        <div key={alert.id} className={`flex items-start gap-3 p-3 rounded-xl border ${cfg.bg} ${cfg.border}`}>
+                          <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${alert.severity === "critical" ? "text-red-600" : alert.severity === "high" ? "text-orange-600" : "text-yellow-600"}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-gray-800">{alert.title}</span>
+                              <Badge className={`text-[9px] h-4 font-medium ${alert.severity === "critical" ? "bg-red-100 text-red-700" : alert.severity === "high" ? "bg-orange-100 text-orange-700" : "bg-yellow-100 text-yellow-700"}`}>
+                                {cfg.label}
+                              </Badge>
+                            </div>
+                            <div className="text-[11px] text-gray-600 mt-0.5">{alert.description}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-4">
                   <KPICard label="Дохід від реалізації" value={k.revenue}     prev={k.revPrev}     color="green"  icon={TrendingUp}   note="Р2000 НП(С)БО 1" />
                   <KPICard label="Валовий прибуток"     value={k.grossProfit} prev={k.grossProfitPrev} color="blue" icon={BarChart3}   note="Р2090" />
@@ -5944,6 +6184,11 @@ function AccBankTab() {
   // ── Auto-match state ──
   const [autoMatchRunning, setAutoMatchRunning] = useState(false);
 
+  // ── AI categorizer state ──
+  const [aiSuggestions, setAiSuggestions] = useState<Record<number, any>>({});
+  const [aiLoadingId, setAiLoadingId] = useState<number | null>(null);
+  const [bulkAiRunning, setBulkAiRunning] = useState(false);
+
   const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
 
@@ -6080,6 +6325,43 @@ function AccBankTab() {
     await handleMatch(s.id, s.entry_id);
   };
 
+  // ── AI handlers ──
+  const handleAiCategorize = async (stmtId: number) => {
+    setAiLoadingId(stmtId);
+    try {
+      const res = await accFetch(`bank/ai-categorize/${stmtId}`, { method: "POST" });
+      setAiSuggestions(prev => ({ ...prev, [stmtId]: res.suggestion }));
+      toast({ title: "AI розмітка готова", description: `Дт ${res.suggestion?.debit_code} / Кт ${res.suggestion?.credit_code}` });
+    } catch (e: any) { toast({ title: "AI помилка", description: e.message, variant: "destructive" }); }
+    finally { setAiLoadingId(null); }
+  };
+
+  const handleBulkAi = async () => {
+    setBulkAiRunning(true);
+    try {
+      const res = await accFetch("bank/ai-categorize-bulk", { method: "POST", body: JSON.stringify({ from, to }) });
+      const suggestions: Record<number, any> = {};
+      (res.results ?? []).forEach((r: any) => { if (r.suggestion) suggestions[r.id] = r.suggestion; });
+      setAiSuggestions(prev => ({ ...prev, ...suggestions }));
+      toast({ title: "AI розмітка завершена", description: `Оброблено: ${res.processed} транзакцій` });
+    } catch (e: any) { toast({ title: "AI помилка", description: e.message, variant: "destructive" }); }
+    finally { setBulkAiRunning(false); }
+  };
+
+  const handleAiApply = async (stmt: any, suggestion: any) => {
+    try {
+      await accFetch(`bank/ai-apply/${stmt.id}`, { method: "POST", body: JSON.stringify({
+        debit_code: suggestion.debit_code,
+        credit_code: suggestion.credit_code,
+        description: suggestion.description,
+        vat_percent: suggestion.vat_percent,
+      }) });
+      toast({ title: "Проводку створено", description: `Дт ${suggestion.debit_code} / Кт ${suggestion.credit_code}` });
+      setAiSuggestions(prev => { const n = { ...prev }; delete n[stmt.id]; return n; });
+      qc.invalidateQueries({ queryKey: ["acc-bank"] });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+  };
+
   // ── Match status badge ──
   const matchBadge = (status: string) => {
     if (status === "matched")   return <Badge className="text-[10px] bg-green-100 text-green-700">✓ Звірено</Badge>;
@@ -6122,11 +6404,18 @@ function AccBankTab() {
         </div>
         <div className="ml-auto flex gap-2">
           {view === "reconcile" && (
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
-              onClick={handleAutoMatch} disabled={autoMatchRunning}>
-              {autoMatchRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-              Авто-матч
-            </Button>
+            <>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
+                onClick={handleAutoMatch} disabled={autoMatchRunning}>
+                {autoMatchRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                Авто-матч
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs border-purple-200 text-purple-700 hover:bg-purple-50"
+                onClick={handleBulkAi} disabled={bulkAiRunning}>
+                {bulkAiRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
+                AI розмітка
+              </Button>
+            </>
           )}
           <Button size="sm" className="h-8 gap-1.5 text-xs bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={() => setShowAdd(true)}>
             <Plus className="w-3.5 h-3.5" /> Додати
@@ -6198,7 +6487,10 @@ function AccBankTab() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(recStmts as any[]).map((s: any) => (
+                  {(recStmts as any[]).flatMap((s: any) => {
+                    const aiSug = aiSuggestions[s.id];
+                    const isUnmatched = s.match_status === "unmatched" || s.match_status === null;
+                    return [
                     <TableRow key={s.id} className={`hover:bg-gray-50/50 ${s.match_status === "matched" ? "bg-green-50/20" : s.match_status === "ignored" ? "opacity-50" : ""}`}>
                       <TableCell className="font-mono text-xs text-gray-500">{s.statement_date?.slice(0,10)}</TableCell>
                       <TableCell className="max-w-0">
@@ -6229,6 +6521,10 @@ function AccBankTab() {
                               </Button>
                               <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 text-gray-400 hover:text-gray-600"
                                 onClick={() => handleIgnore(s.id)}>Ігнор</Button>
+                              <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5 text-purple-500 hover:bg-purple-50"
+                                title="AI розмітка" onClick={() => handleAiCategorize(s.id)} disabled={aiLoadingId === s.id}>
+                                {aiLoadingId === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bot className="w-3 h-3" />}
+                              </Button>
                             </>
                           )}
                           {s.match_status === "suggested" && (
@@ -6241,6 +6537,10 @@ function AccBankTab() {
                                 onClick={() => { setMatchDialog(s); setEntrySearch(""); }}>
                                 Замінити
                               </Button>
+                              <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5 text-purple-500 hover:bg-purple-50"
+                                title="AI розмітка" onClick={() => handleAiCategorize(s.id)} disabled={aiLoadingId === s.id}>
+                                {aiLoadingId === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bot className="w-3 h-3" />}
+                              </Button>
                             </>
                           )}
                           {(s.match_status === "matched" || s.match_status === "ignored") && (
@@ -6249,8 +6549,38 @@ function AccBankTab() {
                           )}
                         </div>
                       </TableCell>
-                    </TableRow>
-                  ))}
+                    </TableRow>,
+                    /* ── AI Suggestion sub-row ── */
+                    isUnmatched && aiSug ? (
+                      <TableRow key={`ai-${s.id}`} className="bg-purple-50/60 border-b border-purple-100">
+                        <TableCell colSpan={6} className="py-2 px-6">
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Bot className="w-3.5 h-3.5 text-purple-600" />
+                              <span className="text-[10px] font-semibold text-purple-600 uppercase tracking-wide">AI</span>
+                            </div>
+                            <div className="flex-1 min-w-0 text-xs flex flex-wrap items-center gap-2">
+                              <span className="font-mono font-bold text-purple-800">Дт {aiSug.debit_code} / Кт {aiSug.credit_code}</span>
+                              {aiSug.contractor_name && <span className="text-purple-600 text-[11px]">· {aiSug.contractor_name}</span>}
+                              {aiSug.category && <Badge className="text-[9px] h-4 bg-purple-100 text-purple-700 font-normal">{aiSug.category}</Badge>}
+                              {aiSug.vat_percent > 0 && <Badge className="text-[9px] h-4 bg-orange-100 text-orange-700 font-normal">ПДВ {aiSug.vat_percent}%</Badge>}
+                              <span className="text-gray-400 text-[10px]">{Math.round((aiSug.confidence ?? 0) * 100)}% впевненість</span>
+                              {aiSug.description && <span className="text-gray-500 text-[10px] truncate max-w-xs">{aiSug.description}</span>}
+                            </div>
+                            <div className="flex gap-1.5 shrink-0">
+                              <Button size="sm" className="h-6 text-[10px] px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-md"
+                                onClick={() => handleAiApply(s, aiSug)}>
+                                <Sparkles className="w-3 h-3 mr-1" />Застосувати
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600"
+                                onClick={() => setAiSuggestions(prev => { const n = { ...prev }; delete n[s.id]; return n; })}>✕</Button>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : null,
+                  ].filter(Boolean);
+                  })}
                 </TableBody>
               </Table>
             )}

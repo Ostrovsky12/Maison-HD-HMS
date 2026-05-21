@@ -1,0 +1,707 @@
+MAISON HD — MIGRATION CENTER
+Product Vision + Architecture + Logic + Development Prompt
+
+========================================================
+PRODUCT IDEA
+========================================================
+
+MaisonHD Migration Center is a dedicated migration operating system inside MaisonHD Finance.
+
+Its purpose is to migrate businesses from BAS / 1C / Excel / Poster / Servio and other legacy systems into MaisonHD without:
+- data loss,
+- business downtime,
+- accounting corruption,
+- operational chaos.
+
+Core promise:
+
+“Switch to MaisonHD safely, without stopping your business.”
+
+This is NOT a file importer.
+This is a guided migration ecosystem with:
+- connectors,
+- scanning,
+- mapping,
+- validation,
+- reconciliation,
+- rollback,
+- parallel run,
+- go-live control.
+
+========================================================
+PRODUCT PHILOSOPHY
+========================================================
+
+The system must feel:
+- simple,
+- calm,
+- premium,
+- trustworthy,
+- guided.
+
+Users should never feel:
+- technical overload,
+- accounting fear,
+- migration anxiety.
+
+The migration process should feel like:
+“Apple setup experience for ERP migration.”
+
+The user flow must be:
+1. Connect old system
+2. Scan data
+3. Review issues
+4. Fix critical problems
+5. Run trial migration
+6. Compare results
+7. Run systems in parallel
+8. Switch to MaisonHD
+
+========================================================
+CORE ARCHITECTURE
+========================================================
+
+1. MIGRATION PROJECTS
+
+Every migration is an isolated project.
+
+Entity:
+migration_projects
+
+Fields:
+- id
+- company_id
+- source_system
+- source_version
+- migration_status
+- cutoff_date
+- go_live_date
+- created_by
+- created_at
+- completed_at
+
+Statuses:
+- Draft
+- Source Connected
+- Data Scanned
+- Mapping Required
+- Validation Failed
+- Ready for Trial Import
+- Trial Imported
+- Reconciliation
+- Parallel Run
+- Ready for Go Live
+- Completed
+- Archived
+
+========================================================
+2. SOURCE CONNECTORS
+========================================================
+
+MVP connectors:
+- BAS XML
+- BAS Excel export
+- CSV
+- Excel
+- Manual upload
+- Poster placeholder
+- Servio placeholder
+
+Future connectors:
+- direct SQL
+- BAS API
+- M.E.Doc
+- Checkbox
+- Bank APIs
+- Vchasno
+- CRM systems
+
+Each uploaded file:
+- stored permanently,
+- versioned,
+- linked to migration project,
+- parsed asynchronously.
+
+========================================================
+3. DATA SCANNER
+========================================================
+
+After upload:
+system scans and detects:
+
+MASTER DATA:
+- legal entities
+- counterparties
+- products
+- services
+- warehouses
+- employees
+- bank accounts
+- cash desks
+- chart of accounts
+
+ACCOUNTING DATA:
+- journal entries
+- balances
+- receivables
+- payables
+- tax records
+- VAT operations
+
+OPERATIONAL DATA:
+- bookings
+- inventory balances
+- deposits
+- open invoices
+- unpaid bills
+- reservations
+
+Scanner must generate:
+- total entities,
+- duplicate warnings,
+- broken records,
+- missing mappings,
+- validation warnings,
+- Migration Health Score.
+
+========================================================
+4. MIGRATION HEALTH SCORE
+========================================================
+
+0–50%
+Data corrupted / unsafe
+
+51–80%
+Migration possible but requires cleaning
+
+81–95%
+Almost ready
+
+96–100%
+Safe to migrate
+
+Health Score must consider:
+- missing fields
+- duplicates
+- invalid accounting entries
+- broken references
+- unmapped accounts
+- missing tax rules
+- invalid balances
+
+========================================================
+5. MAPPING CENTER
+========================================================
+
+Purpose:
+map source system entities into MaisonHD entities.
+
+Supported mappings:
+- accounts
+- products
+- counterparties
+- warehouses
+- legal entities
+- taxes
+- units of measure
+- document types
+
+Each mapping:
+- source_value
+- target_value
+- confidence_score
+- is_ai_suggested
+- approved_by
+- approved_at
+
+Must support:
+- automatic mapping
+- manual mapping
+- bulk mapping
+- AI suggestions
+- search/filter
+- mapping history
+
+========================================================
+6. AI SUGGESTION ENGINE
+========================================================
+
+AI should help users clean and map data.
+
+AI can suggest:
+- duplicate counterparties
+- duplicate products
+- account mappings
+- warehouse mappings
+- tax mappings
+- unit mappings
+
+Matching logic:
+- exact match
+- fuzzy match
+- tax ID match
+- SKU match
+- semantic similarity
+- account number similarity
+
+IMPORTANT:
+AI never auto-applies changes.
+All suggestions require human approval.
+
+========================================================
+7. VALIDATION ENGINE
+========================================================
+
+Validation types:
+
+CRITICAL:
+- unbalanced journal entry
+- document without date
+- missing counterparty
+- missing product unit
+- missing account mapping
+- invalid VAT logic
+- negative stock without permission
+- missing legal entity
+
+WARNING:
+- possible duplicate
+- inactive record
+- unusual tax rate
+- missing tax ID
+- old document
+
+INFO:
+- optional cleanup recommendation
+- formatting warning
+- archive suggestion
+
+Validation object:
+- severity
+- error_code
+- message
+- suggested_fix
+- status
+- resolved_by
+- resolved_at
+
+========================================================
+8. TRIAL IMPORT
+========================================================
+
+System must support:
+- sandbox import
+- isolated environment
+- rollback
+- import batches
+
+Trial import:
+- creates MaisonHD entities
+- does NOT affect production
+- creates import batch
+- generates import report
+
+Import report:
+- imported
+- skipped
+- failed
+- warnings
+- reconciliation preview
+
+========================================================
+9. IMPORT BATCH SYSTEM
+========================================================
+
+Every import:
+- has batch_id
+- fully auditable
+- rollback-capable
+
+Batch stores:
+- imported records
+- failed records
+- changed records
+- timestamps
+- user actions
+
+Rollback:
+- soft rollback only
+- no hard delete
+- restore-safe
+
+========================================================
+10. RECONCILIATION DASHBOARD
+========================================================
+
+System compares source vs MaisonHD:
+
+ACCOUNTING:
+- debit total
+- credit total
+- opening balances
+- trial balance
+- receivables
+- payables
+
+FINANCE:
+- cash balance
+- bank balance
+- deposits
+
+INVENTORY:
+- stock quantities
+- stock valuation
+
+OPERATIONS:
+- bookings
+- invoices
+- reservations
+
+Output:
+- reconciliation percentage
+- mismatches
+- critical discrepancies
+- acceptable tolerance
+
+Example:
+“Migration accuracy: 99.97%
+Difference detected: 1,240 UAH in BAR warehouse.”
+
+========================================================
+11. PARALLEL RUN MODE
+========================================================
+
+Purpose:
+run old system and MaisonHD simultaneously.
+
+Duration:
+2–4 weeks.
+
+MaisonHD compares:
+- sales
+- payments
+- stock movements
+- accounting entries
+- balances
+- reports
+
+Goal:
+prove MaisonHD accuracy before Go Live.
+
+========================================================
+12. GO LIVE
+========================================================
+
+Go Live checklist:
+- all critical issues resolved
+- reconciliation above threshold
+- cutoff date selected
+- backup created
+- accountant approval
+- owner approval
+- rollback checkpoint created
+
+After Go Live:
+- old system frozen
+- MaisonHD becomes production
+- old system becomes read-only archive
+
+========================================================
+13. ARCHIVE SYSTEM
+========================================================
+
+Historical data:
+- stored separately,
+- searchable,
+- read-only.
+
+Archive types:
+- PDF
+- XML
+- Excel
+- accounting documents
+- invoices
+- acts
+- tax documents
+
+Users can:
+- search old records
+- export old records
+- open archived documents
+
+========================================================
+14. AUDIT LOG
+========================================================
+
+Immutable audit system.
+
+Track:
+- uploads
+- parsing
+- mapping changes
+- approvals
+- validation runs
+- imports
+- rollbacks
+- Go Live approvals
+
+Every action:
+- timestamp
+- user
+- action
+- previous value
+- new value
+- IP/device
+
+========================================================
+15. SECURITY
+========================================================
+
+Roles:
+- Owner
+- Accountant
+- Migration Manager
+- Auditor
+- Admin
+
+Permissions:
+- granular
+- organization-level
+- entity-level
+
+Only Owner/Admin:
+- approve Go Live
+
+Only Accountant/Admin:
+- approve accounting mappings
+
+========================================================
+16. DATABASE TABLES
+========================================================
+
+migration_projects
+migration_sources
+migration_files
+migration_entities
+migration_mappings
+migration_validation_errors
+migration_import_batches
+migration_reconciliation_reports
+migration_parallel_runs
+migration_audit_logs
+migration_archives
+
+========================================================
+17. IMPORTANT TABLE STRUCTURES
+========================================================
+
+migration_entities:
+- id
+- project_id
+- source_entity_type
+- source_entity_id
+- source_payload_json
+- target_entity_type
+- target_entity_id
+- status
+- confidence_score
+- created_at
+
+migration_mappings:
+- id
+- project_id
+- mapping_type
+- source_value
+- target_value
+- confidence_score
+- is_ai_suggested
+- approved_by
+- approved_at
+
+migration_validation_errors:
+- id
+- project_id
+- entity_type
+- entity_id
+- severity
+- error_code
+- message
+- suggested_fix
+- status
+- resolved_by
+- resolved_at
+
+migration_import_batches:
+- id
+- project_id
+- batch_type
+- started_at
+- finished_at
+- status
+- records_total
+- records_imported
+- records_failed
+- rollback_available
+
+========================================================
+18. UI STRUCTURE
+========================================================
+
+LEFT NAVIGATION:
+- Overview
+- Source Files
+- Data Scan
+- Mapping Center
+- Validation
+- Trial Import
+- Reconciliation
+- Parallel Run
+- Go Live
+- Archive
+- Audit Log
+
+MAIN DASHBOARD:
+- Migration Status
+- Source System
+- Health Score
+- Critical Errors
+- Warnings
+- Reconciliation %
+- Go Live Readiness
+
+DESIGN:
+- Apple-like
+- minimal
+- calm
+- premium
+- enterprise SaaS
+- no clutter
+- guided experience
+
+========================================================
+19. TECHNICAL REQUIREMENTS
+========================================================
+
+Backend:
+- Node.js or Python
+
+Frontend:
+- React / Next.js
+
+Database:
+- PostgreSQL
+
+Architecture:
+- event-driven
+- async jobs
+- queue-based imports
+- idempotent processing
+
+Storage:
+- JSONB raw payloads
+- versioned uploads
+
+Performance:
+- chunked processing
+- batch validation
+- background imports
+
+Never block UI during imports.
+
+========================================================
+20. IMPORT STRATEGY
+========================================================
+
+Recommended migration flow:
+
+STEP 1
+Connect source system
+
+STEP 2
+Scan data
+
+STEP 3
+Map entities
+
+STEP 4
+Fix critical issues
+
+STEP 5
+Trial import
+
+STEP 6
+Reconciliation
+
+STEP 7
+Parallel run
+
+STEP 8
+Go Live
+
+STEP 9
+Freeze old system
+
+========================================================
+21. CUTOVER STRATEGY
+========================================================
+
+Do NOT migrate everything.
+
+Use:
+Cutoff Date Logic.
+
+Example:
+- Historical data → archive
+- Active accounting → from 01.01.2026
+
+This massively reduces migration risk.
+
+========================================================
+22. KEY PRODUCT DIFFERENTIATOR
+========================================================
+
+MaisonHD does NOT compete by:
+“having accounting.”
+
+MaisonHD competes by:
+“making transition painless.”
+
+Core market message:
+
+“We move your business from BAS / 1C into a modern cloud ERP safely, without downtime, with validation, reconciliation and full migration control.”
+
+========================================================
+23. MVP VERSION
+========================================================
+
+MVP MUST include:
+- Excel/CSV import
+- BAS XML import
+- Mapping Center
+- Validation Engine
+- Trial Import
+- Reconciliation
+- Rollback
+- Audit Log
+
+MVP does NOT require:
+- direct SQL connectors
+- COM integration
+- live sync
+- payroll migration
+- advanced VAT reporting
+
+========================================================
+24. FINAL PRODUCT POSITIONING
+========================================================
+
+MaisonHD Migration Center is not:
+- file import,
+- technical utility,
+- accountant tool.
+
+It is:
+“A business transition operating system.”
+
+Its main job:
+remove fear from ERP migration.
