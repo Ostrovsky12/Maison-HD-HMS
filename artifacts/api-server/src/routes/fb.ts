@@ -853,7 +853,7 @@ router.post("/orders/:id/items", requireAuth, async (req: any, res) => {
       name = req.body.name; price = req.body.price;
     }
 
-    const qty = parseInt(quantity) || 1;
+    const qty = parseFloat(quantity) || 1;
     const total = (parseFloat(price) * qty).toFixed(2);
 
     const { rows: [orderItem] } = await db_.query(
@@ -1798,6 +1798,61 @@ router.post("/orders/:id/split", requireAuth, async (req: any, res) => {
     );
     const [r1, r2] = await Promise.all([fetchOrder(orderId), fetchOrder(newOrderId)]);
     res.json({ order1: r1.rows[0], order2: r2.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── MERGE ORDERS ──────────────────────────────────────────────────────────────
+router.post("/orders/:id/merge", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const targetOrderId = parseInt(req.params.id);
+    const { sourceOrderId } = req.body;
+    if (!sourceOrderId) { res.status(400).json({ error: "sourceOrderId required" }); return; }
+    const srcId = parseInt(sourceOrderId);
+    if (srcId === targetOrderId) { res.status(400).json({ error: "Cannot merge order with itself" }); return; }
+    const db_ = (db as any).$client;
+
+    // Validate both orders belong to org
+    const [targetRow, sourceRow] = await Promise.all([
+      db_.query(`SELECT * FROM fb_orders WHERE id = $1 AND organization_id = $2`, [targetOrderId, orgId]),
+      db_.query(`SELECT * FROM fb_orders WHERE id = $1 AND organization_id = $2`, [srcId, orgId]),
+    ]);
+    if (!targetRow.rows.length) { res.status(404).json({ error: "Target order not found" }); return; }
+    if (!sourceRow.rows.length) { res.status(404).json({ error: "Source order not found" }); return; }
+    if (sourceRow.rows[0].status === "billed") { res.status(400).json({ error: "Cannot merge a paid order" }); return; }
+
+    // Move all active items from source to target
+    await db_.query(
+      `UPDATE fb_order_items SET order_id = $1
+       WHERE order_id = $2 AND organization_id = $3 AND status != 'cancelled'`,
+      [targetOrderId, srcId, orgId]
+    );
+
+    // Cancel source order
+    await db_.query(
+      `UPDATE fb_orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
+      [srcId]
+    );
+
+    // Recalculate target total
+    await db_.query(
+      `UPDATE fb_orders
+       SET total_amount = (SELECT COALESCE(SUM(total_price),0) FROM fb_order_items WHERE order_id = $1 AND status != 'cancelled'),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [targetOrderId]
+    );
+
+    // Return updated target order with items
+    const { rows } = await db_.query(
+      `SELECT o.*, ft.number AS "tableNumber",
+              json_agg(row_to_json(oi) ORDER BY oi.id) FILTER (WHERE oi.id IS NOT NULL) AS items
+       FROM fb_orders o
+       LEFT JOIN fb_tables ft ON ft.id = o.table_id
+       LEFT JOIN fb_order_items oi ON oi.order_id = o.id
+       WHERE o.id = $1 GROUP BY o.id, ft.number`, [targetOrderId]
+    );
+    res.json({ order: rows[0], mergedFromOrderId: srcId });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

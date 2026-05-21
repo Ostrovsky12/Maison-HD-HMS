@@ -45,6 +45,17 @@ const TIP_OPTIONS = [
   { label: "15%", pct: 15 },
 ];
 
+const PORTION_PRESETS = [
+  { label: "¼",  value: 0.25 },
+  { label: "⅓",  value: 0.33 },
+  { label: "½",  value: 0.5  },
+  { label: "¾",  value: 0.75 },
+  { label: "1",  value: 1    },
+  { label: "1½", value: 1.5  },
+  { label: "2",  value: 2    },
+  { label: "3",  value: 3    },
+];
+
 const PAYMENT_METHODS = [
   { key: "cash",      label: "Готівка",      icon: Banknote,   color: "text-emerald-600" },
   { key: "card",      label: "Картка",       icon: CreditCard, color: "text-blue-600"    },
@@ -724,6 +735,143 @@ function SplitDialog({ order, orderItems, onSplit, onClose }: {
   );
 }
 
+// ── Portion Picker Dialog ─────────────────────────────────────────────────────
+function PortionPickerDialog({ item, onConfirm, onClose }: {
+  item: MenuItem;
+  onConfirm: (item: MenuItem, qty: number) => void;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState(1);
+  const [custom, setCustom]     = useState("");
+
+  const effectiveQty = custom !== "" ? (parseFloat(custom) || 0) : selected;
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-xs bg-[#1e2235] border-white/10 text-white">
+        <DialogHeader>
+          <DialogTitle className="text-white text-sm font-semibold truncate flex items-center gap-2">
+            <UtensilsCrossed className="w-4 h-4 text-indigo-300 shrink-0" /> {item.name}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-xs text-white/40">Оберіть кількість порцій:</p>
+          <div className="grid grid-cols-4 gap-1.5">
+            {PORTION_PRESETS.map(p => (
+              <button key={p.value}
+                onClick={() => { setSelected(p.value); setCustom(""); }}
+                className={`py-2.5 rounded-xl text-sm font-bold transition-all border ${
+                  custom === "" && selected === p.value
+                    ? "bg-indigo-500 border-indigo-400 text-white"
+                    : "bg-white/5 border-white/8 text-white/60 hover:bg-white/10"
+                }`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-white/40">Або введіть вручну:</p>
+            <Input
+              type="number" min={0.01} step={0.1}
+              value={custom}
+              onChange={e => { setCustom(e.target.value); setSelected(0); }}
+              placeholder="напр. 0.3"
+              className="h-8 text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25"
+            />
+          </div>
+          <div className="flex justify-between items-center bg-white/5 rounded-xl px-3 py-2.5">
+            <span className="text-xs text-white/50">Ціна за {effectiveQty > 0 ? effectiveQty : "?"} порц.:</span>
+            <span className="text-base font-bold text-indigo-300">{fmt(item.price * (effectiveQty || 0))}</span>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/60">Скасувати</Button>
+          <Button
+            onClick={() => effectiveQty > 0 && onConfirm(item, effectiveQty)}
+            disabled={effectiveQty <= 0}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white">
+            <Plus className="w-3.5 h-3.5 mr-1.5" /> Додати
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Merge Orders Dialog ───────────────────────────────────────────────────────
+function MergeDialog({ currentOrderId, onMerge, onClose }: {
+  currentOrderId: number;
+  onMerge: (order: any) => void;
+  onClose: () => void;
+}) {
+  const [orders, setOrders]           = useState<any[]>([]);
+  const [selectedId, setSelectedId]   = useState<number | null>(null);
+  const [loading, setLoading]         = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    apiFetch("/fb/orders?open=true")
+      .then(r => r.json())
+      .then(d => setOrders((d.orders || []).filter((o: any) => o.id !== currentOrderId && o.status !== "cancelled")))
+      .catch(() => {});
+  }, [currentOrderId]);
+
+  const confirm = async () => {
+    if (!selectedId) return;
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/fb/orders/${currentOrderId}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceOrderId: selectedId }),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast({ title: "Помилка", description: d.error, variant: "destructive" }); return; }
+      toast({ title: "✅ Рахунки об'єднано", description: `Замовлення #${selectedId} приєднано до поточного` });
+      onMerge(d.order);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md bg-[#1e2235] border-white/10 text-white">
+        <DialogHeader>
+          <DialogTitle className="text-white flex items-center gap-2">
+            <Layers className="w-4 h-4 text-indigo-300" /> Об'єднати рахунки
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-white/40">Оберіть замовлення, яке хочете приєднати до поточного рахунку</p>
+        <div className="space-y-2 mt-2 max-h-72 overflow-y-auto">
+          {orders.length === 0 ? (
+            <p className="text-center py-8 text-white/25 text-sm">Немає інших відкритих замовлень</p>
+          ) : orders.map((o: any) => (
+            <button key={o.id}
+              onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
+              className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${
+                selectedId === o.id
+                  ? "bg-indigo-500/20 border-indigo-400/50"
+                  : "bg-white/4 border-white/8 hover:bg-white/8"
+              }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-white/85">
+                  {o.tableNumber ? `Стіл #${o.tableNumber}` : o.guestName ? `👤 ${o.guestName}` : `Замовлення #${o.id}`}
+                </span>
+                <span className="text-sm font-bold text-indigo-300">{fmt(o.totalAmount)}</span>
+              </div>
+              <p className="text-[10px] text-white/40 mt-0.5">#{o.id} · {o.tableLocation || o.orderType}</p>
+            </button>
+          ))}
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/60">Скасувати</Button>
+          <Button onClick={confirm} disabled={!selectedId || loading} className="bg-indigo-600 hover:bg-indigo-500 text-white">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Layers className="w-4 h-4 mr-1.5" /> Об'єднати</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Open Session Dialog ───────────────────────────────────────────────────────
 function OpenSessionDialog({ legalEntity, onOpened, onClose }: {
   legalEntity: LegalEntity | null; onOpened: (s: Session) => void; onClose: () => void;
@@ -876,12 +1024,14 @@ export default function FbPosPage() {
   const myRole = getMyRole();
 
   // Dialogs
-  const [openForEntity, setOpenForEntity]   = useState<LegalEntity | null | undefined>(undefined); // undefined=closed
-  const [closingSession, setClosingSession] = useState<Session | null>(null);
-  const [showPayment, setShowPayment]       = useState(false);
-  const [showSplit, setShowSplit]           = useState(false);
-  const [loading, setLoading]               = useState(false);
-  const [tab, setTab]                       = useState<"tables" | "menu">("tables");
+  const [openForEntity, setOpenForEntity]         = useState<LegalEntity | null | undefined>(undefined);
+  const [closingSession, setClosingSession]       = useState<Session | null>(null);
+  const [showPayment, setShowPayment]             = useState(false);
+  const [showSplit, setShowSplit]                 = useState(false);
+  const [showMerge, setShowMerge]                 = useState(false);
+  const [portionItem, setPortionItem]             = useState<MenuItem | null>(null);
+  const [loading, setLoading]                     = useState(false);
+  const [tab, setTab]                             = useState<"tables" | "menu">("tables");
 
   // Derived
   const canOperate = sessions.length > 0;
@@ -947,21 +1097,34 @@ export default function FbPosPage() {
   // ── Add item to order ──────────────────────────────────────────────────────
   const addItem = (item: MenuItem) => {
     if (!canOperate) { toast({ title: "Зміна не відкрита", variant: "destructive" }); return; }
+    setPortionItem(item);
+  };
+
+  const confirmAddItem = (item: MenuItem, qty: number) => {
+    setPortionItem(null);
     setOrderItems(prev => {
-      const existing = prev.find(i => i.item_id === item.id);
-      if (existing) {
-        return prev.map(i => i.item_id === item.id
-          ? { ...i, quantity: i.quantity + 1, total_price: (i.quantity + 1) * i.price }
-          : i
-        );
+      // Merge only when qty=1 and same item already in cart
+      if (qty === 1) {
+        const existing = prev.find(i => i.item_id === item.id && !i.id);
+        if (existing) {
+          return prev.map(i => i === existing
+            ? { ...i, quantity: i.quantity + 1, total_price: (i.quantity + 1) * i.price }
+            : i
+          );
+        }
       }
-      return [...prev, { item_id: item.id, name: item.name, price: Number(item.price), quantity: 1, total_price: Number(item.price), is_alcohol: !!item.is_alcohol, excise_per_unit: Number(item.excise_per_unit) || 0 }];
+      // Fractional or new line
+      return [...prev, {
+        item_id: item.id, name: item.name, price: Number(item.price),
+        quantity: qty, total_price: Number(item.price) * qty,
+        is_alcohol: !!item.is_alcohol, excise_per_unit: Number(item.excise_per_unit) || 0,
+      }];
     });
   };
 
-  const changeQty = (itemId: number, delta: number) => {
+  const changeQty = (idx: number, delta: number) => {
     setOrderItems(prev => prev
-      .map(i => i.item_id === itemId ? { ...i, quantity: i.quantity + delta, total_price: (i.quantity + delta) * i.price } : i)
+      .map((i, j) => j === idx ? { ...i, quantity: Math.round((i.quantity + delta) * 100) / 100, total_price: Math.round((i.quantity + delta) * i.price * 100) / 100 } : i)
       .filter(i => i.quantity > 0)
     );
   };
@@ -1228,6 +1391,11 @@ export default function FbPosPage() {
                     <p className="text-sm font-medium text-white/85 truncate">{item.name}</p>
                     <div className="flex items-center gap-2">
                       <p className="text-xs text-white/30">{fmt(item.price)} / шт</p>
+                      {item.quantity !== 1 && item.quantity !== Math.floor(item.quantity) && (
+                        <span className="text-[10px] text-indigo-400/70 bg-indigo-500/10 px-1.5 py-0.5 rounded font-semibold">
+                          {item.quantity} порц.
+                        </span>
+                      )}
                       {item.is_alcohol && item.excise_per_unit && item.excise_per_unit > 0 && (
                         <span className="text-xs text-amber-400/70 bg-amber-500/10 px-1.5 py-0.5 rounded">
                           🍺 акциз {fmt(item.excise_per_unit * item.quantity)}
@@ -1236,19 +1404,19 @@ export default function FbPosPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => changeQty(item.item_id, -1)} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50">
+                    <button onClick={() => changeQty(idx, -1)} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50">
                       <Minus className="w-2.5 h-2.5" />
                     </button>
                     <button
-                      onClick={() => changeQty(item.item_id, -0.5)}
+                      onClick={() => changeQty(idx, -0.5)}
                       title="Зменшити на ½ порції"
                       className="w-5 h-5 rounded text-[9px] font-bold bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-400 flex items-center justify-center transition-colors">
                       ½
                     </button>
-                    <span className="w-6 text-center text-sm font-medium text-white">
-                      {Number(item.quantity) % 1 !== 0 ? Number(item.quantity).toFixed(1) : item.quantity}
+                    <span className="w-8 text-center text-sm font-medium text-white">
+                      {Number(item.quantity) % 1 !== 0 ? Number(item.quantity).toFixed(2).replace(/\.?0+$/, "") : item.quantity}
                     </span>
-                    <button onClick={() => changeQty(item.item_id, +1)} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50">
+                    <button onClick={() => changeQty(idx, +1)} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50">
                       <Plus className="w-2.5 h-2.5" />
                     </button>
                   </div>
@@ -1280,6 +1448,11 @@ export default function FbPosPage() {
                         <Scissors className="w-4 h-4" />
                       </Button>
                     )}
+                    <Button onClick={() => setShowMerge(true)} variant="outline"
+                      className="border-white/10 text-emerald-400 hover:bg-emerald-500/10 h-10 px-3"
+                      title="Об'єднати рахунки">
+                      <Layers className="w-4 h-4" />
+                    </Button>
                     <Button onClick={() => setShowPayment(true)} disabled={!currentOrder || orderItems.length === 0}
                       className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white h-10">
                       <CreditCard className="w-4 h-4 mr-1.5" /> Оплатити
@@ -1328,12 +1501,36 @@ export default function FbPosPage() {
           orderItems={orderItems}
           onSplit={(order2) => {
             setShowSplit(false);
-            // Remove order2 items from local state and reload
             load();
             setOrderItems(prev => prev.filter(i => !order2.items?.some((o2i: any) => o2i.id === i.id)));
             toast({ title: `Рахунок 2 відкрито — #${order2.id}`, description: "Сплатіть кожен рахунок окремо" });
           }}
           onClose={() => setShowSplit(false)}
+        />
+      )}
+      {showMerge && currentOrder && (
+        <MergeDialog
+          currentOrderId={currentOrder.id}
+          onMerge={(mergedOrder) => {
+            setShowMerge(false);
+            const newItems = (mergedOrder.items || []).map((i: any) => ({
+              id: i.id, item_id: i.item_id, name: i.name,
+              price: Number(i.price), quantity: Number(i.quantity),
+              total_price: Number(i.total_price),
+              is_alcohol: !!i.is_alcohol, excise_per_unit: Number(i.excise_per_unit) || 0,
+            }));
+            setCurrentOrder({ ...currentOrder, total_amount: mergedOrder.total_amount });
+            setOrderItems(newItems);
+            load();
+          }}
+          onClose={() => setShowMerge(false)}
+        />
+      )}
+      {portionItem && (
+        <PortionPickerDialog
+          item={portionItem}
+          onConfirm={confirmAddItem}
+          onClose={() => setPortionItem(null)}
         />
       )}
     </AppLayout>
