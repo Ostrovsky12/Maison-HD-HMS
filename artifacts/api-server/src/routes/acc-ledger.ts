@@ -1288,6 +1288,459 @@ router.get("/reports/balance-sheet", async (req: any, res) => {
   });
 });
 
+// ─── НП(С)БО Ф1 — Structured Balance Sheet ─────────────────────────────────
+// Returns rows 1000-1900 per НП(С)БО 1 standard with optional compare_date
+router.get("/reports/balance-sheet-f1", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const date  = (req.query.date  as string) || null;
+    const cDate = (req.query.compare_date as string) || null;
+
+    // Fetch all account net balances up to a given date in ONE query
+    const fetchBals = async (d: string | null): Promise<Map<string, number>> => {
+      const { rows } = await pool.query(`
+        WITH e AS (
+          SELECT debit_account_id  AS acc, amount AS dbt, 0 AS crd FROM acc_entries
+          WHERE organization_id=$1 ${d ? "AND entry_date<=$2::date" : ""}
+          UNION ALL
+          SELECT credit_account_id AS acc, 0 AS dbt, amount AS crd FROM acc_entries
+          WHERE organization_id=$1 ${d ? "AND entry_date<=$2::date" : ""}
+        ),
+        agg AS (SELECT acc, SUM(dbt) AS d, SUM(crd) AS c FROM e GROUP BY acc)
+        SELECT a.code, COALESCE(g.d,0)-COALESCE(g.c,0) AS net
+        FROM acc_accounts a LEFT JOIN agg g ON g.acc=a.id
+        WHERE a.organization_id=$1
+      `, d ? [orgId, d] : [orgId]);
+      const m = new Map<string, number>();
+      for (const r of rows) m.set(r.code as string, parseFloat(r.net ?? 0));
+      return m;
+    };
+
+    const buildF1 = (bals: Map<string, number>) => {
+      // sum net debit balance for accounts whose code starts with any of the prefixes
+      const dbt = (...prefixes: string[]) => {
+        let s = 0;
+        bals.forEach((v, code) => { if (prefixes.some(p => code.startsWith(p))) s += Math.max(0, v); });
+        return s;
+      };
+      // sum net credit balance (take abs of negative net)
+      const crd = (...prefixes: string[]) => {
+        let s = 0;
+        bals.forEach((v, code) => { if (prefixes.some(p => code.startsWith(p))) s += Math.max(0, -v); });
+        return s;
+      };
+      // straight net (positive = debit)
+      const net = (...prefixes: string[]) => {
+        let s = 0;
+        bals.forEach((v, code) => { if (prefixes.some(p => code.startsWith(p))) s += v; });
+        return s;
+      };
+
+      // ── АКТИВ ──────────────────────────────────────────────────────────────
+      const r1000 = dbt("12") - crd("133");       // НМА (залишкова)
+      const r1010 = dbt("15");                     // Незавершені кап. інвестиції
+      const r1020 = dbt("10","11") - crd("131","132","134"); // ОЗ залишкова
+      const r1030 = dbt("100");                    // Інвестиційна нерухомість
+      const r1035 = dbt("141","142");              // Довгострокові фін. інвестиції
+      const r1040 = dbt("143","14") - dbt("141","142"); // Інші фін. інвестиції
+      const r1045 = dbt("181","182","183");        // Довгострокова ДЗ
+      const r1060 = dbt("17");                     // Відстрочені под. активи
+      const r1090 = dbt("16","184","185","188","189"); // Інші необоротні
+      const r1095 = Math.max(0, r1000+r1010+r1020+r1030+r1035+r1040+r1045+r1060+r1090);
+
+      const r1100 = dbt("20","22","23","25","26","27","28"); // Запаси
+      const r1110 = dbt("21");                     // Поточні біологічні активи
+      const r1125 = dbt("644");                    // Дт ПДВ
+      const r1130 = dbt("36");                     // ДЗ за товари
+      const r1135 = dbt("374","375","376","377","378","379"); // ДЗ за розрахунками
+      const r1155 = dbt("371","372","373") + dbt("34"); // Інша поточна ДЗ
+      const r1160 = dbt("35");                     // Поточні фін. інвестиції
+      const r1165 = dbt("30","31","33");           // Гроші та еквіваленти
+      const r1190 = dbt("39","643","645");         // Інші оборотні
+      const r1195 = r1100+r1110+r1125+r1130+r1135+r1155+r1160+r1165+r1190;
+
+      const r1300 = r1095 + r1195;                 // БАЛАНС (актив)
+
+      // ── ПАСИВ ──────────────────────────────────────────────────────────────
+      const r1400 = crd("40");                     // Зарег. капітал
+      const r1405 = crd("45");                     // Незарег. внески
+      const r1410 = crd("41");                     // Капітал у дооцінках
+      const r1415 = crd("43");                     // Резервний капітал
+      const r1420 = crd("42");                     // Додатковий капітал
+      const r44net = net("44");
+      const r1421 = r44net > 0 ? 0 : Math.abs(r44net);  // Непокритий збиток
+      const r1422 = r44net < 0 ? 0 : r44net;             // Нерозподілений прибуток
+      const r1495 = r1400+r1405+r1410+r1415+r1420+r1422-r1421;
+
+      const r1510 = crd("501","502","503");        // Довгострокові кредити
+      const r1515 = crd("504","505","506","55");   // Інші довгостр. зобов'язання
+      const r1520 = crd("54");                     // Відстрочені под. зобов'язання
+      const r1595 = r1510+r1515+r1520;
+
+      const r1600 = crd("60");                     // Короткострокові кредити
+      const r1610 = crd("63");                     // КЗ за товари
+      const r1615 = crd("641","642");              // КЗ перед бюджетом
+      const r1620 = crd("65");                     // КЗ зі страхування
+      const r1625 = crd("661","662");              // КЗ з оплати праці
+      const r1630 = crd("681","682","683","684","685"); // Інша КЗ
+      const r1635 = crd("69");                     // Доходи майбутніх периодів
+      const r1690 = crd("68","372");               // Інші поточні зобов'язання
+      const r1695 = r1600+r1610+r1615+r1620+r1625+r1630+r1635+r1690;
+
+      const r1900 = r1495+r1595+r1695;            // БАЛАНС (пасив)
+
+      return {
+        assets: [
+          { code:"1000", label:"Нематеріальні активи",                value:r1000 },
+          { code:"1010", label:"Незавершені капітальні інвестиції",    value:r1010 },
+          { code:"1020", label:"Основні засоби",                       value:r1020 },
+          { code:"1030", label:"Інвестиційна нерухомість",             value:r1030 },
+          { code:"1035", label:"Довгострокові фін. інвестиції",        value:r1035 },
+          { code:"1040", label:"Інші фінансові інвестиції",            value:r1040 },
+          { code:"1045", label:"Довгострокова дебіторська заборг.",    value:r1045 },
+          { code:"1060", label:"Відстрочені податкові активи",         value:r1060 },
+          { code:"1090", label:"Інші необоротні активи",               value:r1090 },
+          { code:"1095", label:"Усього за розділом І",                 value:r1095, subtotal:true },
+          { code:"1100", label:"Запаси",                               value:r1100 },
+          { code:"1110", label:"Поточні біологічні активи",            value:r1110 },
+          { code:"1125", label:"Дебіторська заборгованість з ПДВ",     value:r1125 },
+          { code:"1130", label:"ДЗ за продукцію/товари",               value:r1130 },
+          { code:"1135", label:"ДЗ за розрахунками (бюджет, аванси)",  value:r1135 },
+          { code:"1155", label:"Інша поточна ДЗ",                      value:r1155 },
+          { code:"1160", label:"Поточні фінансові інвестиції",         value:r1160 },
+          { code:"1165", label:"Гроші та їх еквіваленти",              value:r1165 },
+          { code:"1190", label:"Інші оборотні активи",                 value:r1190 },
+          { code:"1195", label:"Усього за розділом ІІ",                value:r1195, subtotal:true },
+          { code:"1300", label:"БАЛАНС",                               value:r1300, total:true },
+        ],
+        equity: [
+          { code:"1400", label:"Зареєстрований (пайовий) капітал",     value:r1400 },
+          { code:"1405", label:"Внески до незареєстрованого капіталу", value:r1405 },
+          { code:"1410", label:"Капітал у дооцінках",                  value:r1410 },
+          { code:"1415", label:"Резервний капітал",                    value:r1415 },
+          { code:"1420", label:"Додатковий капітал",                   value:r1420 },
+          { code:"1422", label:"Нерозподілений прибуток (збиток)",     value:r44net },
+          { code:"1495", label:"Усього за розділом І",                 value:r1495, subtotal:true },
+        ],
+        longterm: [
+          { code:"1510", label:"Довгострокові кредити банків",         value:r1510 },
+          { code:"1515", label:"Інші довгострокові зобов'язання",      value:r1515 },
+          { code:"1520", label:"Відстрочені податкові зобов'язання",   value:r1520 },
+          { code:"1595", label:"Усього за розділом ІІ",                value:r1595, subtotal:true },
+        ],
+        current: [
+          { code:"1600", label:"Поточні кредити банків",               value:r1600 },
+          { code:"1610", label:"КЗ за товари, роботи, послуги",        value:r1610 },
+          { code:"1615", label:"КЗ за розрахунками з бюджетом",        value:r1615 },
+          { code:"1620", label:"КЗ зі страхування",                    value:r1620 },
+          { code:"1625", label:"КЗ з оплати праці",                    value:r1625 },
+          { code:"1630", label:"Інша кредиторська заборгованість",     value:r1630 },
+          { code:"1635", label:"Доходи майбутніх периодів",            value:r1635 },
+          { code:"1690", label:"Інші поточні зобов'язання",            value:r1690 },
+          { code:"1695", label:"Усього за розділом ІІІ",               value:r1695, subtotal:true },
+        ],
+        totals: { r1300, r1900, r1095, r1195, r1495, r1595, r1695, balanced: Math.abs(r1300 - r1900) < 0.02 },
+      };
+    };
+
+    const [cur, cmp] = await Promise.all([
+      fetchBals(date),
+      cDate ? fetchBals(cDate) : Promise.resolve(null),
+    ]);
+
+    const current = buildF1(cur);
+    const compare = cmp ? buildF1(cmp) : null;
+    res.json({ current, compare, date, compare_date: cDate });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Ф3 — Cashflow Statement (indirect method) ──────────────────────────────
+router.get("/reports/cashflow", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { year, month } = req.query as Record<string, string>;
+    const y = parseInt(year ?? new Date().getFullYear().toString());
+    const m = parseInt(month ?? (new Date().getMonth() + 1).toString());
+
+    // Date range: full year up to end of selected month
+    const fromDate = `${y}-01-01`;
+    const toDate   = new Date(y, m, 0).toISOString().split("T")[0]; // last day of month
+
+    // Fetch turnovers (from-to) for given code prefixes
+    const turnover = async (codes: string[], side: "debit"|"credit"): Promise<number> => {
+      const col = side === "debit" ? "debit_account_id" : "credit_account_id";
+      const likes = codes.map((_, i) => `a.code LIKE $${i + 4}`).join(" OR ");
+      const { rows } = await pool.query(
+        `SELECT COALESCE(SUM(e.amount),0) AS v
+         FROM acc_entries e JOIN acc_accounts a ON a.id=e.${col}
+         WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3 AND (${likes})`,
+        [orgId, fromDate, toDate, ...codes.map(c => c + "%")],
+      );
+      return parseFloat(rows[0]?.v ?? 0);
+    };
+
+    // Net debit turnover = inflows - outflows for asset accounts
+    const netDbr = async (...codes: string[]) => (await turnover(codes,"debit")) - (await turnover(codes,"credit"));
+    const netCrd = async (...codes: string[]) => (await turnover(codes,"credit")) - (await turnover(codes,"debit"));
+
+    // ── Operating ──────────────────────────────────────────────────────────
+    const netProfit = (await (async () => {
+      const [rev, cogs, sga, other] = await Promise.all([
+        netCrd("701","702","703","71","72","73","74"),
+        netDbr("90","91","92","93","94","95","97","98"),
+        Promise.resolve(0), Promise.resolve(0),
+      ]);
+      return rev - cogs;
+    })());
+
+    const [amort, deltaRec, deltaInv, deltaPay, deltaCash311, cash30, cash31] = await Promise.all([
+      turnover(["131","132","133","134"],"credit"),  // amortization credit turnover (non-cash add-back)
+      netDbr("36","37"),               // Δ receivables (increase = use of cash)
+      netDbr("20","21","22","23","25","26","27","28"), // Δ inventory
+      netCrd("63","68","685"),         // Δ payables (increase = source of cash)
+      turnover(["311"],"debit"),        // cash inflows 311
+      turnover(["30"],"debit") - turnover(["30"],"credit"), // net cash 30
+      turnover(["311"],"debit") - turnover(["311"],"credit"), // net cash 311
+    ]);
+
+    // Revenue receipts (operational inflows to 30x/31x from 70x via 36x)
+    const [cashInflow, cashOutflow] = await Promise.all([
+      turnover(["30","31","33"],"debit"),
+      turnover(["30","31","33"],"credit"),
+    ]);
+
+    const opCashFlow = cashInflow - cashOutflow - (await turnover(["10","11","12","15"],"debit"))
+      + (await turnover(["10","11","12","15"],"credit")); // rough operating
+
+    // Better: compute direct from bank/cash movements by source accounts
+    // Use receipts to cash (30x/31x debit) from customers (36x,70x) minus payments to suppliers etc.
+    const [recFromCust, paidSupp, paidSalary, paidTax, paidOther] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '30%' OR dt.code LIKE '31%' OR dt.code LIKE '33%')
+          AND (ct.code LIKE '36%' OR ct.code LIKE '70%' OR ct.code LIKE '71%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '63%' OR dt.code LIKE '68%')
+          AND (ct.code LIKE '30%' OR ct.code LIKE '31%' OR ct.code LIKE '33%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '66%')
+          AND (ct.code LIKE '30%' OR ct.code LIKE '31%' OR ct.code LIKE '33%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '64%' OR dt.code LIKE '65%')
+          AND (ct.code LIKE '30%' OR ct.code LIKE '31%' OR ct.code LIKE '33%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '92%' OR dt.code LIKE '93%' OR dt.code LIKE '94%' OR dt.code LIKE '97%')
+          AND (ct.code LIKE '30%' OR ct.code LIKE '31%' OR ct.code LIKE '33%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+    ]);
+
+    const netOperating = recFromCust - paidSupp - paidSalary - paidTax - paidOther;
+
+    // ── Investing ──────────────────────────────────────────────────────────
+    const [capex, assetSales] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '10%' OR dt.code LIKE '11%' OR dt.code LIKE '12%' OR dt.code LIKE '15%')
+          AND (ct.code LIKE '30%' OR ct.code LIKE '31%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '30%' OR dt.code LIKE '31%')
+          AND (ct.code LIKE '74%' OR ct.code LIKE '76%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+    ]);
+    const netInvesting = assetSales - capex;
+
+    // ── Financing ──────────────────────────────────────────────────────────
+    const [loanIn, loanOut, equityIn] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '30%' OR dt.code LIKE '31%')
+          AND (ct.code LIKE '50%' OR ct.code LIKE '60%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '50%' OR dt.code LIKE '60%')
+          AND (ct.code LIKE '30%' OR ct.code LIKE '31%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+      pool.query(`SELECT COALESCE(SUM(e.amount),0) AS v FROM acc_entries e
+        JOIN acc_accounts dt ON dt.id=e.debit_account_id
+        JOIN acc_accounts ct ON ct.id=e.credit_account_id
+        WHERE e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+          AND (dt.code LIKE '30%' OR dt.code LIKE '31%')
+          AND (ct.code LIKE '40%' OR ct.code LIKE '42%')`,
+        [orgId, fromDate, toDate]).then(r => parseFloat(r.rows[0].v)),
+    ]);
+    const netFinancing = loanIn - loanOut + equityIn;
+
+    // Cash at beginning/end
+    const cashAtStart = await pool.query(`
+      SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE 0 END)
+            -SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) AS v
+      FROM acc_accounts a
+      LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+        AND e.organization_id=$1 AND e.entry_date<$2
+      WHERE a.organization_id=$1 AND (a.code LIKE '30%' OR a.code LIKE '31%' OR a.code LIKE '33%')
+    `, [orgId, fromDate]).then(r => parseFloat(r.rows[0].v));
+
+    const cashAtEnd = await pool.query(`
+      SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE 0 END)
+            -SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) AS v
+      FROM acc_accounts a
+      LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+        AND e.organization_id=$1 AND e.entry_date<=$2
+      WHERE a.organization_id=$1 AND (a.code LIKE '30%' OR a.code LIKE '31%' OR a.code LIKE '33%')
+    `, [orgId, toDate]).then(r => parseFloat(r.rows[0].v));
+
+    res.json({
+      period: { year: y, month: m, from: fromDate, to: toDate },
+      operating: {
+        net: netOperating,
+        receipts_from_customers: recFromCust,
+        payments_to_suppliers:   -paidSupp,
+        payments_salary:         -paidSalary,
+        payments_tax:            -paidTax,
+        payments_other:          -paidOther,
+      },
+      investing: {
+        net:        netInvesting,
+        capex:      -capex,
+        asset_sales: assetSales,
+      },
+      financing: {
+        net:       netFinancing,
+        loan_in:   loanIn,
+        loan_out:  -loanOut,
+        equity_in: equityIn,
+      },
+      cash_at_start: cashAtStart,
+      cash_at_end:   cashAtEnd,
+      net_change:    netOperating + netInvesting + netFinancing,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── KPI Snapshot — Management Dashboard ────────────────────────────────────
+router.get("/reports/kpi-snapshot", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { year, month } = req.query as Record<string, string>;
+    const y = parseInt(year ?? new Date().getFullYear().toString());
+    const m = parseInt(month ?? (new Date().getMonth() + 1).toString());
+
+    const fromDate = `${y}-${String(m).padStart(2,"0")}-01`;
+    const toDate   = new Date(y, m, 0).toISOString().split("T")[0];
+    const prevM    = m === 1 ? 12 : m - 1;
+    const prevY    = m === 1 ? y - 1 : y;
+    const prevFrom = `${prevY}-${String(prevM).padStart(2,"0")}-01`;
+    const prevTo   = new Date(prevY, prevM, 0).toISOString().split("T")[0];
+
+    const netCredit = async (codes: string[], from: string, to: string) => {
+      const likes = codes.map((_, i) => `a.code LIKE $${i+4}`).join(" OR ");
+      const { rows } = await pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END)
+                        -SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE 0 END),0) AS v
+         FROM acc_accounts a
+         LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+           AND e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+         WHERE a.organization_id=$1 AND (${likes})`,
+        [orgId, from, to, ...codes.map(c => c+"%")],
+      );
+      return parseFloat(rows[0]?.v ?? 0);
+    };
+    const netDebit = async (codes: string[], from: string, to: string) => {
+      const likes = codes.map((_, i) => `a.code LIKE $${i+4}`).join(" OR ");
+      const { rows } = await pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE 0 END)
+                        -SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) AS v
+         FROM acc_accounts a
+         LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+           AND e.organization_id=$1 AND e.entry_date>=$2 AND e.entry_date<=$3
+         WHERE a.organization_id=$1 AND (${likes})`,
+        [orgId, from, to, ...codes.map(c => c+"%")],
+      );
+      return parseFloat(rows[0]?.v ?? 0);
+    };
+    const balAsOf = async (codes: string[], date: string) => {
+      const likes = codes.map((_, i) => `a.code LIKE $${i+3}`).join(" OR ");
+      const { rows } = await pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN e.debit_account_id=a.id THEN e.amount ELSE 0 END)
+                        -SUM(CASE WHEN e.credit_account_id=a.id THEN e.amount ELSE 0 END),0) AS v
+         FROM acc_accounts a
+         LEFT JOIN acc_entries e ON (e.debit_account_id=a.id OR e.credit_account_id=a.id)
+           AND e.organization_id=$1 AND e.entry_date<=$2
+         WHERE a.organization_id=$1 AND (${likes})`,
+        [orgId, date, ...codes.map(c => c+"%")],
+      );
+      return parseFloat(rows[0]?.v ?? 0);
+    };
+
+    const [
+      revenue, cogs, adminExp, sga, amort,
+      revPrev, cogsPrev, adminPrev,
+      cash, receivables, payables, inventory,
+    ] = await Promise.all([
+      netCredit(["701","702","703"], fromDate, toDate),
+      netDebit(["901","902","903"], fromDate, toDate),
+      netDebit(["92"], fromDate, toDate),
+      netDebit(["93"], fromDate, toDate),
+      netDebit(["131","132","133","134"], fromDate, toDate),
+      netCredit(["701","702","703"], prevFrom, prevTo),
+      netDebit(["901","902","903"], prevFrom, prevTo),
+      netDebit(["92"], prevFrom, prevTo),
+      balAsOf(["30","31","33"], toDate),
+      balAsOf(["36","37"], toDate),
+      balAsOf(["63","64","65","66","68"], toDate),
+      balAsOf(["20","21","22","23","25","26","27","28"], toDate),
+    ]);
+
+    const grossProfit   = revenue - cogs;
+    const ebitda        = grossProfit - adminExp - sga + amort;
+    const grossProfitPrev = revPrev - cogsPrev;
+    const grossMargin   = revenue > 0 ? grossProfit / revenue : 0;
+    const prevMargin    = revPrev > 0 ? grossProfitPrev / revPrev : 0;
+    const revenueGrowth = revPrev > 0 ? (revenue - revPrev) / revPrev : 0;
+    const ebitdaMargin  = revenue > 0 ? ebitda / revenue : 0;
+
+    res.json({
+      period: { year: y, month: m },
+      kpi: {
+        revenue,       revPrev,    revenueGrowth,
+        grossProfit,   grossProfitPrev, grossMargin, prevMargin,
+        ebitda,        ebitdaMargin,
+        adminExp,      sga,        amort,
+        cash,          receivables, payables, inventory,
+      },
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // BANK STATEMENTS — банківська виписка
 // ═══════════════════════════════════════════════════════════════════════════

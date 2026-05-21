@@ -34,6 +34,7 @@ import {
   GanttChart, ArrowUpRight, SquareCheck, Square, Layers,
   PlugZap, Timer, Play, Pause, FileSpreadsheet, Webhook, Globe,
   ChevronUp, Eye, EyeOff, Link, Copy, Check, BarChart2,
+  Activity, Percent, Banknote, Package,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
@@ -4510,23 +4511,34 @@ function AccVatTab() {
 // ─── ACC: REPORTS (ЗВІТИ) ─────────────────────────────────────────────────────
 function AccReportsTab() {
   const now = new Date();
-  const [reportType, setReportType] = useState<"osv" | "pnl" | "balance">("osv");
-  const [year, setYear]   = useState(String(now.getFullYear()));
-  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [reportType, setReportType] = useState<"kpi"|"osv"|"pnl"|"balance"|"cashflow">("kpi");
+  const [year, setYear]     = useState(String(now.getFullYear()));
+  const [month, setMonth]   = useState(String(now.getMonth() + 1));
   const [asDate, setAsDate] = useState(format(now, "yyyy-MM-dd"));
+  const [cmpDate, setCmpDate] = useState(format(new Date(now.getFullYear()-1, now.getMonth(), now.getDate()), "yyyy-MM-dd"));
+  const [cmpYear, setCmpYear] = useState(String(now.getFullYear() - 1));
+  const [showCmp, setShowCmp] = useState(false);
   const qc = useQueryClient();
 
   const osvPath  = `reports/trial-balance?year=${year}&month=${month}`;
   const pnlPath  = `reports/profit-loss?year=${year}&month=${month}`;
-  const balPath  = `reports/balance-sheet?date=${asDate}`;
+  const pnlCmpPath = `reports/profit-loss?year=${cmpYear}&month=${month}`;
+  const balPath  = `reports/balance-sheet-f1?date=${asDate}${showCmp ? `&compare_date=${cmpDate}` : ""}`;
+  const cfPath   = `reports/cashflow?year=${year}&month=${month}`;
+  const kpiPath  = `reports/kpi-snapshot?year=${year}&month=${month}`;
 
-  const { data: osvRaw, isLoading: osvLoading } = useQuery({ queryKey: ["acc-ledger", osvPath], queryFn: () => accFetch(osvPath), staleTime: 30_000, enabled: reportType === "osv" });
-  const { data: pnlData, isLoading: pnlLoading } = useQuery({ queryKey: ["acc-ledger", pnlPath], queryFn: () => accFetch(pnlPath), staleTime: 30_000, enabled: reportType === "pnl" });
-  const { data: balData, isLoading: balLoading } = useQuery({ queryKey: ["acc-ledger", balPath], queryFn: () => accFetch(balPath), staleTime: 30_000, enabled: reportType === "balance" });
+  const { data: osvRaw,  isLoading: osvLoading  } = useQuery({ queryKey: ["acc-ledger", osvPath],    queryFn: () => accFetch(osvPath),    staleTime: 30_000, enabled: reportType === "osv" });
+  const { data: pnlData, isLoading: pnlLoading  } = useQuery({ queryKey: ["acc-ledger", pnlPath],    queryFn: () => accFetch(pnlPath),    staleTime: 30_000, enabled: reportType === "pnl" });
+  const { data: pnlCmp,  isLoading: pnlCmpLoad  } = useQuery({ queryKey: ["acc-ledger", pnlCmpPath], queryFn: () => accFetch(pnlCmpPath), staleTime: 30_000, enabled: reportType === "pnl" && showCmp });
+  const { data: balData, isLoading: balLoading  } = useQuery({ queryKey: ["acc-ledger", balPath],    queryFn: () => accFetch(balPath),    staleTime: 30_000, enabled: reportType === "balance" });
+  const { data: cfData,  isLoading: cfLoading   } = useQuery({ queryKey: ["acc-ledger", cfPath],     queryFn: () => accFetch(cfPath),     staleTime: 30_000, enabled: reportType === "cashflow" });
+  const { data: kpiData, isLoading: kpiLoading  } = useQuery({ queryKey: ["acc-ledger", kpiPath],    queryFn: () => accFetch(kpiPath),    staleTime: 30_000, enabled: reportType === "kpi" });
 
   const osvData: any[] = osvRaw?.rows ?? (Array.isArray(osvRaw) ? osvRaw : []);
-  const loading = osvLoading || pnlLoading || balLoading;
-  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const loading = osvLoading || pnlLoading || balLoading || cfLoading || kpiLoading;
+  const fmt  = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct  = (n: any) => `${(Number(n||0)*100).toFixed(1)}%`;
+  const chg  = (n: any) => { const v=Number(n||0); return v>=0?`+${pct(v)}`:pct(v); };
 
   const MONTHS = [
     ["1","Січень"],["2","Лютий"],["3","Березень"],["4","Квітень"],
@@ -4539,23 +4551,34 @@ function AccReportsTab() {
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
+      {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex border rounded-lg overflow-hidden">
+        <div className="flex border border-gray-200 rounded-lg overflow-hidden shadow-sm">
           {([
-            { id: "osv",     label: "ОСВ" },
-            { id: "pnl",     label: "Форма 2 (Ф2)" },
-            { id: "balance", label: "Баланс (Ф1)" },
+            { id:"kpi",      label:"Огляд KPI" },
+            { id:"osv",      label:"ОСВ" },
+            { id:"pnl",      label:"Ф2 — Фін. результати" },
+            { id:"balance",  label:"Ф1 — Баланс" },
+            { id:"cashflow", label:"Ф3 — Рух коштів" },
           ] as const).map(({ id, label }) => (
             <button key={id} onClick={() => setReportType(id)}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${reportType === id ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+              className={`px-3.5 py-2 text-sm font-medium transition-colors ${reportType === id ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
               {label}
             </button>
           ))}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {reportType !== "balance" ? (
+          {reportType === "balance" ? (
+            <>
+              <Input type="date" value={asDate} onChange={e => setAsDate(e.target.value)} className="w-40 h-8 text-xs" />
+              <button onClick={() => setShowCmp(v => !v)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${showCmp ? "bg-purple-600 text-white border-purple-600" : "bg-white text-gray-500 border-gray-300 hover:border-purple-400"}`}>
+                Порівняти
+              </button>
+              {showCmp && <Input type="date" value={cmpDate} onChange={e => setCmpDate(e.target.value)} className="w-40 h-8 text-xs" />}
+            </>
+          ) : (
             <>
               <Select value={month} onValueChange={setMonth}>
                 <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -4565,21 +4588,113 @@ function AccReportsTab() {
                 <SelectTrigger className="w-24 h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>{years.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}</SelectContent>
               </Select>
+              {reportType === "pnl" && (
+                <>
+                  <button onClick={() => setShowCmp(v => !v)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${showCmp ? "bg-purple-600 text-white border-purple-600" : "bg-white text-gray-500 border-gray-300 hover:border-purple-400"}`}>
+                    Порівняти рік
+                  </button>
+                  {showCmp && (
+                    <Select value={cmpYear} onValueChange={setCmpYear}>
+                      <SelectTrigger className="w-24 h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>{years.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}</SelectContent>
+                    </Select>
+                  )}
+                </>
+              )}
             </>
-          ) : (
-            <Input type="date" value={asDate} onChange={e => setAsDate(e.target.value)} className="w-40 h-8 text-xs" />
           )}
           <Button variant="outline" size="sm" className="h-8 gap-1.5"
-            onClick={() => qc.invalidateQueries({ queryKey: ["acc-ledger", reportType === "osv" ? osvPath : reportType === "pnl" ? pnlPath : balPath] })}>
+            onClick={() => qc.invalidateQueries({ queryKey: ["acc-ledger"] })}>
             <RefreshCw className="w-3.5 h-3.5" /> Оновити
           </Button>
         </div>
       </div>
 
-      {loading ? (
+      {(reportType === "kpi" ? kpiLoading : reportType === "osv" ? osvLoading : reportType === "pnl" ? pnlLoading : reportType === "balance" ? balLoading : cfLoading) ? (
         <div className="py-16 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /></div>
       ) : (
         <>
+          {/* ═══════════════════════════════════════════════════════════════
+              KPI — Управлінський огляд
+          ═══════════════════════════════════════════════════════════════ */}
+          {reportType === "kpi" && (() => {
+            const k = kpiData?.kpi;
+            if (!k) return <div className="py-12 text-center text-sm text-gray-400">Проводок за обраний місяць не знайдено</div>;
+            const KPICard = ({ label, value, prev, note, color, icon: Icon, isRatio }: any) => {
+              const diff = prev != null ? value - prev : null;
+              const pctDiff = prev != null && prev !== 0 ? (value - prev) / Math.abs(prev) : null;
+              return (
+                <Card className={`border-${color}-200 bg-${color}-50/40`}>
+                  <CardContent className="p-4">
+                    <div className={`flex items-center gap-1.5 text-xs font-medium text-${color}-700 mb-2`}>
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{label}</span>
+                    </div>
+                    <div className={`text-2xl font-bold text-${color}-800 mb-1`}>
+                      {isRatio ? pct(value) : fmt(value)}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      {note && <span className="text-[10px] text-gray-400">{note}</span>}
+                      {pctDiff != null && (
+                        <span className={`text-xs font-semibold flex items-center gap-0.5 ${pctDiff >= 0 ? "text-green-600" : "text-red-500"}`}>
+                          {pctDiff >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          {chg(pctDiff)} vs попер. міс.
+                        </span>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            };
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  <KPICard label="Дохід від реалізації" value={k.revenue}     prev={k.revPrev}     color="green"  icon={TrendingUp}   note="Р2000 НП(С)БО 1" />
+                  <KPICard label="Валовий прибуток"     value={k.grossProfit} prev={k.grossProfitPrev} color="blue" icon={BarChart3}   note="Р2090" />
+                  <KPICard label="EBITDA"               value={k.ebitda}      prev={null}           color="purple" icon={Activity}     note="Операц. прибуток + амортизація" />
+                  <KPICard label="Маржа валового прибутку" value={k.grossMargin} prev={k.prevMargin} color="indigo" icon={Percent}   note="GP / Revenue" isRatio />
+                  <KPICard label="Гроші та еквіваленти" value={k.cash}        prev={null}           color="emerald" icon={Banknote}  note="Рах. 30, 31, 33 (залишок)" />
+                  <KPICard label="Дебіторська заборг."  value={k.receivables} prev={null}           color="orange" icon={Clock}     note="Рах. 36, 37 (залишок)" />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <Card className="border-red-200 bg-red-50/30">
+                    <CardContent className="p-4">
+                      <div className="text-xs text-red-700 font-medium flex items-center gap-1.5 mb-2"><CreditCard className="w-3.5 h-3.5" />Кредиторська заборг.</div>
+                      <div className="text-2xl font-bold text-red-800">{fmt(Math.abs(k.payables))}</div>
+                      <div className="text-[10px] text-gray-400 mt-1">Рах. 63, 64, 65, 66, 68 (залишок)</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-yellow-200 bg-yellow-50/30">
+                    <CardContent className="p-4">
+                      <div className="text-xs text-yellow-700 font-medium flex items-center gap-1.5 mb-2"><Package className="w-3.5 h-3.5" />Запаси</div>
+                      <div className="text-2xl font-bold text-yellow-800">{fmt(k.inventory)}</div>
+                      <div className="text-[10px] text-gray-400 mt-1">Рах. 20–28 (залишок)</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-gray-200 bg-gray-50/40">
+                    <CardContent className="p-4">
+                      <div className="text-xs text-gray-600 font-medium flex items-center gap-1.5 mb-3"><BarChart3 className="w-3.5 h-3.5" />Розбивка витрат</div>
+                      {[
+                        { label: "Адмін. витрати (92)", val: k.adminExp, color: "bg-blue-500" },
+                        { label: "Витрати на збут (93)", val: k.sga,      color: "bg-purple-500" },
+                        { label: "Амортизація",          val: k.amort,    color: "bg-gray-400" },
+                      ].map(x => (
+                        <div key={x.label} className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] text-gray-500 w-36 shrink-0">{x.label}</span>
+                          <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                            <div className={`${x.color} h-1.5 rounded-full`} style={{ width: `${k.revenue > 0 ? Math.min(100, x.val/k.revenue*100) : 0}%` }} />
+                          </div>
+                          <span className="text-[10px] font-medium text-gray-700 w-20 text-right">{fmt(x.val)}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* ═══ ОСВ ═══ */}
           {reportType === "osv" && (
             <Card>
@@ -4656,189 +4771,369 @@ function AccReportsTab() {
             </Card>
           )}
 
-          {/* ═══ Ф2 — Звіт про фінансові результати ═══ */}
-          {reportType === "pnl" && pnlData && (
-            <div className="space-y-4">
-              {/* KPI */}
-              <div className="grid grid-cols-3 gap-4">
-                <Card className="border-green-200 bg-green-50">
-                  <CardContent className="p-4">
-                    <div className="text-xs text-green-700 font-medium mb-1 flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5" />Чистий дохід (Р2000)</div>
-                    <div className="text-2xl font-bold text-green-700">{fmt(pnlData.rows?.find((r:any)=>r.code==="2000")?.value ?? 0)}</div>
-                  </CardContent>
-                </Card>
-                <Card className="border-red-200 bg-red-50">
-                  <CardContent className="p-4">
-                    <div className="text-xs text-red-700 font-medium mb-1 flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5" />Валовий прибуток (Р2090)</div>
-                    <div className="text-2xl font-bold text-red-700">{fmt(pnlData.rows?.find((r:any)=>r.code==="2090")?.value ?? 0)}</div>
-                  </CardContent>
-                </Card>
-                <Card className={`border-2 ${(pnlData.netProfit ?? 0) >= 0 ? "border-blue-300 bg-blue-50" : "border-orange-300 bg-orange-50"}`}>
-                  <CardContent className="p-4">
-                    <div className={`text-xs font-medium mb-1 ${(pnlData.netProfit ?? 0) >= 0 ? "text-blue-700" : "text-orange-700"}`}>
-                      Чистий {(pnlData.netProfit ?? 0) >= 0 ? "прибуток" : "збиток"} (Р2350)
-                    </div>
-                    <div className={`text-2xl font-bold ${(pnlData.netProfit ?? 0) >= 0 ? "text-blue-700" : "text-orange-700"}`}>
-                      {fmt(Math.abs(pnlData.netProfit ?? 0))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card>
-                <CardHeader className="pb-2 border-b">
-                  <CardTitle className="text-sm font-bold text-gray-800">
-                    Звіт про фінансові результати — НП(С)БО 1, Форма 2
-                    <span className="ml-2 text-xs font-normal text-gray-400">{MONTHS.find(m=>m[0]===month)?.[1]} {year}</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader className="bg-gray-50">
-                      <TableRow>
-                        <TableHead className="w-20">Рядок</TableHead>
-                        <TableHead>Стаття</TableHead>
-                        <TableHead className="text-right w-40">Сума, грн</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(() => {
-                        let lastSection = "";
-                        return (pnlData.rows ?? []).map((r: any, i: number) => {
-                          const sectionChanged = r.section !== lastSection;
-                          if (sectionChanged) lastSection = r.section;
-                          return (
-                            <>
-                              {sectionChanged && (
-                                <TableRow key={`sec-${r.section}`} className="bg-gray-100 border-t border-gray-200">
-                                  <TableCell colSpan={3} className="text-[10px] font-bold text-gray-500 uppercase tracking-wide py-1.5 px-4">
-                                    {PNL_SECTIONS[r.section]}
+          {/* ═══════════════════════════════════════════════════════════════
+              Ф2 — Звіт про фінансові результати (з порівнянням)
+          ═══════════════════════════════════════════════════════════════ */}
+          {reportType === "pnl" && pnlData && (() => {
+            const cmpRows: any[] = pnlCmp?.rows ?? [];
+            const cmpVal = (code: string) => cmpRows.find((r: any) => r.code === code)?.value ?? null;
+            const colCount = showCmp ? 5 : 3;
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    { label: "Чистий дохід (Р2000)", code: "2000", color: "green", icon: TrendingUp },
+                    { label: "Валовий прибуток (Р2090)", code: "2090", color: "blue", icon: BarChart3 },
+                    { label: pnlData.netProfit >= 0 ? "Чистий прибуток (Р2350)" : "Чистий збиток (Р2350)", code: "2350", color: pnlData.netProfit >= 0 ? "indigo" : "orange", icon: pnlData.netProfit >= 0 ? TrendingUp : TrendingDown },
+                  ].map(({ label, code, color, icon: Icon }) => {
+                    const val  = pnlData.rows?.find((r:any)=>r.code===code)?.value ?? 0;
+                    const prev = cmpVal(code);
+                    const diff = prev != null ? val - prev : null;
+                    return (
+                      <Card key={code} className={`border-${color}-200 bg-${color}-50/40`}>
+                        <CardContent className="p-4">
+                          <div className={`text-xs text-${color}-700 font-medium mb-1 flex items-center gap-1.5`}><Icon className="w-3.5 h-3.5" />{label}</div>
+                          <div className={`text-2xl font-bold text-${color}-700`}>{fmt(Math.abs(val))}</div>
+                          {diff != null && prev != null && (
+                            <div className={`text-xs mt-1 flex items-center gap-1 ${diff >= 0 ? "text-green-600" : "text-red-500"}`}>
+                              {diff >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                              {diff >= 0 ? "+" : ""}{fmt(diff)} vs {cmpYear}р.
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+                <Card>
+                  <CardHeader className="pb-2 border-b">
+                    <CardTitle className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                      Звіт про фінансові результати — НП(С)БО 1, Форма 2
+                      <span className="ml-2 text-xs font-normal text-gray-400">{MONTHS.find(m=>m[0]===month)?.[1]} {year}</span>
+                      {showCmp && <Badge variant="outline" className="text-[10px] text-purple-700 border-purple-300">Порівняння {cmpYear}р.</Badge>}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader className="bg-gray-50">
+                        <TableRow>
+                          <TableHead className="w-16">Рядок</TableHead>
+                          <TableHead>Стаття</TableHead>
+                          <TableHead className="text-right w-36">{year}, грн</TableHead>
+                          {showCmp && <TableHead className="text-right w-36 text-purple-600">{cmpYear}, грн</TableHead>}
+                          {showCmp && <TableHead className="text-right w-28 text-gray-500">Δ</TableHead>}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(() => {
+                          let lastSec = "";
+                          return (pnlData.rows ?? []).map((r: any, i: number) => {
+                            const sec = r.section !== lastSec;
+                            if (sec) lastSec = r.section;
+                            const cv  = cmpVal(r.code);
+                            const delta = cv != null ? r.value - cv : null;
+                            return (
+                              <>
+                                {sec && (
+                                  <TableRow key={`s-${r.section}`} className="bg-gray-100">
+                                    <TableCell colSpan={colCount} className="text-[10px] font-bold text-gray-500 uppercase tracking-wide py-1.5 px-4">
+                                      {PNL_SECTIONS[r.section]}
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                                <TableRow key={i} className={`hover:bg-gray-50 ${r.bold ? "bg-blue-50/40" : ""} ${r.final ? "bg-blue-100 border-t-2 border-blue-300" : ""}`}>
+                                  <TableCell className={`font-mono text-xs text-center ${r.bold ? "font-bold text-blue-800" : "text-gray-400"}`}>{r.code}</TableCell>
+                                  <TableCell className={`text-xs ${r.bold ? "font-semibold text-gray-900" : "text-gray-700"} ${r.final ? "font-bold text-blue-900" : ""}`}>{r.label}</TableCell>
+                                  <TableCell className={`text-right font-mono text-sm ${r.final ? "font-bold "+(r.value>=0?"text-blue-800":"text-red-700") : r.bold ? "font-semibold text-gray-800" : (r.value??0)>=0 ? "text-gray-700":"text-red-600"}`}>
+                                    {(r.value??0) !== 0 ? fmt(r.value) : "—"}
                                   </TableCell>
+                                  {showCmp && <TableCell className="text-right text-xs text-purple-600 font-mono">{cv != null && cv !== 0 ? fmt(cv) : "—"}</TableCell>}
+                                  {showCmp && <TableCell className={`text-right text-xs font-mono ${delta != null && delta > 0 ? "text-green-600" : delta != null && delta < 0 ? "text-red-500" : "text-gray-400"}`}>
+                                    {delta != null && delta !== 0 ? `${delta > 0 ? "+" : ""}${fmt(delta)}` : "—"}
+                                  </TableCell>}
                                 </TableRow>
-                              )}
-                              <TableRow key={i} className={`hover:bg-gray-50 ${r.bold ? "bg-blue-50/40" : ""} ${r.final ? "bg-blue-100 border-t-2 border-blue-300" : ""}`}>
-                                <TableCell className={`font-mono text-xs text-center ${r.bold ? "font-bold text-blue-800" : "text-gray-500"}`}>{r.code}</TableCell>
-                                <TableCell className={`text-xs ${r.bold ? "font-semibold text-gray-900" : "text-gray-700"} ${r.final ? "font-bold text-blue-900" : ""}`}>{r.label}</TableCell>
-                                <TableCell className={`text-right font-mono text-sm ${
-                                  r.final ? "font-bold " + ((r.value??0) >= 0 ? "text-blue-800" : "text-red-700") :
-                                  r.bold ? "font-semibold text-gray-800" :
-                                  (r.value ?? 0) >= 0 ? "text-gray-700" : "text-red-600"
-                                }`}>
-                                  {(r.value ?? 0) !== 0 ? fmt(r.value) : "—"}
-                                </TableCell>
-                              </TableRow>
-                            </>
-                          );
-                        });
-                      })()}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          {/* Balance Sheet */}
-          {reportType === "balance" && balData && (
-            <div className="grid grid-cols-2 gap-4">
-              {/* АКТИВ */}
-              <Card>
-                <CardHeader className="pb-2 border-b border-blue-100 bg-blue-50/50 rounded-t-lg">
-                  <CardTitle className="text-sm font-bold text-blue-800 flex items-center justify-between">
-                    <span>АКТИВ</span>
-                    <span className="text-lg">{fmt(balData.totalAssets)} грн</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader className="bg-blue-50">
-                      <TableRow>
-                        <TableHead className="w-20">Рахунок</TableHead>
-                        <TableHead>Стаття</TableHead>
-                        <TableHead className="text-right w-36">Сума, грн</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(balData.assets?.length === 0) ? (
-                        <TableRow><TableCell colSpan={3} className="text-center py-4 text-gray-400 text-sm">Активи відсутні</TableCell></TableRow>
-                      ) : balData.assets?.map((r: any, i: number) => (
-                        <TableRow key={i} className="hover:bg-blue-50/50">
-                          <TableCell className="font-mono text-xs font-bold text-blue-800">{r.code}</TableCell>
-                          <TableCell className="text-xs">{r.name}</TableCell>
-                          <TableCell className="text-right text-xs font-semibold text-blue-700">{fmt(r.balance)}</TableCell>
-                        </TableRow>
-                      ))}
-                      {balData.assets?.length > 0 && (
-                        <TableRow className="bg-blue-100 border-t-2 border-blue-300">
-                          <TableCell colSpan={2} className="text-xs font-bold text-blue-900">Баланс актив</TableCell>
-                          <TableCell className="text-right text-sm font-bold text-blue-900">{fmt(balData.totalAssets)}</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              {/* ПАСИВ */}
-              <Card>
-                <CardHeader className="pb-2 border-b border-purple-100 bg-purple-50/50 rounded-t-lg">
-                  <CardTitle className="text-sm font-bold text-purple-800 flex items-center justify-between">
-                    <span>ПАСИВ</span>
-                    <span className="text-lg">{fmt(balData.totalLiabilities + balData.totalEquity)} грн</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader className="bg-purple-50">
-                      <TableRow>
-                        <TableHead className="w-20">Рахунок</TableHead>
-                        <TableHead>Стаття</TableHead>
-                        <TableHead className="text-right w-36">Сума, грн</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(balData.equity?.length === 0 && balData.liabilities?.length === 0) ? (
-                        <TableRow><TableCell colSpan={3} className="text-center py-4 text-gray-400 text-sm">Пасиви відсутні</TableCell></TableRow>
-                      ) : null}
-                      {balData.equity?.map((r: any, i: number) => (
-                        <TableRow key={`eq-${i}`} className="hover:bg-purple-50/50">
-                          <TableCell className="font-mono text-xs font-bold text-purple-800">{r.code}</TableCell>
-                          <TableCell className="text-xs"><span className="text-purple-600 text-[10px] mr-1">[ВК]</span>{r.name}</TableCell>
-                          <TableCell className="text-right text-xs font-semibold text-purple-700">{fmt(Math.abs(r.balance))}</TableCell>
-                        </TableRow>
-                      ))}
-                      {balData.liabilities?.map((r: any, i: number) => (
-                        <TableRow key={`li-${i}`} className="hover:bg-purple-50/50">
-                          <TableCell className="font-mono text-xs font-bold text-purple-800">{r.code}</TableCell>
-                          <TableCell className="text-xs"><span className="text-orange-500 text-[10px] mr-1">[Зб]</span>{r.name}</TableCell>
-                          <TableCell className="text-right text-xs font-semibold text-orange-700">{fmt(Math.abs(r.balance))}</TableCell>
-                        </TableRow>
-                      ))}
-                      {(balData.equity?.length > 0 || balData.liabilities?.length > 0) && (
-                        <TableRow className="bg-purple-100 border-t-2 border-purple-300">
-                          <TableCell colSpan={2} className="text-xs font-bold text-purple-900">Баланс пасив</TableCell>
-                          <TableCell className="text-right text-sm font-bold text-purple-900">{fmt(balData.totalLiabilities + balData.totalEquity)}</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              {/* Balance check */}
-              <div className={`col-span-2 flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
-                Math.abs(balData.totalAssets - balData.totalLiabilities - balData.totalEquity) < 0.01
-                  ? "bg-green-50 text-green-700 border border-green-200"
-                  : "bg-orange-50 text-orange-700 border border-orange-200"
-              }`}>
-                {Math.abs(balData.totalAssets - balData.totalLiabilities - balData.totalEquity) < 0.01 ? (
-                  <><CheckCircle2 className="w-4 h-4" /> Баланс зійшовся: Актив = Пасив = {fmt(balData.totalAssets)} грн</>
-                ) : (
-                  <><AlertCircle className="w-4 h-4" /> Баланс не зійшовся. Різниця: {fmt(Math.abs(balData.totalAssets - balData.totalLiabilities - balData.totalEquity))} грн</>
-                )}
+                              </>
+                            );
+                          });
+                        })()}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
               </div>
-            </div>
-          )}
+            );
+          })()}
+
+          {/* ═══════════════════════════════════════════════════════════════
+              Ф1 — Баланс (НП(С)БО структура, рядки 1000–1900)
+          ═══════════════════════════════════════════════════════════════ */}
+          {reportType === "balance" && balData && (() => {
+            const cur = balData.current;
+            const cmp = balData.compare;
+            const hasCmp = !!cmp;
+            const cmpAssetVal  = (code: string) => cmp?.assets?.find((r:any)=>r.code===code)?.value ?? null;
+            const cmpEqVal     = (code: string) => cmp?.equity?.find((r:any)=>r.code===code)?.value ?? null;
+            const cmpLtVal     = (code: string) => cmp?.longterm?.find((r:any)=>r.code===code)?.value ?? null;
+            const cmpCurVal    = (code: string) => cmp?.current?.find((r:any)=>r.code===code)?.value ?? null;
+
+            const AssetSection = ({ title, rows, sectionRows, cmpFn }: any) => (
+              <>
+                <TableRow className="bg-blue-100/60 border-y border-blue-200">
+                  <TableCell colSpan={hasCmp ? 4 : 3} className="text-[10px] font-bold text-blue-800 uppercase tracking-wide py-1.5 px-4">{title}</TableCell>
+                </TableRow>
+                {(sectionRows ?? rows).map((r: any) => {
+                  const cv = cmpFn ? cmpFn(r.code) : null;
+                  const delta = cv != null ? r.value - cv : null;
+                  if (!r.subtotal && !r.total && r.value === 0 && (cv == null || cv === 0)) return null;
+                  return (
+                    <TableRow key={r.code} className={`${r.total ? "bg-blue-200 border-t-2 border-blue-400 font-bold" : r.subtotal ? "bg-blue-50 border-t border-blue-200 font-semibold" : "hover:bg-blue-50/30"}`}>
+                      <TableCell className={`font-mono text-xs text-center ${r.total||r.subtotal ? "text-blue-900 font-bold" : "text-blue-700"}`}>{r.code}</TableCell>
+                      <TableCell className={`text-xs ${r.total||r.subtotal ? "font-semibold text-blue-900" : "text-gray-700"}`}>{r.label}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm ${r.total||r.subtotal ? "font-bold text-blue-900" : "text-blue-800"}`}>
+                        {r.value !== 0 ? fmt(r.value) : "—"}
+                      </TableCell>
+                      {hasCmp && <TableCell className="text-right text-xs font-mono text-purple-600">{cv != null && cv !== 0 ? fmt(cv) : "—"}</TableCell>}
+                      {hasCmp && <TableCell className={`text-right text-xs font-mono ${delta != null && delta > 0 ? "text-green-600" : delta != null && delta < 0 ? "text-red-500" : "text-gray-300"}`}>
+                        {delta != null && delta !== 0 ? `${delta>0?"+":""}${fmt(delta)}` : ""}
+                      </TableCell>}
+                    </TableRow>
+                  );
+                })}
+              </>
+            );
+
+            const PasSection = ({ title, rows, cmpFn, colorClass = "purple" }: any) => (
+              <>
+                <TableRow className={`bg-${colorClass}-100/60 border-y border-${colorClass}-200`}>
+                  <TableCell colSpan={hasCmp ? 4 : 3} className={`text-[10px] font-bold text-${colorClass}-800 uppercase tracking-wide py-1.5 px-4`}>{title}</TableCell>
+                </TableRow>
+                {rows.map((r: any) => {
+                  const cv = cmpFn ? cmpFn(r.code) : null;
+                  const delta = cv != null ? r.value - cv : null;
+                  const absVal = Math.abs(r.value);
+                  if (!r.subtotal && !r.total && absVal === 0 && (cv == null || Math.abs(cv??0) === 0)) return null;
+                  return (
+                    <TableRow key={r.code} className={`${r.total ? `bg-${colorClass}-200 border-t-2 border-${colorClass}-400 font-bold` : r.subtotal ? `bg-${colorClass}-50 border-t border-${colorClass}-200 font-semibold` : `hover:bg-${colorClass}-50/30`}`}>
+                      <TableCell className={`font-mono text-xs text-center ${r.total||r.subtotal ? `text-${colorClass}-900 font-bold` : `text-${colorClass}-700`}`}>{r.code}</TableCell>
+                      <TableCell className={`text-xs ${r.total||r.subtotal ? `font-semibold text-${colorClass}-900` : "text-gray-700"}`}>{r.label}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm ${r.total||r.subtotal ? `font-bold text-${colorClass}-900` : r.value < 0 ? "text-red-600" : `text-${colorClass}-800`}`}>
+                        {r.value !== 0 ? fmt(r.value < 0 ? r.value : absVal) : "—"}
+                      </TableCell>
+                      {hasCmp && <TableCell className="text-right text-xs font-mono text-purple-600">{cv != null && cv !== 0 ? fmt(Math.abs(cv)) : "—"}</TableCell>}
+                      {hasCmp && <TableCell className={`text-right text-xs font-mono ${delta != null && delta > 0 ? "text-green-600" : delta != null && delta < 0 ? "text-red-500" : "text-gray-300"}`}>
+                        {delta != null && delta !== 0 ? `${delta>0?"+":""}${fmt(delta)}` : ""}
+                      </TableCell>}
+                    </TableRow>
+                  );
+                })}
+              </>
+            );
+
+            const colCount = hasCmp ? 5 : 3;
+            const balanced = cur?.totals?.balanced;
+
+            return (
+              <div className="space-y-4">
+                {/* Balance status */}
+                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${balanced ? "bg-green-50 text-green-700 border border-green-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`}>
+                  {balanced
+                    ? <><CheckCircle2 className="w-4 h-4" /> Баланс зійшовся: Актив = Пасив = {fmt(cur?.totals?.r1300)} грн — {asDate}</>
+                    : <><AlertCircle className="w-4 h-4" /> Баланс не зійшовся: Актив {fmt(cur?.totals?.r1300)} ≠ Пасив {fmt(cur?.totals?.r1900)} грн (Δ {fmt(Math.abs((cur?.totals?.r1300??0)-(cur?.totals?.r1900??0)))})</>
+                  }
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* ── АКТИВ ── */}
+                  <Card>
+                    <CardHeader className="pb-2 border-b border-blue-100 bg-blue-50/50">
+                      <CardTitle className="text-sm font-bold text-blue-800 flex items-center justify-between">
+                        <span>АКТИВ</span>
+                        <span className="text-base font-bold">{fmt(cur?.totals?.r1300)} грн</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader className="bg-blue-50">
+                          <TableRow>
+                            <TableHead className="w-16 text-center text-[11px]">Ряд.</TableHead>
+                            <TableHead className="text-[11px]">Стаття балансу</TableHead>
+                            <TableHead className="text-right w-32 text-[11px]">{asDate.slice(0,4)}, грн</TableHead>
+                            {hasCmp && <TableHead className="text-right w-32 text-[11px] text-purple-600">{cmpDate?.slice(0,4)}, грн</TableHead>}
+                            {hasCmp && <TableHead className="text-right w-24 text-[11px] text-gray-400">Δ</TableHead>}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          <AssetSection title="I. Необоротні активи" rows={cur?.assets?.filter((r:any) => parseInt(r.code) <= 1095)} cmpFn={cmpAssetVal} />
+                          <AssetSection title="II. Оборотні активи" rows={cur?.assets?.filter((r:any) => parseInt(r.code) >= 1100)} cmpFn={cmpAssetVal} />
+                          {cur?.assets?.filter((r:any) => r.total).map((r:any) => {
+                            const cv = cmpAssetVal(r.code);
+                            return (
+                              <TableRow key="bal-a" className="bg-blue-200 border-t-2 border-blue-500">
+                                <TableCell className="font-mono text-xs text-center font-bold text-blue-900">{r.code}</TableCell>
+                                <TableCell className="text-xs font-bold text-blue-900">{r.label}</TableCell>
+                                <TableCell className="text-right font-bold text-sm text-blue-900">{fmt(r.value)}</TableCell>
+                                {hasCmp && <TableCell className="text-right text-sm font-bold text-purple-700">{cv != null ? fmt(cv) : "—"}</TableCell>}
+                                {hasCmp && <TableCell />}
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+
+                  {/* ── ПАСИВ ── */}
+                  <Card>
+                    <CardHeader className="pb-2 border-b border-purple-100 bg-purple-50/50">
+                      <CardTitle className="text-sm font-bold text-purple-800 flex items-center justify-between">
+                        <span>ПАСИВ</span>
+                        <span className="text-base font-bold">{fmt(cur?.totals?.r1900)} грн</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader className="bg-purple-50">
+                          <TableRow>
+                            <TableHead className="w-16 text-center text-[11px]">Ряд.</TableHead>
+                            <TableHead className="text-[11px]">Стаття балансу</TableHead>
+                            <TableHead className="text-right w-32 text-[11px]">{asDate.slice(0,4)}, грн</TableHead>
+                            {hasCmp && <TableHead className="text-right w-32 text-[11px] text-purple-600">{cmpDate?.slice(0,4)}, грн</TableHead>}
+                            {hasCmp && <TableHead className="text-right w-24 text-[11px] text-gray-400">Δ</TableHead>}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          <PasSection title="I. Власний капітал" rows={cur?.equity ?? []} cmpFn={cmpEqVal} colorClass="purple" />
+                          <PasSection title="II. Довгострокові зобов'язання" rows={cur?.longterm ?? []} cmpFn={cmpLtVal} colorClass="indigo" />
+                          <PasSection title="III. Поточні зобов'язання" rows={cur?.current ?? []} cmpFn={cmpCurVal} colorClass="orange" />
+                          {/* Баланс пасив row */}
+                          <TableRow className="bg-purple-200 border-t-2 border-purple-500">
+                            <TableCell className="font-mono text-xs text-center font-bold text-purple-900">1900</TableCell>
+                            <TableCell className="text-xs font-bold text-purple-900">БАЛАНС</TableCell>
+                            <TableCell className="text-right font-bold text-sm text-purple-900">{fmt(cur?.totals?.r1900)}</TableCell>
+                            {hasCmp && <TableCell className="text-right text-sm font-bold text-purple-700">{fmt(cmp?.totals?.r1900)}</TableCell>}
+                            {hasCmp && <TableCell />}
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ═══════════════════════════════════════════════════════════════
+              Ф3 — Звіт про рух грошових коштів (непрямий метод)
+          ═══════════════════════════════════════════════════════════════ */}
+          {reportType === "cashflow" && (() => {
+            if (!cfData) return <div className="py-12 text-center text-sm text-gray-400">Завантаження...</div>;
+            const cf = cfData;
+            const CfSection = ({ title, icon: Icon, colorClass, net, rows }: any) => (
+              <Card className={`border-${colorClass}-200`}>
+                <CardHeader className={`pb-2 border-b border-${colorClass}-100 bg-${colorClass}-50/50`}>
+                  <CardTitle className={`text-sm font-bold text-${colorClass}-800 flex items-center justify-between`}>
+                    <span className="flex items-center gap-2"><Icon className="w-4 h-4" />{title}</span>
+                    <span className={`text-lg font-bold ${net >= 0 ? `text-${colorClass}-700` : "text-red-600"}`}>
+                      {net >= 0 ? "+" : ""}{fmt(net)} грн
+                    </span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableBody>
+                      {rows.map(([label, val]: [string, number], i: number) => (
+                        <TableRow key={i} className="hover:bg-gray-50">
+                          <TableCell className="text-xs text-gray-600 py-2">{label}</TableCell>
+                          <TableCell className={`text-right font-mono text-sm font-medium py-2 ${val >= 0 ? "text-green-700" : "text-red-600"}`}>
+                            {val !== 0 ? `${val > 0 ? "+" : ""}${fmt(val)}` : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            );
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    { label: "Операційна діяльність", val: cf.operating?.net, color: "green" },
+                    { label: "Інвестиційна діяльність", val: cf.investing?.net, color: "blue" },
+                    { label: "Фінансова діяльність", val: cf.financing?.net, color: "purple" },
+                    { label: "Нетто-зміна коштів", val: cf.net_change, color: cf.net_change >= 0 ? "emerald" : "red" },
+                  ].map(({ label, val, color }) => (
+                    <Card key={label} className={`border-${color}-200 bg-${color}-50/30`}>
+                      <CardContent className="p-3">
+                        <div className={`text-[10px] font-medium text-${color}-700 mb-1`}>{label}</div>
+                        <div className={`text-lg font-bold ${val >= 0 ? `text-${color}-700` : "text-red-600"}`}>
+                          {val >= 0 ? "+" : ""}{fmt(val)}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <CfSection
+                    title="Операційна діяльність"
+                    icon={Activity}
+                    colorClass="green"
+                    net={cf.operating?.net}
+                    rows={[
+                      ["Надходження від покупців", cf.operating?.receipts_from_customers ?? 0],
+                      ["Оплата постачальникам",    cf.operating?.payments_to_suppliers ?? 0],
+                      ["Виплата зарплати",         cf.operating?.payments_salary ?? 0],
+                      ["Сплата податків",          cf.operating?.payments_tax ?? 0],
+                      ["Інші операційні виплати",  cf.operating?.payments_other ?? 0],
+                    ]}
+                  />
+                  <CfSection
+                    title="Інвестиційна діяльність"
+                    icon={TrendingUp}
+                    colorClass="blue"
+                    net={cf.investing?.net}
+                    rows={[
+                      ["Придбання необоротних активів (CAPEX)", cf.investing?.capex ?? 0],
+                      ["Надходження від реалізації активів",    cf.investing?.asset_sales ?? 0],
+                    ]}
+                  />
+                  <CfSection
+                    title="Фінансова діяльність"
+                    icon={Banknote}
+                    colorClass="purple"
+                    net={cf.financing?.net}
+                    rows={[
+                      ["Отримані кредити",       cf.financing?.loan_in ?? 0],
+                      ["Погашення кредитів",     cf.financing?.loan_out ?? 0],
+                      ["Внески до капіталу",     cf.financing?.equity_in ?? 0],
+                    ]}
+                  />
+                </div>
+
+                <Card className="border-gray-200">
+                  <CardContent className="p-4">
+                    <div className="grid grid-cols-3 gap-6">
+                      <div>
+                        <div className="text-[10px] text-gray-400 mb-0.5">Залишок коштів на початок</div>
+                        <div className="text-lg font-bold text-gray-800">{fmt(cf.cash_at_start)} грн</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-[10px] text-gray-400 mb-0.5">Нетто-зміна за {MONTHS.find(m=>m[0]===month)?.[1].toLowerCase()} {year}</div>
+                        <div className={`text-lg font-bold ${cf.net_change >= 0 ? "text-green-700" : "text-red-600"}`}>
+                          {cf.net_change >= 0 ? "+" : ""}{fmt(cf.net_change)} грн
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-gray-400 mb-0.5">Залишок коштів на кінець</div>
+                        <div className="text-xl font-bold text-blue-800">{fmt(cf.cash_at_end)} грн</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
