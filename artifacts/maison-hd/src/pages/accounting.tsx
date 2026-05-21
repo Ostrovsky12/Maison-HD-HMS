@@ -5614,21 +5614,61 @@ function AccSyncTab() {
   );
 }
 
-// ─── BANK TAB ─────────────────────────────────────────────────────────────────
+// ─── BANK TAB — Phase 4: повна банківська звірка ──────────────────────────────
 function AccBankTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const now = new Date();
+
+  // ── Period & view state ──
   const [from, setFrom] = useState(format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd"));
   const [to, setTo]     = useState(format(now, "yyyy-MM-dd"));
+  const [view, setView] = useState<"statements" | "reconcile" | "import">("reconcile");
+  const [recFilter, setRecFilter] = useState<"all" | "unmatched" | "suggested" | "matched" | "ignored">("unmatched");
+
+  // ── Manual add state ──
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm]  = useState<any>({ bank_account: "", statement_date: format(now, "yyyy-MM-dd"), description: "", amount: "", contractor_id: "" });
+  const [addForm, setAddForm] = useState<any>({ bank_account: "", statement_date: format(now, "yyyy-MM-dd"), description: "", amount: "", contractor_id: "" });
   const [addLoading, setAddLoading] = useState(false);
 
-  const { data: stmts = [], isLoading } = useQuery({
-    queryKey: ["acc-bank", from, to],
+  // ── CSV import state ──
+  const [csvText, setCsvText] = useState("");
+  const [csvFormat, setCsvFormat] = useState<"privatbank" | "monobank" | "generic">("privatbank");
+  const [csvBankName, setCsvBankName] = useState("");
+  const [csvBankAccount, setCsvBankAccount] = useState("");
+  const [csvPreview, setCsvPreview] = useState<any[]>([]);
+  const [csvParsing, setCsvParsing] = useState(false);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
+
+  // ── Match dialog state ──
+  const [matchDialog, setMatchDialog] = useState<any>(null);
+  const [entrySearch, setEntrySearch] = useState("");
+  const [matchLoading, setMatchLoading] = useState(false);
+
+  // ── Auto-match state ──
+  const [autoMatchRunning, setAutoMatchRunning] = useState(false);
+
+  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const MONTHS_UK = ["Січень","Лютий","Березень","Квітень","Травень","Червень","Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+
+  // ── Data fetching ──
+  const { data: stmts = [], isLoading: stmtsLoading } = useQuery({
+    queryKey: ["acc-bank", "stmts", from, to],
     queryFn: () => accFetch(`bank?from=${from}&to=${to}`),
     staleTime: 30_000,
+  });
+
+  const { data: recStmts = [], isLoading: recLoading, refetch: refetchRec } = useQuery({
+    queryKey: ["acc-bank", "reconcile", from, to, recFilter],
+    queryFn: () => accFetch(`bank/reconcile?from=${from}&to=${to}&status=${recFilter}`),
+    staleTime: 15_000,
+  });
+
+  const { data: summary, isLoading: summaryLoading, refetch: refetchSummary } = useQuery({
+    queryKey: ["acc-bank", "summary", from, to],
+    queryFn: () => accFetch(`bank/reconcile/summary?from=${from}&to=${to}`),
+    staleTime: 15_000,
   });
 
   const { data: contractors = [] } = useQuery({
@@ -5637,150 +5677,539 @@ function AccBankTab() {
     staleTime: 60_000,
   });
 
-  const fmt = (n: any) => Number(n || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Journal entries for manual match search
+  const { data: journalEntries = [] } = useQuery({
+    queryKey: ["acc-ledger", "journal-match", from, to],
+    queryFn: () => accFetch(`journal?from=${from}&to=${to}&limit=200`),
+    staleTime: 30_000,
+    enabled: !!matchDialog,
+  });
 
-  const totalIn  = (stmts as any[]).filter(s => Number(s.amount) > 0).reduce((sum, s) => sum + Number(s.amount), 0);
-  const totalOut = (stmts as any[]).filter(s => Number(s.amount) < 0).reduce((sum, s) => sum + Number(s.amount), 0);
+  // ── Derived ──
+  const totalIn  = (stmts as any[]).filter(s => Number(s.amount) > 0).reduce((sum: number, s: any) => sum + Number(s.amount), 0);
+  const totalOut = (stmts as any[]).filter(s => Number(s.amount) < 0).reduce((sum: number, s: any) => sum + Number(s.amount), 0);
 
+  const filteredEntries = (journalEntries as any[]).filter((e: any) => {
+    if (!entrySearch) return true;
+    const q = entrySearch.toLowerCase();
+    return e.description?.toLowerCase().includes(q)
+        || e.debit_code?.includes(q) || e.credit_code?.includes(q)
+        || String(e.amount).includes(q);
+  });
+
+  // ── Handlers ──
   const handleAdd = async () => {
-    if (!form.statement_date || !form.amount || !form.description) {
+    if (!addForm.statement_date || !addForm.amount || !addForm.description) {
       toast({ title: "Заповніть обов'язкові поля", variant: "destructive" }); return;
     }
     setAddLoading(true);
     try {
       await accFetch("bank", { method: "POST", body: JSON.stringify({
-        ...form,
-        amount: parseFloat(form.amount),
-        contractor_id: form.contractor_id ? parseInt(form.contractor_id) : null,
+        ...addForm, amount: parseFloat(addForm.amount),
+        contractor_id: addForm.contractor_id ? parseInt(addForm.contractor_id) : null,
       }) });
       toast({ title: "Операцію додано" });
       qc.invalidateQueries({ queryKey: ["acc-bank"] });
       setShowAdd(false);
-      setForm({ bank_account: "", statement_date: format(now, "yyyy-MM-dd"), description: "", amount: "", contractor_id: "" });
-    } catch (e: any) {
-      toast({ title: "Помилка", description: e.message, variant: "destructive" });
-    } finally { setAddLoading(false); }
+      setAddForm({ bank_account: "", statement_date: format(now, "yyyy-MM-dd"), description: "", amount: "", contractor_id: "" });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setAddLoading(false); }
   };
 
-  const handleReconcile = async (id: number) => {
+  const handleCsvParse = async () => {
+    if (!csvText.trim()) { toast({ title: "Вставте CSV-текст", variant: "destructive" }); return; }
+    setCsvParsing(true);
     try {
-      await accFetch(`bank/${id}/reconcile`, { method: "PATCH" });
+      const res = await accFetch("bank/csv-parse", { method: "POST", body: JSON.stringify({ text: csvText, format: csvFormat }) });
+      setCsvPreview(res.rows ?? []);
+      if ((res.rows ?? []).length === 0) toast({ title: "Жодного рядка не розпізнано", description: "Перевірте формат CSV", variant: "destructive" });
+      else toast({ title: `Розпізнано ${res.rows.length} рядків`, description: "Перевірте та натисніть «Імпортувати»" });
+    } catch (e: any) { toast({ title: "Помилка парсингу", description: e.message, variant: "destructive" }); }
+    finally { setCsvParsing(false); }
+  };
+
+  const handleCsvImport = async () => {
+    if (!csvText.trim() || csvPreview.length === 0) { toast({ title: "Спочатку розпарсіть CSV", variant: "destructive" }); return; }
+    setCsvImporting(true);
+    try {
+      const res = await accFetch("bank/csv-import", { method: "POST", body: JSON.stringify({
+        text: csvText, format: csvFormat, bank_name: csvBankName || undefined, bank_account: csvBankAccount || undefined,
+      }) });
+      setImportResult(res);
+      toast({ title: `Імпортовано ${res.imported} транзакцій`, description: `Авто-матч: ${res.auto_matched} · Пропущено дублів: ${res.skipped}` });
       qc.invalidateQueries({ queryKey: ["acc-bank"] });
-      toast({ title: "Позначено як звірено" });
-    } catch (e: any) {
-      toast({ title: "Помилка", description: e.message, variant: "destructive" });
-    }
+      setCsvText(""); setCsvPreview([]); setCsvBankName(""); setCsvBankAccount("");
+      setView("reconcile"); setRecFilter("unmatched");
+    } catch (e: any) { toast({ title: "Помилка імпорту", description: e.message, variant: "destructive" }); }
+    finally { setCsvImporting(false); }
+  };
+
+  const handleAutoMatch = async () => {
+    setAutoMatchRunning(true);
+    try {
+      const res = await accFetch("bank/auto-match-all", { method: "POST" });
+      toast({ title: `Авто-матч завершено`, description: `Знайдено збігів: ${res.matched} з ${res.checked}` });
+      qc.invalidateQueries({ queryKey: ["acc-bank"] });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setAutoMatchRunning(false); }
+  };
+
+  const handleMatch = async (stmtId: number, entryId: number | null) => {
+    setMatchLoading(true);
+    try {
+      await accFetch(`bank/${stmtId}/match`, { method: "POST", body: JSON.stringify({ entry_id: entryId }) });
+      toast({ title: "Звірено з проводкою" });
+      qc.invalidateQueries({ queryKey: ["acc-bank"] });
+      setMatchDialog(null);
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+    finally { setMatchLoading(false); }
+  };
+
+  const handleIgnore = async (id: number) => {
+    try {
+      await accFetch(`bank/${id}/ignore`, { method: "POST" });
+      toast({ title: "Позначено як ігнорована" });
+      qc.invalidateQueries({ queryKey: ["acc-bank"] });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+  };
+
+  const handleUnmatch = async (id: number) => {
+    try {
+      await accFetch(`bank/${id}/unmatch`, { method: "POST" });
+      toast({ title: "Звірку знято" });
+      qc.invalidateQueries({ queryKey: ["acc-bank"] });
+    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
+  };
+
+  const handleConfirmSuggested = async (s: any) => {
+    await handleMatch(s.id, s.entry_id);
+  };
+
+  // ── Match status badge ──
+  const matchBadge = (status: string) => {
+    if (status === "matched")   return <Badge className="text-[10px] bg-green-100 text-green-700">✓ Звірено</Badge>;
+    if (status === "suggested") return <Badge className="text-[10px] bg-amber-100 text-amber-700">≈ Підбір</Badge>;
+    if (status === "ignored")   return <Badge className="text-[10px] bg-gray-100 text-gray-500">— Ігнор</Badge>;
+    return <Badge className="text-[10px] bg-red-50 text-red-600 border-red-200">! Незвірено</Badge>;
+  };
+
+  const FILTER_TABS: { key: typeof recFilter; label: string }[] = [
+    { key: "unmatched",  label: "Незвірені" },
+    { key: "suggested",  label: "Підбір" },
+    { key: "matched",    label: "Звірені" },
+    { key: "ignored",    label: "Ігноровані" },
+    { key: "all",        label: "Всі" },
+  ];
+
+  // ── CSV format hints ──
+  const CSV_FORMAT_HINTS: Record<string, string> = {
+    privatbank: "ПриватБанк: Дата;Час;Категорія;Картка;Опис;Сума;Валюта;...",
+    monobank:   "Monobank: Дата;Опис;МСС;Сума;Сума в валюті;Баланс;Cashback;Валюта",
+    generic:    "Загальний: Дата,Сума,Опис (будь-яка кома/крапка з комою)",
   };
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
+      {/* ── Top toolbar ── */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Період:</span>
+        <div className="flex items-center gap-1.5">
           <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36 h-8 text-xs" />
           <span className="text-xs text-gray-400">—</span>
           <Input type="date" value={to}   onChange={e => setTo(e.target.value)}   className="w-36 h-8 text-xs" />
         </div>
+        <div className="flex border rounded-lg overflow-hidden">
+          {(["reconcile","statements","import"] as const).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors ${view===v ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+              {v === "reconcile" ? "Звірка" : v === "statements" ? "Виписки" : "Імпорт CSV"}
+            </button>
+          ))}
+        </div>
         <div className="ml-auto flex gap-2">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled title="Буде в наступному релізі">
-            <Upload className="w-3.5 h-3.5" /> Імпорт XML НБУ
-          </Button>
-          <Button size="sm" className="h-8 gap-1.5 bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={() => setShowAdd(true)}>
-            <Plus className="w-3.5 h-3.5" /> Додати операцію
+          {view === "reconcile" && (
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
+              onClick={handleAutoMatch} disabled={autoMatchRunning}>
+              {autoMatchRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+              Авто-матч
+            </Button>
+          )}
+          <Button size="sm" className="h-8 gap-1.5 text-xs bg-[--mhd-primary] hover:bg-[--mhd-primary]/90" onClick={() => setShowAdd(true)}>
+            <Plus className="w-3.5 h-3.5" /> Додати
           </Button>
         </div>
       </div>
 
-      {/* KPI row */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="border-green-200 bg-green-50">
-          <CardContent className="p-3 flex items-center gap-3">
-            <TrendingUp className="w-5 h-5 text-green-600 shrink-0" />
-            <div>
-              <div className="text-[11px] text-green-700 font-medium">Надходження</div>
-              <div className="text-lg font-bold text-green-700">{fmt(totalIn)}</div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="p-3 flex items-center gap-3">
-            <TrendingDown className="w-5 h-5 text-red-600 shrink-0" />
-            <div>
-              <div className="text-[11px] text-red-700 font-medium">Списання</div>
-              <div className="text-lg font-bold text-red-700">{fmt(Math.abs(totalOut))}</div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="p-3 flex items-center gap-3">
-            <Wallet className="w-5 h-5 text-blue-600 shrink-0" />
-            <div>
-              <div className="text-[11px] text-blue-700 font-medium">Сальдо</div>
-              <div className={`text-lg font-bold ${(totalIn + totalOut) >= 0 ? "text-blue-700" : "text-red-700"}`}>{fmt(totalIn + totalOut)}</div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ── Summary KPI ── */}
+      <div className="grid grid-cols-5 gap-2">
+        {[
+          { label: "Надходження",  val: fmt(summary?.total_in ?? totalIn),  color: "text-green-700", bg: "bg-green-50 border-green-200" },
+          { label: "Списання",     val: fmt(summary?.total_out ?? Math.abs(totalOut)), color: "text-red-700", bg: "bg-red-50 border-red-200" },
+          { label: "Звірено",      val: `${summary?.pct_reconciled ?? 0}%`, color: "text-blue-700",  bg: "bg-blue-50 border-blue-200" },
+          { label: "Незвірених",   val: String(summary?.unmatched ?? "—"),  color: "text-orange-700", bg: "bg-orange-50 border-orange-200" },
+          { label: "Підбір",       val: String(summary?.suggested ?? "—"),  color: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
+        ].map(({ label, val, color, bg }) => (
+          <Card key={label} className={`border ${bg}`}>
+            <CardContent className="p-3">
+              <div className="text-[10px] text-gray-500 font-medium">{label}</div>
+              <div className={`text-base font-bold ${color} mt-0.5`}>{val}</div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Statements table */}
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div>
-          ) : (
-            <Table>
-              <TableHeader className="bg-gray-50">
-                <TableRow>
-                  <TableHead className="w-28">Дата</TableHead>
-                  <TableHead>Опис операції</TableHead>
-                  <TableHead>Контрагент</TableHead>
-                  <TableHead>Рахунок</TableHead>
-                  <TableHead className="text-right w-36">Сума, грн</TableHead>
-                  <TableHead className="text-center w-24">Звірено</TableHead>
-                  <TableHead className="w-20" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(stmts as any[]).length === 0 ? (
+      {/* ════════════════════════════════════════════════
+          VIEW: RECONCILE
+      ════════════════════════════════════════════════ */}
+      {view === "reconcile" && (
+        <Card>
+          <CardHeader className="pb-0 border-b">
+            <div className="flex items-center gap-1 flex-wrap">
+              {FILTER_TABS.map(({ key, label }) => {
+                const count = key === "unmatched"  ? summary?.unmatched
+                            : key === "suggested"  ? summary?.suggested
+                            : key === "matched"    ? summary?.matched
+                            : key === "ignored"    ? summary?.ignored
+                            : summary?.total;
+                return (
+                  <button key={key} onClick={() => setRecFilter(key)}
+                    className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${recFilter===key ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+                    {label}{count != null ? <span className="ml-1.5 bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5 text-[10px]">{count}</span> : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {recLoading ? (
+              <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div>
+            ) : (recStmts as any[]).length === 0 ? (
+              <div className="py-12 text-center text-gray-400">
+                <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-400" />
+                <div className="text-sm font-medium">
+                  {recFilter === "unmatched" ? "Всі транзакції звірені!" : "Немає записів у цьому фільтрі"}
+                </div>
+                {recFilter === "unmatched" && <div className="text-xs mt-1 text-gray-400">Чудова робота 🎉</div>}
+              </div>
+            ) : (
+              <Table>
+                <TableHeader className="bg-gray-50 sticky top-0 z-10">
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12 text-gray-400">
+                    <TableHead className="text-xs w-24">Дата</TableHead>
+                    <TableHead className="text-xs">Опис / Контрагент</TableHead>
+                    <TableHead className="text-right text-xs w-32">Сума, ₴</TableHead>
+                    <TableHead className="text-xs w-28">Статус</TableHead>
+                    <TableHead className="text-xs">Проводка</TableHead>
+                    <TableHead className="text-right text-xs w-48">Дії</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(recStmts as any[]).map((s: any) => (
+                    <TableRow key={s.id} className={`hover:bg-gray-50/50 ${s.match_status === "matched" ? "bg-green-50/20" : s.match_status === "ignored" ? "opacity-50" : ""}`}>
+                      <TableCell className="font-mono text-xs text-gray-500">{s.statement_date?.slice(0,10)}</TableCell>
+                      <TableCell className="max-w-0">
+                        <div className="text-xs font-medium text-gray-800 truncate">{s.description || "—"}</div>
+                        {s.counterpart_name && <div className="text-[10px] text-gray-400 truncate">{s.counterpart_name}</div>}
+                        {s.contractor_name && !s.counterpart_name && <div className="text-[10px] text-gray-400 truncate">{s.contractor_name}</div>}
+                      </TableCell>
+                      <TableCell className={`text-right font-mono text-sm font-bold ${Number(s.amount)>=0 ? "text-green-700" : "text-red-700"}`}>
+                        {Number(s.amount)>=0 ? "+" : ""}{fmt(s.amount)}
+                      </TableCell>
+                      <TableCell>{matchBadge(s.match_status ?? "unmatched")}</TableCell>
+                      <TableCell className="max-w-0">
+                        {s.entry_id ? (
+                          <div className="text-[10px] text-gray-500">
+                            <span className="font-mono text-blue-600">#{s.entry_id}</span>
+                            {" · "}<span className="font-mono">{s.entry_debit}→{s.entry_credit}</span>
+                            {s.entry_amount && <span className="ml-1 text-gray-400">{fmt(s.entry_amount)} ₴</span>}
+                          </div>
+                        ) : <span className="text-[10px] text-gray-300">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          {(s.match_status === "unmatched" || s.match_status === null) && (
+                            <>
+                              <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 hover:bg-green-50 hover:border-green-300"
+                                onClick={() => { setMatchDialog(s); setEntrySearch(String(Math.abs(Number(s.amount)))); }}>
+                                Прив'язати
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 text-gray-400 hover:text-gray-600"
+                                onClick={() => handleIgnore(s.id)}>Ігнор</Button>
+                            </>
+                          )}
+                          {s.match_status === "suggested" && (
+                            <>
+                              <Button size="sm" className="h-6 text-[10px] px-2 bg-amber-500 hover:bg-amber-600 text-white"
+                                onClick={() => handleConfirmSuggested(s)} disabled={matchLoading}>
+                                Підтвердити
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+                                onClick={() => { setMatchDialog(s); setEntrySearch(""); }}>
+                                Замінити
+                              </Button>
+                            </>
+                          )}
+                          {(s.match_status === "matched" || s.match_status === "ignored") && (
+                            <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 text-gray-400 hover:text-red-600"
+                              onClick={() => handleUnmatch(s.id)}>Скинути</Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ════════════════════════════════════════════════
+          VIEW: STATEMENTS (classic)
+      ════════════════════════════════════════════════ */}
+      {view === "statements" && (
+        <Card>
+          <CardContent className="p-0">
+            {stmtsLoading ? (
+              <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500" /></div>
+            ) : (
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="text-xs w-24">Дата</TableHead>
+                    <TableHead className="text-xs">Опис</TableHead>
+                    <TableHead className="text-xs">Контрагент</TableHead>
+                    <TableHead className="text-xs">Рахунок</TableHead>
+                    <TableHead className="text-right text-xs w-32">Сума, ₴</TableHead>
+                    <TableHead className="text-xs w-24">Статус</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(stmts as any[]).length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-12 text-gray-400">
                       <CreditCard className="w-8 h-8 mx-auto mb-2 opacity-30" />
                       <div className="text-sm">Виписок за обраний період не знайдено</div>
-                      <div className="text-xs mt-1">Додайте операцію вручну або імпортуйте CSV</div>
-                    </TableCell>
-                  </TableRow>
-                ) : (stmts as any[]).map((s: any) => (
-                  <TableRow key={s.id} className={`hover:bg-gray-50 ${s.is_reconciled ? "opacity-70" : ""}`}>
-                    <TableCell className="text-xs font-medium">{fmtDate(s.statement_date)}</TableCell>
-                    <TableCell className="text-xs max-w-xs truncate">{s.description || "—"}</TableCell>
-                    <TableCell className="text-xs text-gray-600">{s.contractor_name || "—"}</TableCell>
-                    <TableCell className="text-xs font-mono text-gray-500">{s.bank_account || "—"}</TableCell>
-                    <TableCell className={`text-right text-sm font-bold ${Number(s.amount) >= 0 ? "text-green-700" : "text-red-700"}`}>
-                      {Number(s.amount) >= 0 ? "+" : ""}{fmt(s.amount)}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {s.is_reconciled
-                        ? <Badge variant="secondary" className="text-[10px] bg-green-100 text-green-700 border-green-200">Звірено</Badge>
-                        : <Badge variant="outline"   className="text-[10px] text-gray-400">Ні</Badge>
-                      }
-                    </TableCell>
-                    <TableCell>
-                      {!s.is_reconciled && (
-                        <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => handleReconcile(s.id)}>
-                          <CheckCircle2 className="w-3 h-3 mr-1" /> Звірити
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                      <div className="text-xs mt-1">Імпортуйте CSV або додайте вручну</div>
+                    </TableCell></TableRow>
+                  ) : (stmts as any[]).map((s: any) => (
+                    <TableRow key={s.id} className="hover:bg-gray-50/50">
+                      <TableCell className="font-mono text-xs text-gray-500">{s.statement_date?.slice(0,10)}</TableCell>
+                      <TableCell className="text-xs max-w-xs truncate">{s.description || "—"}</TableCell>
+                      <TableCell className="text-xs text-gray-500">{s.contractor_name || "—"}</TableCell>
+                      <TableCell className="text-xs font-mono text-gray-400">{s.bank_account || "—"}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm font-bold ${Number(s.amount)>=0 ? "text-green-700" : "text-red-700"}`}>
+                        {Number(s.amount)>=0 ? "+" : ""}{fmt(s.amount)}
+                      </TableCell>
+                      <TableCell>{matchBadge(s.match_status ?? "unmatched")}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Add statement dialog */}
+      {/* ════════════════════════════════════════════════
+          VIEW: CSV IMPORT
+      ════════════════════════════════════════════════ */}
+      {view === "import" && (
+        <div className="space-y-4">
+          {/* Import result */}
+          {importResult && (
+            <div className="bg-green-50 border border-green-300 rounded-lg p-4 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="text-sm font-semibold text-green-800">Імпорт завершено</div>
+                <div className="text-xs text-green-700 mt-1">
+                  Імпортовано: <strong>{importResult.imported}</strong> · Авто-матч: <strong>{importResult.auto_matched}</strong> · Пропущено дублів: <strong>{importResult.skipped}</strong>
+                </div>
+                <button className="text-xs text-green-600 underline mt-1" onClick={() => setImportResult(null)}>Закрити</button>
+              </div>
+            </div>
+          )}
+
+          <Card>
+            <CardHeader className="pb-3 border-b">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <Upload className="w-4 h-4 text-blue-600" /> Імпорт банківської виписки CSV
+              </CardTitle>
+              <p className="text-xs text-gray-500 mt-1">Підтримуємо ПриватБанк, Monobank та загальний формат</p>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4">
+              {/* Format & meta */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <Label className="text-xs mb-1 block">Банк / Формат</Label>
+                  <Select value={csvFormat} onValueChange={v => setCsvFormat(v as any)}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="privatbank">ПриватБанк</SelectItem>
+                      <SelectItem value="monobank">Monobank</SelectItem>
+                      <SelectItem value="generic">Загальний CSV</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">Назва банку</Label>
+                  <Input value={csvBankName} onChange={e => setCsvBankName(e.target.value)}
+                    placeholder="напр. ПриватБанк" className="h-9 text-sm" />
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">IBAN рахунку</Label>
+                  <Input value={csvBankAccount} onChange={e => setCsvBankAccount(e.target.value)}
+                    placeholder="UA29..." className="h-9 text-sm font-mono" />
+                </div>
+              </div>
+
+              {/* Format hint */}
+              <div className="bg-blue-50 border border-blue-200 rounded p-2.5 text-xs text-blue-700 font-mono">
+                {CSV_FORMAT_HINTS[csvFormat]}
+              </div>
+
+              {/* CSV textarea */}
+              <div>
+                <Label className="text-xs mb-1 block">Вставте текст CSV виписки *</Label>
+                <Textarea
+                  value={csvText}
+                  onChange={e => { setCsvText(e.target.value); setCsvPreview([]); }}
+                  placeholder={`21.05.2026;10:30:00;Надходження;UA29...;Оплата рахунку №123;15000,00;UAH;...`}
+                  rows={8}
+                  className="font-mono text-xs resize-none"
+                />
+                <div className="text-[10px] text-gray-400 mt-1">{csvText.split("\n").filter(Boolean).length} рядків вставлено</div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleCsvParse} disabled={csvParsing || !csvText.trim()} className="gap-1.5">
+                  {csvParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                  Розпізнати CSV
+                </Button>
+                {csvPreview.length > 0 && (
+                  <Button size="sm" onClick={handleCsvImport} disabled={csvImporting} className="gap-1.5 bg-green-600 hover:bg-green-700">
+                    {csvImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    Імпортувати {csvPreview.length} рядків
+                  </Button>
+                )}
+              </div>
+
+              {/* Preview table */}
+              {csvPreview.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-gray-700 mb-2">Попередній перегляд (перші 10)</div>
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader className="bg-gray-50">
+                        <TableRow>
+                          <TableHead className="text-xs">Дата</TableHead>
+                          <TableHead className="text-xs">Опис</TableHead>
+                          <TableHead className="text-right text-xs">Сума, ₴</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {csvPreview.slice(0,10).map((row, i) => (
+                          <TableRow key={i} className="hover:bg-gray-50/50">
+                            <TableCell className="text-xs font-mono">{row.date}</TableCell>
+                            <TableCell className="text-xs max-w-xs truncate">{row.description}</TableCell>
+                            <TableCell className={`text-right font-mono text-sm font-semibold ${Number(row.amount)>=0 ? "text-green-700" : "text-red-700"}`}>
+                              {Number(row.amount)>=0 ? "+" : ""}{fmt(row.amount)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {csvPreview.length > 10 && (
+                          <TableRow><TableCell colSpan={3} className="text-center text-xs text-gray-400 py-2">…ще {csvPreview.length - 10} рядків</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════
+          MATCH DIALOG
+      ════════════════════════════════════════════════ */}
+      <Dialog open={!!matchDialog} onOpenChange={open => !open && setMatchDialog(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold">Прив'язати до проводки</DialogTitle>
+          </DialogHeader>
+          {matchDialog && (
+            <div className="space-y-4">
+              {/* Statement info */}
+              <div className="bg-gray-50 border rounded-lg p-3 flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-gray-500">Транзакція банку</div>
+                  <div className="text-sm font-semibold text-gray-800">{matchDialog.description}</div>
+                  <div className="text-xs text-gray-400 font-mono mt-0.5">{matchDialog.statement_date?.slice(0,10)}</div>
+                </div>
+                <div className={`text-xl font-bold ${Number(matchDialog.amount)>=0 ? "text-green-700" : "text-red-700"}`}>
+                  {Number(matchDialog.amount)>=0 ? "+" : ""}{fmt(matchDialog.amount)} ₴
+                </div>
+              </div>
+
+              {/* Search journal */}
+              <div>
+                <Label className="text-xs mb-1 block">Пошук проводки (сума, опис, рахунок)</Label>
+                <Input value={entrySearch} onChange={e => setEntrySearch(e.target.value)}
+                  placeholder={`${Math.abs(Number(matchDialog.amount))}...`} className="h-9 text-sm" autoFocus />
+              </div>
+
+              {/* Entries list */}
+              <div className="border rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+                <Table>
+                  <TableHeader className="bg-gray-50 sticky top-0">
+                    <TableRow>
+                      <TableHead className="text-xs">Дата</TableHead>
+                      <TableHead className="text-xs">Дт → Кт</TableHead>
+                      <TableHead className="text-xs">Опис</TableHead>
+                      <TableHead className="text-right text-xs">Сума, ₴</TableHead>
+                      <TableHead className="w-20" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredEntries.slice(0, 50).map((e: any) => (
+                      <TableRow key={e.id} className="hover:bg-blue-50/30 cursor-pointer"
+                        onClick={() => handleMatch(matchDialog.id, e.id)}>
+                        <TableCell className="text-xs font-mono text-gray-500">{e.entry_date?.slice(0,10)}</TableCell>
+                        <TableCell className="font-mono text-xs text-blue-700">{e.debit_code}→{e.credit_code}</TableCell>
+                        <TableCell className="text-xs max-w-xs truncate">{e.description}</TableCell>
+                        <TableCell className="text-right font-mono text-sm font-semibold text-gray-800">{fmt(e.amount)}</TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" disabled={matchLoading}>
+                            {matchLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Обрати"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {filteredEntries.length === 0 && (
+                      <TableRow><TableCell colSpan={5} className="text-center py-6 text-xs text-gray-400">Проводок не знайдено</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-gray-400">
+                <span>Або позначте без прив'язки:</span>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="h-7 text-xs"
+                    onClick={() => handleMatch(matchDialog.id, null)} disabled={matchLoading}>
+                    Звірено без проводки
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-gray-500"
+                    onClick={() => { handleIgnore(matchDialog.id); setMatchDialog(null); }}>
+                    Ігнорувати
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add manual statement dialog ── */}
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Нова банківська операція</DialogTitle></DialogHeader>
@@ -5788,25 +6217,31 @@ function AccBankTab() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Дата *</Label>
-                <Input type="date" value={form.statement_date} onChange={e => setForm((f: any) => ({ ...f, statement_date: e.target.value }))} className="mt-1" />
+                <Input type="date" value={addForm.statement_date}
+                  onChange={e => setAddForm((f: any) => ({ ...f, statement_date: e.target.value }))} className="mt-1 h-9" />
               </div>
               <div>
-                <Label className="text-xs">Сума, грн * <span className="text-gray-400">(«-» для списання)</span></Label>
-                <Input type="number" step="0.01" value={form.amount} onChange={e => setForm((f: any) => ({ ...f, amount: e.target.value }))} className="mt-1" placeholder="1500.00" />
+                <Label className="text-xs">Сума, ₴ * <span className="text-gray-400">(«-» для списання)</span></Label>
+                <Input type="number" step="0.01" value={addForm.amount}
+                  onChange={e => setAddForm((f: any) => ({ ...f, amount: e.target.value }))} className="mt-1 h-9" placeholder="1500.00" />
               </div>
             </div>
             <div>
-              <Label className="text-xs">Опис операції *</Label>
-              <Input value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} className="mt-1" placeholder="Оплата за послуги проживання" />
+              <Label className="text-xs">Опис *</Label>
+              <Input value={addForm.description}
+                onChange={e => setAddForm((f: any) => ({ ...f, description: e.target.value }))}
+                className="mt-1 h-9" placeholder="Оплата за послуги проживання" />
             </div>
             <div>
-              <Label className="text-xs">Банківський рахунок</Label>
-              <Input value={form.bank_account} onChange={e => setForm((f: any) => ({ ...f, bank_account: e.target.value }))} className="mt-1" placeholder="UA123456789012345678901234567" />
+              <Label className="text-xs">Банківський IBAN</Label>
+              <Input value={addForm.bank_account}
+                onChange={e => setAddForm((f: any) => ({ ...f, bank_account: e.target.value }))}
+                className="mt-1 h-9 font-mono" placeholder="UA29..." />
             </div>
             <div>
               <Label className="text-xs">Контрагент</Label>
-              <Select value={form.contractor_id || ""} onValueChange={v => setForm((f: any) => ({ ...f, contractor_id: v }))}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Не вказано" /></SelectTrigger>
+              <Select value={addForm.contractor_id || ""} onValueChange={v => setAddForm((f: any) => ({ ...f, contractor_id: v }))}>
+                <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Не вказано" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">— Не вказано —</SelectItem>
                   {(Array.isArray(contractors) ? contractors : []).map((c: any) => (
@@ -5815,11 +6250,10 @@ function AccBankTab() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setShowAdd(false)}>Скасувати</Button>
-              <Button onClick={handleAdd} disabled={addLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
-                {addLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
-                Додати
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setShowAdd(false)}>Скасувати</Button>
+              <Button size="sm" onClick={handleAdd} disabled={addLoading} className="bg-[--mhd-primary] hover:bg-[--mhd-primary]/90">
+                {addLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Додати
               </Button>
             </div>
           </div>

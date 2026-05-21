@@ -1349,6 +1349,307 @@ router.patch("/bank/:id/reconcile", async (req: any, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// BANK RECONCILIATION — Phase 4
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function ensureBankReconcileColumns() {
+  await pool.query(`
+    ALTER TABLE acc_bank_statements
+      ADD COLUMN IF NOT EXISTS match_status   TEXT    DEFAULT 'unmatched'  CHECK(match_status IN ('unmatched','matched','ignored','suggested')),
+      ADD COLUMN IF NOT EXISTS entry_id       INT     REFERENCES acc_entries(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS import_source  TEXT,
+      ADD COLUMN IF NOT EXISTS bank_name      TEXT,
+      ADD COLUMN IF NOT EXISTS counterpart_iban TEXT,
+      ADD COLUMN IF NOT EXISTS counterpart_name TEXT,
+      ADD COLUMN IF NOT EXISTS transaction_id TEXT;
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uidx_bank_stmt_txn
+      ON acc_bank_statements(organization_id, transaction_id)
+      WHERE transaction_id IS NOT NULL;
+  `);
+}
+
+// Helper: parse PrivatBank CSV row  (UA format)
+// Col order: Дата, Час, Категорія, Картка, Опис, Сума, Валюта, Баланс, Баланс після
+function parsePrivatBankCSV(text: string): any[] {
+  const lines = text.trim().split(/\r?\n/);
+  const results: any[] = [];
+  // skip header line(s) — detect by checking if first col parseable as date
+  for (const line of lines) {
+    const cols = line.split(/[,;\t]/).map(c => c.replace(/^"|"$/g, "").trim());
+    if (cols.length < 5) continue;
+    // try to parse date DD.MM.YYYY or YYYY-MM-DD
+    const rawDate = cols[0];
+    let date: string | null = null;
+    const dmY = rawDate.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    const Ymd = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dmY)      date = `${dmY[3]}-${dmY[2]}-${dmY[1]}`;
+    else if (Ymd) date = rawDate;
+    else continue; // skip non-date rows
+    const description = cols[4] ?? cols[2] ?? "";
+    const rawAmt = (cols[5] ?? cols[3] ?? "").replace(/\s/g, "").replace(",", ".");
+    const amount = parseFloat(rawAmt);
+    if (isNaN(amount)) continue;
+    const txnId = cols[7] ?? null;
+    results.push({ date, description, amount, transaction_id: txnId || null });
+  }
+  return results;
+}
+
+// Helper: parse Monobank CSV (export from app)
+// Col order: Дата, Опис, МСС, Сума, Сума в валюті, Баланс, Cashback, Валюта
+function parseMonobankCSV(text: string): any[] {
+  const lines = text.trim().split(/\r?\n/);
+  const results: any[] = [];
+  for (const line of lines) {
+    const cols = line.split(/[,;\t]/).map(c => c.replace(/^"|"$/g, "").trim());
+    if (cols.length < 4) continue;
+    const rawDate = cols[0];
+    let date: string | null = null;
+    // Monobank: DD.MM.YYYY HH:MM:SS
+    const m = rawDate.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    if (m) date = `${m[3]}-${m[2]}-${m[1]}`;
+    else continue;
+    const description = cols[1] ?? "";
+    const rawAmt = (cols[3] ?? "").replace(/\s/g, "").replace(",", ".");
+    const amount = parseFloat(rawAmt);
+    if (isNaN(amount)) continue;
+    results.push({ date, description, amount, transaction_id: null });
+  }
+  return results;
+}
+
+// Auto-match: find journal entries matching by amount + date proximity
+async function autoMatchEntry(orgId: number, stmtId: number, amount: number, date: string): Promise<number | null> {
+  const { rows } = await pool.query(`
+    SELECT e.id
+    FROM acc_entries e
+    WHERE e.organization_id = $1
+      AND ABS(e.amount - ABS($2)) < 0.02
+      AND e.entry_date BETWEEN ($3::date - INTERVAL '3 days') AND ($3::date + INTERVAL '3 days')
+      AND NOT EXISTS (
+        SELECT 1 FROM acc_bank_statements b
+        WHERE b.entry_id = e.id AND b.organization_id = $1 AND b.id <> $4
+      )
+    ORDER BY ABS(e.entry_date - $3::date), e.id DESC
+    LIMIT 1
+  `, [orgId, amount, date, stmtId]);
+  return rows[0]?.id ?? null;
+}
+
+// --- GET /bank/reconcile/summary
+router.get("/bank/reconcile/summary", async (req: any, res) => {
+  try {
+    await ensureBankReconcileColumns();
+    const orgId = await resolveOrgId(req);
+    const { from, to } = req.query;
+    let where = `WHERE organization_id=$1`;
+    const p: any[] = [orgId];
+    if (from) { p.push(from); where += ` AND statement_date>=$${p.length}`; }
+    if (to)   { p.push(to);   where += ` AND statement_date<=$${p.length}`; }
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)                                          AS total,
+        COUNT(*) FILTER (WHERE match_status='matched')   AS matched,
+        COUNT(*) FILTER (WHERE match_status='unmatched' OR match_status IS NULL) AS unmatched,
+        COUNT(*) FILTER (WHERE match_status='ignored')   AS ignored,
+        COUNT(*) FILTER (WHERE match_status='suggested') AS suggested,
+        COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),0) AS total_in,
+        COALESCE(SUM(CASE WHEN amount<0 THEN ABS(amount) ELSE 0 END),0) AS total_out
+      FROM acc_bank_statements ${where}
+    `, p);
+    const r = rows[0];
+    const tot = Number(r.total);
+    const matched = Number(r.matched);
+    res.json({
+      total:    tot,
+      matched,
+      unmatched: Number(r.unmatched),
+      ignored:  Number(r.ignored),
+      suggested: Number(r.suggested),
+      pct_reconciled: tot > 0 ? Math.round((matched + Number(r.ignored)) / tot * 100) : 100,
+      total_in:  Number(r.total_in),
+      total_out: Number(r.total_out),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- POST /bank/csv-parse — preview only, no save
+router.post("/bank/csv-parse", async (req: any, res) => {
+  try {
+    const { text, format } = req.body;
+    if (!text) return res.status(400).json({ error: "text required" });
+    let rows: any[];
+    if (format === "monobank") rows = parseMonobankCSV(text);
+    else rows = parsePrivatBankCSV(text); // default: privatbank
+    res.json({ rows, count: rows.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- POST /bank/csv-import — parse + insert + auto-match
+router.post("/bank/csv-import", async (req: any, res) => {
+  try {
+    await ensureBankReconcileColumns();
+    const orgId = await resolveOrgId(req);
+    const { text, format, bank_account, bank_name } = req.body;
+    if (!text) return res.status(400).json({ error: "text required" });
+
+    let rows: any[];
+    if (format === "monobank") rows = parseMonobankCSV(text);
+    else rows = parsePrivatBankCSV(text);
+
+    let imported = 0, skipped = 0, autoMatched = 0;
+    for (const row of rows) {
+      const { rows: ins } = await pool.query(`
+        INSERT INTO acc_bank_statements
+          (organization_id, statement_date, description, amount,
+           import_source, bank_name, counterpart_iban, counterpart_name,
+           transaction_id, match_status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'unmatched')
+        ON CONFLICT (organization_id, transaction_id) WHERE transaction_id IS NOT NULL
+        DO NOTHING
+        RETURNING id, amount, statement_date
+      `, [orgId, row.date, row.description, row.amount,
+          format ?? "privatbank", bank_name ?? null,
+          row.counterpart_iban ?? null, row.counterpart_name ?? null,
+          row.transaction_id ?? null]);
+
+      if (!ins[0]) { skipped++; continue; }
+      imported++;
+
+      // try auto-match
+      const entryId = await autoMatchEntry(orgId, ins[0].id, row.amount, row.date);
+      if (entryId) {
+        await pool.query(
+          `UPDATE acc_bank_statements SET match_status='suggested', entry_id=$1 WHERE id=$2`,
+          [entryId, ins[0].id],
+        );
+        autoMatched++;
+      }
+    }
+
+    await logAudit({
+      organizationId: orgId, action: "bank_csv_import", entityType: "bank_statement",
+      entityId: 0, userId: req.user?.userId ?? req.user?.id ?? null,
+      note: `CSV імпорт: ${imported} рядків, ${autoMatched} авто-матч`,
+    });
+    res.json({ imported, skipped, auto_matched: autoMatched, total: rows.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- POST /bank/auto-match-all — try auto-match all unmatched
+router.post("/bank/auto-match-all", async (req: any, res) => {
+  try {
+    await ensureBankReconcileColumns();
+    const orgId = await resolveOrgId(req);
+    const { rows: unmatched } = await pool.query(`
+      SELECT id, amount, statement_date FROM acc_bank_statements
+      WHERE organization_id=$1 AND (match_status='unmatched' OR match_status IS NULL)
+    `, [orgId]);
+
+    let matched = 0;
+    for (const stmt of unmatched) {
+      const entryId = await autoMatchEntry(orgId, stmt.id, stmt.amount, stmt.statement_date);
+      if (entryId) {
+        await pool.query(
+          `UPDATE acc_bank_statements SET match_status='suggested', entry_id=$1 WHERE id=$2`,
+          [entryId, stmt.id],
+        );
+        matched++;
+      }
+    }
+    res.json({ matched, checked: unmatched.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- POST /bank/:id/match — confirm match to entry_id
+router.post("/bank/:id/match", async (req: any, res) => {
+  try {
+    await ensureBankReconcileColumns();
+    const orgId = await resolveOrgId(req);
+    const { entry_id } = req.body;
+    const { rows } = await pool.query(`
+      UPDATE acc_bank_statements
+        SET match_status='matched', is_reconciled=true, entry_id=$1
+      WHERE id=$2 AND organization_id=$3
+      RETURNING *
+    `, [entry_id ?? null, req.params.id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- POST /bank/:id/ignore
+router.post("/bank/:id/ignore", async (req: any, res) => {
+  try {
+    await ensureBankReconcileColumns();
+    const orgId = await resolveOrgId(req);
+    const { rows } = await pool.query(`
+      UPDATE acc_bank_statements
+        SET match_status='ignored', is_reconciled=true
+      WHERE id=$1 AND organization_id=$2
+      RETURNING *
+    `, [req.params.id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- POST /bank/:id/unmatch — reset to unmatched
+router.post("/bank/:id/unmatch", async (req: any, res) => {
+  try {
+    const orgId = await resolveOrgId(req);
+    const { rows } = await pool.query(`
+      UPDATE acc_bank_statements
+        SET match_status='unmatched', is_reconciled=false, entry_id=NULL
+      WHERE id=$1 AND organization_id=$2
+      RETURNING *
+    `, [req.params.id, orgId]);
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- GET /bank?... (extended — now includes match_status, entry info)
+// Already defined above; add a separate extended list with entry info:
+router.get("/bank/reconcile", async (req: any, res) => {
+  try {
+    await ensureBankReconcileColumns();
+    const orgId = await resolveOrgId(req);
+    const { from, to, status } = req.query;
+    let where = `b.organization_id=$1`;
+    const p: any[] = [orgId];
+    if (from)   { p.push(from);   where += ` AND b.statement_date>=$${p.length}`; }
+    if (to)     { p.push(to);     where += ` AND b.statement_date<=$${p.length}`; }
+    if (status && status !== "all") {
+      if (status === "unmatched") {
+        where += ` AND (b.match_status='unmatched' OR b.match_status IS NULL)`;
+      } else {
+        p.push(status); where += ` AND b.match_status=$${p.length}`;
+      }
+    }
+    const { rows } = await pool.query(`
+      SELECT b.*,
+             c.name  AS contractor_name,
+             e.description AS entry_desc,
+             da.code AS entry_debit,
+             ca.code AS entry_credit,
+             e.amount AS entry_amount,
+             e.entry_date AS entry_date
+      FROM acc_bank_statements b
+      LEFT JOIN acc_contractors c ON c.id = b.contractor_id
+      LEFT JOIN acc_entries    e ON e.id = b.entry_id
+      LEFT JOIN acc_accounts   da ON da.id = e.debit_account_id
+      LEFT JOIN acc_accounts   ca ON ca.id = e.credit_account_id
+      WHERE ${where}
+      ORDER BY b.statement_date DESC, b.id DESC
+    `, p);
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ACCOUNT CARD — картка рахунку
 // ═══════════════════════════════════════════════════════════════════════════
 
