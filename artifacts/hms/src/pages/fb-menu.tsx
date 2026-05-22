@@ -194,8 +194,8 @@ function CategoryDialog({
   }, [open, initial?.id, parentId]);
 
   const title = initial?.id
-    ? (isSubcat ? "Редагувати підкатегорію" : "Редагувати станцію")
-    : (isSubcat ? "Нова підкатегорія" : "Нова станція");
+    ? (isSubcat ? "Редагувати групу" : "Редагувати категорію")
+    : (isSubcat ? "Нова група" : "Нова категорія");
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -1273,6 +1273,146 @@ function ItemCard({ item, onEdit, onDelete, onToggleAvailable, onToggleStopList,
   );
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getDescendantIds(catId: number, allCats: Category[]): number[] {
+  const direct = allCats.filter(c => c.parent_id === catId);
+  return [catId, ...direct.flatMap(c => getDescendantIds(c.id, allCats))];
+}
+
+// ─── Recursive Category Tree Node ─────────────────────────────────────────────
+
+interface TreeNodeProps {
+  cat: Category;
+  depth: number;
+  categories: Category[];
+  allItems: Item[];
+  selectedCatId: number | null;
+  expandedNodes: Set<number>;
+  draggingCatId: number | null;
+  dragOverCatId: number | null;
+  draggingItemId: number | null;
+  onSelect: (id: number) => void;
+  onToggleExpand: (id: number) => void;
+  onCatDragStart: (e: React.DragEvent, catId: number) => void;
+  onDragEnd: () => void;
+  onNodeDragOver: (e: React.DragEvent, catId: number) => void;
+  onNodeDragLeave: (e: React.DragEvent) => void;
+  onNodeDrop: (e: React.DragEvent, catId: number) => void;
+  onAddChild: (parentId: number) => void;
+  onEdit: (cat: Category) => void;
+  onDelete: (cat: Category) => void;
+}
+
+function TreeNode({
+  cat, depth, categories, allItems, selectedCatId, expandedNodes,
+  draggingCatId, dragOverCatId, draggingItemId,
+  onSelect, onToggleExpand,
+  onCatDragStart, onDragEnd, onNodeDragOver, onNodeDragLeave, onNodeDrop,
+  onAddChild, onEdit, onDelete,
+}: TreeNodeProps) {
+  const children = categories
+    .filter(c => c.parent_id === cat.id)
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  const isExpanded = expandedNodes.has(cat.id);
+  const isSelected = selectedCatId === cat.id;
+  const isDragTarget = dragOverCatId === cat.id;
+  const isBeingDragged = draggingCatId === cat.id;
+  const descendantIds = getDescendantIds(cat.id, categories);
+  const itemCount = allItems.filter(i =>
+    descendantIds.includes((i as any).category_id ?? i.categoryId)
+  ).length;
+
+  const isTopLevel = depth === 0;
+  const stationEmoji = isTopLevel
+    ? (STATION_TYPES.find(s => s.value === cat.station)?.emoji || cat.emoji)
+    : cat.emoji;
+
+  const pl = 8 + depth * 14;
+
+  const sharedProps = {
+    categories, allItems, selectedCatId, expandedNodes,
+    draggingCatId, dragOverCatId, draggingItemId,
+    onSelect, onToggleExpand,
+    onCatDragStart, onDragEnd, onNodeDragOver, onNodeDragLeave, onNodeDrop,
+    onAddChild, onEdit, onDelete,
+  };
+
+  return (
+    <div>
+      <div
+        className={`group relative flex items-center gap-1 text-sm transition-colors cursor-pointer
+          ${isSelected ? "bg-muted font-medium" : "hover:bg-muted"}
+          ${!cat.isActive ? "opacity-50" : ""}
+          ${isDragTarget ? "bg-primary/10 ring-1 ring-inset ring-primary/40 rounded mx-1" : ""}
+          ${isBeingDragged ? "opacity-40" : ""}`}
+        style={{ paddingLeft: pl, paddingRight: 8, paddingTop: isTopLevel ? 7 : 5, paddingBottom: isTopLevel ? 7 : 5 }}
+        draggable={depth > 0}
+        onDragStart={depth > 0 ? e => onCatDragStart(e, cat.id) : undefined}
+        onDragEnd={onDragEnd}
+        onDragOver={e => onNodeDragOver(e, cat.id)}
+        onDragLeave={onNodeDragLeave}
+        onDrop={e => onNodeDrop(e, cat.id)}
+        onClick={() => { onSelect(cat.id); if (children.length > 0 && !isExpanded) onToggleExpand(cat.id); }}
+      >
+        <button
+          className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
+          onClick={e => { e.stopPropagation(); onToggleExpand(cat.id); }}
+        >
+          {children.length > 0
+            ? (isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />)
+            : <span className="w-3.5 h-3.5 inline-block" />}
+        </button>
+
+        {depth > 0 && (
+          <GripVertical className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 cursor-grab" />
+        )}
+
+        <span className={`shrink-0 ${isTopLevel ? "text-base" : "text-sm"}`}>
+          {isDragTarget && draggingItemId != null ? "📥" : isDragTarget ? "📂" : stationEmoji}
+        </span>
+
+        <span className={`flex-1 truncate ${isTopLevel ? "font-medium uppercase text-xs tracking-wide text-muted-foreground" : ""}`}>
+          {cat.name}
+        </span>
+
+        {itemCount > 0 && <span className="text-xs text-muted-foreground shrink-0 mr-1">{itemCount}</span>}
+
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
+          <button className="p-1 hover:bg-muted rounded" title="Нова підгрупа"
+            onClick={e => { e.stopPropagation(); onAddChild(cat.id); }}>
+            <FolderPlus className="w-3 h-3" />
+          </button>
+          <button className="p-1 hover:bg-muted rounded" title="Редагувати"
+            onClick={e => { e.stopPropagation(); onEdit(cat); }}>
+            <Pencil className="w-3 h-3" />
+          </button>
+          <button className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Видалити"
+            onClick={e => { e.stopPropagation(); onDelete(cat); }}>
+            <Trash2 className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div>
+          {children.map(child => (
+            <TreeNode key={child.id} {...sharedProps} cat={child} depth={depth + 1} />
+          ))}
+          <button
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 w-full py-1 transition-colors"
+            style={{ paddingLeft: pl + 28 }}
+            onClick={() => onAddChild(cat.id)}
+          >
+            <Plus className="w-3 h-3" />
+            <span>Нова група</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function FbMenu() {
@@ -1280,7 +1420,7 @@ export default function FbMenu() {
   const { toast } = useToast();
 
   const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
-  const [expandedStations, setExpandedStations] = useState<Set<number>>(new Set());
+  const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "available" | "stop" | "popular" | "vegetarian">("all");
   const [catDialog, setCatDialog] = useState<{ open: boolean; initial?: Partial<Category>; parentId?: number | null }>({ open: false });
@@ -1290,7 +1430,6 @@ export default function FbMenu() {
   const [draggingItemId, setDraggingItemId] = useState<number | null>(null);
   const [dragOverCatId, setDragOverCatId] = useState<number | null>(null);
   const [draggingCatId, setDraggingCatId] = useState<number | null>(null);
-  const [dragOverStationId, setDragOverStationId] = useState<number | null>(null);
 
   const { data: catsData } = useQuery({ queryKey: ["fb-categories"], queryFn: () => apiFetch("/api/fb/categories") });
   const { data: itemsData, isLoading: itemsLoading } = useQuery({ queryKey: ["fb-items"], queryFn: () => apiFetch("/api/fb/items") });
@@ -1306,41 +1445,33 @@ export default function FbMenu() {
   const allItems: Item[] = itemsData?.items || [];
   const taxGroups: TaxGroup[] = taxData?.taxGroups || [];
 
-  // Stations = top-level categories with station field
-  const stations = categories.filter(c => !c.parent_id && c.station).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-  // Standalone categories = top-level without station (legacy / uncategorised)
-  const standaloneLeafs = categories.filter(c => !c.parent_id && !c.station).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  // Top-level categories (no parent) — includes both station-type and legacy standalone
+  const topLevelCats = categories
+    .filter(c => !c.parent_id)
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-  // Auto-expand stations and select first subcat on load
+  // Auto-expand first category on load
   useEffect(() => {
-    if (stations.length && expandedStations.size === 0) {
-      const firstStation = stations[0];
-      setExpandedStations(new Set([firstStation.id]));
-      if (selectedCatId === null) setSelectedCatId(firstStation.id);
+    if (topLevelCats.length && expandedNodes.size === 0) {
+      setExpandedNodes(new Set([topLevelCats[0].id]));
+      if (selectedCatId === null) setSelectedCatId(topLevelCats[0].id);
     }
-  }, [stations.length]);
+  }, [topLevelCats.length]);
 
-  function toggleExpanded(stationId: number) {
-    setExpandedStations(prev => {
+  function toggleExpanded(catId: number) {
+    setExpandedNodes(prev => {
       const next = new Set(prev);
-      if (next.has(stationId)) next.delete(stationId); else next.add(stationId);
+      if (next.has(catId)) next.delete(catId); else next.add(catId);
       return next;
     });
   }
 
-  // Item filtering — handle station → all subcats
+  // Item filtering — recursively collect all descendant category IDs
   const items = allItems.filter(item => {
     const catId = (item as any).category_id ?? item.categoryId;
     if (selectedCatId !== null) {
-      const selCat = categories.find(c => c.id === selectedCatId);
-      if (selCat && !selCat.parent_id) {
-        // Station selected → show items in station + all subcategories
-        const stationCatIds = new Set([selectedCatId, ...categories.filter(c => c.parent_id === selectedCatId).map(c => c.id)]);
-        if (!stationCatIds.has(catId)) return false;
-      } else {
-        // Subcategory or standalone → exact match
-        if (catId !== selectedCatId) return false;
-      }
+      const descendantIds = getDescendantIds(selectedCatId, categories);
+      if (!descendantIds.includes(catId)) return false;
     }
     if (search && !item.name.toLowerCase().includes(search.toLowerCase()) && !(item.description || "").toLowerCase().includes(search.toLowerCase())) return false;
     const isAvail = (item as any).is_available ?? item.isAvailable;
@@ -1352,12 +1483,6 @@ export default function FbMenu() {
     if (filter === "vegetarian" && !isVeg) return false;
     return true;
   });
-
-  // Count items under a station (all subcats + direct)
-  function stationItemCount(stationId: number) {
-    const subcatIds = new Set([stationId, ...categories.filter(c => c.parent_id === stationId).map(c => c.id)]);
-    return allItems.filter(i => subcatIds.has((i as any).category_id ?? i.categoryId)).length;
-  }
 
   // Mutations
   const saveCategory = useMutation({
@@ -1477,17 +1602,20 @@ export default function FbMenu() {
     }
   };
 
-  const moveCategoryToStation = async (subcatId: number, targetStationId: number) => {
-    const subcat = categories.find(c => c.id === subcatId);
-    if (!subcat || subcat.parent_id === targetStationId) return;
-    const targetStation = categories.find(c => c.id === targetStationId);
+  const moveCategory = async (catId: number, newParentId: number | null) => {
+    const cat = categories.find(c => c.id === catId);
+    if (!cat || cat.parent_id === newParentId) return;
+    const targetCat = newParentId ? categories.find(c => c.id === newParentId) : null;
     try {
-      await apiFetch(`/api/fb/categories/${subcatId}`, {
+      await apiFetch(`/api/fb/categories/${catId}`, {
         method: "PATCH",
-        body: JSON.stringify({ parent_id: targetStationId, station: null }),
+        body: JSON.stringify({
+          parent_id: newParentId,
+          station: newParentId ? null : (cat.station ?? "kitchen"),
+        }),
       });
       qc.invalidateQueries({ queryKey: ["fb-categories"] });
-      toast({ title: `«${subcat.name}» переміщено до ${targetStation?.name || "станції"}` });
+      toast({ title: `«${cat.name}» переміщено до «${targetCat?.name || "верхнього рівня"}»` });
     } catch (e: any) {
       toast({ title: e.message, variant: "destructive" });
     }
@@ -1505,85 +1633,56 @@ export default function FbMenu() {
     setDraggingItemId(null);
     setDragOverCatId(null);
     setDraggingCatId(null);
-    setDragOverStationId(null);
   };
 
-  const handleCatDragOver = (e: React.DragEvent, catId: number) => {
+  // ── Category (tree node) drag handlers ──────────────────────────────────────
+  const handleCatDragStart = (e: React.DragEvent, catId: number) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("catId", String(catId));
+    e.dataTransfer.setData("dragType", "category");
+    setDraggingCatId(catId);
+  };
+
+  const handleNodeDragOver = (e: React.DragEvent, catId: number) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     setDragOverCatId(catId);
   };
 
-  const handleCatDragLeave = () => {
-    setDragOverCatId(null);
-  };
-
-  const handleCatDrop = (e: React.DragEvent, catId: number) => {
-    e.preventDefault();
-    const dragType = e.dataTransfer.getData("dragType");
-    setDragOverCatId(null);
-    setDraggingItemId(null);
-    if (dragType === "item") {
-      const itemId = parseInt(e.dataTransfer.getData("itemId"));
-      if (!itemId || !catId) return;
-      const item = allItems.find(i => i.id === itemId);
-      const catId_current = (item as any)?.category_id ?? item?.categoryId;
-      if (catId_current === catId) return;
-      moveItemToCategory(itemId, catId);
-    }
-  };
-
-  // ── Category drag handlers (move subcat → station) ─────────────────────────
-  const handleCatRowDragStart = (e: React.DragEvent, subcatId: number) => {
-    e.stopPropagation();
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("subcatId", String(subcatId));
-    e.dataTransfer.setData("dragType", "category");
-    setDraggingCatId(subcatId);
-  };
-
-  const handleStationDragOver = (e: React.DragEvent, stationId: number) => {
-    const dragType = e.dataTransfer.types.includes("dragtype") ? e.dataTransfer.getData("dragType") : null;
-    // Allow both category and item drags over stations
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverStationId(stationId);
-  };
-
-  const handleStationDragLeave = (e: React.DragEvent) => {
-    // Only clear if leaving the station container itself (not entering a child)
+  const handleNodeDragLeave = (e: React.DragEvent) => {
     if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
-      setDragOverStationId(null);
+      setDragOverCatId(null);
     }
   };
 
-  const handleStationDrop = (e: React.DragEvent, stationId: number) => {
+  const handleNodeDrop = (e: React.DragEvent, catId: number) => {
     e.preventDefault();
+    e.stopPropagation();
     const dragType = e.dataTransfer.getData("dragType");
-    setDragOverStationId(null);
-    setDraggingCatId(null);
-    if (dragType === "category") {
-      const subcatId = parseInt(e.dataTransfer.getData("subcatId"));
-      if (!subcatId || !stationId) return;
-      moveCategoryToStation(subcatId, stationId);
-    } else if (dragType === "item") {
-      // If an item is dropped on a station header, move to first subcat or keep station
+    setDragOverCatId(null);
+
+    if (dragType === "item") {
       const itemId = parseInt(e.dataTransfer.getData("itemId"));
       setDraggingItemId(null);
       if (!itemId) return;
-      const firstSubcat = categories.find(c => c.parent_id === stationId);
-      const targetCatId = firstSubcat?.id ?? stationId;
       const item = allItems.find(i => i.id === itemId);
-      const catId_current = (item as any)?.category_id ?? item?.categoryId;
-      if (catId_current !== targetCatId) moveItemToCategory(itemId, targetCatId);
+      const currentCatId = (item as any)?.category_id ?? item?.categoryId;
+      if (currentCatId !== catId) moveItemToCategory(itemId, catId);
+    } else if (dragType === "category") {
+      const draggedCatId = parseInt(e.dataTransfer.getData("catId"));
+      setDraggingCatId(null);
+      if (!draggedCatId || draggedCatId === catId) return;
+      // Prevent moving a category into its own descendant
+      if (getDescendantIds(draggedCatId, categories).slice(1).includes(catId)) return;
+      moveCategory(draggedCatId, catId);
     }
   };
 
   const selectedCat = categories.find(c => c.id === selectedCatId);
   const selectedCatLabel = selectedCat
-    ? (selectedCat.parent_id
-      ? `${selectedCat.emoji} ${selectedCat.name}`
-      : (STATION_TYPES.find(s => s.value === selectedCat.station)?.emoji || selectedCat.emoji) + ` ${selectedCat.name}`)
+    ? `${selectedCat.emoji} ${selectedCat.name}`
     : null;
 
   const FILTERS = [
@@ -1619,155 +1718,37 @@ export default function FbMenu() {
               <span className="text-xs text-muted-foreground">{allItems.length}</span>
             </button>
 
-            {/* Station tree */}
-            {stations.map(station => {
-              const subcats = categories.filter(c => c.parent_id === station.id).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-              const isExpanded = expandedStations.has(station.id);
-              const isSelected = selectedCatId === station.id;
-              const count = stationItemCount(station.id);
-              const stationEmoji = STATION_TYPES.find(s => s.value === station.station)?.emoji || station.emoji;
-
-              const isStationDragTarget = dragOverStationId === station.id;
-              const isDraggingCat = draggingCatId !== null;
-
-              return (
-                <div key={station.id}
-                  onDragOver={e => handleStationDragOver(e, station.id)}
-                  onDragLeave={handleStationDragLeave}
-                  onDrop={e => handleStationDrop(e, station.id)}>
-                  {/* Station row */}
-                  <div className={`group relative flex items-center gap-1.5 px-2 py-2 cursor-pointer text-sm transition-colors
-                    ${isSelected ? "bg-muted font-medium" : "hover:bg-muted"}
-                    ${isStationDragTarget && isDraggingCat ? "bg-blue-50 ring-2 ring-inset ring-blue-400 rounded" : ""}`}
-                    onClick={() => { setSelectedCatId(station.id); if (!isExpanded) toggleExpanded(station.id); }}>
-                    <button
-                      className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
-                      onClick={e => { e.stopPropagation(); toggleExpanded(station.id); }}>
-                      {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                    </button>
-                    <span className="text-base shrink-0">{isStationDragTarget && isDraggingCat ? "📂" : stationEmoji}</span>
-                    <span className="flex-1 truncate font-medium uppercase text-xs tracking-wide text-muted-foreground">{station.name}</span>
-                    <span className="text-xs text-muted-foreground shrink-0">{count}</span>
-                    {/* Hover actions */}
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
-                      <button className="p-1 hover:bg-muted rounded" title="Нова підкатегорія"
-                        onClick={e => { e.stopPropagation(); setCatDialog({ open: true, parentId: station.id }); }}>
-                        <FolderPlus className="w-3 h-3" />
-                      </button>
-                      <button className="p-1 hover:bg-muted rounded" title="Редагувати"
-                        onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: station }); }}>
-                        <Pencil className="w-3 h-3" />
-                      </button>
-                      <button className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Видалити"
-                        onClick={e => { e.stopPropagation(); setDeleteCat(station); }}>
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Subcategories */}
-                  {isExpanded && (
-                    <>
-                      {subcats.map(subcat => {
-                        const subCount = allItems.filter(i => ((i as any).category_id ?? i.categoryId) === subcat.id).length;
-                        const isSubSelected = selectedCatId === subcat.id;
-                        const isDragTarget = dragOverCatId === subcat.id;
-                        const isBeingDragged = draggingCatId === subcat.id;
-                        return (
-                          <div key={subcat.id}
-                            draggable
-                            onDragStart={e => handleCatRowDragStart(e, subcat.id)}
-                            onDragEnd={handleDragEnd}
-                            className={`group relative flex items-center gap-1.5 pl-6 pr-2 py-1.5 cursor-grab text-sm transition-colors
-                              ${isSubSelected ? "bg-muted font-medium" : "hover:bg-muted"}
-                              ${!subcat.isActive ? "opacity-50" : ""}
-                              ${isDragTarget ? "bg-primary/10 ring-1 ring-inset ring-primary/40 rounded" : ""}
-                              ${isBeingDragged ? "opacity-40 scale-95" : ""}`}
-                            onClick={() => !isBeingDragged && setSelectedCatId(subcat.id)}
-                            onDragOver={e => handleCatDragOver(e, subcat.id)}
-                            onDragLeave={handleCatDragLeave}
-                            onDrop={e => handleCatDrop(e, subcat.id)}>
-                            {/* Grip handle */}
-                            <GripVertical className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 cursor-grab" />
-                            <span className="text-sm shrink-0">{isDragTarget ? "📥" : subcat.emoji}</span>
-                            <span className="flex-1 truncate">{subcat.name}</span>
-                            <span className="text-xs text-muted-foreground shrink-0">{subCount}</span>
-                            <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
-                              <button className="p-1 hover:bg-muted rounded cursor-pointer" title="Редагувати"
-                                onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: subcat }); }}>
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                              <button className="p-1 hover:bg-destructive/10 text-destructive rounded cursor-pointer" title="Видалити"
-                                onClick={e => { e.stopPropagation(); setDeleteCat(subcat); }}>
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {/* Drop hint when dragging a category over this station */}
-                      {isStationDragTarget && isDraggingCat && (
-                        <div className="flex items-center gap-2 pl-8 pr-2 py-1.5 text-xs text-blue-500 bg-blue-50 border border-dashed border-blue-300 rounded mx-2 mb-1">
-                          <span>↓ Перемістити сюди</span>
-                        </div>
-                      )}
-                      {/* Add subcategory row */}
-                      <button
-                        className="flex items-center gap-1.5 pl-8 pr-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 w-full transition-colors"
-                        onClick={() => setCatDialog({ open: true, parentId: station.id })}>
-                        <Plus className="w-3 h-3" />
-                        <span>Нова підкатегорія</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Standalone leaf categories (no station yet — draggable onto stations) */}
-            {standaloneLeafs.length > 0 && (
-              <div className="mt-1">
-                <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  <span>Без станції</span>
-                  <span className="text-muted-foreground/50 normal-case font-normal">— перетягніть у станцію</span>
-                </div>
-                {standaloneLeafs.map(cat => {
-                  const catCount = allItems.filter(i => ((i as any).category_id ?? i.categoryId) === cat.id).length;
-                  const isSel = selectedCatId === cat.id;
-                  const isBeingDragged = draggingCatId === cat.id;
-                  return (
-                    <div key={cat.id}
-                      draggable
-                      onDragStart={e => handleCatRowDragStart(e, cat.id)}
-                      onDragEnd={handleDragEnd}
-                      className={`group relative flex items-center gap-1.5 px-2 py-2 cursor-grab text-sm transition-colors
-                        ${isSel ? "bg-muted font-medium" : "hover:bg-muted"}
-                        ${!cat.isActive ? "opacity-50" : ""}
-                        ${isBeingDragged ? "opacity-40 scale-95" : ""}`}
-                      onClick={() => !isBeingDragged && setSelectedCatId(cat.id)}>
-                      <GripVertical className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 cursor-grab" />
-                      <span className="text-base shrink-0">{cat.emoji}</span>
-                      <span className="flex-1 truncate">{cat.name}</span>
-                      <span className="text-xs text-muted-foreground">{catCount}</span>
-                      <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
-                        <button className="p-1 hover:bg-muted rounded cursor-pointer" onClick={e => { e.stopPropagation(); setCatDialog({ open: true, initial: cat }); }}>
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button className="p-1 hover:bg-destructive/10 text-destructive rounded cursor-pointer" onClick={e => { e.stopPropagation(); setDeleteCat(cat); }}>
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {/* Recursive category tree */}
+            {topLevelCats.map(cat => (
+              <TreeNode
+                key={cat.id}
+                cat={cat}
+                depth={0}
+                categories={categories}
+                allItems={allItems}
+                selectedCatId={selectedCatId}
+                expandedNodes={expandedNodes}
+                draggingCatId={draggingCatId}
+                dragOverCatId={dragOverCatId}
+                draggingItemId={draggingItemId}
+                onSelect={setSelectedCatId}
+                onToggleExpand={toggleExpanded}
+                onCatDragStart={handleCatDragStart}
+                onDragEnd={handleDragEnd}
+                onNodeDragOver={handleNodeDragOver}
+                onNodeDragLeave={handleNodeDragLeave}
+                onNodeDrop={handleNodeDrop}
+                onAddChild={parentId => setCatDialog({ open: true, parentId })}
+                onEdit={cat => setCatDialog({ open: true, initial: cat })}
+                onDelete={setDeleteCat}
+              />
+            ))}
           </div>
 
           {/* Bottom actions */}
           <div className="p-2 border-t space-y-1">
             <Button variant="ghost" className="w-full h-8 text-xs justify-start" onClick={() => setCatDialog({ open: true })}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" /> Нова станція
+              <Plus className="w-3.5 h-3.5 mr-1.5" /> Нова категорія
             </Button>
           </div>
         </div>
@@ -1863,7 +1844,7 @@ export default function FbMenu() {
           <AlertDialogHeader>
             <AlertDialogTitle>Видалити «{deleteCat?.name}»?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteCat?.parent_id ? "Страви у цій підкатегорії залишаться, але втратять прив'язку." : "Буде видалена станція разом з усіма підкатегоріями. Страви залишаться."}
+              {deleteCat?.parent_id ? "Страви у цій групі залишаться, але втратять прив'язку до категорії." : "Буде видалена категорія разом з усіма групами. Страви залишаться."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
