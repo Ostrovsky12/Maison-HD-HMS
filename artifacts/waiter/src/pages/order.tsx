@@ -4,9 +4,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, API } from "@/lib/api";
 import { QRCodeSVG } from "qrcode.react";
 import {
-  ArrowLeft, Plus, Minus, Send, QrCode, CreditCard,
+  ArrowLeft, Plus, Send, QrCode, CreditCard,
   ChefHat, CheckCircle2, Clock, X, Loader2, UtensilsCrossed,
   Receipt, ExternalLink, Trash2, Printer, ShieldCheck, AlertTriangle,
+  Scissors, Layers,
 } from "lucide-react";
 
 const ITEM_STATUS: Record<string, { label: string; color: string }> = {
@@ -30,16 +31,39 @@ export default function Order() {
   const [qrMode, setQrMode] = useState<QRMode>(null);
   const [sending, setSending] = useState(false);
 
+  // Split state
+  const [showSplit, setShowSplit] = useState(false);
+  const [splitSelected, setSplitSelected] = useState<Set<number>>(new Set());
+  const [splitting, setSplitting] = useState(false);
+
+  // Merge state
+  const [showMerge, setShowMerge] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState<number | null>(null);
+  const [merging, setMerging] = useState(false);
+
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["waiter-order", orderId],
     queryFn: () => apiFetch(`/fb/orders/${orderId}`),
     refetchInterval: 10000,
   });
 
+  // Open orders for merge list
+  const { data: openOrdersData } = useQuery({
+    queryKey: ["waiter-open-orders"],
+    queryFn: () => apiFetch(`/fb/orders?open=true`),
+    enabled: showMerge,
+  });
+
   const order = data?.order;
   const items: any[] = data?.items || [];
   const activeItems = items.filter(i => i.status !== "cancelled");
   const unsentItems = activeItems.filter(i => i.status === "pending" && !i.sent_at);
+  const splittableItems = activeItems.filter(i => i.status === "pending" && !i.sent_at);
+
+  // Open orders excluding current
+  const openOrders: any[] = (openOrdersData?.orders || []).filter(
+    (o: any) => String(o.id) !== String(orderId) && o.status !== "cancelled" && o.status !== "billed"
+  );
 
   const removeItem = useMutation({
     mutationFn: (itemId: number) =>
@@ -85,7 +109,11 @@ export default function Order() {
     </div>
     ${order.guestName ? `<div class="small">Гість: ${order.guestName}</div>` : ""}
     <hr/>
-    ${receiptItems.map((it: any) => `<div class="row"><span style="flex:1;margin-right:8px">${it.quantity}×${it.name}</span><span>${parseFloat(it.total_price || it.totalPrice || "0").toFixed(2)} ₴</span></div>`).join("")}
+    ${receiptItems.map((it: any) => {
+      const qty = parseFloat(it.quantity || 1);
+      const qtyLabel = qty % 1 !== 0 ? qty.toFixed(2).replace(/\.?0+$/, "") : String(qty);
+      return `<div class="row"><span style="flex:1;margin-right:8px">${qtyLabel}×${it.name}</span><span>${parseFloat(it.total_price || it.totalPrice || "0").toFixed(2)} ₴</span></div>`;
+    }).join("")}
     <hr/>
     <div class="row bold big"><span>РАЗОМ:</span><span>${total.toFixed(2)} ₴</span></div>
     ${cfg.guest_message ? `<hr/><div class="center small italic">${cfg.guest_message}</div>` : ""}
@@ -117,7 +145,47 @@ export default function Order() {
     } finally { setSending(false); }
   }
 
-  // Build QR URLs
+  async function doSplit() {
+    if (splitSelected.size === 0) return;
+    setSplitting(true);
+    try {
+      const res = await apiFetch(`/fb/orders/${orderId}/split`, {
+        method: "POST",
+        body: JSON.stringify({ itemIds: Array.from(splitSelected) }),
+      });
+      qc.invalidateQueries({ queryKey: ["waiter-order", orderId] });
+      qc.invalidateQueries({ queryKey: ["waiter-tables"] });
+      setShowSplit(false);
+      setSplitSelected(new Set());
+      if (res?.newOrderId) {
+        setLocation(`/order/${res.newOrderId}`);
+      }
+    } finally { setSplitting(false); }
+  }
+
+  async function doMerge() {
+    if (!mergeTargetId) return;
+    setMerging(true);
+    try {
+      await apiFetch(`/fb/orders/${orderId}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceOrderId: mergeTargetId }),
+      });
+      qc.invalidateQueries({ queryKey: ["waiter-order", orderId] });
+      qc.invalidateQueries({ queryKey: ["waiter-tables"] });
+      setShowMerge(false);
+      setMergeTargetId(null);
+    } finally { setMerging(false); }
+  }
+
+  function toggleSplitItem(id: number) {
+    setSplitSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
   const conciergeBase = window.location.origin + import.meta.env.BASE_URL.replace(/\/waiter\/?/, "/room-concierge");
   const billUrl = `${conciergeBase}bill/${orderId}`;
   const payUrl  = `${conciergeBase}pay/${orderId}`;
@@ -218,7 +286,7 @@ export default function Order() {
         </div>
       </div>
 
-      {/* Fiscal receipt banner — shown when billed */}
+      {/* Fiscal receipt banner */}
       {order.status === "billed" && (
         <div className={`mx-4 mt-4 rounded-2xl p-4 ${hasFiscal ? "bg-emerald-50 border border-emerald-200" : fiscalError ? "bg-amber-50 border border-amber-200" : "bg-gray-50 border border-gray-200"}`}>
           <div className="flex items-center gap-3">
@@ -280,6 +348,8 @@ export default function Order() {
           </div>
         ) : activeItems.map(item => {
           const st = ITEM_STATUS[item.status] || ITEM_STATUS.pending;
+          const qty = parseFloat(item.quantity || 1);
+          const qtyLabel = qty % 1 !== 0 ? qty.toFixed(2).replace(/\.?0+$/, "") : String(qty);
           return (
             <div key={item.id} className="bg-card border rounded-2xl p-3.5 flex items-start gap-3">
               <div className="flex-1">
@@ -287,7 +357,7 @@ export default function Order() {
                 {item.notes && <div className="text-xs text-muted-foreground mt-0.5">{item.notes}</div>}
                 <div className="flex items-center gap-2 mt-1.5">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.color}`}>{st.label}</span>
-                  <span className="text-xs text-muted-foreground">×{item.quantity}</span>
+                  <span className="text-xs text-muted-foreground">×{qtyLabel}</span>
                 </div>
               </div>
               <div className="text-right shrink-0">
@@ -325,22 +395,39 @@ export default function Order() {
           </button>
         )}
 
-        {/* Print bill + QR */}
+        {/* Split / Merge / Print / QR */}
         {order.status !== "cancelled" && activeItems.length > 0 && order.status !== "billed" && (
-          <div className="grid grid-cols-3 gap-2">
-            <button onClick={printBill}
-              className="py-3 rounded-2xl bg-gray-50 border border-gray-200 text-gray-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
-              <Printer className="w-4 h-4" /> Рахунок
-            </button>
-            <button onClick={() => setQrMode("bill")}
-              className="py-3 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
-              <QrCode className="w-4 h-4" /> QR Рах.
-            </button>
-            <button onClick={() => setQrMode("pay")}
-              className="py-3 rounded-2xl bg-green-50 border border-green-200 text-green-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
-              <CreditCard className="w-4 h-4" /> QR Опл.
-            </button>
-          </div>
+          <>
+            {/* Split & Merge row */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { setSplitSelected(new Set()); setShowSplit(true); }}
+                className="py-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+                <Scissors className="w-4 h-4" /> Розділити
+              </button>
+              <button
+                onClick={() => setShowMerge(true)}
+                className="py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+                <Layers className="w-4 h-4" /> Об'єднати
+              </button>
+            </div>
+
+            {/* Print / QR row */}
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={printBill}
+                className="py-3 rounded-2xl bg-gray-50 border border-gray-200 text-gray-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+                <Printer className="w-4 h-4" /> Рахунок
+              </button>
+              <button onClick={() => setQrMode("bill")}
+                className="py-3 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+                <QrCode className="w-4 h-4" /> QR Рах.
+              </button>
+              <button onClick={() => setQrMode("pay")}
+                className="py-3 rounded-2xl bg-green-50 border border-green-200 text-green-700 font-semibold text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+                <CreditCard className="w-4 h-4" /> QR Опл.
+              </button>
+            </div>
+          </>
         )}
 
         {/* Back to tables when billed */}
@@ -351,6 +438,154 @@ export default function Order() {
           </button>
         )}
       </div>
+
+      {/* ══ SPLIT BOTTOM SHEET ══════════════════════════════════ */}
+      {showSplit && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowSplit(false)} />
+          <div className="relative bg-white rounded-t-3xl shadow-2xl flex flex-col max-h-[80vh]">
+            <div className="p-5 border-b shrink-0">
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-base">Розділити рахунок</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Виберіть позиції для окремого рахунку</p>
+                </div>
+                <button onClick={() => setShowSplit(false)} className="p-2 rounded-xl bg-gray-100">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            {splittableItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+                <Scissors className="w-8 h-8 opacity-30" />
+                <p className="text-sm">Немає позицій для розділення</p>
+                <p className="text-xs text-center px-6">Лише незвідправлені позиції можна перенести</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                {splittableItems.map((item: any) => {
+                  const selected = splitSelected.has(item.id);
+                  const qty = parseFloat(item.quantity || 1);
+                  const qtyLabel = qty % 1 !== 0 ? qty.toFixed(2).replace(/\.?0+$/, "") : String(qty);
+                  return (
+                    <button key={item.id}
+                      onClick={() => toggleSplitItem(item.id)}
+                      className={`w-full flex items-center gap-3 p-3.5 rounded-2xl border-2 transition-all text-left ${
+                        selected ? "border-amber-400 bg-amber-50" : "border-border bg-card"
+                      }`}>
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                        selected ? "bg-amber-400 border-amber-400" : "border-gray-300"
+                      }`}>
+                        {selected && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                      </div>
+                      <span className="flex-1 text-sm font-medium">{item.name}</span>
+                      <span className="text-xs text-muted-foreground">×{qtyLabel}</span>
+                      <span className="text-sm font-bold text-gray-700">
+                        {parseFloat(item.total_price || item.totalPrice || "0").toFixed(0)} ₴
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="p-4 border-t shrink-0 space-y-2">
+              {splitSelected.size > 0 && (
+                <p className="text-xs text-center text-muted-foreground">
+                  Обрано {splitSelected.size} позицій — буде відкрито новий рахунок
+                </p>
+              )}
+              <button
+                onClick={doSplit}
+                disabled={splitSelected.size === 0 || splitting}
+                className="w-full py-4 rounded-2xl bg-amber-500 text-white font-bold text-base active:scale-95 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {splitting
+                  ? <><Loader2 className="w-5 h-5 animate-spin" /> Розділяємо...</>
+                  : <><Scissors className="w-5 h-5" /> Розділити ({splitSelected.size})</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ MERGE BOTTOM SHEET ══════════════════════════════════ */}
+      {showMerge && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowMerge(false)} />
+          <div className="relative bg-white rounded-t-3xl shadow-2xl flex flex-col max-h-[80vh]">
+            <div className="p-5 border-b shrink-0">
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-base">Об'єднати рахунки</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Позиції з обраного столу перейдуть до Столу №{order.tableNumber || "?"}
+                  </p>
+                </div>
+                <button onClick={() => setShowMerge(false)} className="p-2 rounded-xl bg-gray-100">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+              {openOrders.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+                  <Layers className="w-8 h-8 opacity-30" />
+                  <p className="text-sm">Немає інших відкритих замовлень</p>
+                </div>
+              ) : openOrders.map((o: any) => {
+                const selected = mergeTargetId === o.id;
+                return (
+                  <button key={o.id}
+                    onClick={() => setMergeTargetId(selected ? null : o.id)}
+                    className={`w-full flex items-center gap-3 p-3.5 rounded-2xl border-2 transition-all text-left ${
+                      selected ? "border-emerald-400 bg-emerald-50" : "border-border bg-card"
+                    }`}>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                      selected ? "bg-emerald-500 border-emerald-500" : "border-gray-300"
+                    }`}>
+                      {selected && <div className="w-2.5 h-2.5 bg-white rounded-full" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold">
+                        Стіл №{o.tableNumber || o.table_number || "—"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{o.guestName || o.guest_name || ""}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold">{parseFloat(o.totalAmount || o.total_amount || "0").toFixed(0)} ₴</p>
+                      <p className="text-xs text-muted-foreground">{ORDER_STATUS_LABEL[o.status] || o.status}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="p-4 border-t shrink-0 space-y-2">
+              {mergeTargetId && (
+                <p className="text-xs text-center text-muted-foreground">
+                  Обраний рахунок буде закрито, позиції перейдуть сюди
+                </p>
+              )}
+              <button
+                onClick={doMerge}
+                disabled={!mergeTargetId || merging}
+                className="w-full py-4 rounded-2xl bg-emerald-600 text-white font-bold text-base active:scale-95 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {merging
+                  ? <><Loader2 className="w-5 h-5 animate-spin" /> Об'єднуємо...</>
+                  : <><Layers className="w-5 h-5" /> Об'єднати</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

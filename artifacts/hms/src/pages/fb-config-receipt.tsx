@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
   Save, Loader2, Receipt, Eye, Wifi, QrCode, MessageSquare,
-  Store, Clock, User, Image,
+  Store, Clock, Image, Upload, X,
 } from "lucide-react";
 
 const API = "/api/fb/config";
@@ -68,6 +68,48 @@ const SAMPLE = {
   payment: "Картка",
 };
 
+// ─── Moved outside to prevent remount on parent re-render ─────────────────────
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-6 pb-3 border-b mb-3">
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="font-semibold text-sm text-gray-700">{title}</span>
+    </div>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[180px_1fr] gap-3 items-start py-2">
+      <span className="text-sm text-gray-700 pt-2">{label}</span>
+      <div>
+        {children}
+        {hint && <p className="text-xs text-muted-foreground mt-1">{hint}</p>}
+      </div>
+    </div>
+  );
+}
+
+function Check({
+  id, label, desc, val, onChange, children,
+}: { id: string; label: string; desc?: string; val: boolean; onChange: (v: boolean) => void; children?: React.ReactNode }) {
+  return (
+    <div>
+      <label className="flex items-start gap-2.5 cursor-pointer py-1.5 group">
+        <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${val ? "bg-blue-500 border-blue-500" : "border-gray-300 group-hover:border-gray-400"}`}>
+          {val && <svg viewBox="0 0 12 12" className="w-3 h-3 text-white fill-white"><polyline points="2,6 5,9 10,4" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}
+        </div>
+        <input type="checkbox" id={id} checked={val} onChange={e => onChange(e.target.checked)} className="sr-only" />
+        <span>
+          <span className="text-sm text-gray-800">{label}</span>
+          {desc && <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{desc}</p>}
+        </span>
+      </label>
+      {val && children && <div className="ml-7 mt-1 mb-1">{children}</div>}
+    </div>
+  );
+}
+
 // ─── Live Receipt Preview ─────────────────────────────────────────────────────
 function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
   const total = SAMPLE_ITEMS.reduce((s, i) => s + i.qty * i.price, 0);
@@ -84,7 +126,6 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
           style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, width: 270, background: "#fff" }}
           className="shadow-2xl border rounded-sm p-3 space-y-0.5 text-gray-900"
         >
-          {/* Logo */}
           {cfg.logo_url && (
             <div style={{ textAlign: "center", marginBottom: 6 }}>
               <img src={cfg.logo_url} alt="logo" style={{ maxHeight: 48, maxWidth: 180, margin: "0 auto", display: "block" }}
@@ -92,7 +133,6 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
             </div>
           )}
 
-          {/* Header */}
           <div style={{ textAlign: "center", fontWeight: "bold", fontSize: 13, marginBottom: 2 }}>{name}</div>
 
           {(cfg.print_number ?? true) && (
@@ -101,7 +141,6 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
 
           <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
 
-          {/* Order info */}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontWeight: "bold" }}>{SAMPLE.table}</span>
             <span style={{ color: "#555" }}>{SAMPLE.guest}</span>
@@ -121,7 +160,6 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
 
           <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
 
-          {/* Items */}
           {SAMPLE_ITEMS.map((it, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", margin: "2px 0" }}>
               <span style={{ flex: 1, marginRight: 6 }}>{it.qty}×{it.name}</span>
@@ -131,13 +169,11 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
 
           <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
 
-          {/* Total */}
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: 13 }}>
             <span>РАЗОМ:</span><span>{total.toFixed(2)} ₴</span>
           </div>
           <div style={{ fontSize: 10, color: "#555", textAlign: "right" }}>{SAMPLE.payment}</div>
 
-          {/* Guest message */}
           {cfg.guest_message && (
             <>
               <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
@@ -147,7 +183,6 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
             </>
           )}
 
-          {/* QR */}
           {cfg.show_qr && cfg.qr_url && (
             <>
               <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
@@ -161,7 +196,6 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
             </>
           )}
 
-          {/* WiFi */}
           {cfg.print_wifi && cfg.wifi_name && (
             <>
               <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
@@ -172,7 +206,6 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
             </>
           )}
 
-          {/* Footer */}
           {cfg.footer_text && (
             <>
               <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
@@ -188,12 +221,74 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
   );
 }
 
-// ─── Section Header ───────────────────────────────────────────────────────────
-function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+// ─── Logo Upload Widget ───────────────────────────────────────────────────────
+function LogoUpload({ value, onChange }: { value?: string; onChange: (url: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return;
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      onChange(reader.result as string);
+      setUploading(false);
+    };
+    reader.onerror = () => setUploading(false);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   return (
-    <div className="flex items-center gap-2 pt-6 pb-3 border-b mb-3">
-      <span className="text-muted-foreground">{icon}</span>
-      <span className="font-semibold text-sm text-gray-700">{title}</span>
+    <div className="space-y-2">
+      {value ? (
+        <div className="flex items-center gap-3 p-2 border rounded-lg bg-gray-50">
+          <img src={value} alt="Логотип" className="h-10 max-w-[120px] object-contain rounded" />
+          <div className="flex-1 text-xs text-muted-foreground truncate">
+            {value.startsWith("data:") ? "Завантажений файл" : value}
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="p-1 text-red-400 hover:text-red-600 rounded transition-colors"
+            title="Видалити логотип"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+        <div
+          onClick={() => fileRef.current?.click()}
+          className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-lg p-4 cursor-pointer hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
+        >
+          {uploading ? (
+            <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+          ) : (
+            <>
+              <Image className="w-5 h-5 text-gray-300" />
+              <span className="text-xs text-muted-foreground">PNG, JPG, SVG · до 2 МБ</span>
+            </>
+          )}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        disabled={uploading}
+        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors disabled:opacity-50"
+      >
+        <Upload className="w-3.5 h-3.5" />
+        {value ? "Замінити логотип" : "Завантажити логотип"}
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+        className="hidden"
+        onChange={handleFile}
+      />
     </div>
   );
 }
@@ -224,38 +319,6 @@ export default function FbConfigReceipt() {
     onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
   });
 
-  function Check({
-    id, label, desc, val, onChange, children,
-  }: { id: string; label: string; desc?: string; val: boolean; onChange: (v: boolean) => void; children?: React.ReactNode }) {
-    return (
-      <div>
-        <label className="flex items-start gap-2.5 cursor-pointer py-1.5 group">
-          <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${val ? "bg-blue-500 border-blue-500" : "border-gray-300 group-hover:border-gray-400"}`}>
-            {val && <svg viewBox="0 0 12 12" className="w-3 h-3 text-white fill-white"><path d="M2 6l3 3 5-5"/><polyline points="2,6 5,9 10,4" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}
-          </div>
-          <input type="checkbox" id={id} checked={val} onChange={e => onChange(e.target.checked)} className="sr-only" />
-          <span>
-            <span className="text-sm text-gray-800">{label}</span>
-            {desc && <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{desc}</p>}
-          </span>
-        </label>
-        {val && children && <div className="ml-7 mt-1 mb-1">{children}</div>}
-      </div>
-    );
-  }
-
-  function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-    return (
-      <div className="grid grid-cols-[180px_1fr] gap-3 items-start py-2">
-        <span className="text-sm text-gray-700 pt-2">{label}</span>
-        <div>
-          {children}
-          {hint && <p className="text-xs text-muted-foreground mt-1">{hint}</p>}
-        </div>
-      </div>
-    );
-  }
-
   if (isLoading) {
     return <AppLayout><div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div></AppLayout>;
   }
@@ -263,7 +326,6 @@ export default function FbConfigReceipt() {
   return (
     <AppLayout>
       <div className="flex flex-col h-full">
-        {/* Header */}
         <div className="px-6 py-4 border-b bg-background shrink-0 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Receipt className="w-5 h-5 text-slate-600" />
@@ -290,26 +352,18 @@ export default function FbConfigReceipt() {
 
                 <Field label="Назва закладу" hint="Відображається у шапці чека. Якщо порожньо — береться з налаштувань організації.">
                   <input
-                    value={cfg.establishment_name || ""} onChange={e => set("establishment_name", e.target.value)}
+                    value={cfg.establishment_name ?? ""}
+                    onChange={e => set("establishment_name", e.target.value)}
                     placeholder="напр. Maison HD"
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                   />
                 </Field>
 
-                <Field label="URL логотипу" hint="Вставте посилання на зображення (PNG/JPG). Логотип буде надруковано у шапці чека.">
-                  <div className="flex gap-2">
-                    <input
-                      value={cfg.logo_url || ""} onChange={e => set("logo_url", e.target.value)}
-                      placeholder="https://example.com/logo.png"
-                      className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    />
-                    {cfg.logo_url && (
-                      <div className="w-10 h-10 rounded-lg border bg-gray-50 flex items-center justify-center overflow-hidden shrink-0">
-                        <img src={cfg.logo_url} alt="logo" className="max-w-full max-h-full object-contain"
-                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      </div>
-                    )}
-                  </div>
+                <Field label="Логотип">
+                  <LogoUpload
+                    value={cfg.logo_url}
+                    onChange={url => set("logo_url", url)}
+                  />
                 </Field>
 
                 {/* CONTENT */}
@@ -329,12 +383,12 @@ export default function FbConfigReceipt() {
                   <Check id="pa" label="Друкувати адресу закладу" val={cfg.print_address ?? false} onChange={v => set("print_address", v)} />
                 </div>
 
-                {/* WAITER / DATE */}
+                {/* GUEST MESSAGE */}
                 <SectionHeader icon={<MessageSquare className="w-4 h-4" />} title="Повідомлення для гостя" />
 
                 <div>
                   <textarea
-                    value={cfg.guest_message || ""}
+                    value={cfg.guest_message ?? ""}
                     onChange={e => set("guest_message", e.target.value)}
                     placeholder="напр. Дякуємо за відвідування! Чекаємо вас знову 🙏"
                     rows={3}
@@ -345,7 +399,7 @@ export default function FbConfigReceipt() {
 
                 <Field label="Підвал (footer)">
                   <input
-                    value={cfg.footer_text || ""}
+                    value={cfg.footer_text ?? ""}
                     onChange={e => set("footer_text", e.target.value)}
                     placeholder="напр. Тел: +380 44 000 0000 · maisonhd.com"
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -360,7 +414,7 @@ export default function FbConfigReceipt() {
                     <div>
                       <label className="text-xs text-gray-600 block mb-1">Посилання для QR-коду</label>
                       <input
-                        value={cfg.qr_url || ""}
+                        value={cfg.qr_url ?? ""}
                         onChange={e => set("qr_url", e.target.value)}
                         placeholder="https://your-site.com або Google Maps посилання"
                         className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -389,13 +443,13 @@ export default function FbConfigReceipt() {
                     <input
                       className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                       placeholder="Назва мережі Wi-Fi"
-                      value={cfg.wifi_name || ""} onChange={e => set("wifi_name", e.target.value)}
+                      value={cfg.wifi_name ?? ""} onChange={e => set("wifi_name", e.target.value)}
                     />
                     <input
                       className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                       placeholder="Пароль Wi-Fi"
                       type="text"
-                      value={cfg.wifi_password || ""} onChange={e => set("wifi_password", e.target.value)}
+                      value={cfg.wifi_password ?? ""} onChange={e => set("wifi_password", e.target.value)}
                     />
                   </div>
                 </Check>
