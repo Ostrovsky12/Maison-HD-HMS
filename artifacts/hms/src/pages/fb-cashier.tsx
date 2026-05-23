@@ -209,12 +209,10 @@ function NewOrderModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 // ─── Print Bill — internal printer first, browser fallback ───────────────────
 async function printBill(order: ActiveOrder): Promise<{ ok: boolean; msg: string }> {
-  // Try internal receipt printer via print job API
   try {
     const result = await apiFetch(`/orders/${order.id}/print-receipt`, { method: "POST" });
     return { ok: true, msg: `Надруковано на ${result.printerName || "принтер чеків"}` };
   } catch (apiErr: any) {
-    // If no printer configured → fall back to browser print dialog
     if ((apiErr.message || "").includes("не налаштований") || (apiErr.message || "").includes("404")) {
       await printBillBrowser(order);
       return { ok: true, msg: "Відкрито діалог друку браузера" };
@@ -223,51 +221,246 @@ async function printBill(order: ActiveOrder): Promise<{ ok: boolean; msg: string
   }
 }
 
+// ─── Pre-check (передрахунок) — 4-column table format ────────────────────────
 async function printBillBrowser(order: ActiveOrder) {
   let cfg: any = {};
   try { const d = await apiFetch("/config/section/receipt"); cfg = d.data || {}; } catch {}
 
-  const items = order.items || [];
-  const total = parseFloat(order.total_amount || "0");
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("uk-UA");
-  const timeStr = now.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
-  const tableLabel = order.tableNumber ? `Стіл №${order.tableNumber}` : order.order_type === "takeaway" ? "Takeaway" : "Замовлення";
   const estName = cfg.establishment_name || "Maison HD";
-  const showDate = cfg.show_date !== false;
-  const showTime = cfg.show_time !== false;
+  const fmtNum = (n: number) =>
+    n.toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDateTime = (d: Date) =>
+    d.toLocaleDateString("uk-UA", { day: "numeric", month: "long", year: "numeric" }) + " " +
+    d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
 
-  const win = window.open("", "_blank", "width=380,height=700");
+  const now = new Date();
+  const openedAt = order.opened_at ? fmtDateTime(new Date(order.opened_at)) : "—";
+  const printedAt = fmtDateTime(now);
+  const tableLabel = [
+    order.tableNumber ? String(order.tableNumber) : "",
+    (order as any).tableLocation ? `(${(order as any).tableLocation})` : "",
+  ].filter(Boolean).join("") || "—";
+
+  const items = order.items || [];
+  const total = items.reduce((s: number, i: any) => s + parseFloat(i.total_price || "0"), 0);
+  const vatTotal = items.reduce((s: number, i: any) => {
+    const tp = parseFloat(i.total_price || "0");
+    const rate = parseFloat((i as any).vat_rate || "0");
+    return s + (rate > 0 ? tp - tp / (1 + rate / 100) : 0);
+  }, 0);
+
+  const logoHtml = cfg.logo_url
+    ? `<div style="text-align:center;margin-bottom:5px"><img src="${cfg.logo_url}" style="max-height:60px;max-width:200px" onerror="this.remove()"/></div>`
+    : "";
+
+  const itemsHtml = items.map((it: any) => {
+    const qty = parseFloat(it.quantity || 1);
+    const tp = parseFloat(it.total_price || "0");
+    const unit = qty > 0 ? tp / qty : 0;
+    const qtyLabel = qty % 1 !== 0 ? qty.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") : String(qty);
+    return `<tr>
+      <td style="word-break:break-word;padding-right:6px;vertical-align:top">${it.name}</td>
+      <td style="text-align:right;white-space:nowrap;vertical-align:top">${qtyLabel}</td>
+      <td style="text-align:right;white-space:nowrap;vertical-align:top">${fmtNum(unit)}</td>
+      <td style="text-align:right;white-space:nowrap;vertical-align:top">${fmtNum(tp)}</td>
+    </tr>`;
+  }).join("");
+
+  const win = window.open("", "_blank", "width=420,height=820");
   if (!win) return;
+  win.document.write(`<!DOCTYPE html><html><head>
+<meta charset="utf-8"><title>Передрахунок</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Courier New',Courier,monospace;font-size:11px;padding:12px 14px;max-width:302px;margin:0 auto;color:#111}
+  .c{text-align:center}
+  hr{border:none;border-top:1px dashed #777;margin:7px 0}
+  .m{display:flex;margin:2px 0;font-size:10px;line-height:1.4}
+  .ml{color:#444;min-width:86px;flex-shrink:0}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:9px;padding:2px 2px 3px;color:#333;border-bottom:1px solid #888;font-weight:normal}
+  th:first-child{text-align:left}
+  th:not(:first-child){text-align:right}
+  td{font-size:10px;padding:2.5px 2px;line-height:1.35}
+  .tr{display:flex;align-items:flex-end;margin:3px 0;font-size:10px}
+  .tl{flex-shrink:0}
+  .td{flex:1;border-bottom:1px dotted #999;margin:0 3px;min-width:8px;height:9px}
+  .tv{flex-shrink:0;font-weight:bold}
+  .sm{font-size:9px;color:#555}
+  @media print{body{padding:3px 5px}@page{margin:4mm}}
+</style></head><body>
+${logoHtml}
+<div class="c" style="font-size:15px;font-weight:bold;letter-spacing:1px">${estName}</div>
+<hr/>
+${cfg.print_number !== false && (order as any).receiptNumber ? `<div class="m"><span class="ml">Чек №</span><span>${(order as any).receiptNumber}</span></div>` : ""}
+<div class="m"><span class="ml">Відкрито</span><span>${openedAt}</span></div>
+<div class="m"><span class="ml">Надруковано</span><span>${printedAt}</span></div>
+<div class="m"><span class="ml">Стіл №</span><span>${tableLabel}</span></div>
+<div class="m"><span class="ml">К-сть гостей</span><span>${(order as any).guestCount || 1}</span></div>
+${order.guest_name ? `<div class="m"><span class="ml">Гість</span><span>${order.guest_name}</span></div>` : ""}
+<hr/>
+<table>
+  <thead><tr>
+    <th>Найменування</th><th>К-сть</th><th>Ціна</th><th>Загалом</th>
+  </tr></thead>
+  <tbody>${itemsHtml}</tbody>
+</table>
+<hr/>
+<div class="tr">
+  <span class="tl" style="font-weight:bold">До оплати</span>
+  <span class="td"></span>
+  <span class="tv">${fmtNum(total)}&nbsp;грн</span>
+</div>
+<div class="tr">
+  <span class="tl sm">в т.ч. ПДВ</span>
+  <span class="td"></span>
+  <span class="tv sm">${fmtNum(vatTotal)}&nbsp;грн</span>
+</div>
+${cfg.guest_message ? `<hr/><div class="c sm" style="font-style:italic;margin:3px 0">${cfg.guest_message}</div>` : ""}
+${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
+<hr/>
+<div class="c sm">Дякуємо за відвідування!</div>
+<script>window.onload=()=>{window.print()}</script>
+</body></html>`);
+  win.document.close();
+}
 
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Передрахунок</title>
-  <style>
-    body{font-family:'Courier New',monospace;font-size:12px;padding:14px;max-width:300px;margin:0 auto;color:#111}
-    .center{text-align:center}.bold{font-weight:bold}.big{font-size:14px}
-    hr{border:none;border-top:1px dashed #999;margin:7px 0}
-    .row{display:flex;justify-content:space-between;margin:2px 0}
-    .small{font-size:10px;color:#555}.italic{font-style:italic}
-    @media print{body{padding:4px}}
-  </style></head><body>
-  ${cfg.logo_url ? `<div class="center" style="margin-bottom:6px"><img src="${cfg.logo_url}" style="max-height:50px;max-width:200px" onerror="this.remove()"/></div>` : ""}
-  <div class="center bold big">${estName}</div>
-  <div class="center small">— ПЕРЕДРАХУНОК —</div>
-  <hr/>
-  <div class="row">
-    <span class="bold">${tableLabel}</span>
-    <span class="small">${showDate ? dateStr : ""}${showDate && showTime ? " " : ""}${showTime ? timeStr : ""}</span>
-  </div>
-  ${order.guest_name ? `<div class="small">Гість: ${order.guest_name}</div>` : ""}
-  <hr/>
-  ${items.map(it => `<div class="row"><span style="flex:1;margin-right:8px">${it.quantity}×${it.name}</span><span>${parseFloat(it.total_price||"0").toFixed(2)} ₴</span></div>`).join("")}
-  <hr/>
-  <div class="row bold big"><span>РАЗОМ:</span><span>${total.toFixed(2)} ₴</span></div>
-  ${cfg.guest_message ? `<hr/><div class="center small italic">${cfg.guest_message}</div>` : ""}
-  ${cfg.footer_text ? `<hr/><div class="center small">${cfg.footer_text}</div>` : ""}
-  <hr/>
-  <div class="center small">Дякуємо за відвідування!</div>
-  <script>window.onload=()=>{window.print()}</script>
-  </body></html>`);
+// ─── Final receipt (фіскальний чек) — printed after payment ──────────────────
+async function printFinalReceiptBrowser(order: any) {
+  let cfg: any = {};
+  try { const d = await apiFetch("/config/section/receipt"); cfg = d.data || {}; } catch {}
+
+  const estName = cfg.establishment_name || "Maison HD";
+  const legalName  = cfg.legal_name    || "";
+  const legalAddr  = cfg.legal_address || "";
+  const taxId      = cfg.tax_id        || "";
+
+  const fmtNum = (n: number) =>
+    n.toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDT = (d: Date) => {
+    const date = d.toLocaleDateString("uk-UA");
+    const time = d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return `${date}, ${time}`;
+  };
+
+  const now = new Date();
+  const openedRaw  = order.opened_at  || order.openedAt;
+  const closedRaw  = order.closed_at  || order.closedAt;
+  const openedAt   = openedRaw  ? fmtDT(new Date(openedRaw))  : "—";
+  const closedAt   = closedRaw  ? fmtDT(new Date(closedRaw))  : fmtDT(now);
+
+  const tableLabel = [
+    order.tableNumber || order.table_number ? String(order.tableNumber || order.table_number) : "",
+    order.tableLocation || order.table_location ? `(${order.tableLocation || order.table_location})` : "",
+  ].filter(Boolean).join("") || "—";
+
+  const items: any[] = order.items || [];
+  const total          = parseFloat(order.total_amount  || order.totalAmount  || "0");
+  const discountAmount = parseFloat(order.discount_amount || order.discountAmount || "0");
+  const tipAmount      = parseFloat(order.tip_amount    || order.tipAmount    || "0");
+  const guestCount     = order.guest_count || order.guestCount || 1;
+  const receiptNum     = order.receipt_number || order.receiptNumber || "";
+
+  const PM_LABELS: Record<string, string> = {
+    cash: "Готівка", card: "Безготівкова", mixed: "Змішана",
+    invoice: "Безготівкова", qr: "Безготівкова",
+    certificate: "Сертифікат", deposit: "Депозит",
+  };
+  const PM_SUB: Record<string, string> = {
+    card: "Картка", invoice: "Рахунок", qr: "Інтернет еквайринг",
+  };
+  const pm       = order.payment_method || order.paymentMethod || "cash";
+  const pmLabel  = PM_LABELS[pm] || pm;
+  const pmSub    = PM_SUB[pm] || "";
+
+  const fiscalStatus = order.fiscal_status || order.fiscalStatus;
+  const fiscalUrl    = order.fiscal_receipt_url || order.fiscalReceiptUrl || "";
+  const fiscalQrUrl  = order.fiscal_qr_url     || order.fiscalQrUrl      || fiscalUrl;
+  const isFiscal     = fiscalStatus === "done" && !!fiscalUrl;
+
+  const logoHtml = cfg.logo_url
+    ? `<div style="text-align:center;margin-bottom:5px"><img src="${cfg.logo_url}" style="max-height:60px;max-width:200px" onerror="this.remove()"/></div>`
+    : "";
+
+  const itemsHtml = items.map((it: any) => {
+    const qty = parseFloat(it.quantity || 1);
+    const tp  = parseFloat(it.total_price || "0");
+    const unit = qty > 0 ? tp / qty : 0;
+    if (qty === 1) {
+      return `<div style="display:flex;justify-content:space-between;margin:3px 0;font-size:10px">
+        <span style="flex:1;margin-right:4px">${it.name}</span>
+        <span style="white-space:nowrap">${fmtNum(tp)}&nbsp;₴</span>
+      </div>`;
+    }
+    const qtyLabel = qty % 1 !== 0 ? qty.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") : String(qty);
+    return `<div style="margin:3px 0;font-size:10px">
+      <div style="color:#555;font-size:9px">${qtyLabel}&nbsp;x&nbsp;${fmtNum(unit)}</div>
+      <div style="display:flex;justify-content:space-between">
+        <span style="flex:1;margin-right:4px">${it.name}</span>
+        <span style="white-space:nowrap">${fmtNum(tp)}&nbsp;₴</span>
+      </div>
+    </div>`;
+  }).join("");
+
+  const win = window.open("", "_blank", "width=420,height=960");
+  if (!win) return;
+  win.document.write(`<!DOCTYPE html><html><head>
+<meta charset="utf-8"><title>Чек</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Courier New',Courier,monospace;font-size:11px;padding:12px 14px;max-width:302px;margin:0 auto;color:#111}
+  .c{text-align:center}
+  hr{border:none;border-top:1px dashed #777;margin:6px 0}
+  .m{display:flex;margin:2px 0;font-size:10px;line-height:1.4}
+  .ml{color:#444;min-width:90px;flex-shrink:0}
+  .row{display:flex;justify-content:space-between;margin:2.5px 0;font-size:10px}
+  .bold{font-weight:bold}
+  .sm{font-size:9px;color:#555}
+  @media print{body{padding:3px 5px}@page{margin:4mm}}
+</style></head><body>
+${logoHtml}
+<div class="c bold" style="font-size:15px;letter-spacing:1px">${estName}</div>
+${legalName || legalAddr || taxId ? `<div style="height:5px"></div>
+${legalName ? `<div class="c" style="font-size:10px">${legalName}</div>` : ""}
+${legalAddr ? `<div class="c" style="font-size:9px;color:#444;margin-top:2px">${legalAddr}</div>` : ""}
+${taxId ? `<div class="c" style="font-size:9px;color:#444">ІД ${taxId}</div>` : ""}` : ""}
+<hr/>
+${receiptNum && cfg.print_number !== false ? `<div class="m"><span class="ml">Чек №</span><span>${receiptNum}</span></div>` : ""}
+<div class="m"><span class="ml">Відкрито</span><span>${openedAt}</span></div>
+<div class="m"><span class="ml">Надруковано</span><span>${closedAt}</span></div>
+<div class="m"><span class="ml">Стіл №</span><span>${tableLabel}</span></div>
+<div class="m"><span class="ml">К-сть гостей</span><span>${guestCount}</span></div>
+${order.guest_name || order.guestName ? `<div class="m"><span class="ml">Гість</span><span>${order.guest_name || order.guestName}</span></div>` : ""}
+<hr/>
+${itemsHtml}
+<hr/>
+<div style="font-size:10px;margin:2px 0">Оплата</div>
+<hr/>
+<div class="row"><span class="bold">${pmLabel}</span><span class="bold">${fmtNum(total)}&nbsp;грн</span></div>
+${pmSub ? `<div style="font-size:9px;color:#555;margin:1px 0 0 8px">${pmSub}</div>` : ""}
+${discountAmount > 0 ? `<div class="row sm"><span>Знижка</span><span>-${fmtNum(discountAmount)}&nbsp;грн</span></div>` : ""}
+${tipAmount > 0 ? `<div class="row sm"><span>Сервісний збір</span><span>+${fmtNum(tipAmount)}&nbsp;грн</span></div>` : ""}
+<hr/>
+<div class="row"><span>Сума</span><span>${fmtNum(total)}&nbsp;грн</span></div>
+<div class="row sm"><span>Без ПДВ ₴</span><span>0,00</span></div>
+<div class="row bold"><span>До сплати</span><span>${fmtNum(total)}&nbsp;грн</span></div>
+${isFiscal ? `<hr/>
+<div class="c sm" style="line-height:1.7">
+  ${receiptNum ? `<div>Чек № ${receiptNum}</div>` : ""}
+  <div>${closedAt}</div>
+  <div>ОНЛАЙН</div>
+  <div class="bold">ФІСКАЛЬНИЙ ЧЕК</div>
+  <div>Maison HD</div>
+</div>
+<hr/>
+<div class="c"><img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(fiscalQrUrl)}" style="width:120px;height:120px;margin:4px auto;display:block"/></div>` : ""}
+${cfg.guest_message ? `<hr/><div class="c sm" style="font-style:italic;margin:3px 0">${cfg.guest_message}</div>` : ""}
+${cfg.print_wifi && cfg.wifi_name ? `<hr/><div class="c sm">Wi-Fi: <b>${cfg.wifi_name}</b>${cfg.wifi_password ? `<br/>Пароль: ${cfg.wifi_password}` : ""}</div>` : ""}
+${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
+<hr/>
+<div class="c sm">Дякуємо за відвідування!</div>
+<script>window.onload=()=>{window.print()}</script>
+</body></html>`);
   win.document.close();
 }
 
@@ -1014,6 +1207,7 @@ function ReceiptArchive() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [returning, setReturning] = useState<number | null>(null);
+  const [printing, setPrinting] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState(todayStr);
@@ -1044,6 +1238,15 @@ function ReceiptArchive() {
       setOrders(prev => prev.filter(o => o.id !== order.id));
     } catch (e: any) { alert("Помилка повернення: " + e.message); }
     finally { setReturning(null); }
+  }
+
+  async function handlePrint(order: any) {
+    setPrinting(order.id);
+    try {
+      const fullData = await apiFetch(`/orders/${order.id}`);
+      await printFinalReceiptBrowser({ ...fullData.order, items: fullData.items || [] });
+    } catch (e: any) { alert("Помилка друку: " + (e as any).message); }
+    finally { setPrinting(null); }
   }
 
   return (
@@ -1107,10 +1310,18 @@ function ReceiptArchive() {
                   )}
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
                   {{cash:"Готівка",card:"Картка",mixed:"Змішана",invoice:"Рахунок",certificate:"Сертифікат",deposit:"Депозит"}[o.paymentMethod || o.payment_method] || (o.paymentMethod || o.payment_method)}
                 </span>
+                <button
+                  onClick={() => handlePrint(o)}
+                  disabled={printing === o.id}
+                  className="flex items-center gap-1 px-2.5 py-0.5 text-xs rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-40 transition-colors"
+                >
+                  <Printer className="w-3 h-3" />
+                  {printing === o.id ? "..." : "Чек"}
+                </button>
                 <button
                   onClick={() => handleReturn(o)}
                   disabled={returning === o.id}
@@ -1231,6 +1442,13 @@ function PaymentModal({ order, onClose, onDone }: { order: ActiveOrder; onClose:
         body = { ...body, paymentMethod: mode, paidAmount: finalTotal };
       }
       await apiFetch(`/orders/${order.id}/pay`, { method: "POST", body: JSON.stringify(body) });
+
+      // Auto-print final receipt after payment
+      try {
+        const fullData = await apiFetch(`/orders/${order.id}`);
+        await printFinalReceiptBrowser({ ...fullData.order, items: fullData.items || [] });
+      } catch {}
+
       onDone();
     } catch (e: any) { setError(e.message); setPaying(false); }
   }

@@ -42,6 +42,9 @@ interface ReceiptCfg {
   show_qr?: boolean;
   qr_url?: string;
   footer_text?: string;
+  legal_name?: string;
+  legal_address?: string;
+  tax_id?: string;
 }
 
 const DEFAULTS: ReceiptCfg = {
@@ -53,6 +56,7 @@ const DEFAULTS: ReceiptCfg = {
   show_qr: false, qr_url: "",
   establishment_name: "", logo_url: "",
   guest_message: "", footer_text: "",
+  legal_name: "", legal_address: "", tax_id: "",
 };
 
 const SAMPLE_ITEMS = [
@@ -153,6 +157,15 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
           )}
 
           <div style={{ textAlign: "center", fontWeight: "bold", fontSize: 13, letterSpacing: 1 }}>{name}</div>
+
+          {(cfg.legal_name || cfg.legal_address || cfg.tax_id) && (
+            <>
+              <div style={{ height: 5 }} />
+              {cfg.legal_name    && <div style={{ textAlign: "center", fontSize: 9, color: "#222" }}>{cfg.legal_name}</div>}
+              {cfg.legal_address && <div style={{ textAlign: "center", fontSize: 8, color: "#555", marginTop: 1 }}>{cfg.legal_address}</div>}
+              {cfg.tax_id        && <div style={{ textAlign: "center", fontSize: 8, color: "#555" }}>ІД {cfg.tax_id}</div>}
+            </>
+          )}
 
           {sep}
 
@@ -377,6 +390,36 @@ export default function FbConfigReceipt() {
                   <LogoUpload
                     value={cfg.logo_url}
                     onChange={url => set("logo_url", url)}
+                  />
+                </Field>
+
+                {/* LEGAL ENTITY */}
+                <SectionHeader icon={<Receipt className="w-4 h-4" />} title="Юридична особа (для фіскального чека)" />
+
+                <Field label="Назва юр. особи" hint="напр. ФОП КРАВЧЕНКО ОЛЕКСІЙ МИКОЛАЙОВИЧ">
+                  <input
+                    value={cfg.legal_name ?? ""}
+                    onChange={e => set("legal_name", e.target.value)}
+                    placeholder="ФОП / ТОВ / назва підприємства"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </Field>
+
+                <Field label="Адреса" hint="напр. Київська обл., вул. Хрещатик, 1">
+                  <input
+                    value={cfg.legal_address ?? ""}
+                    onChange={e => set("legal_address", e.target.value)}
+                    placeholder="Повна юридична адреса"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </Field>
+
+                <Field label="Ідентифікатор (ІД)" hint="ЄДРПОУ / ІПН підприємця">
+                  <input
+                    value={cfg.tax_id ?? ""}
+                    onChange={e => set("tax_id", e.target.value)}
+                    placeholder="напр. 3211121537"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                   />
                 </Field>
 
