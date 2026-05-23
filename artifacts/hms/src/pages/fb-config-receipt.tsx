@@ -114,6 +114,25 @@ function Check({
 function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
   const total = SAMPLE_ITEMS.reduce((s, i) => s + i.qty * i.price, 0);
   const name = cfg.establishment_name || "Maison HD";
+  const fmtNum = (n: number) =>
+    n.toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const sep = <div style={{ borderTop: "1px dashed #888", margin: "6px 0" }} />;
+
+  const metaRow = (label: string, value: string) => (
+    <div style={{ display: "flex", fontSize: 9, margin: "1.5px 0", lineHeight: 1.4 }}>
+      <span style={{ color: "#555", minWidth: 76, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: "#111" }}>{value}</span>
+    </div>
+  );
+
+  const dotRow = (label: string, value: string, bold = true, small = false) => (
+    <div style={{ display: "flex", alignItems: "flex-end", margin: "2.5px 0", fontSize: small ? 9 : 10 }}>
+      <span style={{ flexShrink: 0, color: small ? "#555" : "#111", fontWeight: bold ? "bold" : "normal" }}>{label}</span>
+      <span style={{ flex: 1, borderBottom: "1px dotted #aaa", margin: "0 3px", minWidth: 8, height: 8 }} />
+      <span style={{ flexShrink: 0, fontWeight: bold ? "bold" : "normal", color: small ? "#555" : "#111", whiteSpace: "nowrap" }}>{value}</span>
+    </div>
+  );
 
   return (
     <div className="sticky top-6">
@@ -123,84 +142,79 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
 
       <div className="flex justify-center">
         <div
-          style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, width: 270, background: "#fff" }}
-          className="shadow-2xl border rounded-sm p-3 space-y-0.5 text-gray-900"
+          style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 10, width: 272, background: "#fff", padding: "12px 14px" }}
+          className="shadow-2xl border rounded-sm text-gray-900"
         >
           {cfg.logo_url && (
-            <div style={{ textAlign: "center", marginBottom: 6 }}>
+            <div style={{ textAlign: "center", marginBottom: 5 }}>
               <img src={cfg.logo_url} alt="logo" style={{ maxHeight: 48, maxWidth: 180, margin: "0 auto", display: "block" }}
                 onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
             </div>
           )}
 
-          <div style={{ textAlign: "center", fontWeight: "bold", fontSize: 13, marginBottom: 2 }}>{name}</div>
+          <div style={{ textAlign: "center", fontWeight: "bold", fontSize: 13, letterSpacing: 1 }}>{name}</div>
 
-          {(cfg.print_number ?? true) && (
-            <div style={{ textAlign: "center", fontSize: 10, color: "#666" }}>Чек: {SAMPLE.number}</div>
-          )}
+          {sep}
 
-          <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
+          {(cfg.print_number ?? true) && metaRow("Чек №", SAMPLE.number)}
+          {(cfg.show_waiter ?? true) && metaRow("Офіціант", SAMPLE.waiter)}
+          {metaRow("Відкрито", `${SAMPLE.date} ${SAMPLE.time}`)}
+          {metaRow("Надруковано", `${SAMPLE.date} ${SAMPLE.time}`)}
+          {metaRow("Стіл №", `${SAMPLE.table.replace("Стіл №", "")}(Зала)`)}
+          {metaRow("К-сть гостей", "2")}
 
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontWeight: "bold" }}>{SAMPLE.table}</span>
-            <span style={{ color: "#555" }}>{SAMPLE.guest}</span>
-          </div>
+          {sep}
 
-          {(cfg.show_waiter ?? true) && (
-            <div style={{ fontSize: 10, color: "#555" }}>Офіціант: {SAMPLE.waiter}</div>
-          )}
+          {/* Items table */}
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ fontSize: 8, textAlign: "left", padding: "1px 2px 3px", color: "#444", borderBottom: "1px solid #888", fontWeight: "normal" }}>Найменування</th>
+                <th style={{ fontSize: 8, textAlign: "right", padding: "1px 2px 3px", color: "#444", borderBottom: "1px solid #888", fontWeight: "normal" }}>К-сть</th>
+                <th style={{ fontSize: 8, textAlign: "right", padding: "1px 2px 3px", color: "#444", borderBottom: "1px solid #888", fontWeight: "normal" }}>Ціна</th>
+                <th style={{ fontSize: 8, textAlign: "right", padding: "1px 2px 3px", color: "#444", borderBottom: "1px solid #888", fontWeight: "normal" }}>Загалом</th>
+              </tr>
+            </thead>
+            <tbody>
+              {SAMPLE_ITEMS.map((it, i) => (
+                <tr key={i}>
+                  <td style={{ fontSize: 9, padding: "2px 4px 2px 2px", verticalAlign: "top", wordBreak: "break-word" }}>{it.name}</td>
+                  <td style={{ fontSize: 9, padding: "2px 2px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{it.qty}</td>
+                  <td style={{ fontSize: 9, padding: "2px 2px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{fmtNum(it.price)}</td>
+                  <td style={{ fontSize: 9, padding: "2px 2px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{fmtNum(it.qty * it.price)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-          {(cfg.show_date || cfg.show_time) && (
-            <div style={{ fontSize: 10, color: "#555" }}>
-              {cfg.show_date && SAMPLE.date}
-              {cfg.show_date && cfg.show_time && " "}
-              {cfg.show_time && SAMPLE.time}
-            </div>
-          )}
+          {sep}
 
-          <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
-
-          {SAMPLE_ITEMS.map((it, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", margin: "2px 0" }}>
-              <span style={{ flex: 1, marginRight: 6 }}>{it.qty}×{it.name}</span>
-              <span>{(it.qty * it.price).toFixed(2)} ₴</span>
-            </div>
-          ))}
-
-          <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
-
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: 13 }}>
-            <span>РАЗОМ:</span><span>{total.toFixed(2)} ₴</span>
-          </div>
-          <div style={{ fontSize: 10, color: "#555", textAlign: "right" }}>{SAMPLE.payment}</div>
+          {dotRow("До оплати", `${fmtNum(total)} грн`)}
+          {dotRow("в т.ч. ПДВ", "0,00 грн", false, true)}
 
           {cfg.guest_message && (
             <>
-              <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
-              <div style={{ textAlign: "center", fontSize: 10, color: "#333", fontStyle: "italic" }}>
-                {cfg.guest_message}
-              </div>
+              {sep}
+              <div style={{ textAlign: "center", fontSize: 9, color: "#444", fontStyle: "italic" }}>{cfg.guest_message}</div>
             </>
           )}
 
           {cfg.show_qr && cfg.qr_url && (
             <>
-              <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
+              {sep}
               <div style={{ textAlign: "center" }}>
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(cfg.qr_url)}`}
-                  alt="QR" style={{ width: 80, height: 80, margin: "0 auto", display: "block" }}
-                />
-                <div style={{ fontSize: 9, color: "#666", marginTop: 2 }}>Відскануйте QR</div>
+                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=72x72&data=${encodeURIComponent(cfg.qr_url)}`}
+                  alt="QR" style={{ width: 72, height: 72, margin: "0 auto", display: "block" }} />
+                <div style={{ fontSize: 8, color: "#666", marginTop: 2 }}>Відскануйте QR</div>
               </div>
             </>
           )}
 
           {cfg.print_wifi && cfg.wifi_name && (
             <>
-              <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
-              <div style={{ fontSize: 10, textAlign: "center" }}>
-                <div>Wi-Fi: <b>{cfg.wifi_name}</b></div>
+              {sep}
+              <div style={{ fontSize: 9, textAlign: "center" }}>
+                Wi-Fi: <b>{cfg.wifi_name}</b>
                 {cfg.wifi_password && <div>Пароль: {cfg.wifi_password}</div>}
               </div>
             </>
@@ -208,13 +222,13 @@ function ReceiptPreview({ cfg }: { cfg: ReceiptCfg }) {
 
           {cfg.footer_text && (
             <>
-              <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
-              <div style={{ textAlign: "center", fontSize: 10, color: "#555" }}>{cfg.footer_text}</div>
+              {sep}
+              <div style={{ textAlign: "center", fontSize: 9, color: "#555" }}>{cfg.footer_text}</div>
             </>
           )}
 
-          <div style={{ borderTop: "1px dashed #aaa", margin: "6px 0" }} />
-          <div style={{ textAlign: "center", fontSize: 9, color: "#999" }}>Дякуємо за відвідування!</div>
+          {sep}
+          <div style={{ textAlign: "center", fontSize: 8, color: "#999" }}>Дякуємо за відвідування!</div>
         </div>
       </div>
     </div>

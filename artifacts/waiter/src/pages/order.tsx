@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, API } from "@/lib/api";
+import { useAuth } from "@/hooks/use-auth";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowLeft, Plus, Send, QrCode, CreditCard,
@@ -28,6 +29,7 @@ export default function Order() {
   const { orderId } = useParams<{ orderId: string }>();
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [qrMode, setQrMode] = useState<QRMode>(null);
   const [sending, setSending] = useState(false);
 
@@ -75,55 +77,115 @@ export default function Order() {
     let cfg: any = {};
     try { const d = await apiFetch("/fb/config/section/receipt"); cfg = d.data || {}; } catch {}
 
+    const waiterName = user?.name || "—";
+    const now = new Date();
+    const estName = cfg.establishment_name || "Maison HD";
+
+    const fmtNum = (n: number) =>
+      n.toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtDateTime = (d: Date) =>
+      d.toLocaleDateString("uk-UA", { day: "numeric", month: "long", year: "numeric" }) + " " +
+      d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+
+    const openedAt = order.openedAt ? fmtDateTime(new Date(order.openedAt)) : "—";
+    const printedAt = fmtDateTime(now);
+
+    const tableLabel = [
+      order.tableNumber ? String(order.tableNumber) : "",
+      order.tableLocation ? `(${order.tableLocation})` : "",
+    ].filter(Boolean).join("") || "—";
+
     const receiptItems = activeItems;
     const total = receiptItems.reduce(
       (s: number, i: any) => s + parseFloat(i.total_price || i.totalPrice || "0"), 0
     );
-    const now = new Date();
-    const dateStr = now.toLocaleDateString("uk-UA");
-    const timeStr = now.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
-    const tableLabel = order.tableNumber ? `Стіл №${order.tableNumber}` : order.guestName || "Замовлення";
-    const estName = cfg.establishment_name || "Maison HD";
-    const showDate = cfg.show_date !== false;
-    const showTime = cfg.show_time !== false;
+    const vatTotal = receiptItems.reduce((s: number, i: any) => {
+      const tp = parseFloat(i.total_price || i.totalPrice || "0");
+      const rate = parseFloat(i.vat_rate || "0");
+      return s + (rate > 0 ? tp - tp / (1 + rate / 100) : 0);
+    }, 0);
 
-    const win = window.open("", "_blank", "width=380,height=700");
+    const logoHtml = cfg.logo_url
+      ? `<div style="text-align:center;margin-bottom:5px"><img src="${cfg.logo_url}" style="max-height:60px;max-width:200px" onerror="this.remove()"/></div>`
+      : "";
+
+    const itemsHtml = receiptItems.map((it: any) => {
+      const qty = parseFloat(it.quantity || 1);
+      const tp  = parseFloat(it.total_price || it.totalPrice || "0");
+      const unit = qty > 0 ? tp / qty : 0;
+      const qtyLabel = qty % 1 !== 0 ? qty.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") : String(qty);
+      return `<tr>
+        <td style="word-break:break-word;padding-right:6px;vertical-align:top">${it.name}</td>
+        <td style="text-align:right;white-space:nowrap;vertical-align:top">${qtyLabel}</td>
+        <td style="text-align:right;white-space:nowrap;vertical-align:top">${fmtNum(unit)}</td>
+        <td style="text-align:right;white-space:nowrap;vertical-align:top">${fmtNum(tp)}</td>
+      </tr>`;
+    }).join("");
+
+    const win = window.open("", "_blank", "width=420,height=820");
     if (!win) return;
 
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Передрахунок</title>
-    <style>
-      body{font-family:'Courier New',monospace;font-size:12px;padding:14px;max-width:300px;margin:0 auto;color:#111}
-      .center{text-align:center}.bold{font-weight:bold}.big{font-size:14px}
-      hr{border:none;border-top:1px dashed #999;margin:7px 0}
-      .row{display:flex;justify-content:space-between;margin:2px 0}
-      .small{font-size:10px;color:#555}.italic{font-style:italic}
-      @media print{body{padding:4px}}
-    </style></head><body>
-    ${cfg.logo_url ? `<div class="center" style="margin-bottom:6px"><img src="${cfg.logo_url}" style="max-height:50px;max-width:200px" onerror="this.remove()"/></div>` : ""}
-    <div class="center bold big">${estName}</div>
-    <div class="center small">— ПЕРЕДРАХУНОК —</div>
-    <hr/>
-    <div class="row">
-      <span class="bold">${tableLabel}</span>
-      <span class="small">${showDate ? dateStr : ""}${showDate && showTime ? " " : ""}${showTime ? timeStr : ""}</span>
-    </div>
-    ${order.guestName ? `<div class="small">Гість: ${order.guestName}</div>` : ""}
-    <hr/>
-    ${receiptItems.map((it: any) => {
-      const qty = parseFloat(it.quantity || 1);
-      const qtyLabel = qty % 1 !== 0 ? qty.toFixed(2).replace(/\.?0+$/, "") : String(qty);
-      return `<div class="row"><span style="flex:1;margin-right:8px">${qtyLabel}×${it.name}</span><span>${parseFloat(it.total_price || it.totalPrice || "0").toFixed(2)} ₴</span></div>`;
-    }).join("")}
-    <hr/>
-    <div class="row bold big"><span>РАЗОМ:</span><span>${total.toFixed(2)} ₴</span></div>
-    ${cfg.guest_message ? `<hr/><div class="center small italic">${cfg.guest_message}</div>` : ""}
-    ${cfg.show_qr && cfg.qr_url ? `<hr/><div class="center"><img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(cfg.qr_url)}" style="width:90px;height:90px"/><div class="small" style="margin-top:2px">Відскануйте QR</div></div>` : ""}
-    ${cfg.print_wifi && cfg.wifi_name ? `<hr/><div class="center small"><div>Wi-Fi: <b>${cfg.wifi_name}</b></div>${cfg.wifi_password ? `<div>Пароль: ${cfg.wifi_password}</div>` : ""}</div>` : ""}
-    ${cfg.footer_text ? `<hr/><div class="center small">${cfg.footer_text}</div>` : ""}
-    <hr/>
-    <div class="center small">Дякуємо за відвідування!</div>
-    <script>window.onload=()=>{ window.print(); }</script>
-    </body></html>`);
+    win.document.write(`<!DOCTYPE html><html><head>
+<meta charset="utf-8"><title>Передрахунок</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Courier New',Courier,monospace;font-size:11px;padding:12px 14px;max-width:302px;margin:0 auto;color:#111}
+  .c{text-align:center}
+  hr{border:none;border-top:1px dashed #777;margin:7px 0}
+  .m{display:flex;margin:2px 0;font-size:10px;line-height:1.4}
+  .ml{color:#444;min-width:86px;flex-shrink:0}
+  .mv{color:#111}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:9px;padding:2px 2px 3px;color:#333;border-bottom:1px solid #888;font-weight:normal}
+  th:first-child{text-align:left}
+  th:not(:first-child){text-align:right}
+  td{font-size:10px;padding:2.5px 2px;line-height:1.35}
+  .tr{display:flex;align-items:flex-end;margin:3px 0;font-size:10px}
+  .tl{flex-shrink:0}
+  .td{flex:1;border-bottom:1px dotted #999;margin:0 3px;min-width:8px;height:9px}
+  .tv{flex-shrink:0;font-weight:bold}
+  .sm{font-size:9px;color:#555}
+  @media print{body{padding:3px 5px}@page{margin:4mm}}
+</style></head><body>
+${logoHtml}
+<div class="c" style="font-size:15px;font-weight:bold;letter-spacing:1px">${estName}</div>
+<hr/>
+${cfg.print_number !== false && order.receiptNumber ? `<div class="m"><span class="ml">Чек №</span><span class="mv">${order.receiptNumber}</span></div>` : ""}
+${cfg.show_waiter !== false ? `<div class="m"><span class="ml">Офіціант</span><span class="mv">${waiterName}</span></div>` : ""}
+<div class="m"><span class="ml">Відкрито</span><span class="mv">${openedAt}</span></div>
+<div class="m"><span class="ml">Надруковано</span><span class="mv">${printedAt}</span></div>
+<div class="m"><span class="ml">Стіл №</span><span class="mv">${tableLabel}</span></div>
+<div class="m"><span class="ml">К-сть гостей</span><span class="mv">${order.guestCount || 1}</span></div>
+${order.guestName ? `<div class="m"><span class="ml">Гість</span><span class="mv">${order.guestName}</span></div>` : ""}
+<hr/>
+<table>
+  <thead><tr>
+    <th>Найменування</th>
+    <th>К-сть</th>
+    <th>Ціна</th>
+    <th>Загалом</th>
+  </tr></thead>
+  <tbody>${itemsHtml}</tbody>
+</table>
+<hr/>
+<div class="tr">
+  <span class="tl" style="font-weight:bold">До оплати</span>
+  <span class="td"></span>
+  <span class="tv">${fmtNum(total)}&nbsp;грн</span>
+</div>
+<div class="tr">
+  <span class="tl sm">в т.ч. ПДВ</span>
+  <span class="td"></span>
+  <span class="tv sm">${fmtNum(vatTotal)}&nbsp;грн</span>
+</div>
+${cfg.guest_message ? `<hr/><div class="c sm" style="font-style:italic;margin:3px 0">${cfg.guest_message}</div>` : ""}
+${cfg.show_qr && cfg.qr_url ? `<hr/><div class="c"><img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(cfg.qr_url)}" style="width:90px;height:90px"/><div class="sm" style="margin-top:2px">Відскануйте QR</div></div>` : ""}
+${cfg.print_wifi && cfg.wifi_name ? `<hr/><div class="c sm">Wi-Fi: <b>${cfg.wifi_name}</b>${cfg.wifi_password ? `<br/>Пароль: ${cfg.wifi_password}` : ""}</div>` : ""}
+${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
+<hr/>
+<div class="c sm">Дякуємо за відвідування!</div>
+<script>window.onload=()=>{window.print()}</script>
+</body></html>`);
     win.document.close();
   }
 
