@@ -99,9 +99,44 @@ const SOURCE_SYSTEMS = [
   { value: "bas_excel",label: "BAS / 1C (Excel)" },
   { value: "excel",    label: "Excel / CSV" },
   { value: "csv",      label: "CSV" },
-  { value: "poster",   label: "Poster (скоро)" },
-  { value: "servio",   label: "Servio (скоро)" },
+  { value: "poster",   label: "Poster" },
+  { value: "servio",   label: "Servio" },
 ];
+
+const SYSTEM_FILE_HINTS: Record<string, { formats: string; steps: string[] }> = {
+  poster: {
+    formats: "CSV · Excel",
+    steps: [
+      "Увійдіть в joinposter.com → Налаштування",
+      "Перейдіть у розділ Товари → Експортувати",
+      "Завантажте отриманий CSV-файл сюди",
+    ],
+  },
+  servio: {
+    formats: "CSV · Excel · XML",
+    steps: [
+      "Відкрийте Servio PMS → Звіти",
+      "Оберіть потрібний звіт (Гості / Бронювання / Рахунки)",
+      "Експортуйте у форматі Excel або CSV та завантажте",
+    ],
+  },
+  bas_xml: {
+    formats: "XML (вивантаження BAS/1C)",
+    steps: [
+      "В BAS/1C: Адміністрування → Завантаження даних",
+      "Вивантажте у форматі XML обмін",
+      "Завантажте отриманий .xml файл сюди",
+    ],
+  },
+  bas_excel: {
+    formats: "Excel (.xlsx / .xls)",
+    steps: [
+      "В BAS/1C: оберіть потрібний журнал або довідник",
+      "Натисніть «Вивести список» → Зберегти як Excel",
+      "Завантажте отриманий файл сюди",
+    ],
+  },
+};
 
 // ── HEALTH SCORE GAUGE ────────────────────────────────────────────────────────
 
@@ -590,6 +625,29 @@ export default function MigrationCenterPage() {
               {/* ── FILES ──────────────────────────────────────────────────── */}
               {activeSection === "files" && (
                 <div className="space-y-5">
+                  {/* System-specific hint */}
+                  {(() => {
+                    const srcSys = proj?.source_system || selectedProject?.source_system;
+                    const hint = SYSTEM_FILE_HINTS[srcSys];
+                    if (!hint) return null;
+                    return (
+                      <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+                        <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-2">
+                          Як отримати файл з {SOURCE_SYSTEMS.find(s => s.value === srcSys)?.label}
+                        </div>
+                        <ol className="space-y-1">
+                          {hint.steps.map((step, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs text-indigo-800">
+                              <span className="w-4 h-4 rounded-full bg-indigo-200 text-indigo-700 font-bold flex items-center justify-center shrink-0 mt-0.5 text-[10px]">{i + 1}</span>
+                              {step}
+                            </li>
+                          ))}
+                        </ol>
+                        <div className="text-[11px] text-indigo-500 mt-2">Підтримувані формати: {hint.formats}</div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Upload zone */}
                   <div className="bg-white rounded-2xl p-6 border border-gray-100">
                     <h3 className="text-sm font-semibold text-gray-700 mb-4">Завантажити файл</h3>
