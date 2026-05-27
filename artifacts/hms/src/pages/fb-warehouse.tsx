@@ -736,10 +736,6 @@ function ReceiptsTab({ receipts, suppliers, summary, isLoading }: {
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [showAiScan, setShowAiScan] = useState(false);
 
-  if (showAiScan) {
-    return <AiScanView suppliers={suppliers} onBack={() => { setShowAiScan(false); qc.invalidateQueries({ queryKey: ["wh-receipts"] }); }} />;
-  }
-
   const createReceipt = useMutation({
     mutationFn: async ({ header, items }: { header: any; items: ReceiptItem[] }) => {
       const { receipt } = await api("/receipts", { method: "POST", body: JSON.stringify({ ...header, supplier_id: header.supplier_id ? parseInt(header.supplier_id) : null }) });
@@ -760,6 +756,10 @@ function ReceiptsTab({ receipts, suppliers, summary, isLoading }: {
     },
     onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
   });
+
+  if (showAiScan) {
+    return <AiScanView suppliers={suppliers} onBack={() => { setShowAiScan(false); qc.invalidateQueries({ queryKey: ["wh-receipts"] }); }} />;
+  }
 
   return (
     <div>
