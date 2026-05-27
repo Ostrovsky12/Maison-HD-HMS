@@ -39,6 +39,29 @@ async function api(path: string, opts?: RequestInit) {
   return r.json();
 }
 
+// Upload receipt photo to object storage, returns objectPath or null on failure
+async function uploadReceiptPhoto(file: File): Promise<string | null> {
+  try {
+    const token = localStorage.getItem("hms_token");
+    const metaRes = await fetch("/api/storage/uploads/request-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type || "image/jpeg" }),
+    });
+    if (!metaRes.ok) return null;
+    const { uploadURL, objectPath } = await metaRes.json();
+    const uploadRes = await fetch(uploadURL, { method: "PUT", body: file, headers: { "Content-Type": file.type || "image/jpeg" } });
+    if (!uploadRes.ok) return null;
+    return objectPath as string;
+  } catch { return null; }
+}
+
+function receiptPhotoUrl(objectPath: string): string {
+  // objectPath is like /objects/some-uuid → serve via /api/storage/objects/some-uuid
+  const path = objectPath.startsWith("/objects/") ? objectPath.slice("/objects/".length) : objectPath;
+  return `/api/storage/objects/${path}`;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Ingredient {
   id: number; name: string; unit: string; category: string;
@@ -396,11 +419,16 @@ function AiScanView({ suppliers, onBack }: { suppliers: Supplier[]; onBack: () =
           if (sr.supplier?.id) finalSupplierId = sr.supplier.id;
         } catch {}
       }
+      // Upload photo to object storage if user selected an image file
+      let invoiceImagePath: string | null = null;
+      if (imageFile) {
+        invoiceImagePath = await uploadReceiptPhoto(imageFile);
+      }
       const cr = await api("/receipts", { method: "POST", body: JSON.stringify({
         supplier_id: finalSupplierId, receipt_no: parsed.receipt_no, receipt_date: parsed.receipt_date,
         payment_type: paymentType,
-        notes: inputMode === "voice" ? "Голосовий ввід (AI)" : imageBase64 ? "AI-сканування фото" : "AI-сканування тексту",
-        invoice_image: imageBase64 || null,
+        notes: inputMode === "voice" ? "Голосовий ввід (AI)" : imageFile ? "AI-сканування фото" : "AI-сканування тексту",
+        invoice_image: invoiceImagePath,
       })});
       await api(`/receipts/${cr.receipt.id}/items`, { method: "PUT", body: JSON.stringify({ items: parsed.items.map((item: any) => ({ ...item, receipt_unit: item.receipt_unit || item.unit, conversion_factor: item.conversion_factor || 1 })) }) });
       const newCount = (parsed.items || []).filter((i: any) => i.is_new_ingredient).length;
@@ -939,16 +967,197 @@ function ReceiptCreateDialog({ open, onClose, suppliers, ingredients, onSave }: 
   );
 }
 
+// ─── Receipt Detail Dialog ────────────────────────────────────────────────────
+function ReceiptDetailDialog({ id, open, onClose, suppliers, ingredients, onRefetch }: {
+  id: number | null; open: boolean; onClose: () => void;
+  suppliers: Supplier[]; ingredients: Ingredient[]; onRefetch: () => void;
+}) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [editItems, setEditItems] = useState<any[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [imageOpen, setImageOpen] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["receipt-detail", id],
+    queryFn: () => api(`/receipts/${id}`),
+    enabled: open && !!id,
+  });
+  const receipt = data?.receipt;
+  const items: any[] = editItems ?? data?.items ?? [];
+
+  useEffect(() => { if (!open) { setEditItems(null); setSaving(false); setImageOpen(false); } }, [open]);
+
+  const handleSaveItems = async () => {
+    if (!id || !editItems) return;
+    setSaving(true);
+    try {
+      await api(`/receipts/${id}/items`, { method: "PUT", body: JSON.stringify({ items: editItems }) });
+      qc.invalidateQueries({ queryKey: ["receipt-detail", id] });
+      qc.invalidateQueries({ queryKey: ["wh-receipts"] });
+      setEditItems(null);
+      toast({ title: "Позиції оновлено" });
+      onRefetch();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setSaving(false); }
+  };
+
+  const handleConfirm = async () => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      await api(`/receipts/${id}/confirm`, { method: "POST" });
+      qc.invalidateQueries({ queryKey: ["receipt-detail", id] });
+      qc.invalidateQueries({ queryKey: ["wh-receipts"] });
+      qc.invalidateQueries({ queryKey: ["wh-ingredients"] });
+      toast({ title: "Накладну проведено" });
+      onRefetch();
+      onClose();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setSaving(false); }
+  };
+
+  const updateEditItem = (idx: number, field: string, value: any) =>
+    setEditItems(prev => (prev ?? data?.items ?? []).map((it: any, i: number) => i === idx ? { ...it, [field]: value } : it));
+
+  const isDraft = receipt?.status === "draft";
+  const isEditing = !!editItems;
+  const hasImage = receipt?.invoice_image && !receipt.invoice_image.startsWith("data:");
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        {isLoading ? (
+          <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+        ) : receipt ? (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3">
+                <span>Накладна {receipt.receipt_no || `#${receipt.id}`}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${RECEIPT_STATUSES[receipt.status]?.color || "bg-muted"}`}>
+                  {RECEIPT_STATUSES[receipt.status]?.label || receipt.status}
+                </span>
+                {hasImage && (
+                  <button onClick={() => setImageOpen(v => !v)} className="ml-auto flex items-center gap-1 text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-1 hover:bg-violet-50">
+                    <ImageIcon className="w-3.5 h-3.5" /> {imageOpen ? "Сховати фото" : "Фото накладної"}
+                  </button>
+                )}
+              </DialogTitle>
+            </DialogHeader>
+
+            {hasImage && imageOpen && (
+              <div className="rounded-xl border overflow-hidden">
+                <img src={receiptPhotoUrl(receipt.invoice_image)} alt="Накладна" className="w-full object-contain max-h-80" />
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div><span className="text-muted-foreground text-xs">Дата</span><div className="font-medium">{receipt.receipt_date?.slice(0, 10)}</div></div>
+              <div><span className="text-muted-foreground text-xs">Постачальник</span><div className="font-medium">{receipt.supplier_name || "—"}</div></div>
+              <div><span className="text-muted-foreground text-xs">Оплата</span><div className="font-medium">{PAYMENT_TERMS.find(p => p.value === receipt.payment_type)?.label || receipt.payment_type}</div></div>
+              {receipt.notes && <div className="col-span-3"><span className="text-muted-foreground text-xs">Примітки</span><div className="text-sm">{receipt.notes}</div></div>}
+            </div>
+
+            <div className="border rounded-xl overflow-hidden">
+              <div className="bg-muted/40 px-3 py-2 flex items-center justify-between border-b">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{items.length} позицій</span>
+                {isDraft && !isEditing && (
+                  <button onClick={() => setEditItems(data?.items?.map((i: any) => ({ ...i })) ?? [])} className="text-xs text-violet-700 hover:underline flex items-center gap-1">
+                    <Pencil className="w-3 h-3" /> Редагувати
+                  </button>
+                )}
+                {isEditing && (
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditItems(null)} className="text-xs text-muted-foreground hover:underline">Скасувати</button>
+                    <Button size="sm" className="h-6 text-xs" onClick={handleSaveItems} disabled={saving}>
+                      {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3 mr-1" />} Зберегти
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-muted/20 border-b">
+                  <tr className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                    <th className="text-left px-3 py-2 font-medium">Позиція</th>
+                    <th className="text-right px-3 py-2 font-medium">К-сть</th>
+                    <th className="text-left px-3 py-2 font-medium">Од.</th>
+                    <th className="text-right px-3 py-2 font-medium">Ціна/од</th>
+                    <th className="text-right px-3 py-2 font-medium">Сума</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {items.map((item: any, idx: number) => (
+                    <tr key={item.id ?? idx} className="hover:bg-muted/10">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-xs">{item.name}</div>
+                        {item.ingredient_name && item.ingredient_name !== item.name && (
+                          <div className="text-[10px] text-muted-foreground">{item.ingredient_name}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {isEditing ? (
+                          <input type="number" min="0" step="0.001" value={item.quantity}
+                            onChange={e => updateEditItem(idx, "quantity", parseFloat(e.target.value))}
+                            className="w-16 border rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-violet-300" />
+                        ) : (
+                          <span className="font-mono">{parseFloat(item.quantity).toFixed(3)}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{item.unit}</td>
+                      <td className="px-3 py-2 text-right">
+                        {isEditing ? (
+                          <input type="number" min="0" step="0.01" value={item.price_per_unit}
+                            onChange={e => updateEditItem(idx, "price_per_unit", parseFloat(e.target.value))}
+                            className="w-20 border rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-violet-300" />
+                        ) : (
+                          <span className="font-mono">{parseFloat(item.price_per_unit).toFixed(2)}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-xs">
+                        {(parseFloat(item.quantity) * parseFloat(item.price_per_unit)).toFixed(2)} ₴
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-muted/30 border-t">
+                  <tr>
+                    <td colSpan={4} className="px-3 py-2 font-semibold text-sm">Разом</td>
+                    <td className="px-3 py-2 text-right font-bold font-mono">
+                      {items.reduce((s: number, i: any) => s + parseFloat(i.quantity) * parseFloat(i.price_per_unit), 0).toFixed(2)} ₴
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {isDraft && (
+              <DialogFooter>
+                <Button variant="outline" onClick={onClose}>Закрити</Button>
+                <Button className="bg-green-600 hover:bg-green-700 gap-2" onClick={handleConfirm} disabled={saving}>
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Провести накладну
+                </Button>
+              </DialogFooter>
+            )}
+          </>
+        ) : (
+          <div className="py-12 text-center text-muted-foreground">Накладну не знайдено</div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // TAB: Постачання (накладні)
 // ══════════════════════════════════════════════════════════════════════════════
-function ReceiptsTab({ receipts, suppliers, ingredients, summary, isLoading }: {
-  receipts: Receipt[]; suppliers: Supplier[]; ingredients: Ingredient[]; summary: any; isLoading: boolean;
+function ReceiptsTab({ receipts, suppliers, ingredients, summary, isLoading, onRefetch }: {
+  receipts: Receipt[]; suppliers: Supplier[]; ingredients: Ingredient[]; summary: any; isLoading: boolean; onRefetch: () => void;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [dialog, setDialog] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [showAiScan, setShowAiScan] = useState(false);
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const createReceipt = useMutation({
     mutationFn: async ({ header, items }: { header: any; items: ReceiptItem[] }) => {
@@ -1016,7 +1225,7 @@ function ReceiptsTab({ receipts, suppliers, ingredients, summary, isLoading }: {
             </thead>
             <tbody className="divide-y">
               {receipts.map((r: Receipt) => (
-                <tr key={r.id} className="hover:bg-muted/20">
+                <tr key={r.id} className="hover:bg-muted/20 cursor-pointer" onClick={() => setDetailId(r.id)}>
                   <td className="px-3 py-2 font-mono text-xs">{r.receipt_no || `#${r.id}`}</td>
                   <td className="px-3 py-2 text-muted-foreground">{r.receipt_date?.slice(0, 10)}</td>
                   <td className="px-3 py-2 font-medium truncate max-w-[140px]">{r.supplier_name || "—"}</td>
@@ -1028,7 +1237,7 @@ function ReceiptsTab({ receipts, suppliers, ingredients, summary, isLoading }: {
                       {RECEIPT_STATUSES[r.status]?.label || r.status}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-right" onClick={e => e.stopPropagation()}>
                     {r.status === "draft" && (
                       <Button size="sm" variant="outline" className="h-7 text-xs text-green-700 border-green-300 hover:bg-green-50"
                         onClick={() => setConfirmId(r.id)}>
@@ -1060,6 +1269,14 @@ function ReceiptsTab({ receipts, suppliers, ingredients, summary, isLoading }: {
         suppliers={suppliers}
         ingredients={ingredients}
         onSave={data => createReceipt.mutate(data)}
+      />
+      <ReceiptDetailDialog
+        id={detailId}
+        open={!!detailId}
+        onClose={() => setDetailId(null)}
+        suppliers={suppliers}
+        ingredients={ingredients}
+        onRefetch={() => { qc.invalidateQueries({ queryKey: ["wh-receipts"] }); onRefetch(); }}
       />
     </div>
   );
@@ -2462,7 +2679,7 @@ export default function FbWarehouse() {
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {tab === "stock"      && <StockTab ingredients={ingredients} suppliers={suppliers} isLoading={ingQ.isLoading} onRefetch={ingQ.refetch} />}
-          {tab === "receipts"   && <ReceiptsTab receipts={receipts} suppliers={suppliers} ingredients={ingredients} summary={summary} isLoading={recQ.isLoading} />}
+          {tab === "receipts"   && <ReceiptsTab receipts={receipts} suppliers={suppliers} ingredients={ingredients} summary={summary} isLoading={recQ.isLoading} onRefetch={recQ.refetch} />}
           {tab === "writeoffs"  && <WriteoffsTab ingredients={ingredients} />}
           {tab === "transfers"  && <TransfersTab ingredients={ingredients} />}
           {tab === "movement"   && <MovementTab />}

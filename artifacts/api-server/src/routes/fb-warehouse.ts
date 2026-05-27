@@ -397,7 +397,7 @@ router.post("/receipts", async (req, res) => {
 
 router.patch("/receipts/:id", async (req, res) => {
   try {
-    const { supplier_id, receipt_no, receipt_date, notes, status, payment_type } = req.body;
+    const { supplier_id, receipt_no, receipt_date, notes, status, payment_type, invoice_image } = req.body;
     const r = await db.execute(sql`
       UPDATE fb_stock_receipts SET
         supplier_id = COALESCE(${supplier_id ?? null}, supplier_id),
@@ -406,6 +406,7 @@ router.patch("/receipts/:id", async (req, res) => {
         notes = COALESCE(${notes || null}, notes),
         status = COALESCE(${status || null}, status),
         payment_type = COALESCE(${payment_type || null}, payment_type),
+        invoice_image = CASE WHEN ${invoice_image !== undefined} THEN ${invoice_image || null} ELSE invoice_image END,
         updated_at = NOW()
       WHERE id = ${parseInt(req.params.id)} AND organization_id = ${org(req)}
       RETURNING *
@@ -663,7 +664,7 @@ ${ingredientsList || "список порожній"}
 
     const completion = await openai.chat.completions.create({
       model: "gpt-5.2",
-      max_completion_tokens: 2000,
+      max_completion_tokens: 8000,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent }
