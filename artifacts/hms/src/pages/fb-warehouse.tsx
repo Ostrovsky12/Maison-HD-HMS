@@ -731,23 +731,48 @@ function ReceiptCreateDialog({ open, onClose, suppliers, ingredients, onSave }: 
   suppliers: Supplier[]; ingredients: Ingredient[];
   onSave: (data: { header: any; items: ReceiptItem[] }) => void;
 }) {
+  const { toast } = useToast();
   const blank = { supplier_id: "", receipt_no: "", receipt_date: new Date().toISOString().slice(0, 10), payment_type: "unpaid", notes: "" };
   const [hdr, setHdr] = useState(blank);
   const [items, setItems] = useState<{ ingredient_id: string; name: string; quantity: string; unit: string; price_per_unit: string }[]>([
     { ingredient_id: "", name: "", quantity: "", unit: "кг", price_per_unit: "" },
   ]);
+  const [creatingIdx, setCreatingIdx] = useState<number | null>(null);
+  const [extraIngredients, setExtraIngredients] = useState<Ingredient[]>([]);
+  const allIngredients = [...ingredients, ...extraIngredients];
+
   const set = (k: string, v: string) => setHdr(h => ({ ...h, [k]: v }));
   const setItem = (i: number, k: string, v: string) =>
     setItems(arr => arr.map((row, idx) => {
       if (idx !== i) return row;
       if (k === "ingredient_id") {
-        const ing = ingredients.find(x => String(x.id) === v);
+        const ing = allIngredients.find(x => String(x.id) === v);
         return { ...row, ingredient_id: v, name: ing?.name || row.name, unit: ing?.unit || row.unit, price_per_unit: ing ? String(ing.cost_per_unit) : row.price_per_unit };
       }
       return { ...row, [k]: v };
     }));
   const addItem = () => setItems(arr => [...arr, { ingredient_id: "", name: "", quantity: "", unit: "кг", price_per_unit: "" }]);
   const removeItem = (i: number) => setItems(arr => arr.filter((_, idx) => idx !== i));
+
+  const createAndLink = async (i: number) => {
+    const row = items[i];
+    if (!row.name.trim()) return;
+    setCreatingIdx(i);
+    try {
+      const res = await api("/ingredients", {
+        method: "POST",
+        body: JSON.stringify({ name: row.name.trim(), unit: row.unit, category: "Інше", current_stock: "0", min_stock: "0", cost_per_unit: row.price_per_unit || "0" }),
+      });
+      const newIng: Ingredient = res.ingredient;
+      setExtraIngredients(prev => [...prev, newIng]);
+      setItems(arr => arr.map((r, idx) => idx === i ? { ...r, ingredient_id: String(newIng.id) } : r));
+      toast({ title: `«${newIng.name}» додано до складу` });
+    } catch (e: any) {
+      toast({ title: "Не вдалося створити інгредієнт", description: e.message, variant: "destructive" });
+    } finally {
+      setCreatingIdx(null);
+    }
+  };
 
   const total = items.reduce((s, it) => s + (parseFloat(it.quantity) || 0) * (parseFloat(it.price_per_unit) || 0), 0);
   const canSave = items.some(it => (parseFloat(it.quantity) || 0) > 0 && it.name.trim());
@@ -827,17 +852,44 @@ function ReceiptCreateDialog({ open, onClose, suppliers, ingredients, onSave }: 
                   {items.map((row, i) => (
                     <tr key={i}>
                       <td className="px-2 py-1.5">
-                        <Select value={row.ingredient_id} onValueChange={v => setItem(i, "ingredient_id", v)}>
-                          <SelectTrigger className="h-7 text-xs border-0 shadow-none px-0 focus:ring-0">
-                            <SelectValue placeholder="Оберіть або введіть..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ingredients.map(ing => <SelectItem key={ing.id} value={String(ing.id)}>{ing.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        {!row.ingredient_id && (
-                          <Input className="mt-0.5 h-6 text-xs border-0 border-b rounded-none px-0 focus-visible:ring-0" placeholder="або назва вручну"
-                            value={row.name} onChange={e => setItem(i, "name", e.target.value)} />
+                        {row.ingredient_id ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs font-medium truncate">{allIngredients.find(x => String(x.id) === row.ingredient_id)?.name}</span>
+                            <button onClick={() => setItem(i, "ingredient_id", "")} className="text-muted-foreground hover:text-primary shrink-0">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <Select value="" onValueChange={v => setItem(i, "ingredient_id", v)}>
+                              <SelectTrigger className="h-7 text-xs border-0 shadow-none px-0 focus:ring-0">
+                                <SelectValue placeholder="Зі складу..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {allIngredients.map(ing => <SelectItem key={ing.id} value={String(ing.id)}>{ing.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex items-center gap-1">
+                              <Input
+                                className="h-6 text-xs border-0 border-b rounded-none px-0 focus-visible:ring-0 flex-1"
+                                placeholder="або нова назва..."
+                                value={row.name}
+                                onChange={e => setItem(i, "name", e.target.value)}
+                              />
+                              {row.name.trim() && (
+                                <button
+                                  onClick={() => createAndLink(i)}
+                                  disabled={creatingIdx === i}
+                                  className="shrink-0 flex items-center gap-0.5 text-[10px] font-medium text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded px-1.5 py-0.5 transition-colors disabled:opacity-50"
+                                >
+                                  {creatingIdx === i
+                                    ? <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                    : <Plus className="w-2.5 h-2.5" />}
+                                  Створити
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         )}
                       </td>
                       <td className="px-2 py-1.5">
