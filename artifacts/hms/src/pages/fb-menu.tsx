@@ -16,7 +16,7 @@ import {
   Leaf, Star, Wine, AlertTriangle, ChefHat, Clock,
   Eye, EyeOff, GripVertical,
   Layers, Package, Filter,
-  ChevronRight, ChevronDown, FolderPlus, Settings2, Sliders,
+  ChevronRight, ChevronDown, FolderPlus, Sliders,
   Printer,
 } from "lucide-react";
 
@@ -911,7 +911,7 @@ function ItemDialog({
                   { value: "service", label: "🛎 Послуга", desc: "Без списання" },
                 ] as const).map(opt => (
                   <button key={opt.value} type="button"
-                    onClick={() => { set("item_type", opt.value); if (opt.value !== "dish" && tab === "tech") setTab("main"); }}
+                    onClick={() => { set("item_type", opt.value); if (opt.value !== "dish") setTab(prev => prev === "tech" ? "main" : prev); }}
                     className={`flex-1 rounded-lg border-2 p-2.5 text-left transition-colors ${form.item_type === opt.value ? "border-primary bg-primary/5" : "border-muted hover:border-muted-foreground/40"}`}>
                     <div className="text-sm font-medium">{opt.label}</div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">{opt.desc}</div>
@@ -1280,135 +1280,231 @@ function getDescendantIds(catId: number, allCats: Category[]): number[] {
   return [catId, ...direct.flatMap(c => getDescendantIds(c.id, allCats))];
 }
 
-// ─── Recursive Category Tree Node ─────────────────────────────────────────────
+// ─── Dish Row (Level 3 — inline in tree) ──────────────────────────────────────
 
-interface TreeNodeProps {
-  cat: Category;
-  depth: number;
-  categories: Category[];
-  allItems: Item[];
-  selectedCatId: number | null;
-  expandedNodes: Set<number>;
-  draggingCatId: number | null;
-  dragOverCatId: number | null;
-  draggingItemId: number | null;
-  onSelect: (id: number) => void;
-  onToggleExpand: (id: number) => void;
-  onCatDragStart: (e: React.DragEvent, catId: number) => void;
+function DishRow({
+  item, onEdit, onToggleAvailable, onTogglePopular, isDragging, onDragStart, onDragEnd,
+}: {
+  item: Item;
+  onEdit: () => void;
+  onToggleAvailable: () => void;
+  onTogglePopular: () => void;
+  isDragging: boolean;
+  onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
-  onNodeDragOver: (e: React.DragEvent, catId: number) => void;
-  onNodeDragLeave: (e: React.DragEvent) => void;
-  onNodeDrop: (e: React.DragEvent, catId: number) => void;
-  onAddChild: (parentId: number) => void;
-  onEdit: (cat: Category) => void;
-  onDelete: (cat: Category) => void;
-}
-
-function TreeNode({
-  cat, depth, categories, allItems, selectedCatId, expandedNodes,
-  draggingCatId, dragOverCatId, draggingItemId,
-  onSelect, onToggleExpand,
-  onCatDragStart, onDragEnd, onNodeDragOver, onNodeDragLeave, onNodeDrop,
-  onAddChild, onEdit, onDelete,
-}: TreeNodeProps) {
-  const children = categories
-    .filter(c => c.parent_id === cat.id)
-    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-  const isExpanded = expandedNodes.has(cat.id);
-  const isSelected = selectedCatId === cat.id;
-  const isDragTarget = dragOverCatId === cat.id;
-  const isBeingDragged = draggingCatId === cat.id;
-  const descendantIds = getDescendantIds(cat.id, categories);
-  const itemCount = allItems.filter(i =>
-    descendantIds.includes((i as any).category_id ?? i.categoryId)
-  ).length;
-
-  const isTopLevel = depth === 0;
-  const stationEmoji = isTopLevel
-    ? (STATION_TYPES.find(s => s.value === cat.station)?.emoji || cat.emoji)
-    : cat.emoji;
-
-  const pl = 8 + depth * 14;
-
-  const sharedProps = {
-    categories, allItems, selectedCatId, expandedNodes,
-    draggingCatId, dragOverCatId, draggingItemId,
-    onSelect, onToggleExpand,
-    onCatDragStart, onDragEnd, onNodeDragOver, onNodeDragLeave, onNodeDrop,
-    onAddChild, onEdit, onDelete,
-  };
+}) {
+  const isAvail = (item as any).is_available ?? item.isAvailable;
+  const isPop   = (item as any).is_popular   ?? item.isPopular;
+  const src = imgSrc(item.image_url);
 
   return (
-    <div>
-      <div
-        className={`group relative flex items-center gap-1 text-sm transition-colors cursor-pointer
-          ${isSelected ? "bg-muted font-medium" : "hover:bg-muted"}
-          ${!cat.isActive ? "opacity-50" : ""}
-          ${isDragTarget ? "bg-primary/10 ring-1 ring-inset ring-primary/40 rounded mx-1" : ""}
-          ${isBeingDragged ? "opacity-40" : ""}`}
-        style={{ paddingLeft: pl, paddingRight: 8, paddingTop: isTopLevel ? 7 : 5, paddingBottom: isTopLevel ? 7 : 5 }}
-        draggable={depth > 0}
-        onDragStart={depth > 0 ? e => onCatDragStart(e, cat.id) : undefined}
-        onDragEnd={onDragEnd}
-        onDragOver={e => onNodeDragOver(e, cat.id)}
-        onDragLeave={onNodeDragLeave}
-        onDrop={e => onNodeDrop(e, cat.id)}
-        onClick={() => { onSelect(cat.id); if (children.length > 0 && !isExpanded) onToggleExpand(cat.id); }}
-      >
-        <button
-          className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
-          onClick={e => { e.stopPropagation(); onToggleExpand(cat.id); }}
-        >
-          {children.length > 0
-            ? (isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />)
-            : <span className="w-3.5 h-3.5 inline-block" />}
-        </button>
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={`relative flex items-center gap-3 border-b border-muted/50 hover:bg-muted/20 transition-colors group select-none
+        ${isDragging ? "opacity-40" : ""}
+        ${!isAvail ? "opacity-60" : ""}
+        ${item.is_stop_list ? "bg-red-50/30" : ""}`}
+      style={{ paddingLeft: 72, paddingRight: 16, paddingTop: 8, paddingBottom: 8 }}
+    >
+      {/* Left tree indent line */}
+      <div className="absolute left-[44px] top-0 bottom-0 w-px bg-border/40 pointer-events-none" />
 
-        {depth > 0 && (
-          <GripVertical className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 cursor-grab" />
-        )}
+      {/* Drag handle */}
+      <GripVertical className="w-4 h-4 text-muted-foreground/0 group-hover:text-muted-foreground/50 cursor-grab shrink-0 -ml-3" />
 
-        <span className={`shrink-0 ${isTopLevel ? "text-base" : "text-sm"}`}>
-          {isDragTarget && draggingItemId != null ? "📥" : isDragTarget ? "📂" : stationEmoji}
-        </span>
-
-        <span className={`flex-1 truncate ${isTopLevel ? "font-medium uppercase text-xs tracking-wide text-muted-foreground" : ""}`}>
-          {cat.name}
-        </span>
-
-        {itemCount > 0 && <span className="text-xs text-muted-foreground shrink-0 mr-1">{itemCount}</span>}
-
-        <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-background border rounded shadow-sm z-10">
-          <button className="p-1 hover:bg-muted rounded" title="Нова підгрупа"
-            onClick={e => { e.stopPropagation(); onAddChild(cat.id); }}>
-            <FolderPlus className="w-3 h-3" />
-          </button>
-          <button className="p-1 hover:bg-muted rounded" title="Редагувати"
-            onClick={e => { e.stopPropagation(); onEdit(cat); }}>
-            <Pencil className="w-3 h-3" />
-          </button>
-          <button className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Видалити"
-            onClick={e => { e.stopPropagation(); onDelete(cat); }}>
-            <Trash2 className="w-3 h-3" />
-          </button>
-        </div>
+      {/* Thumbnail */}
+      <div className="w-10 h-10 rounded-full overflow-hidden bg-muted/60 shrink-0 border border-border/60 flex items-center justify-center">
+        {src
+          ? <img src={src} alt={item.name} className="w-full h-full object-cover" />
+          : <span className="text-xl">🍽</span>}
       </div>
 
-      {isExpanded && (
-        <div>
-          {children.map(child => (
-            <TreeNode key={child.id} {...sharedProps} cat={child} depth={depth + 1} />
-          ))}
-          <button
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 w-full py-1 transition-colors"
-            style={{ paddingLeft: pl + 28 }}
-            onClick={() => onAddChild(cat.id)}
-          >
-            <Plus className="w-3 h-3" />
-            <span>Нова група</span>
-          </button>
+      {/* Name + description */}
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm leading-tight flex items-center gap-1.5 flex-wrap">
+          <span>{item.name}</span>
+          {item.is_stop_list && (
+            <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">СТОП</span>
+          )}
+          {item.item_type === "goods" && (
+            <span className="text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded">товар</span>
+          )}
+          {item.item_type === "service" && (
+            <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">послуга</span>
+          )}
+          {((item as any).is_popular ?? item.isPopular) && (
+            <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">⭐ Топ</span>
+          )}
         </div>
+        {item.description && (
+          <div className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">{item.description}</div>
+        )}
+      </div>
+
+      {/* Price */}
+      <div className="text-sm font-semibold shrink-0 min-w-[80px] text-right tabular-nums">
+        {parseFloat(item.price).toLocaleString("uk-UA", { minimumFractionDigits: 2 })} ₴
+      </div>
+
+      {/* Available toggle */}
+      <div className="flex flex-col items-center shrink-0 gap-0.5" onClick={e => e.stopPropagation()}>
+        <Switch
+          checked={isAvail}
+          onCheckedChange={onToggleAvailable}
+          className="h-[18px] w-8 data-[state=checked]:bg-green-500"
+        />
+        <span className="text-[9px] text-muted-foreground">доступна</span>
+      </div>
+
+      {/* Popular toggle */}
+      <div className="flex flex-col items-center shrink-0 gap-0.5" onClick={e => e.stopPropagation()}>
+        <Switch
+          checked={isPop}
+          onCheckedChange={onTogglePopular}
+          className="h-[18px] w-8 data-[state=checked]:bg-amber-500"
+        />
+        <span className="text-[9px] text-muted-foreground">топ</span>
+      </div>
+
+      {/* Edit */}
+      <button
+        onClick={e => { e.stopPropagation(); onEdit(); }}
+        className="text-xs text-primary hover:underline font-medium shrink-0 ml-1"
+      >
+        Ред.
+      </button>
+    </div>
+  );
+}
+
+// ─── Category Tree Row (Level 2) ──────────────────────────────────────────────
+
+function CategoryTreeRow({
+  cat, isExpanded, itemCount, onToggle, onEdit, onToggleActive, onAddItem,
+}: {
+  cat: Category;
+  isExpanded: boolean;
+  itemCount: number;
+  onToggle: () => void;
+  onEdit: () => void;
+  onToggleActive: () => void;
+  onAddItem: () => void;
+}) {
+  return (
+    <div
+      className={`relative flex items-center gap-2 border-b border-muted/50 hover:bg-muted/30 transition-colors group cursor-pointer
+        ${!cat.isActive ? "opacity-60" : ""}`}
+      style={{ paddingLeft: 36, paddingRight: 16, paddingTop: 9, paddingBottom: 9 }}
+      onClick={onToggle}
+    >
+      {/* Left tree line */}
+      <div className="absolute left-[44px] top-0 bottom-0 w-px bg-border/40 pointer-events-none" />
+      {/* Horizontal dash connector */}
+      <div className="absolute left-[28px] top-1/2 w-4 h-px bg-border/60 pointer-events-none" />
+
+      {/* Expand arrow */}
+      <button
+        className="p-0.5 text-muted-foreground hover:text-foreground shrink-0 z-10"
+        onClick={e => { e.stopPropagation(); onToggle(); }}
+      >
+        {isExpanded
+          ? <ChevronDown className="w-3.5 h-3.5" />
+          : <ChevronRight className="w-3.5 h-3.5" />}
+      </button>
+
+      <span className="shrink-0 text-base">{cat.emoji}</span>
+
+      <span className="flex-1 font-medium text-sm">{cat.name}</span>
+
+      {itemCount > 0 && (
+        <span className="text-xs text-muted-foreground">{itemCount}</span>
       )}
+
+      {/* Hover: add item button */}
+      <button
+        className="hidden group-hover:flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted mr-1"
+        onClick={e => { e.stopPropagation(); onAddItem(); }}
+      >
+        <Plus className="w-3 h-3" /> Страва
+      </button>
+
+      {/* Active toggle */}
+      <div onClick={e => e.stopPropagation()}>
+        <Switch checked={cat.isActive} onCheckedChange={onToggleActive} className="h-[18px] w-8" />
+      </div>
+
+      {/* Edit */}
+      <button
+        onClick={e => { e.stopPropagation(); onEdit(); }}
+        className="text-xs text-primary hover:underline font-medium shrink-0"
+      >
+        Ред.
+      </button>
+    </div>
+  );
+}
+
+// ─── Group Tree Row (Level 1) ─────────────────────────────────────────────────
+
+function GroupTreeRow({
+  group, isExpanded, totalItems, onToggle, onEdit, onToggleActive, onAddCategory,
+}: {
+  group: Category;
+  isExpanded: boolean;
+  totalItems: number;
+  onToggle: () => void;
+  onEdit: () => void;
+  onToggleActive: () => void;
+  onAddCategory: () => void;
+}) {
+  const stationEmoji = STATION_TYPES.find(s => s.value === group.station)?.emoji || group.emoji;
+
+  return (
+    <div
+      className={`flex items-center gap-2 px-4 py-3 bg-muted/25 border-b hover:bg-muted/45 transition-colors group cursor-pointer
+        ${!group.isActive ? "opacity-60" : ""}`}
+      onClick={onToggle}
+    >
+      {/* Expand arrow */}
+      <button
+        className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
+        onClick={e => { e.stopPropagation(); onToggle(); }}
+      >
+        {isExpanded
+          ? <ChevronDown className="w-4 h-4" />
+          : <ChevronRight className="w-4 h-4" />}
+      </button>
+
+      <span className="shrink-0 text-base">{stationEmoji}</span>
+
+      <span className="flex-1 font-semibold text-sm">{group.name}</span>
+
+      {totalItems > 0 && (
+        <span className="text-xs text-muted-foreground mr-1">{totalItems} позицій</span>
+      )}
+
+      {/* Hover: add category button */}
+      <button
+        className="hidden group-hover:flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-background/60 mr-1"
+        onClick={e => { e.stopPropagation(); onAddCategory(); }}
+      >
+        <Plus className="w-3 h-3" /> Категорія
+      </button>
+
+      {/* Active toggle */}
+      <div onClick={e => e.stopPropagation()}>
+        <Switch checked={group.isActive} onCheckedChange={onToggleActive} className="h-[18px] w-8" />
+      </div>
+
+      {/* Edit */}
+      <button
+        onClick={e => { e.stopPropagation(); onEdit(); }}
+        className="text-xs text-primary hover:underline font-medium shrink-0"
+      >
+        Ред.
+      </button>
     </div>
   );
 }
@@ -1419,8 +1515,8 @@ export default function FbMenu() {
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
-  const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const [expandedCats, setExpandedCats] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "available" | "stop" | "popular" | "vegetarian">("all");
   const [catDialog, setCatDialog] = useState<{ open: boolean; initial?: Partial<Category>; parentId?: number | null }>({ open: false });
@@ -1428,8 +1524,6 @@ export default function FbMenu() {
   const [deleteCat, setDeleteCat] = useState<Category | null>(null);
   const [deleteItem, setDeleteItem] = useState<Item | null>(null);
   const [draggingItemId, setDraggingItemId] = useState<number | null>(null);
-  const [dragOverCatId, setDragOverCatId] = useState<number | null>(null);
-  const [draggingCatId, setDraggingCatId] = useState<number | null>(null);
 
   const { data: catsData } = useQuery({ queryKey: ["fb-categories"], queryFn: () => apiFetch("/api/fb/categories") });
   const { data: itemsData, isLoading: itemsLoading } = useQuery({ queryKey: ["fb-items"], queryFn: () => apiFetch("/api/fb/items") });
@@ -1442,37 +1536,30 @@ export default function FbMenu() {
     parent_id: c.parent_id ?? null,
     station: c.station ?? null,
   }));
-  const allItems: Item[] = itemsData?.items || [];
+  const allItems: Item[] = (itemsData?.items || []);
   const taxGroups: TaxGroup[] = taxData?.taxGroups || [];
 
-  // Top-level categories (no parent) — includes both station-type and legacy standalone
-  const topLevelCats = categories
-    .filter(c => !c.parent_id)
-    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  const groups = categories.filter(c => !c.parent_id).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-  // Auto-expand first category on load
+  // Auto-expand first group + its first category on load
   useEffect(() => {
-    if (topLevelCats.length && expandedNodes.size === 0) {
-      setExpandedNodes(new Set([topLevelCats[0].id]));
-      if (selectedCatId === null) setSelectedCatId(topLevelCats[0].id);
+    if (groups.length && expandedGroups.size === 0) {
+      const firstGroup = groups[0];
+      setExpandedGroups(new Set([firstGroup.id]));
+      const firstSubCat = categories.find(c => c.parent_id === firstGroup.id);
+      if (firstSubCat) setExpandedCats(new Set([firstSubCat.id]));
     }
-  }, [topLevelCats.length]);
+  }, [groups.length]);
 
-  function toggleExpanded(catId: number) {
-    setExpandedNodes(prev => {
-      const next = new Set(prev);
-      if (next.has(catId)) next.delete(catId); else next.add(catId);
-      return next;
-    });
+  function toggleGroup(id: number) {
+    setExpandedGroups(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  function toggleCat(id: number) {
+    setExpandedCats(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
-  // Item filtering — recursively collect all descendant category IDs
-  const items = allItems.filter(item => {
-    const catId = (item as any).category_id ?? item.categoryId;
-    if (selectedCatId !== null) {
-      const descendantIds = getDescendantIds(selectedCatId, categories);
-      if (!descendantIds.includes(catId)) return false;
-    }
+  // Filtered items helper
+  function filterItem(item: Item): boolean {
     if (search && !item.name.toLowerCase().includes(search.toLowerCase()) && !(item.description || "").toLowerCase().includes(search.toLowerCase())) return false;
     const isAvail = (item as any).is_available ?? item.isAvailable;
     const isPop   = (item as any).is_popular   ?? item.isPopular;
@@ -1482,7 +1569,7 @@ export default function FbMenu() {
     if (filter === "popular" && !isPop) return false;
     if (filter === "vegetarian" && !isVeg) return false;
     return true;
-  });
+  }
 
   // Mutations
   const saveCategory = useMutation({
@@ -1504,12 +1591,16 @@ export default function FbMenu() {
     onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
   });
 
+  const toggleCategoryActive = (cat: Category) =>
+    apiFetch(`/api/fb/categories/${cat.id}`, { method: "PATCH", body: JSON.stringify({ isActive: !cat.isActive }) })
+      .then(() => qc.invalidateQueries({ queryKey: ["fb-categories"] }))
+      .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
+
   const deleteCategory = useMutation({
     mutationFn: (id: number) => apiFetch(`/api/fb/categories/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["fb-categories"] });
       setDeleteCat(null);
-      if (deleteCat?.id === selectedCatId) setSelectedCatId(null);
       toast({ title: "Видалено" });
     },
     onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
@@ -1539,7 +1630,6 @@ export default function FbMenu() {
       } else {
         saved = await apiFetch("/api/fb/items", { method: "POST", body: JSON.stringify(payload) });
       }
-      // Bulk-save modifier groups if item has id
       const itemId = saved.item?.id ?? data.id;
       if (itemId) {
         try {
@@ -1567,15 +1657,12 @@ export default function FbMenu() {
     onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
   });
 
-  const toggleAvailable = (item: Item) =>
-    apiFetch(`/api/fb/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ isAvailable: !item.isAvailable }) })
+  const toggleAvailable = (item: Item) => {
+    const cur = (item as any).is_available ?? item.isAvailable;
+    apiFetch(`/api/fb/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ isAvailable: !cur }) })
       .then(() => qc.invalidateQueries({ queryKey: ["fb-items"] }))
       .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
-
-  const toggleStopList = (item: Item) =>
-    apiFetch(`/api/fb/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ is_stop_list: !item.is_stop_list }) })
-      .then(() => qc.invalidateQueries({ queryKey: ["fb-items"] }))
-      .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
+  };
 
   const togglePopular = (item: Item) => {
     const cur = (item as any).is_popular ?? item.isPopular;
@@ -1584,106 +1671,12 @@ export default function FbMenu() {
       .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
   };
 
-  const toggleVegetarian = (item: Item) => {
-    const cur = (item as any).is_vegetarian ?? item.isVegetarian;
-    apiFetch(`/api/fb/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ isVegetarian: !cur }) })
-      .then(() => qc.invalidateQueries({ queryKey: ["fb-items"] }))
-      .catch((e: any) => toast({ title: e.message, variant: "destructive" }));
-  };
-
-  const moveItemToCategory = async (itemId: number, categoryId: number) => {
-    try {
-      await apiFetch(`/api/fb/items/${itemId}`, { method: "PATCH", body: JSON.stringify({ categoryId }) });
-      qc.invalidateQueries({ queryKey: ["fb-items"] });
-      const cat = categories.find(c => c.id === categoryId);
-      toast({ title: `Переміщено до «${cat?.name || ""}»` });
-    } catch (e: any) {
-      toast({ title: e.message, variant: "destructive" });
-    }
-  };
-
-  const moveCategory = async (catId: number, newParentId: number | null) => {
-    const cat = categories.find(c => c.id === catId);
-    if (!cat || cat.parent_id === newParentId) return;
-    const targetCat = newParentId ? categories.find(c => c.id === newParentId) : null;
-    try {
-      await apiFetch(`/api/fb/categories/${catId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          parent_id: newParentId,
-          station: newParentId ? null : (cat.station ?? "kitchen"),
-        }),
-      });
-      qc.invalidateQueries({ queryKey: ["fb-categories"] });
-      toast({ title: `«${cat.name}» переміщено до «${targetCat?.name || "верхнього рівня"}»` });
-    } catch (e: any) {
-      toast({ title: e.message, variant: "destructive" });
-    }
-  };
-
-  // ── Item drag handlers ──────────────────────────────────────────────────────
+  // Drag handlers for item rows
   const handleDragStart = (e: React.DragEvent, itemId: number) => {
-    e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("itemId", String(itemId));
-    e.dataTransfer.setData("dragType", "item");
     setDraggingItemId(itemId);
   };
-
-  const handleDragEnd = () => {
-    setDraggingItemId(null);
-    setDragOverCatId(null);
-    setDraggingCatId(null);
-  };
-
-  // ── Category (tree node) drag handlers ──────────────────────────────────────
-  const handleCatDragStart = (e: React.DragEvent, catId: number) => {
-    e.stopPropagation();
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("catId", String(catId));
-    e.dataTransfer.setData("dragType", "category");
-    setDraggingCatId(catId);
-  };
-
-  const handleNodeDragOver = (e: React.DragEvent, catId: number) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverCatId(catId);
-  };
-
-  const handleNodeDragLeave = (e: React.DragEvent) => {
-    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
-      setDragOverCatId(null);
-    }
-  };
-
-  const handleNodeDrop = (e: React.DragEvent, catId: number) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const dragType = e.dataTransfer.getData("dragType");
-    setDragOverCatId(null);
-
-    if (dragType === "item") {
-      const itemId = parseInt(e.dataTransfer.getData("itemId"));
-      setDraggingItemId(null);
-      if (!itemId) return;
-      const item = allItems.find(i => i.id === itemId);
-      const currentCatId = (item as any)?.category_id ?? item?.categoryId;
-      if (currentCatId !== catId) moveItemToCategory(itemId, catId);
-    } else if (dragType === "category") {
-      const draggedCatId = parseInt(e.dataTransfer.getData("catId"));
-      setDraggingCatId(null);
-      if (!draggedCatId || draggedCatId === catId) return;
-      // Prevent moving a category into its own descendant
-      if (getDescendantIds(draggedCatId, categories).slice(1).includes(catId)) return;
-      moveCategory(draggedCatId, catId);
-    }
-  };
-
-  const selectedCat = categories.find(c => c.id === selectedCatId);
-  const selectedCatLabel = selectedCat
-    ? `${selectedCat.emoji} ${selectedCat.name}`
-    : null;
+  const handleDragEnd = () => setDraggingItemId(null);
 
   const FILTERS = [
     { value: "all", label: "Всі" },
@@ -1693,133 +1686,189 @@ export default function FbMenu() {
     { value: "vegetarian", label: "Веган" },
   ] as const;
 
-  // Default category for new items
-  const defaultCatId = selectedCatId
-    ? (selectedCat?.parent_id ? selectedCatId : (categories.find(c => c.parent_id === selectedCatId)?.id ?? selectedCatId))
-    : (categories[0]?.id);
+  const totalItems = allItems.length;
+  const firstSubCat = groups.length ? categories.find(c => c.parent_id === groups[0]?.id) : undefined;
+  const defaultCatIdForNew = firstSubCat?.id ?? categories[0]?.id;
 
   return (
     <AppLayout>
-      <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+      <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
 
-        {/* ─── Left: Category Tree ──────────────────────────── */}
-        <div className="w-60 shrink-0 border-r flex flex-col bg-background">
-          <div className="px-3 py-2.5 border-b flex items-center justify-between">
-            <span className="font-semibold text-sm">Меню</span>
-            <span className="text-xs text-muted-foreground">{allItems.length} позицій</span>
+        {/* ─── Header ──────────────────────────────────────── */}
+        <div className="flex items-center gap-3 px-5 py-3 border-b bg-background shrink-0">
+          <div>
+            <h1 className="font-semibold text-base">Меню</h1>
+            <p className="text-xs text-muted-foreground">{totalItems} позицій</p>
           </div>
 
-          <div className="flex-1 overflow-y-auto py-1">
-            {/* All shortcut */}
-            <button onClick={() => setSelectedCatId(null)}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors ${selectedCatId === null ? "bg-muted font-medium" : ""}`}>
-              <Layers className="w-4 h-4 text-muted-foreground shrink-0" />
-              <span className="flex-1 text-left">Усі страви</span>
-              <span className="text-xs text-muted-foreground">{allItems.length}</span>
-            </button>
+          <div className="flex-1 relative max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Пошук страв..." className="pl-8 h-8 text-sm" />
+          </div>
 
-            {/* Recursive category tree */}
-            {topLevelCats.map(cat => (
-              <TreeNode
-                key={cat.id}
-                cat={cat}
-                depth={0}
-                categories={categories}
-                allItems={allItems}
-                selectedCatId={selectedCatId}
-                expandedNodes={expandedNodes}
-                draggingCatId={draggingCatId}
-                dragOverCatId={dragOverCatId}
-                draggingItemId={draggingItemId}
-                onSelect={setSelectedCatId}
-                onToggleExpand={toggleExpanded}
-                onCatDragStart={handleCatDragStart}
-                onDragEnd={handleDragEnd}
-                onNodeDragOver={handleNodeDragOver}
-                onNodeDragLeave={handleNodeDragLeave}
-                onNodeDrop={handleNodeDrop}
-                onAddChild={parentId => setCatDialog({ open: true, parentId })}
-                onEdit={cat => setCatDialog({ open: true, initial: cat })}
-                onDelete={setDeleteCat}
-              />
+          <div className="flex gap-1">
+            {FILTERS.map(f => (
+              <button key={f.value} onClick={() => setFilter(f.value as any)}
+                className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${filter === f.value ? "bg-primary text-primary-foreground border-primary" : "border-muted-foreground/30 hover:bg-muted"}`}>
+                {f.label}
+              </button>
             ))}
           </div>
 
-          {/* Bottom actions */}
-          <div className="p-2 border-t space-y-1">
-            <Button variant="ghost" className="w-full h-8 text-xs justify-start" onClick={() => setCatDialog({ open: true })}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" /> Нова категорія
+          <div className="flex gap-2 ml-auto">
+            <Button variant="outline" size="sm" onClick={() => setCatDialog({ open: true })}>
+              <FolderPlus className="w-4 h-4 mr-1" /> Нова група
             </Button>
-          </div>
-        </div>
-
-        {/* ─── Right: Items ─────────────────────────────────── */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center gap-3 px-5 py-3 border-b bg-background shrink-0">
-            <div>
-              <h1 className="font-semibold text-base">
-                {selectedCatLabel ? selectedCatLabel : "🍽 Усі страви"}
-              </h1>
-              <p className="text-xs text-muted-foreground">{items.length} позицій{search ? " (відфільтровано)" : ""}</p>
-            </div>
-
-            <div className="flex-1 relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Пошук страв..." className="pl-8 h-8 text-sm" />
-            </div>
-
-            <div className="flex gap-1">
-              {FILTERS.map(f => (
-                <button key={f.value} onClick={() => setFilter(f.value as any)}
-                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${filter === f.value ? "bg-primary text-primary-foreground border-primary" : "border-muted-foreground/30 hover:bg-muted"}`}>
-                  {f.label}
-                </button>
-              ))}
-            </div>
-
-            <Button size="sm" onClick={() => setItemDialog({ open: true, initial: { categoryId: defaultCatId } })}>
+            <Button size="sm" onClick={() => setItemDialog({ open: true, initial: { categoryId: defaultCatIdForNew } })}>
               <Plus className="w-4 h-4 mr-1" /> Додати страву
             </Button>
           </div>
+        </div>
 
-          {/* Items grid */}
-          <div className="flex-1 overflow-y-auto p-5">
-            {itemsLoading ? (
-              <div className="flex items-center justify-center h-40 text-muted-foreground">Завантаження...</div>
-            ) : items.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
-                <Package className="w-10 h-10 opacity-30" />
-                <p className="text-sm">{search ? "Нічого не знайдено" : "В цій категорії ще немає страв"}</p>
-                {!search && (
-                  <Button size="sm" onClick={() => setItemDialog({ open: true, initial: { categoryId: defaultCatId } })}>
-                    <Plus className="w-4 h-4 mr-1" /> Додати першу страву
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                {items.map(item => (
-                  <ItemCard key={item.id}
-                    item={item}
-                    onEdit={() => setItemDialog({ open: true, initial: item })}
-                    onDelete={() => setDeleteItem(item)}
-                    onToggleAvailable={() => toggleAvailable(item)}
-                    onToggleStopList={() => toggleStopList(item)}
-                    onTogglePopular={() => togglePopular(item)}
-                    onToggleVegetarian={() => toggleVegetarian(item)}
-                    onDragStart={e => handleDragStart(e, item.id)}
-                    onDragEnd={handleDragEnd}
-                    isDragging={draggingItemId === item.id}
+        {/* ─── Tree ────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto">
+          {itemsLoading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Завантаження...</div>
+          ) : groups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-60 gap-3 text-muted-foreground">
+              <Layers className="w-12 h-12 opacity-20" />
+              <p className="text-sm font-medium">Меню порожнє</p>
+              <p className="text-xs">Створіть першу групу (Кухня, Бар тощо)</p>
+              <Button size="sm" onClick={() => setCatDialog({ open: true })}>
+                <Plus className="w-4 h-4 mr-1" /> Нова група
+              </Button>
+            </div>
+          ) : (
+            groups.map(group => {
+              const groupExpanded = expandedGroups.has(group.id);
+              const subCats = categories
+                .filter(c => c.parent_id === group.id)
+                .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+              const groupItemCount = allItems.filter(i => {
+                const catId = (i as any).category_id ?? i.categoryId;
+                return subCats.some(sc => sc.id === catId);
+              }).length;
+
+              return (
+                <div key={group.id}>
+                  {/* ── Level 1: Group ─────────────────────── */}
+                  <GroupTreeRow
+                    group={group}
+                    isExpanded={groupExpanded}
+                    totalItems={groupItemCount}
+                    onToggle={() => toggleGroup(group.id)}
+                    onEdit={() => setCatDialog({ open: true, initial: group })}
+                    onToggleActive={() => toggleCategoryActive(group)}
+                    onAddCategory={() => { setCatDialog({ open: true, parentId: group.id }); if (!groupExpanded) toggleGroup(group.id); }}
                   />
-                ))}
-              </div>
-            )}
-          </div>
+
+                  {groupExpanded && (
+                    <div>
+                      {subCats.length === 0 ? (
+                        <div className="flex items-center gap-2 border-b border-muted/40 text-muted-foreground text-xs"
+                          style={{ paddingLeft: 52, paddingTop: 8, paddingBottom: 8 }}>
+                          <span>Немає категорій</span>
+                          <button className="text-primary hover:underline"
+                            onClick={() => setCatDialog({ open: true, parentId: group.id })}>
+                            + Додати
+                          </button>
+                        </div>
+                      ) : (
+                        subCats.map(cat => {
+                          const catExpanded = expandedCats.has(cat.id);
+                          const catItems = allItems
+                            .filter(i => {
+                              const cId = (i as any).category_id ?? i.categoryId;
+                              return cId === cat.id && filterItem(i);
+                            })
+                            .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+                          const catItemsTotal = allItems.filter(i => {
+                            const cId = (i as any).category_id ?? i.categoryId;
+                            return cId === cat.id;
+                          }).length;
+
+                          return (
+                            <div key={cat.id}>
+                              {/* ── Level 2: Category ─────────── */}
+                              <CategoryTreeRow
+                                cat={cat}
+                                isExpanded={catExpanded}
+                                itemCount={catItemsTotal}
+                                onToggle={() => toggleCat(cat.id)}
+                                onEdit={() => setCatDialog({ open: true, initial: cat })}
+                                onToggleActive={() => toggleCategoryActive(cat)}
+                                onAddItem={() => {
+                                  setItemDialog({ open: true, initial: { categoryId: cat.id } });
+                                  if (!catExpanded) toggleCat(cat.id);
+                                }}
+                              />
+
+                              {catExpanded && (
+                                <div>
+                                  {catItems.length === 0 ? (
+                                    <div className="flex items-center gap-2 border-b border-muted/40 text-muted-foreground text-xs"
+                                      style={{ paddingLeft: 88, paddingTop: 8, paddingBottom: 8 }}>
+                                      {search || filter !== "all"
+                                        ? <span>Нічого не знайдено</span>
+                                        : <>
+                                          <span>Немає страв</span>
+                                          <button className="text-primary hover:underline"
+                                            onClick={() => setItemDialog({ open: true, initial: { categoryId: cat.id } })}>
+                                            + Додати
+                                          </button>
+                                        </>
+                                      }
+                                    </div>
+                                  ) : (
+                                    catItems.map(item => (
+                                      <DishRow
+                                        key={item.id}
+                                        item={item}
+                                        onEdit={() => setItemDialog({ open: true, initial: item })}
+                                        onToggleAvailable={() => toggleAvailable(item)}
+                                        onTogglePopular={() => togglePopular(item)}
+                                        isDragging={draggingItemId === item.id}
+                                        onDragStart={e => handleDragStart(e, item.id)}
+                                        onDragEnd={handleDragEnd}
+                                      />
+                                    ))
+                                  )}
+
+                                  {/* Add item shortcut at bottom of category */}
+                                  <button
+                                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-muted/30 w-full border-b border-muted/40 transition-colors"
+                                    style={{ paddingLeft: 88, paddingTop: 6, paddingBottom: 6 }}
+                                    onClick={() => setItemDialog({ open: true, initial: { categoryId: cat.id } })}
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>Додати страву</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+
+                      {/* Add category shortcut at bottom of group */}
+                      <button
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-muted/20 w-full border-b border-muted/40 transition-colors"
+                        style={{ paddingLeft: 52, paddingTop: 6, paddingBottom: 6 }}
+                        onClick={() => setCatDialog({ open: true, parentId: group.id })}
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Додати категорію</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
-      {/* ─── Category Dialog ─────────────────────────────── */}
+      {/* ─── Category / Group Dialog ──────────────────────── */}
       <CategoryDialog
         open={catDialog.open}
         initial={catDialog.initial}
@@ -1844,7 +1893,9 @@ export default function FbMenu() {
           <AlertDialogHeader>
             <AlertDialogTitle>Видалити «{deleteCat?.name}»?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteCat?.parent_id ? "Страви у цій групі залишаться, але втратять прив'язку до категорії." : "Буде видалена категорія разом з усіма групами. Страви залишаться."}
+              {deleteCat?.parent_id
+                ? "Страви у цій категорії залишаться без прив'язки."
+                : "Буде видалено групу разом з усіма категоріями. Страви залишаться."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1860,7 +1911,7 @@ export default function FbMenu() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Видалити «{deleteItem?.name}»?</AlertDialogTitle>
-            <AlertDialogDescription>Цю дію неможливо скасувати. Страва буде видалена назавжди.</AlertDialogDescription>
+            <AlertDialogDescription>Цю дію неможливо скасувати.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Скасувати</AlertDialogCancel>
