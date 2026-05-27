@@ -545,6 +545,75 @@ router.post("/receipts/:id/confirm", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// Cancel (storno) confirmed receipt → reverse stock changes
+router.post("/receipts/:id/cancel", async (req, res) => {
+  try {
+    const receiptId = parseInt(req.params.id);
+    const orgId = org(req);
+    const db_ = (db as any).$client;
+    const [receipt] = (await db.execute(sql`
+      SELECT * FROM fb_stock_receipts WHERE id = ${receiptId} AND organization_id = ${orgId}
+    `)).rows as any[];
+    if (!receipt) return res.status(404).json({ error: "Not found" });
+    if (receipt.status === "cancelled") return res.status(400).json({ error: "Already cancelled" });
+    if (receipt.status === "draft") {
+      // For drafts: just mark cancelled, no stock to reverse
+      await db.execute(sql`UPDATE fb_stock_receipts SET status = 'cancelled', updated_at = NOW() WHERE id = ${receiptId}`);
+      return res.json({ success: true, reversed: [] });
+    }
+
+    // For confirmed: reverse stock changes
+    const items = (await db.execute(sql`SELECT * FROM fb_stock_receipt_items WHERE receipt_id = ${receiptId}`)).rows as any[];
+    const reversed: any[] = [];
+    let totalReversed = 0;
+
+    for (const item of items) {
+      if (!item.ingredient_id || item.item_type === "product") continue;
+      const conv = parseFloat(item.conversion_factor) > 0 ? parseFloat(item.conversion_factor) : 1;
+      const stockToRemove = parseFloat(item.quantity) * conv;
+
+      // Check current stock won't go below zero (warn but allow)
+      const prevRow = await db_.query(
+        `SELECT current_stock, cost_per_unit FROM fb_ingredients WHERE id=$1`, [item.ingredient_id]
+      );
+      const prev = prevRow.rows[0];
+      const prevStock = parseFloat(prev?.current_stock ?? 0);
+      const newStock = Math.max(0, prevStock - stockToRemove); // floor at 0
+
+      await db.execute(sql`
+        UPDATE fb_ingredients SET
+          current_stock = ${newStock},
+          updated_at = NOW()
+        WHERE id = ${item.ingredient_id}
+      `);
+
+      const lineAmount = parseFloat(item.price_per_unit) * parseFloat(item.quantity);
+      totalReversed += lineAmount;
+      reversed.push({ ingredient_id: item.ingredient_id, name: item.name, stock_removed: stockToRemove });
+    }
+
+    await db.execute(sql`
+      UPDATE fb_stock_receipts SET status = 'cancelled', updated_at = NOW() WHERE id = ${receiptId}
+    `);
+
+    // Reverse accounting entry: Дт 631 → Кт 281 (сторно)
+    if (totalReversed > 0) {
+      const receiptDate = receipt.receipt_date
+        ? new Date(receipt.receipt_date).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+      await postInventoryEntry(db_, {
+        orgId, dateStr: receiptDate,
+        debitCode: "631", creditCode: "281",
+        amount: Math.round(totalReversed * 100) / 100,
+        description: `Сторно приходу: ${receipt.notes || `накладна #${receiptId}`}`,
+        userId: uid(req),
+      });
+    }
+
+    res.json({ success: true, reversed, total_reversed: totalReversed });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Fuzzy ingredient matching helper ────────────────────────────────────────
 function ingredientFuzzyScore(name1: string, name2: string): number {
   const normalize = (s: string) =>

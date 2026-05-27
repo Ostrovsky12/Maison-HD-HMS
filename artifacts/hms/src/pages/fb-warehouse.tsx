@@ -977,6 +977,7 @@ function ReceiptDetailDialog({ id, open, onClose, suppliers, ingredients, onRefe
   const [editItems, setEditItems] = useState<any[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
+  const [cancelConfirm, setCancelConfirm] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["receipt-detail", id],
@@ -986,7 +987,7 @@ function ReceiptDetailDialog({ id, open, onClose, suppliers, ingredients, onRefe
   const receipt = data?.receipt;
   const items: any[] = editItems ?? data?.items ?? [];
 
-  useEffect(() => { if (!open) { setEditItems(null); setSaving(false); setImageOpen(false); } }, [open]);
+  useEffect(() => { if (!open) { setEditItems(null); setSaving(false); setImageOpen(false); setCancelConfirm(false); } }, [open]);
 
   const handleSaveItems = async () => {
     if (!id || !editItems) return;
@@ -1011,6 +1012,22 @@ function ReceiptDetailDialog({ id, open, onClose, suppliers, ingredients, onRefe
       qc.invalidateQueries({ queryKey: ["wh-receipts"] });
       qc.invalidateQueries({ queryKey: ["wh-ingredients"] });
       toast({ title: "Накладну проведено" });
+      onRefetch();
+      onClose();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    finally { setSaving(false); }
+  };
+
+  const handleCancel = async () => {
+    if (!id) return;
+    setSaving(true);
+    setCancelConfirm(false);
+    try {
+      const result = await api(`/receipts/${id}/cancel`, { method: "POST" });
+      qc.invalidateQueries({ queryKey: ["receipt-detail", id] });
+      qc.invalidateQueries({ queryKey: ["wh-receipts"] });
+      qc.invalidateQueries({ queryKey: ["wh-ingredients"] });
+      toast({ title: `Накладну скасовано. Сторновано ${result.reversed?.length || 0} позицій зі складу.` });
       onRefetch();
       onClose();
     } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
@@ -1130,19 +1147,54 @@ function ReceiptDetailDialog({ id, open, onClose, suppliers, ingredients, onRefe
               </table>
             </div>
 
-            {isDraft && (
-              <DialogFooter>
+            <DialogFooter>
+              {receipt.status === "cancelled" ? (
                 <Button variant="outline" onClick={onClose}>Закрити</Button>
-                <Button className="bg-green-600 hover:bg-green-700 gap-2" onClick={handleConfirm} disabled={saving}>
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Провести накладну
-                </Button>
-              </DialogFooter>
-            )}
+              ) : isDraft ? (
+                <>
+                  <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setCancelConfirm(true)} disabled={saving}>
+                    <XCircle className="w-4 h-4 mr-1" /> Видалити чернетку
+                  </Button>
+                  <Button variant="outline" onClick={onClose}>Закрити</Button>
+                  <Button className="bg-green-600 hover:bg-green-700 gap-2" onClick={handleConfirm} disabled={saving}>
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Провести накладну
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setCancelConfirm(true)} disabled={saving}>
+                    <XCircle className="w-4 h-4 mr-1" /> Скасувати (сторно)
+                  </Button>
+                  <Button variant="outline" onClick={onClose}>Закрити</Button>
+                </>
+              )}
+            </DialogFooter>
           </>
         ) : (
           <div className="py-12 text-center text-muted-foreground">Накладну не знайдено</div>
         )}
       </DialogContent>
+
+      <AlertDialog open={cancelConfirm} onOpenChange={setCancelConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {isDraft ? "Видалити чернетку?" : "Скасувати проведену накладну?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isDraft
+                ? "Чернетку буде позначено як скасовану. Залишки складу не зачіпаються."
+                : `Сторно накладної ${receipt?.receipt_no || `#${id}`}: всі позиції будуть списані зі складу назад. Бухгалтерська проводка Дт631→Кт281 буде створена автоматично. Цю дію не можна скасувати.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Назад</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={handleCancel}>
+              {isDraft ? "Видалити" : "Скасувати накладну"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
