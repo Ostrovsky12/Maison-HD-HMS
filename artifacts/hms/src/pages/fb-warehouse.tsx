@@ -165,10 +165,10 @@ function IngredientDialog({ open, onClose, initial, suppliers, onSave }: {
           </div>
           <div>
             <Label>Постачальник</Label>
-            <Select value={String(form.supplier_id || "")} onValueChange={v => set("supplier_id", v ? parseInt(v) : null)}>
+            <Select value={String(form.supplier_id || "none")} onValueChange={v => set("supplier_id", v !== "none" ? parseInt(v) : null)}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="— без постачальника —" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">— без постачальника —</SelectItem>
+                <SelectItem value="none">— без постачальника —</SelectItem>
                 {suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
               </SelectContent>
             </Select>
@@ -483,10 +483,10 @@ function AiScanView({ suppliers, onBack }: { suppliers: Supplier[]; onBack: () =
         )}
         <div>
           <Label className="text-xs">Постачальник</Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
+          <Select value={supplierId || "none"} onValueChange={v => setSupplierId(v === "none" ? "" : v)}>
             <SelectTrigger className="mt-1"><SelectValue placeholder="Визначить AI або оберіть вручну" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">— без постачальника —</SelectItem>
+              <SelectItem value="none">— без постачальника —</SelectItem>
               {suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -799,10 +799,10 @@ function ReceiptCreateDialog({ open, onClose, suppliers, ingredients, onSave }: 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Постачальник</Label>
-              <Select value={hdr.supplier_id} onValueChange={v => set("supplier_id", v)}>
+              <Select value={hdr.supplier_id || "none"} onValueChange={v => set("supplier_id", v === "none" ? "" : v)}>
                 <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue placeholder="Оберіть..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">— без постачальника —</SelectItem>
+                  <SelectItem value="none">— без постачальника —</SelectItem>
                   {suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -861,7 +861,7 @@ function ReceiptCreateDialog({ open, onClose, suppliers, ingredients, onSave }: 
                           </div>
                         ) : (
                           <div className="space-y-0.5">
-                            <Select value="" onValueChange={v => setItem(i, "ingredient_id", v)}>
+                            <Select value="__none__" onValueChange={v => { if (v !== "__none__") setItem(i, "ingredient_id", v); }}>
                               <SelectTrigger className="h-7 text-xs border-0 shadow-none px-0 focus:ring-0">
                                 <SelectValue placeholder="Зі складу..." />
                               </SelectTrigger>
