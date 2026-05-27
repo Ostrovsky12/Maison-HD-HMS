@@ -919,6 +919,54 @@ router.post("/ai-voice-writeoff", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /ai-voice-transfer — парсить голосовий текст для переміщення
+router.post("/ai-voice-transfer", async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: "text required" });
+  try {
+    const orgId = org(req);
+    const existingIngredients = (await db.execute(sql`
+      SELECT id, name, unit, current_stock FROM fb_ingredients WHERE organization_id = ${orgId} AND is_active = true ORDER BY name
+    `)).rows as any[];
+    const ingredientsList = existingIngredients.map((i: any) => `${i.id}|${i.name}|${i.unit}`).join("\n");
+
+    const systemPrompt = `Ти система голосового вводу для переміщення товарів між складами ресторану в Україні.
+Текст отримано через голосовий ввід, можуть бути помилки. Визнач звідки, куди та позиції для переміщення.
+Поверни ТІЛЬКИ JSON:
+{
+  "from_location": "назва складу-джерела або null",
+  "to_location": "назва складу-призначення або null",
+  "notes": "примітка або null",
+  "items": [{"ingredient_id": число або null, "name": "назва", "quantity": число, "unit": "кг/г/л/мл/шт/пляш"}]
+}
+Сьогодні: ${new Date().toISOString().split("T")[0]}
+Інгредієнти (id|name|unit):\n${ingredientsList || "—"}
+Знайди ingredient_id де можливо.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      max_completion_tokens: 1000,
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
+    });
+    const raw = completion.choices[0].message.content || "";
+    let parsed: any;
+    try { const m = raw.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : raw); }
+    catch { return res.status(422).json({ error: "Не вдалося розпізнати", raw }); }
+
+    const enrichedItems = (parsed.items || []).map((item: any) => {
+      const ing = item.ingredient_id
+        ? existingIngredients.find((i: any) => i.id === item.ingredient_id)
+        : existingIngredients.find((i: any) => i.name.toLowerCase().includes((item.name || "").toLowerCase().slice(0, 5)));
+      return {
+        ...item,
+        ingredient_id: ing?.id || item.ingredient_id || "",
+        unit: item.unit || ing?.unit || "кг",
+      };
+    });
+    res.json({ parsed: { ...parsed, items: enrichedItems } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // WRITE-OFFS — Списання
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1718,6 +1766,7 @@ async function ensureWarehouseTables(client: any) {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
   `);
+  await client.query(`ALTER TABLE fb_ingredients ADD COLUMN IF NOT EXISTS warehouse_id INT REFERENCES fb_warehouses(id) ON DELETE SET NULL`).catch(() => {});
   await client.query(`
     CREATE TABLE IF NOT EXISTS fb_transfers (
       id SERIAL PRIMARY KEY,
@@ -1803,6 +1852,51 @@ router.delete("/warehouses-list/:id", async (req, res) => {
     const db_ = (db as any).$client;
     await db_.query(
       `DELETE FROM fb_warehouses WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /warehouses-list/:id/ingredients — інгредієнти складу
+router.get("/warehouses-list/:id/ingredients", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const whId = parseInt(req.params.id);
+    const wh = await db_.query(`SELECT * FROM fb_warehouses WHERE id=$1 AND organization_id=$2`, [whId, org(req)]);
+    if (!wh.rows[0]) return res.status(404).json({ error: "Склад не знайдено" });
+    const ings = await db_.query(
+      `SELECT id, name, unit, category, current_stock, min_stock, cost_per_unit, warehouse_id
+       FROM fb_ingredients WHERE organization_id=$1 AND is_active=TRUE AND warehouse_id=$2 ORDER BY name`,
+      [org(req), whId]
+    );
+    res.json({ warehouse: wh.rows[0], ingredients: ings.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /warehouses-list/:id/assign — прив'язати інгредієнт до складу
+router.post("/warehouses-list/:id/assign", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await ensureWarehouseTables(db_);
+    const whId = parseInt(req.params.id);
+    const { ingredient_id } = req.body;
+    if (!ingredient_id) return res.status(400).json({ error: "ingredient_id required" });
+    await db_.query(
+      `UPDATE fb_ingredients SET warehouse_id=$1 WHERE id=$2 AND organization_id=$3`,
+      [whId, ingredient_id, org(req)]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /warehouses-list/:id/assign/:ingId — відв'язати інгредієнт від складу
+router.delete("/warehouses-list/:id/assign/:ingId", async (req, res) => {
+  try {
+    const db_ = (db as any).$client;
+    await db_.query(
+      `UPDATE fb_ingredients SET warehouse_id=NULL WHERE id=$1 AND organization_id=$2`,
+      [req.params.ingId, org(req)]
     );
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }

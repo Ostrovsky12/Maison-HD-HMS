@@ -123,7 +123,7 @@ function IngredientDialog({ open, onClose, initial, suppliers, onSave }: {
   const blank = { name: "", unit: "кг", category: "Бакалія", current_stock: "0", min_stock: "0", cost_per_unit: "0" };
   const [form, setForm] = useState<any>(initial || blank);
   const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
-  useState(() => { if (open) setForm(initial || blank); });
+  useEffect(() => { if (open) setForm(initial || blank); }, [open]);
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-md">
@@ -194,7 +194,7 @@ function SupplierDialog({ open, onClose, initial, onSave }: {
   const blank = { name: "", payment_terms: "cash", delivery_days: 1, is_vat_payer: false };
   const [form, setForm] = useState<any>(initial || blank);
   const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
-  useState(() => { if (open) setForm(initial || blank); });
+  useEffect(() => { if (open) setForm(initial || blank); }, [open]);
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-md">
@@ -1068,11 +1068,125 @@ function ReceiptsTab({ receipts, suppliers, ingredients, summary, isLoading }: {
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: Списання
 // ══════════════════════════════════════════════════════════════════════════════
+
+function WriteoffVoicePanel({ onApply, onClose }: {
+  onApply: (data: { reason: string; date: string; notes: string; items: any[] }) => void;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [transcript, setTranscript] = useState("");
+  const [step, setStep] = useState<"record" | "preview">("record");
+  const [parsing, setParsing] = useState(false);
+  const [parsed, setParsed] = useState<any>(null);
+  const recogRef = useRef<any>(null);
+  const [recording, setRecording] = useState(false);
+  const finalRef = useRef("");
+
+  const toggleMic = () => {
+    if (recording) { recogRef.current?.stop(); setRecording(false); return; }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { alert("Браузер не підтримує голосовий ввід. Спробуйте Chrome."); return; }
+    finalRef.current = "";
+    const r = new SR(); r.lang = "uk-UA"; r.continuous = true; r.interimResults = true;
+    r.onresult = (e: any) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalRef.current += e.results[i][0].transcript + " ";
+        else interim += e.results[i][0].transcript;
+      }
+      setTranscript(finalRef.current + interim);
+    };
+    r.onerror = () => setRecording(false); r.onend = () => setRecording(false);
+    recogRef.current = r; r.start(); setRecording(true);
+  };
+
+  const parse = async () => {
+    if (!transcript.trim()) return;
+    setParsing(true);
+    try {
+      const res = await api("/ai-voice-writeoff", { method: "POST", body: JSON.stringify({ text: transcript.trim() }) });
+      if (!res.parsed?.items?.length) { toast({ title: "AI не розпізнав позицій", variant: "destructive" }); return; }
+      setParsed(res.parsed); setStep("preview");
+    } catch (e: any) { toast({ title: "Помилка AI", description: e.message, variant: "destructive" }); }
+    finally { setParsing(false); }
+  };
+
+  const apply = () => {
+    if (!parsed) return;
+    onApply({
+      reason: parsed.reason || "spoilage",
+      date: parsed.writeoff_date || new Date().toISOString().slice(0, 10),
+      notes: parsed.notes || "",
+      items: (parsed.items || []).map((i: any) => ({ ingredient_id: String(i.ingredient_id || ""), quantity: String(i.quantity || ""), unit: i.unit || "кг" })),
+    });
+    onClose();
+  };
+
+  const REASON_LABELS: Record<string, string> = { spoilage: "Зіпсувалося", staff_meal: "Їжа персоналу", banquet: "Банкет", breakage: "Бій/втрати", production: "Виробниче", tasting: "Дегустація", other: "Інше" };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
+          <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-violet-500" /><div><h2 className="font-bold text-sm">AI Голосове Списання</h2><p className="text-xs text-muted-foreground">Продиктуйте що і скільки списати</p></div></div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {step === "record" && (
+            <div className="p-5 space-y-5">
+              <div className="text-center space-y-3">
+                <button onClick={toggleMic} className={`rounded-full w-20 h-20 flex flex-col items-center justify-center gap-1 transition-all mx-auto ${recording ? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse" : "bg-violet-100 text-violet-600 hover:bg-violet-200"}`}>
+                  {recording ? <MicOff className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
+                  <span className="text-[10px] font-medium">{recording ? "Стоп" : "Говоріть"}</span>
+                </button>
+                <p className="text-xs text-muted-foreground max-w-xs mx-auto">Наприклад: <span className="italic">"Молоко два кілограми — зіпсувалось, олія пів-літра — бій"</span></p>
+              </div>
+              <div><Label className="text-xs text-muted-foreground">або введіть текстом</Label>
+                <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={4} placeholder="Введіть що списати..." className="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-300" />
+              </div>
+            </div>
+          )}
+          {step === "preview" && parsed && (
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between"><p className="text-sm font-medium">AI розпізнав:</p><button onClick={() => setStep("record")} className="text-xs text-muted-foreground hover:text-violet-600 underline">← Назад</button></div>
+              <div className="flex gap-3 flex-wrap text-xs">
+                <span className="bg-muted px-2 py-1 rounded font-medium">Причина: {REASON_LABELS[parsed.reason] || parsed.reason}</span>
+                {parsed.writeoff_date && <span className="bg-muted px-2 py-1 rounded">{parsed.writeoff_date}</span>}
+                {parsed.notes && <span className="bg-muted px-2 py-1 rounded text-muted-foreground">{parsed.notes}</span>}
+              </div>
+              <div className="space-y-2">
+                {(parsed.items || []).map((item: any, i: number) => (
+                  <div key={i} className="border rounded-lg p-3 flex items-center gap-3">
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{item.name}</p></div>
+                    <span className="text-sm font-mono shrink-0">{item.quantity} {item.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-4 border-t flex gap-2 shrink-0">
+          {step === "record" ? (
+            <><Button variant="outline" onClick={onClose} className="flex-1">Скасувати</Button>
+            <Button onClick={parse} disabled={!transcript.trim() || parsing} className="flex-1 bg-violet-600 hover:bg-violet-700 gap-2">
+              {parsing ? <><Loader2 className="w-4 h-4 animate-spin" /> AI обробляє...</> : <><Sparkles className="w-4 h-4" /> Розпізнати</>}
+            </Button></>
+          ) : (
+            <><Button variant="outline" onClick={() => setStep("record")} className="flex-1">Повторити</Button>
+            <Button onClick={apply} className="flex-1 gap-2 bg-green-600 hover:bg-green-700"><Check className="w-4 h-4" /> Застосувати</Button></>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WriteoffCreateDialog({ open, onClose, ingredients }: { open: boolean; onClose: () => void; ingredients: any[] }) {
   const [reason, setReason] = useState("spoilage");
   const [notes, setNotes] = useState("");
   const [writeoff_date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [items, setItems] = useState([{ ingredient_id: "", quantity: "", unit: "" }]);
+  const [showVoice, setShowVoice] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -1086,7 +1200,18 @@ function WriteoffCreateDialog({ open, onClose, ingredients }: { open: boolean; o
       return updated;
     }));
   }
-  function reset() { setReason("spoilage"); setNotes(""); setItems([{ ingredient_id: "", quantity: "", unit: "" }]); }
+  function reset() { setReason("spoilage"); setNotes(""); setItems([{ ingredient_id: "", quantity: "", unit: "" }]); setShowVoice(false); }
+
+  function applyVoice(data: { reason: string; date: string; notes: string; items: any[] }) {
+    setReason(data.reason); setDate(data.date); setNotes(data.notes);
+    if (data.items.length > 0) {
+      const mapped = data.items.map(i => {
+        const ing = ingredients.find(x => String(x.id) === String(i.ingredient_id));
+        return { ingredient_id: String(i.ingredient_id || ""), quantity: String(i.quantity || ""), unit: i.unit || ing?.unit || "кг" };
+      });
+      setItems(mapped);
+    }
+  }
 
   const save = useMutation({
     mutationFn: () => api("/writeoffs", { method: "POST", body: JSON.stringify({
@@ -1100,9 +1225,18 @@ function WriteoffCreateDialog({ open, onClose, ingredients }: { open: boolean; o
   });
 
   return (
+    <>
+    {showVoice && <WriteoffVoicePanel onApply={applyVoice} onClose={() => setShowVoice(false)} />}
     <Dialog open={open} onOpenChange={v => { if (!v) { onClose(); reset(); } }}>
       <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Нове списання</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <DialogTitle>Нове списання</DialogTitle>
+            <Button type="button" variant="outline" size="sm" onClick={() => setShowVoice(true)} className="gap-1.5 text-violet-600 border-violet-200 hover:bg-violet-50 mr-6">
+              <Mic className="w-3.5 h-3.5" /> AI голос
+            </Button>
+          </div>
+        </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Дата</Label><Input type="date" value={writeoff_date} onChange={e => setDate(e.target.value)} className="mt-1" /></div>
@@ -1147,6 +1281,7 @@ function WriteoffCreateDialog({ open, onClose, ingredients }: { open: boolean; o
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 
@@ -1265,11 +1400,127 @@ function WriteoffsTab({ ingredients }: { ingredients: any[] }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: Переміщення
 // ══════════════════════════════════════════════════════════════════════════════
+
+function TransferVoicePanel({ onApply, onClose }: {
+  onApply: (data: { from: string; to: string; notes: string; items: any[] }) => void;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [transcript, setTranscript] = useState("");
+  const [step, setStep] = useState<"record" | "preview">("record");
+  const [parsing, setParsing] = useState(false);
+  const [parsed, setParsed] = useState<any>(null);
+  const recogRef = useRef<any>(null);
+  const [recording, setRecording] = useState(false);
+  const finalRef = useRef("");
+
+  const toggleMic = () => {
+    if (recording) { recogRef.current?.stop(); setRecording(false); return; }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { alert("Браузер не підтримує голосовий ввід. Спробуйте Chrome."); return; }
+    finalRef.current = "";
+    const r = new SR(); r.lang = "uk-UA"; r.continuous = true; r.interimResults = true;
+    r.onresult = (e: any) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalRef.current += e.results[i][0].transcript + " ";
+        else interim += e.results[i][0].transcript;
+      }
+      setTranscript(finalRef.current + interim);
+    };
+    r.onerror = () => setRecording(false); r.onend = () => setRecording(false);
+    recogRef.current = r; r.start(); setRecording(true);
+  };
+
+  const parse = async () => {
+    if (!transcript.trim()) return;
+    setParsing(true);
+    try {
+      const res = await api("/ai-voice-transfer", { method: "POST", body: JSON.stringify({ text: transcript.trim() }) });
+      if (!res.parsed?.items?.length) { toast({ title: "AI не розпізнав позицій", variant: "destructive" }); return; }
+      setParsed(res.parsed); setStep("preview");
+    } catch (e: any) { toast({ title: "Помилка AI", description: e.message, variant: "destructive" }); }
+    finally { setParsing(false); }
+  };
+
+  const apply = () => {
+    if (!parsed) return;
+    onApply({
+      from: parsed.from_location || "",
+      to: parsed.to_location || "",
+      notes: parsed.notes || "",
+      items: (parsed.items || []).map((i: any) => ({
+        ingredient_id: String(i.ingredient_id || ""), name: i.name || "", quantity: String(i.quantity || ""), unit: i.unit || "кг", cost_per_unit: "",
+      })),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
+          <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-violet-500" /><div><h2 className="font-bold text-sm">AI Голосове Переміщення</h2><p className="text-xs text-muted-foreground">Продиктуйте що і куди перемістити</p></div></div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {step === "record" && (
+            <div className="p-5 space-y-5">
+              <div className="text-center space-y-3">
+                <button onClick={toggleMic} className={`rounded-full w-20 h-20 flex flex-col items-center justify-center gap-1 transition-all mx-auto ${recording ? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse" : "bg-violet-100 text-violet-600 hover:bg-violet-200"}`}>
+                  {recording ? <MicOff className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
+                  <span className="text-[10px] font-medium">{recording ? "Стоп" : "Говоріть"}</span>
+                </button>
+                <p className="text-xs text-muted-foreground max-w-xs mx-auto">Наприклад: <span className="italic">"з кухні на бар молоко два кілограми, олія один літр"</span></p>
+              </div>
+              <div><Label className="text-xs text-muted-foreground">або введіть текстом</Label>
+                <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={4} placeholder="Введіть що і куди перемістити..." className="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-300" />
+              </div>
+            </div>
+          )}
+          {step === "preview" && parsed && (
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between"><p className="text-sm font-medium">AI розпізнав:</p><button onClick={() => setStep("record")} className="text-xs text-muted-foreground hover:text-violet-600 underline">← Назад</button></div>
+              {(parsed.from_location || parsed.to_location) && (
+                <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg text-sm">
+                  <span className="font-medium">{parsed.from_location || "?"}</span>
+                  <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                  <span className="font-medium">{parsed.to_location || "?"}</span>
+                </div>
+              )}
+              <div className="space-y-2">
+                {(parsed.items || []).map((item: any, i: number) => (
+                  <div key={i} className="border rounded-lg p-3 flex items-center gap-3">
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{item.name}</p></div>
+                    <span className="text-sm font-mono shrink-0">{item.quantity} {item.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-4 border-t flex gap-2 shrink-0">
+          {step === "record" ? (
+            <><Button variant="outline" onClick={onClose} className="flex-1">Скасувати</Button>
+            <Button onClick={parse} disabled={!transcript.trim() || parsing} className="flex-1 bg-violet-600 hover:bg-violet-700 gap-2">
+              {parsing ? <><Loader2 className="w-4 h-4 animate-spin" /> AI обробляє...</> : <><Sparkles className="w-4 h-4" /> Розпізнати</>}
+            </Button></>
+          ) : (
+            <><Button variant="outline" onClick={() => setStep("record")} className="flex-1">Повторити</Button>
+            <Button onClick={apply} className="flex-1 gap-2 bg-green-600 hover:bg-green-700"><Check className="w-4 h-4" /> Застосувати</Button></>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TransferCreateDialog({ open, onClose, ingredients }: { open: boolean; onClose: () => void; ingredients: any[] }) {
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState([{ ingredient_id: "", name: "", quantity: "", unit: "", cost_per_unit: "" }]);
+  const [showVoice, setShowVoice] = useState(false);
   const { toast } = useToast(); const qc = useQueryClient();
 
   function addItem() { setItems(i => [...i, { ingredient_id: "", name: "", quantity: "", unit: "", cost_per_unit: "" }]); }
@@ -1282,7 +1533,14 @@ function TransferCreateDialog({ open, onClose, ingredients }: { open: boolean; o
       return updated;
     }));
   }
-  function reset() { setFrom(""); setTo(""); setNotes(""); setItems([{ ingredient_id: "", name: "", quantity: "", unit: "", cost_per_unit: "" }]); }
+  function reset() { setFrom(""); setTo(""); setNotes(""); setItems([{ ingredient_id: "", name: "", quantity: "", unit: "", cost_per_unit: "" }]); setShowVoice(false); }
+
+  function applyVoice(data: { from: string; to: string; notes: string; items: any[] }) {
+    if (data.from) setFrom(data.from);
+    if (data.to) setTo(data.to);
+    if (data.notes) setNotes(data.notes);
+    if (data.items.length > 0) setItems(data.items);
+  }
 
   const save = useMutation({
     mutationFn: () => api("/transfers", { method: "POST", body: JSON.stringify({
@@ -1294,9 +1552,18 @@ function TransferCreateDialog({ open, onClose, ingredients }: { open: boolean; o
   });
 
   return (
+    <>
+    {showVoice && <TransferVoicePanel onApply={applyVoice} onClose={() => setShowVoice(false)} />}
     <Dialog open={open} onOpenChange={v => { if (!v) { onClose(); reset(); } }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Нове переміщення</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <DialogTitle>Нове переміщення</DialogTitle>
+            <Button type="button" variant="outline" size="sm" onClick={() => setShowVoice(true)} className="gap-1.5 text-violet-600 border-violet-200 hover:bg-violet-50 mr-6">
+              <Mic className="w-3.5 h-3.5" /> AI голос
+            </Button>
+          </div>
+        </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="flex-1"><Label>Зі складу</Label><Input value={from} onChange={e => setFrom(e.target.value)} placeholder="Кухня, Бар..." className="mt-1" /></div>
@@ -1335,6 +1602,7 @@ function TransferCreateDialog({ open, onClose, ingredients }: { open: boolean; o
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 
@@ -1687,14 +1955,16 @@ function InvSessionDetail({ id, onBack }: { id: number; onBack: () => void }) {
 
   const session = data?.session; const lines: any[] = data?.lines || [];
 
-  async function saveLines() {
+  async function saveLines(): Promise<void> {
     setSaving(true);
     try {
       const toSave = lines.map(l => ({ id: l.id, actual_qty: counts[l.id] !== undefined ? counts[l.id] : (l.actual_qty !== null ? String(l.actual_qty) : null) }));
       await api(`/inventory/${id}/lines`, { method: "PUT", body: JSON.stringify({ lines: toSave }) });
       toast({ title: "Збережено" }); refetch();
-    } catch (e: any) { toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
-    finally { setSaving(false); }
+    } catch (e: any) {
+      toast({ title: "Помилка збереження", description: e.message, variant: "destructive" });
+      throw e;
+    } finally { setSaving(false); }
   }
 
   const complete = useMutation({
@@ -1853,6 +2123,7 @@ function WhlDialog({ open, onClose, initial }: { open: boolean; onClose: () => v
   const [address, setAddress] = useState(initial?.address || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const { toast } = useToast(); const qc = useQueryClient();
+  useEffect(() => { if (open) { setName(initial?.name || ""); setAddress(initial?.address || ""); setNotes(initial?.notes || ""); } }, [open]);
   const save = useMutation({
     mutationFn: () => initial?.id ? api(`/warehouses-list/${initial.id}`, { method: "PATCH", body: JSON.stringify({ name, address, notes }) }) : api("/warehouses-list", { method: "POST", body: JSON.stringify({ name, address, notes }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["warehouses-list"] }); toast({ title: initial?.id ? "Збережено" : "Склад додано" }); onClose(); },
@@ -1876,9 +2147,103 @@ function WhlDialog({ open, onClose, initial }: { open: boolean; onClose: () => v
   );
 }
 
-function WarehousesTab() {
+function WarehouseDetailDialog({ warehouse, open, onClose, allIngredients }: {
+  warehouse: any; open: boolean; onClose: () => void; allIngredients: any[];
+}) {
+  const { toast } = useToast(); const qc = useQueryClient();
+  const [assignId, setAssignId] = useState("");
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["warehouse-ingredients", warehouse?.id],
+    queryFn: () => api(`/warehouses-list/${warehouse.id}/ingredients`),
+    enabled: open && !!warehouse?.id,
+  });
+
+  const warehouseIngredients: any[] = data?.ingredients || [];
+  const unassigned = allIngredients.filter(i => !warehouseIngredients.some(w => w.id === i.id));
+
+  const assign = useMutation({
+    mutationFn: (ingId: number) => api(`/warehouses-list/${warehouse.id}/assign`, { method: "POST", body: JSON.stringify({ ingredient_id: ingId }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["warehouse-ingredients", warehouse?.id] }); qc.invalidateQueries({ queryKey: ["wh-ingredients"] }); refetch(); setAssignId(""); toast({ title: "Позицію додано до складу" }); },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  const unassign = useMutation({
+    mutationFn: (ingId: number) => api(`/warehouses-list/${warehouse.id}/assign/${ingId}`, { method: "DELETE" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["warehouse-ingredients", warehouse?.id] }); qc.invalidateQueries({ queryKey: ["wh-ingredients"] }); refetch(); toast({ title: "Позицію видалено зі складу" }); },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Warehouse className="w-4 h-4" /> {warehouse?.name}</DialogTitle>
+          {warehouse?.address && <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> {warehouse.address}</p>}
+        </DialogHeader>
+
+        <div className="flex gap-2 mt-1">
+          <select value={assignId} onChange={e => setAssignId(e.target.value)} className="flex-1 border rounded-md px-2 py-2 text-sm bg-background">
+            <option value="">— Обрати інгредієнт для додавання —</option>
+            {unassigned.map((i: any) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
+          </select>
+          <Button size="sm" disabled={!assignId || assign.isPending} onClick={() => assign.mutate(parseInt(assignId))}>
+            {assign.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Додати
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-auto mt-2 border rounded-lg">
+          {isLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+          ) : warehouseIngredients.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+              <Package2 className="w-8 h-8 mb-2 opacity-40" />
+              <p className="text-sm">На цьому складі ще немає позицій</p>
+              <p className="text-xs mt-0.5">Оберіть інгредієнти зі списку вище</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 border-b sticky top-0">
+                <tr className="text-xs text-muted-foreground uppercase tracking-wide">
+                  <th className="text-left px-3 py-2 font-medium">Позиція</th>
+                  <th className="text-left px-3 py-2 font-medium">Категорія</th>
+                  <th className="text-right px-3 py-2 font-medium">Залишок</th>
+                  <th className="px-2 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {warehouseIngredients.map((ing: any) => (
+                  <tr key={ing.id} className="hover:bg-muted/20">
+                    <td className="px-3 py-2.5 font-medium">{ing.name}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground text-xs">{ing.category || "—"}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-xs">
+                      <span className={parseFloat(ing.current_stock) <= parseFloat(ing.min_stock) ? "text-amber-600 font-semibold" : ""}>
+                        {parseFloat(ing.current_stock).toFixed(3)} {ing.unit}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <button onClick={() => unassign.mutate(ing.id)} className="text-muted-foreground hover:text-destructive p-1 rounded" title="Видалити зі складу">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={onClose}>Закрити</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WarehousesTab({ allIngredients }: { allIngredients: any[] }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const [detailWarehouse, setDetailWarehouse] = useState<any>(null);
   const { toast } = useToast(); const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["warehouses-list"], queryFn: () => api("/warehouses-list") });
   const del = useMutation({
@@ -1919,12 +2284,23 @@ function WarehousesTab() {
                     </div>
                   </div>
                   {w.notes && <p className="text-xs text-muted-foreground mt-3 pl-[46px]">{w.notes}</p>}
+                  <button onClick={() => setDetailWarehouse(w)} className="mt-3 w-full text-xs text-primary hover:bg-primary/5 border border-primary/20 rounded-lg py-1.5 font-medium transition-colors">
+                    Позиції складу →
+                  </button>
                 </div>
               ))}
             </div>
           )}
       </div>
       <WhlDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setEditing(null); }} initial={editing} />
+      {detailWarehouse && (
+        <WarehouseDetailDialog
+          warehouse={detailWarehouse}
+          open={!!detailWarehouse}
+          onClose={() => setDetailWarehouse(null)}
+          allIngredients={allIngredients}
+        />
+      )}
     </div>
   );
 }
@@ -2091,7 +2467,7 @@ export default function FbWarehouse() {
           {tab === "transfers"  && <TransfersTab ingredients={ingredients} />}
           {tab === "movement"   && <MovementTab />}
           {tab === "inventory"  && <InventoryTab />}
-          {tab === "warehouses" && <WarehousesTab />}
+          {tab === "warehouses" && <WarehousesTab allIngredients={ingredients} />}
           {tab === "suppliers"  && <SuppliersTab suppliers={suppliers} isLoading={suppQ.isLoading} />}
         </div>
       </div>
