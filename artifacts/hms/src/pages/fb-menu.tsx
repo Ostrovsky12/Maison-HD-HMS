@@ -1744,10 +1744,15 @@ export default function FbMenu() {
               const subCats = categories
                 .filter(c => c.parent_id === group.id)
                 .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-              const groupItemCount = allItems.filter(i => {
-                const catId = (i as any).category_id ?? i.categoryId;
-                return subCats.some(sc => sc.id === catId);
-              }).length;
+              const groupItemCount = subCats.length > 0
+                ? allItems.filter(i => {
+                    const catId = (i as any).category_id ?? i.categoryId;
+                    return subCats.some(sc => sc.id === catId);
+                  }).length
+                : allItems.filter(i => {
+                    const catId = (i as any).category_id ?? i.categoryId;
+                    return catId === group.id;
+                  }).length;
 
               return (
                 <div key={group.id}>
@@ -1764,16 +1769,46 @@ export default function FbMenu() {
 
                   {groupExpanded && (
                     <div>
-                      {subCats.length === 0 ? (
-                        <div className="flex items-center gap-2 border-b border-muted/40 text-muted-foreground text-xs"
-                          style={{ paddingLeft: 52, paddingTop: 8, paddingBottom: 8 }}>
-                          <span>Немає категорій</span>
-                          <button className="text-primary hover:underline"
-                            onClick={() => setCatDialog({ open: true, parentId: group.id })}>
-                            + Додати
-                          </button>
-                        </div>
-                      ) : (
+                      {subCats.length === 0 ? (() => {
+                        const directItems = allItems
+                          .filter(i => {
+                            const cId = (i as any).category_id ?? i.categoryId;
+                            return cId === group.id && filterItem(i);
+                          })
+                          .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+                        return (
+                          <div>
+                            {directItems.length === 0 ? (
+                              <div className="flex items-center gap-2 border-b border-muted/40 text-muted-foreground text-xs"
+                                style={{ paddingLeft: 52, paddingTop: 8, paddingBottom: 8 }}>
+                                {search || filter !== "all"
+                                  ? <span>Нічого не знайдено</span>
+                                  : <><span>Немає страв</span><button className="text-primary hover:underline" onClick={() => setItemDialog({ open: true, initial: { categoryId: group.id } })}>+ Додати</button></>}
+                              </div>
+                            ) : (
+                              directItems.map(item => (
+                                <DishRow
+                                  key={item.id}
+                                  item={item}
+                                  onEdit={() => setItemDialog({ open: true, initial: item })}
+                                  onToggleAvailable={() => toggleAvailable(item)}
+                                  onTogglePopular={() => togglePopular(item)}
+                                  isDragging={draggingItemId === item.id}
+                                  onDragStart={e => handleDragStart(e, item.id)}
+                                  onDragEnd={handleDragEnd}
+                                />
+                              ))
+                            )}
+                            <button
+                              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:bg-muted/30 w-full border-b border-muted/40 transition-colors"
+                              style={{ paddingLeft: 52, paddingTop: 6, paddingBottom: 6 }}
+                              onClick={() => setItemDialog({ open: true, initial: { categoryId: group.id } })}
+                            >
+                              <Plus className="w-3 h-3" /><span>Додати страву</span>
+                            </button>
+                          </div>
+                        );
+                      })() : (
                         subCats.map(cat => {
                           const catExpanded = expandedCats.has(cat.id);
                           const catItems = allItems
