@@ -725,10 +725,172 @@ function StockTab({ ingredients, suppliers, isLoading, onRefetch }: {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ─── Receipt Create Dialog ────────────────────────────────────────────────────
+function ReceiptCreateDialog({ open, onClose, suppliers, ingredients, onSave }: {
+  open: boolean; onClose: () => void;
+  suppliers: Supplier[]; ingredients: Ingredient[];
+  onSave: (data: { header: any; items: ReceiptItem[] }) => void;
+}) {
+  const blank = { supplier_id: "", receipt_no: "", receipt_date: new Date().toISOString().slice(0, 10), payment_type: "unpaid", notes: "" };
+  const [hdr, setHdr] = useState(blank);
+  const [items, setItems] = useState<{ ingredient_id: string; name: string; quantity: string; unit: string; price_per_unit: string }[]>([
+    { ingredient_id: "", name: "", quantity: "", unit: "кг", price_per_unit: "" },
+  ]);
+  const set = (k: string, v: string) => setHdr(h => ({ ...h, [k]: v }));
+  const setItem = (i: number, k: string, v: string) =>
+    setItems(arr => arr.map((row, idx) => {
+      if (idx !== i) return row;
+      if (k === "ingredient_id") {
+        const ing = ingredients.find(x => String(x.id) === v);
+        return { ...row, ingredient_id: v, name: ing?.name || row.name, unit: ing?.unit || row.unit, price_per_unit: ing ? String(ing.cost_per_unit) : row.price_per_unit };
+      }
+      return { ...row, [k]: v };
+    }));
+  const addItem = () => setItems(arr => [...arr, { ingredient_id: "", name: "", quantity: "", unit: "кг", price_per_unit: "" }]);
+  const removeItem = (i: number) => setItems(arr => arr.filter((_, idx) => idx !== i));
+
+  const total = items.reduce((s, it) => s + (parseFloat(it.quantity) || 0) * (parseFloat(it.price_per_unit) || 0), 0);
+  const canSave = items.some(it => (parseFloat(it.quantity) || 0) > 0 && it.name.trim());
+
+  const handleSave = () => {
+    onSave({
+      header: { ...hdr, supplier_id: hdr.supplier_id || null },
+      items: items.filter(it => it.name.trim() && (parseFloat(it.quantity) || 0) > 0).map(it => ({
+        ingredient_id: it.ingredient_id ? parseInt(it.ingredient_id) : undefined,
+        name: it.name,
+        quantity: parseFloat(it.quantity),
+        unit: it.unit,
+        price_per_unit: parseFloat(it.price_per_unit) || 0,
+      })),
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Нова накладна</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          {/* Header */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Постачальник</Label>
+              <Select value={hdr.supplier_id} onValueChange={v => set("supplier_id", v)}>
+                <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue placeholder="Оберіть..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">— без постачальника —</SelectItem>
+                  {suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Тип оплати</Label>
+              <Select value={hdr.payment_type} onValueChange={v => set("payment_type", v)}>
+                <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{PAYMENT_TERMS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Номер накладної</Label>
+              <Input className="mt-1 h-8 text-sm" placeholder="напр. НК-001" value={hdr.receipt_no} onChange={e => set("receipt_no", e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Дата</Label>
+              <Input className="mt-1 h-8 text-sm" type="date" value={hdr.receipt_date} onChange={e => set("receipt_date", e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Примітки</Label>
+            <Input className="mt-1 h-8 text-sm" placeholder="Необов'язково..." value={hdr.notes} onChange={e => set("notes", e.target.value)} />
+          </div>
+
+          {/* Items */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-xs">Позиції накладної</Label>
+              <button onClick={addItem} className="text-xs text-primary hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Додати рядок
+              </button>
+            </div>
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50">
+                  <tr className="text-muted-foreground uppercase tracking-wide">
+                    <th className="text-left px-2 py-2 font-medium">Інгредієнт</th>
+                    <th className="text-right px-2 py-2 font-medium w-20">К-сть</th>
+                    <th className="text-left px-2 py-2 font-medium w-16">Од.</th>
+                    <th className="text-right px-2 py-2 font-medium w-24">Ціна/од ₴</th>
+                    <th className="text-right px-2 py-2 font-medium w-20">Сума ₴</th>
+                    <th className="w-7" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {items.map((row, i) => (
+                    <tr key={i}>
+                      <td className="px-2 py-1.5">
+                        <Select value={row.ingredient_id} onValueChange={v => setItem(i, "ingredient_id", v)}>
+                          <SelectTrigger className="h-7 text-xs border-0 shadow-none px-0 focus:ring-0">
+                            <SelectValue placeholder="Оберіть або введіть..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ingredients.map(ing => <SelectItem key={ing.id} value={String(ing.id)}>{ing.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        {!row.ingredient_id && (
+                          <Input className="mt-0.5 h-6 text-xs border-0 border-b rounded-none px-0 focus-visible:ring-0" placeholder="або назва вручну"
+                            value={row.name} onChange={e => setItem(i, "name", e.target.value)} />
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <Input type="number" min="0" step="0.001" className="h-7 text-xs text-right w-full"
+                          value={row.quantity} onChange={e => setItem(i, "quantity", e.target.value)} />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <Select value={row.unit} onValueChange={v => setItem(i, "unit", v)}>
+                          <SelectTrigger className="h-7 text-xs w-full"><SelectValue /></SelectTrigger>
+                          <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <Input type="number" min="0" step="0.01" className="h-7 text-xs text-right w-full"
+                          value={row.price_per_unit} onChange={e => setItem(i, "price_per_unit", e.target.value)} />
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">
+                        {((parseFloat(row.quantity) || 0) * (parseFloat(row.price_per_unit) || 0)).toFixed(2)}
+                      </td>
+                      <td className="py-1.5 pr-1">
+                        {items.length > 1 && (
+                          <button onClick={() => removeItem(i)} className="text-muted-foreground hover:text-destructive p-0.5 rounded">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-muted/30">
+                  <tr>
+                    <td colSpan={4} className="px-2 py-1.5 text-xs font-semibold text-right">Разом:</td>
+                    <td className="px-2 py-1.5 text-right font-bold font-mono">{total.toFixed(2)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Скасувати</Button>
+          <Button onClick={handleSave} disabled={!canSave}>Зберегти накладну</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // TAB: Постачання (накладні)
 // ══════════════════════════════════════════════════════════════════════════════
-function ReceiptsTab({ receipts, suppliers, summary, isLoading }: {
-  receipts: Receipt[]; suppliers: Supplier[]; summary: any; isLoading: boolean;
+function ReceiptsTab({ receipts, suppliers, ingredients, summary, isLoading }: {
+  receipts: Receipt[]; suppliers: Supplier[]; ingredients: Ingredient[]; summary: any; isLoading: boolean;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -840,6 +1002,13 @@ function ReceiptsTab({ receipts, suppliers, summary, isLoading }: {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <ReceiptCreateDialog
+        open={dialog}
+        onClose={() => setDialog(false)}
+        suppliers={suppliers}
+        ingredients={ingredients}
+        onSave={data => createReceipt.mutate(data)}
+      />
     </div>
   );
 }
@@ -1865,7 +2034,7 @@ export default function FbWarehouse() {
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {tab === "stock"      && <StockTab ingredients={ingredients} suppliers={suppliers} isLoading={ingQ.isLoading} onRefetch={ingQ.refetch} />}
-          {tab === "receipts"   && <ReceiptsTab receipts={receipts} suppliers={suppliers} summary={summary} isLoading={recQ.isLoading} />}
+          {tab === "receipts"   && <ReceiptsTab receipts={receipts} suppliers={suppliers} ingredients={ingredients} summary={summary} isLoading={recQ.isLoading} />}
           {tab === "writeoffs"  && <WriteoffsTab ingredients={ingredients} />}
           {tab === "transfers"  && <TransfersTab ingredients={ingredients} />}
           {tab === "movement"   && <MovementTab />}
