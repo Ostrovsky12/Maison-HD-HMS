@@ -173,19 +173,25 @@ export default function FbConfigGeneral() {
               <Input value={cfg.company_name||""} onChange={e => set("company_name", e.target.value)}
                 placeholder="Назва вашої компанії" className="max-w-xs" />
             </Row>
-            <Row label="Адреса у Maison HD">
+            <Row label="Гостьовий гід">
               {(() => {
-                const slug = toSlug(cfg.company_name || "");
-                const url = slug ? `${slug}.maisonhd.com` : "";
+                const guideUrl = `${window.location.origin}/dogoda-guide/`;
                 return (
-                  <div className="max-w-xs">
+                  <div className="max-w-sm">
                     <div className="flex items-center rounded-md border bg-muted/40 overflow-hidden h-9">
-                      <span className="px-3 text-sm text-muted-foreground bg-muted border-r h-full flex items-center shrink-0">https://</span>
-                      <span className={`px-3 text-sm flex-1 ${url ? "text-foreground font-mono" : "text-muted-foreground"}`}>
-                        {url || "введіть назву компанії вище"}
-                      </span>
+                      <span className="px-3 text-sm font-mono text-foreground flex-1 truncate select-all">{guideUrl}</span>
+                      <button
+                        className="px-3 h-full border-l text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                        onClick={() => { navigator.clipboard.writeText(guideUrl); }}
+                        title="Скопіювати посилання"
+                      >
+                        Копіювати
+                      </button>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">Формується автоматично з назви компанії.</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Пряме посилання на гостьовий гід.{" "}
+                      <a href={guideUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">Відкрити →</a>
+                    </p>
                   </div>
                 );
               })()}
