@@ -134,6 +134,79 @@ const STATION_TYPES = [
 
 const CATEGORY_EMOJIS = ["🍳","🍲","🍖","🥗","🍰","🥤","🍸","🍕","🍣","🍜","🥩","🥚","🥞","🍔","🌮","🍝","🥘","🍱","🍛","🫕","🍷","🍺","☕","🧁","🥐","🥙","🌯","🥗","🍤","🦞","🛎","🛏","🎯","🎪"];
 
+// ─── Tax suggestion (ПКУ Ukraine) ─────────────────────────────────────────────
+// Правила відповідно до Податкового кодексу України та Закону про РРО/ПРРО
+
+interface TaxSuggestion {
+  label: string;       // опис категорії для підказки
+  emoji: string;
+  matchRate: number;   // ставка ПДВ %
+  matchExcise: boolean;// чи є акциз
+  note: string;        // правова підстава
+}
+
+const TAX_RULES: Array<{ keywords: string[]; suggestion: TaxSuggestion }> = [
+  {
+    keywords: ["горілка", "водка", "коньяк", "бренді", "виски", "whiskey", "whisky", "джин", "ром", "текіла", "абсент", "самбука", "лікер", "настоянка", "спирт", "міцний", "алкоголь", "shots", "shot", "шот"],
+    suggestion: { label: "Міцний алкоголь (>8.5%)", emoji: "🥃", matchRate: 20, matchExcise: true, note: "ПДВ 20% + Акциз 5% — ст. 215 ПКУ, підакцизні товари групи 2208" },
+  },
+  {
+    keywords: ["пиво", "beer", "ale", "ель", "портер", "стаут", "вино", "wine", "шампанське", "prosecco", "просеко", "сидр", "cider", "медовуха", "варенуха", "вермут"],
+    suggestion: { label: "Пиво / вино / сидр (≤8.5%)", emoji: "🍷", matchRate: 20, matchExcise: true, note: "ПДВ 20% + Акциз 5% — ст. 215 ПКУ, підакцизні товари груп 2203–2206" },
+  },
+  {
+    keywords: ["кальян", "тютюн", "cigare", "сигара", "сигарета", "hookah", "tobacco"],
+    suggestion: { label: "Тютюнові вироби / кальян", emoji: "🚬", matchRate: 20, matchExcise: true, note: "ПДВ 20% + Акциз — ст. 215 ПКУ, гр. 2402–2403" },
+  },
+  {
+    keywords: ["кава", "coffee", "espresso", "капучино", "americano", "latte", "латте", "чай", "tea", "какао", "cocoa", "вода", "water", "сік", "juice", "лимонад", "напій", "смузі", "shake", "міксер", "kombucha", "комбуча"],
+    suggestion: { label: "Безалкогольні напої", emoji: "☕", matchRate: 20, matchExcise: false, note: "ПДВ 20% — ст. 193 ПКУ, загальна ставка" },
+  },
+  {
+    keywords: ["доставка", "delivery", "сервіс", "service", "обслугов", "оренда", "прокат", "бронюванн"],
+    suggestion: { label: "Послуги / нефіскальні", emoji: "🛎", matchRate: 0, matchExcise: false, note: "Без ПДВ (нефіскальний) — якщо не підлягає РРО-фіскалізації" },
+  },
+  {
+    keywords: ["дитяч", "baby", "infant", "малят"],
+    suggestion: { label: "Дитяче харчування", emoji: "🍼", matchRate: 0, matchExcise: false, note: "ПДВ 0% — ст. 197.1.4 ПКУ, пільга на дитяче харчування" },
+  },
+];
+
+function getTaxSuggestion(
+  categoryName: string,
+  itemName: string,
+  itemType: string,
+  taxGroups: TaxGroup[],
+): (TaxSuggestion & { groupId: number | null }) | null {
+  if (!taxGroups.length) return null;
+  const haystack = `${categoryName} ${itemName}`.toLowerCase();
+
+  for (const rule of TAX_RULES) {
+    if (rule.keywords.some(kw => haystack.includes(kw))) {
+      const { suggestion } = rule;
+      // знаходимо відповідну групу ПДВ у списку організації
+      const matched = taxGroups.find(g =>
+        g.rate === suggestion.matchRate && g.is_excise === suggestion.matchExcise,
+      ) ?? taxGroups.find(g => g.rate === suggestion.matchRate) ?? null;
+      return { ...suggestion, groupId: matched?.id ?? null };
+    }
+  }
+
+  // Default: стандартна ставка 20%
+  if (itemType !== "service") {
+    const standard = taxGroups.find(g => g.rate === 20 && !g.is_excise);
+    if (standard) {
+      return {
+        label: "Стандартна ставка", emoji: "🍽",
+        matchRate: 20, matchExcise: false,
+        note: "ПДВ 20% — ст. 193 ПКУ, загальна ставка для більшості товарів HoReCa",
+        groupId: standard.id,
+      };
+    }
+  }
+  return null;
+}
+
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
 const API = "";
@@ -977,36 +1050,63 @@ function ItemDialog({
             </div>
 
             {/* Податок — обов'язкове поле */}
-            <div>
-              <Label className="flex items-center gap-1">
-                Податок <span className="text-destructive">*</span>
-              </Label>
-              <Select
-                value={form.tax_group_id ? String(form.tax_group_id) : "_none"}
-                onValueChange={v => set("tax_group_id", v === "_none" ? undefined : parseInt(v))}
-              >
-                <SelectTrigger className={`mt-1 ${!form.tax_group_id ? "border-amber-400 ring-1 ring-amber-300" : ""}`}>
-                  <SelectValue placeholder="Оберіть групу оподаткування" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">— не вказано (небезпечно!) —</SelectItem>
-                  {taxGroups.map(g => (
-                    <SelectItem key={g.id} value={String(g.id)}>
-                      {g.code} — {g.name} ({g.rate}%)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!form.tax_group_id && (
-                <div className="flex items-start gap-2 mt-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-600" />
-                  <span>
-                    Без групи ПДВ позиція може викликати розходження між банківським терміналом та ПРРО/ФР.
-                    Оберіть податок або виберіть «Без податку (нефіскальний)» у налаштуваннях → Податки.
-                  </span>
+            {(() => {
+              const catName = categories.find(c => c.id === form.categoryId)?.name ?? "";
+              const suggestion = getTaxSuggestion(catName, form.name ?? "", form.item_type ?? "dish", taxGroups);
+              const showSuggestion = suggestion && suggestion.groupId && suggestion.groupId !== form.tax_group_id;
+              return (
+                <div>
+                  <Label className="flex items-center gap-1">
+                    Податок <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={form.tax_group_id ? String(form.tax_group_id) : "_none"}
+                    onValueChange={v => set("tax_group_id", v === "_none" ? undefined : parseInt(v))}
+                  >
+                    <SelectTrigger className={`mt-1 ${!form.tax_group_id ? "border-amber-400 ring-1 ring-amber-300" : ""}`}>
+                      <SelectValue placeholder="Оберіть групу оподаткування" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">— не вказано (небезпечно!) —</SelectItem>
+                      {taxGroups.map(g => (
+                        <SelectItem key={g.id} value={String(g.id)}>
+                          {g.code} — {g.name} ({g.rate}%)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Підказка на основі ПКУ */}
+                  {showSuggestion && (
+                    <div className="flex items-start gap-2 mt-2 p-2.5 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-xs">
+                      <span className="text-base leading-none shrink-0">{suggestion!.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium">{suggestion!.label}</p>
+                        <p className="text-blue-600 mt-0.5">{suggestion!.note}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="shrink-0 px-2 py-1 rounded bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
+                        onClick={() => suggestion!.groupId && set("tax_group_id", suggestion!.groupId)}
+                      >
+                        Застосувати
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Попередження якщо нічого не обрано */}
+                  {!form.tax_group_id && (
+                    <div className="flex items-start gap-2 mt-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-600" />
+                      <span>
+                        Без групи ПДВ позиція може викликати розходження між банківським терміналом та ПРРО/ФР.
+                        Оберіть податок або виберіть «Без податку (нефіскальний)» у налаштуваннях → Податки.
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             <div className="grid grid-cols-3 gap-3">
               <div>
