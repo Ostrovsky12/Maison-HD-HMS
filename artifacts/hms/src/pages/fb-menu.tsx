@@ -799,6 +799,7 @@ function ItemDialog({
   const [tab, setTab] = useState<"main" | "details" | "tech" | "modifiers">("main");
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
   const [loadingMods, setLoadingMods] = useState(false);
+  const [noTaxConfirm, setNoTaxConfirm] = useState(false);
 
   // Ingredients for "goods" type link
   const { data: ingData } = useQuery({
@@ -975,6 +976,38 @@ function ItemDialog({
               </div>
             </div>
 
+            {/* Податок — обов'язкове поле */}
+            <div>
+              <Label className="flex items-center gap-1">
+                Податок <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={form.tax_group_id ? String(form.tax_group_id) : "_none"}
+                onValueChange={v => set("tax_group_id", v === "_none" ? undefined : parseInt(v))}
+              >
+                <SelectTrigger className={`mt-1 ${!form.tax_group_id ? "border-amber-400 ring-1 ring-amber-300" : ""}`}>
+                  <SelectValue placeholder="Оберіть групу оподаткування" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">— не вказано (небезпечно!) —</SelectItem>
+                  {taxGroups.map(g => (
+                    <SelectItem key={g.id} value={String(g.id)}>
+                      {g.code} — {g.name} ({g.rate}%)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!form.tax_group_id && (
+                <div className="flex items-start gap-2 mt-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-600" />
+                  <span>
+                    Без групи ПДВ позиція може викликати розходження між банківським терміналом та ПРРО/ФР.
+                    Оберіть податок або виберіть «Без податку (нефіскальний)» у налаштуваннях → Податки.
+                  </span>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label>Ціна (грн) *</Label>
@@ -1142,11 +1175,54 @@ function ItemDialog({
 
         <DialogFooter className="mt-4">
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
-          <Button onClick={() => valid && onSave(form, modifierGroups)} disabled={!valid}>
+          <Button
+            onClick={() => {
+              if (!valid) return;
+              if (!form.tax_group_id) {
+                setNoTaxConfirm(true);
+              } else {
+                onSave(form, modifierGroups);
+              }
+            }}
+            disabled={!valid}
+          >
             {initial?.id ? "Зберегти зміни" : "Створити страву"}
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <AlertDialog open={noTaxConfirm} onOpenChange={setNoTaxConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+              Збереження без податку
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-left">
+              <span className="block">
+                Позиція <strong>«{form.name}»</strong> буде збережена <strong>без групи ПДВ</strong>.
+              </span>
+              <span className="block">
+                Це може викликати розходження між банківським терміналом та ПРРО/ФР під час фіскалізації чеків.
+              </span>
+              <span className="block text-xs text-muted-foreground mt-1">
+                Рекомендуємо обрати відповідну групу ПДВ або «Без податку (нефіскальний)» у вкладці деталей.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setNoTaxConfirm(false)}>
+              Повернутись і обрати податок
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-500 hover:bg-amber-600 text-white"
+              onClick={() => { setNoTaxConfirm(false); onSave(form, modifierGroups); }}
+            >
+              Зберегти без податку
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
@@ -1724,6 +1800,27 @@ export default function FbMenu() {
             </Button>
           </div>
         </div>
+
+        {/* ─── No-tax banner ───────────────────────────────── */}
+        {(() => {
+          const noTaxItems = allItems.filter(i => !(i as any).tax_group_id);
+          if (!noTaxItems.length) return null;
+          return (
+            <div className="flex items-center gap-3 px-5 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+              <span className="flex-1">
+                <strong>{noTaxItems.length} {noTaxItems.length === 1 ? "позиція" : noTaxItems.length < 5 ? "позиції" : "позицій"}</strong> без податку — це може викликати розходження між банківським терміналом та ПРРО/ФР.
+                Застосуйте ПДВ або виберіть «Без податку» для нефіскальних позицій.
+              </span>
+              <button
+                className="text-xs underline shrink-0 hover:text-amber-900"
+                onClick={() => setFilter("all")}
+              >
+                Показати всі
+              </button>
+            </div>
+          );
+        })()}
 
         {/* ─── Tree ────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto">
