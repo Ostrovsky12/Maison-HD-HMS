@@ -6,7 +6,7 @@
 
 import {
   pgTable, serial, text, boolean, integer, numeric,
-  timestamp, date, time, jsonb, index,
+  timestamp, date, time, jsonb, index, unique, varchar,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { properties, propertyUnits, businessUnits } from "./property";
@@ -266,10 +266,12 @@ export const restaurantCharges = pgTable("restaurant_charges", {
 export const fbConfigSettings = pgTable("fb_config_settings", {
   id:             serial("id").primaryKey(),
   organizationId: integer("organization_id").notNull(),
-  section:        text("section").notNull(),
+  section:        varchar("section", { length: 100 }).notNull(),
   data:           jsonb("data").notNull().default({}),
   updatedAt:      timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => ({
+  orgSectionUq: unique("fb_config_settings_org_section_uq").on(t.organizationId, t.section),
+}));
 
 // fb_order_sources — order origin labels shown on POS
 export const fbOrderSources = pgTable("fb_order_sources", {
@@ -308,6 +310,35 @@ export const fbHallTables = pgTable("fb_hall_tables", {
   height:         integer("height").notNull().default(80),
   seats:          integer("seats").notNull().default(4),
   createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
+// fb_warehouses — physical stock locations (склади)
+export const fbWarehouses = pgTable("fb_warehouses", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  name:           varchar("name", { length: 200 }).notNull(),
+  address:        text("address"),
+  notes:          text("notes"),
+  isActive:       boolean("is_active").notNull().default(true),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+});
+
+// fb_ingredients — raw materials / stock items; warehouse_id links to fb_warehouses
+export const fbIngredients = pgTable("fb_ingredients", {
+  id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  name:           varchar("name", { length: 255 }).notNull(),
+  unit:           varchar("unit", { length: 20 }).notNull().default("кг"),
+  category:       varchar("category", { length: 100 }),
+  currentStock:   numeric("current_stock", { precision: 12, scale: 3 }).default("0"),
+  minStock:       numeric("min_stock", { precision: 12, scale: 3 }).default("0"),
+  costPerUnit:    numeric("cost_per_unit", { precision: 10, scale: 4 }).default("0"),
+  supplierId:     integer("supplier_id"),
+  barcode:        varchar("barcode", { length: 100 }),
+  isActive:       boolean("is_active").notNull().default(true),
+  warehouseId:    integer("warehouse_id").references(() => fbWarehouses.id, { onDelete: "set null" }),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
 });
 
 // ─── POS SYNC LOGS ────────────────────────────────────────────────────────────
