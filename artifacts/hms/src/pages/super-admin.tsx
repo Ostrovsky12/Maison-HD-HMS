@@ -118,8 +118,9 @@ function CreateTenantDialog({ open, onClose, onSuccess }: {
     ownerName: "", ownerEmail: "", ownerPassword: "",
     email: "", phone: "", trialDays: "30",
   });
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+  function set(k: string, v: string) { setErrorMsg(null); setForm(f => ({ ...f, [k]: v })); }
 
   const mut = useMutation({
     mutationFn: () => apiFetch("/api/organizations", {
@@ -133,9 +134,10 @@ function CreateTenantDialog({ open, onClose, onSuccess }: {
       toast({ title: `Тенант "${data.organization.name}" створено`, description: `Owner: ${data.owner.email}` });
       onSuccess();
       onClose();
+      setErrorMsg(null);
       setForm({ name: "", slug: "", plan: "basic", ownerName: "", ownerEmail: "", ownerPassword: "", email: "", phone: "", trialDays: "30" });
     },
-    onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
+    onError: (e: any) => setErrorMsg(e.message),
   });
 
   function autoSlug(name: string) {
@@ -217,6 +219,13 @@ function CreateTenantDialog({ open, onClose, onSuccess }: {
               </div>
             </div>
           </div>
+
+          {errorMsg && (
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

@@ -59,6 +59,22 @@ router.post("/", requireAuth, requireRole("super_admin"), async (req, res) => {
     return;
   }
 
+  // Check slug uniqueness
+  const existingSlug = await db.select({ id: organizationsTable.id })
+    .from(organizationsTable).where(eq(organizationsTable.slug, slug)).limit(1);
+  if (existingSlug.length > 0) {
+    res.status(409).json({ error: "Conflict", message: `Slug "${slug}" вже зайнятий. Оберіть інший.` });
+    return;
+  }
+
+  // Check owner email uniqueness
+  const existingEmail = await db.select({ id: usersTable.id })
+    .from(usersTable).where(eq(usersTable.email, ownerEmail)).limit(1);
+  if (existingEmail.length > 0) {
+    res.status(409).json({ error: "Conflict", message: `Email "${ownerEmail}" вже використовується іншим користувачем.` });
+    return;
+  }
+
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.basic;
   const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
 
