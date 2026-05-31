@@ -1694,7 +1694,7 @@ export default function FbMenu() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedCats, setExpandedCats] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "available" | "stop" | "popular" | "vegetarian">("all");
+  const [filter, setFilter] = useState<"all" | "available" | "stop" | "popular" | "vegetarian" | "notax">("all");
   const [catDialog, setCatDialog] = useState<{ open: boolean; initial?: Partial<Category>; parentId?: number | null }>({ open: false });
   const [itemDialog, setItemDialog] = useState<{ open: boolean; initial?: Partial<Item> }>({ open: false });
   const [deleteCat, setDeleteCat] = useState<Category | null>(null);
@@ -1744,6 +1744,7 @@ export default function FbMenu() {
     if (filter === "stop" && !item.is_stop_list) return false;
     if (filter === "popular" && !isPop) return false;
     if (filter === "vegetarian" && !isVeg) return false;
+    if (filter === "notax" && (item as any).tax_group_id) return false;
     return true;
   }
 
@@ -1855,11 +1856,12 @@ export default function FbMenu() {
   const handleDragEnd = () => setDraggingItemId(null);
 
   const FILTERS = [
-    { value: "all", label: "Всі" },
+    { value: "all",       label: "Всі" },
     { value: "available", label: "Доступні" },
-    { value: "stop", label: "Стоп-лист" },
-    { value: "popular", label: "Топ" },
-    { value: "vegetarian", label: "Веган" },
+    { value: "stop",      label: "Стоп-лист" },
+    { value: "popular",   label: "Топ" },
+    { value: "vegetarian",label: "Веган" },
+    { value: "notax",     label: "⚠ Без податку" },
   ] as const;
 
   const totalItems = allItems.length;
@@ -1913,10 +1915,10 @@ export default function FbMenu() {
                 Застосуйте ПДВ або виберіть «Без податку» для нефіскальних позицій.
               </span>
               <button
-                className="text-xs underline shrink-0 hover:text-amber-900"
-                onClick={() => setFilter("all")}
+                className="text-xs font-medium underline shrink-0 hover:text-amber-900"
+                onClick={() => setFilter(filter === "notax" ? "all" : "notax")}
               >
-                Показати всі
+                {filter === "notax" ? "Показати всі" : "Показати без податку"}
               </button>
             </div>
           );
