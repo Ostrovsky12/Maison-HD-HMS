@@ -427,6 +427,23 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
+          {user?.role === "super_admin" && (
+            <Link
+              href="/super-admin"
+              className={cn(
+                "flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium mb-1 transition-colors",
+                location === "/super-admin"
+                  ? "bg-primary/10 text-primary"
+                  : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                collapsed ? "justify-center" : ""
+              )}
+              title="Super Admin"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              {!collapsed && <span>Super Admin</span>}
+            </Link>
+          )}
+
           <div className={cn("flex gap-1", collapsed ? "flex-col" : "")}>
             {collapsed && (
               <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-primary to-accent flex items-center justify-center text-white font-bold text-xs shadow-inner mx-auto mb-1">
