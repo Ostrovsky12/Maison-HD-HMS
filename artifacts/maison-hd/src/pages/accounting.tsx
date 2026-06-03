@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -372,6 +372,7 @@ function BookingInvoicesTab() {
   const [legalEntityId, setLegalEntityId] = useState("all");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [actInvoice, setActInvoice] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -546,6 +547,13 @@ function BookingInvoicesTab() {
                           <rect x="6" y="14" width="12" height="8"/>
                         </svg>
                       </button>
+                      <button
+                        onClick={() => setActInvoice(inv)}
+                        title="Створити Акт виконаних робіт"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                      >
+                        <FileCheck className="w-4 h-4" />
+                      </button>
                       {deleteId === inv.id ? (
                         <div className="flex items-center gap-1">
                           <button
@@ -581,10 +589,241 @@ function BookingInvoicesTab() {
           </Table>
         </div>
       )}
+
+      {actInvoice && (
+        <CreateActFromInvoiceDialog
+          invoice={actInvoice}
+          onClose={() => setActInvoice(null)}
+          onCreated={() => { setActInvoice(null); queryClient.invalidateQueries({ queryKey: ["accounting"] }); }}
+        />
+      )}
     </div>
   );
 }
 
+
+// ─── CREATE ACT FROM INVOICE DIALOG ──────────────────────────────────────────
+function CreateActFromInvoiceDialog({
+  invoice, onClose, onCreated,
+}: {
+  invoice: any | null;
+  onClose: () => void;
+  onCreated?: () => void;
+}) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const tok = () => localStorage.getItem("hms_token") || "";
+
+  const [vatMode, setVatMode] = useState<"with_vat" | "no_vat">("with_vat");
+  const [adjustedAmount, setAdjustedAmount] = useState("");
+  const [subject, setSubject] = useState("");
+  const [cpName, setCpName] = useState("");
+  const [cpEdrpou, setCpEdrpou] = useState("");
+  const [cpAddress, setCpAddress] = useState("");
+  const [cpVat, setCpVat] = useState("");
+  const [legalEntityId, setLegalEntityId] = useState("");
+
+  // Fetch full legal entities (with all details)
+  const { data: leData } = useQuery({
+    queryKey: ["acc-legal-entities-full"],
+    queryFn: async () => {
+      const r = await fetch(`${API_BASE}/api/accounting/legal-entities`, {
+        headers: { Authorization: `Bearer ${tok()}` },
+      });
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+  const legalEntities: any[] = leData?.entities || [];
+
+  // Auto-fill from invoice when dialog opens
+  useEffect(() => {
+    if (!invoice) return;
+    setAdjustedAmount(invoice.amount || "");
+    const vatAmt = parseFloat(invoice.vatAmount || invoice.taxAmount || "0");
+    setVatMode(vatAmt > 0 ? "with_vat" : "no_vat");
+    const firstItem = invoice.invoiceItems?.[0];
+    const itemName = firstItem?.name || firstItem?.description || firstItem?.service || "";
+    setSubject(itemName || invoice.description || invoice.notes || "");
+    setCpName(invoice.counterpartyName || "");
+    setCpEdrpou(invoice.counterpartyEdrpou || "");
+    setCpAddress(invoice.buyerAddress || "");
+    setCpVat(invoice.buyerVatNumber || "");
+    if (invoice.legalEntityId) {
+      setLegalEntityId(String(invoice.legalEntityId));
+    } else if (legalEntities.length > 0) {
+      setLegalEntityId(String(legalEntities[0].id));
+    }
+  }, [invoice?.id]);
+
+  // When legalEntities load after dialog opens — set default if not yet set
+  useEffect(() => {
+    if (legalEntities.length === 0 || legalEntityId) return;
+    if (invoice?.legalEntityId) {
+      setLegalEntityId(String(invoice.legalEntityId));
+    } else {
+      setLegalEntityId(String(legalEntities[0].id));
+    }
+  }, [legalEntities]);
+
+  const total = parseFloat(adjustedAmount || invoice?.amount || "0");
+  const subtotal = vatMode === "with_vat" ? total / 1.2 : total;
+  const vatAmt = vatMode === "with_vat" ? total - subtotal : 0;
+
+  const selectedLe = legalEntities.find((le: any) => le.id === parseInt(legalEntityId));
+
+  const mut = useMutation({
+    mutationFn: async (body: any) => {
+      const r = await fetch(`${API_BASE}/api/accounting/documents/from-invoice/${invoice?.id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || e.message || r.statusText);
+      }
+      return r.json();
+    },
+    onSuccess: (res: any) => {
+      toast({ title: "Акт створено", description: `${res?.document?.docNumber || "Документ"} збережено` });
+      qc.invalidateQueries({ queryKey: ["accounting"] });
+      onCreated?.();
+      onClose();
+    },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
+  });
+
+  if (!invoice) return null;
+
+  return (
+    <Dialog open={!!invoice} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileCheck className="h-5 w-5 text-indigo-600" />
+            Акт виконаних робіт — {invoice.invoiceNumber}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Виконавець */}
+          <div className="rounded-xl border bg-gray-50 p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-500">Виконавець</div>
+            <div>
+              <Label className="text-xs">Юридична особа</Label>
+              <select
+                value={legalEntityId}
+                onChange={e => setLegalEntityId(e.target.value)}
+                className="mt-1 w-full h-9 px-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+              >
+                <option value="">— Оберіть виконавця —</option>
+                {legalEntities.map((le: any) => (
+                  <option key={le.id} value={String(le.id)}>
+                    {le.name}{le.edrpou ? ` (ЄДРПОУ ${le.edrpou})` : ""}
+                  </option>
+                ))}
+              </select>
+              {selectedLe && (
+                <div className="mt-2 text-xs text-gray-500 bg-white border border-gray-100 rounded-lg p-2 space-y-0.5">
+                  {selectedLe.edrpou && <div>ЄДРПОУ: <b className="text-gray-700">{selectedLe.edrpou}</b></div>}
+                  {selectedLe.ipn && <div>ІПН: <b className="text-gray-700">{selectedLe.ipn}</b></div>}
+                  {selectedLe.vatNumber && <div>Свід. ПДВ: <b className="text-gray-700">{selectedLe.vatNumber}</b></div>}
+                  {(selectedLe.legalAddress || selectedLe.actualAddress) && (
+                    <div>Адреса: {selectedLe.legalAddress || selectedLe.actualAddress}</div>
+                  )}
+                  {selectedLe.iban && <div>IBAN: {selectedLe.iban}</div>}
+                  {selectedLe.bank && <div>Банк: {selectedLe.bank}</div>}
+                  {selectedLe.director && <div>Директор: {selectedLe.director}</div>}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Замовник */}
+          <div className="rounded-xl border bg-gray-50 p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-500">Замовник</div>
+            <div>
+              <Label className="text-xs">Назва організації</Label>
+              <Input className="mt-1 h-9" value={cpName} onChange={e => setCpName(e.target.value)} placeholder="ТОВ «Назва компанії»" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">ЄДРПОУ / ІПН</Label>
+                <Input className="mt-1 h-9" value={cpEdrpou} onChange={e => setCpEdrpou(e.target.value)} placeholder="12345678" />
+              </div>
+              <div>
+                <Label className="text-xs">№ свід. ПДВ</Label>
+                <Input className="mt-1 h-9" value={cpVat} onChange={e => setCpVat(e.target.value)} placeholder="необов'язково" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Юридична адреса</Label>
+              <Input className="mt-1 h-9" value={cpAddress} onChange={e => setCpAddress(e.target.value)} placeholder="м. Київ, вул. ..." />
+            </div>
+          </div>
+
+          {/* Послуга та сума */}
+          <div className="rounded-xl border bg-gray-50 p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-500">Послуга та сума</div>
+            <div>
+              <Label className="text-xs">Предмет / назва послуги</Label>
+              <Input className="mt-1 h-9" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Послуги з проживання" />
+            </div>
+
+            <div className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3">
+              <div>
+                <div className="text-sm font-medium text-gray-800">З ПДВ (20%)</div>
+                <div className="text-xs text-gray-400">
+                  {vatMode === "with_vat" ? "Загальна сума включає ПДВ 20%" : "Без ПДВ / звільнено"}
+                </div>
+              </div>
+              <Switch checked={vatMode === "with_vat"} onCheckedChange={c => setVatMode(c ? "with_vat" : "no_vat")} />
+            </div>
+
+            <div>
+              <Label className="text-xs">Загальна сума (грн)</Label>
+              <Input className="mt-1 h-9" type="number" step="0.01" value={adjustedAmount} onChange={e => setAdjustedAmount(e.target.value)} />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 bg-white border border-gray-200 rounded-lg p-3 text-sm">
+              <div className="text-center">
+                <div className="text-xs text-gray-400 mb-1">Без ПДВ</div>
+                <div className="font-mono font-medium">{subtotal.toFixed(2)}</div>
+              </div>
+              <div className="text-center border-x border-gray-100">
+                <div className="text-xs text-gray-400 mb-1">ПДВ {vatMode === "with_vat" ? "20%" : "0%"}</div>
+                <div className="font-mono font-medium">{vatAmt.toFixed(2)}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-gray-400 mb-1">Разом</div>
+                <div className="font-mono font-bold text-indigo-700 text-base">{total.toFixed(2)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3 justify-end pt-2">
+          <Button variant="outline" onClick={onClose}>Скасувати</Button>
+          <Button
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            disabled={mut.isPending || !cpName}
+            onClick={() => mut.mutate({
+              vatMode,
+              adjustedAmount: total,
+              subject: subject || "Послуги з проживання",
+              legalEntityIdOverride: legalEntityId ? parseInt(legalEntityId) : undefined,
+              counterpartyOverride: { name: cpName || undefined, edrpou: cpEdrpou || undefined, address: cpAddress || undefined, vatNumber: cpVat || undefined },
+            })}
+          >
+            {mut.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FileCheck className="h-4 w-4 mr-1" />}
+            {mut.isPending ? "Створення..." : "Створити акт"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ─── SETUP WIZARD ─────────────────────────────────────────────────────────────
 const SETUP_STORAGE_KEY = "mhd_acc_setup_v1";
