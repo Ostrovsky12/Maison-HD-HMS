@@ -370,13 +370,26 @@ function CreateFromInvoiceDialog({
     setCpAddress(invoice.buyerAddress || "");
     setCpVat(invoice.buyerVatNumber || "");
 
-    // Legal entity (Виконавець): use invoice's legalEntityId or first available
+    // Legal entity (Виконавець): set if legalEntities already loaded
     if (invoice.legalEntityId) {
       setLegalEntityId(String(invoice.legalEntityId));
     } else if (legalEntities.length > 0) {
       setLegalEntityId(String(legalEntities[0].id));
+    } else {
+      setLegalEntityId(""); // will be set by the second effect when entities load
     }
   }, [invoice?.id, open]);
+
+  // Secondary effect: once legalEntities load, set default if not yet chosen
+  useEffect(() => {
+    if (!open || legalEntities.length === 0) return;
+    if (legalEntityId) return; // already chosen by user or first effect
+    if (invoice?.legalEntityId) {
+      setLegalEntityId(String(invoice.legalEntityId));
+    } else {
+      setLegalEntityId(String(legalEntities[0].id));
+    }
+  }, [legalEntities, open]);
 
   const amount = parseFloat(adjustedAmount || invoice?.amount || "0");
   const sub = vatMode === "with_vat" ? amount / 1.2 : amount;
