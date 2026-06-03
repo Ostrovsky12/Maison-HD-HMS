@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -67,8 +67,10 @@ interface Act {
 interface Invoice {
   id: number; invoiceNumber: string; status: string; amount: string;
   counterpartyName?: string; counterpartyEdrpou?: string; description?: string;
+  buyerAddress?: string; buyerVatNumber?: string;
+  subtotal?: string; vatAmount?: string; taxAmount?: string;
   legalEntityId?: number; currency: string; createdAt: string; paidAt?: string;
-  invoiceItems?: any[]; sellerSnapshot?: any;
+  invoiceItems?: any[]; sellerSnapshot?: any; notes?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -326,7 +328,7 @@ function ActPrintView({
 // ─── Create act from invoice dialog ──────────────────────────────────────────
 
 function CreateFromInvoiceDialog({
-  open, onClose, invoice, legalEntities, counterparties,
+  open, onClose, invoice, legalEntities,
 }: {
   open: boolean;
   onClose: () => void;
@@ -344,27 +346,51 @@ function CreateFromInvoiceDialog({
   const [cpEdrpou, setCpEdrpou] = useState("");
   const [cpAddress, setCpAddress] = useState("");
   const [cpVat, setCpVat] = useState("");
+  const [legalEntityId, setLegalEntityId] = useState<string>("");
 
-  // When invoice changes, pre-fill
-  useState(() => {
-    if (invoice) {
-      setAdjustedAmount(invoice.amount || "");
-      setSubject(invoice.description || "Послуги з проживання");
-      setCpName(invoice.counterpartyName || "");
-      setCpEdrpou(invoice.counterpartyEdrpou || "");
+  // Auto-fill ALL fields from invoice when invoice or dialog opens
+  useEffect(() => {
+    if (!invoice || !open) return;
+
+    // Amount
+    setAdjustedAmount(invoice.amount || "");
+
+    // VAT mode — detect from invoice taxAmount/vatAmount
+    const invoiceVat = parseFloat(invoice.vatAmount || invoice.taxAmount || "0");
+    setVatMode(invoiceVat > 0 ? "with_vat" : "no_vat");
+
+    // Subject: from first invoice item name, or description
+    const firstItem = invoice.invoiceItems?.[0];
+    const itemName = firstItem?.name || firstItem?.description || firstItem?.service || "";
+    setSubject(itemName || invoice.description || invoice.notes || "");
+
+    // Counterparty (Замовник)
+    setCpName(invoice.counterpartyName || "");
+    setCpEdrpou(invoice.counterpartyEdrpou || "");
+    setCpAddress(invoice.buyerAddress || "");
+    setCpVat(invoice.buyerVatNumber || "");
+
+    // Legal entity (Виконавець): use invoice's legalEntityId or first available
+    if (invoice.legalEntityId) {
+      setLegalEntityId(String(invoice.legalEntityId));
+    } else if (legalEntities.length > 0) {
+      setLegalEntityId(String(legalEntities[0].id));
     }
-  });
+  }, [invoice?.id, open]);
 
   const amount = parseFloat(adjustedAmount || invoice?.amount || "0");
   const sub = vatMode === "with_vat" ? amount / 1.2 : amount;
   const vat = vatMode === "with_vat" ? amount - sub : 0;
 
+  const selectedLe = legalEntities.find(le => le.id === parseInt(legalEntityId));
+
   const mutation = useMutation({
     mutationFn: (data: any) =>
       apiFetch(`/api/accounting/documents/from-invoice/${invoice?.id}`, { method: "POST", body: JSON.stringify(data) }),
-    onSuccess: () => {
-      toast({ title: "Акт створено", description: "Акт виконаних робіт збережено" });
+    onSuccess: (result: any) => {
+      toast({ title: "Акт створено", description: `Акт ${result?.document?.docNumber || ""} збережено` });
       qc.invalidateQueries({ queryKey: ["/api/accounting/documents"] });
+      qc.invalidateQueries({ queryKey: ["/api/accounting/documents", { type: "act" }] });
       onClose();
     },
     onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
@@ -374,11 +400,14 @@ function CreateFromInvoiceDialog({
     mutation.mutate({
       vatMode,
       adjustedAmount: amount,
-      subject: subject || undefined,
-      counterpartyOverride: cpName ? {
-        name: cpName, edrpou: cpEdrpou || undefined,
-        address: cpAddress || undefined, vatNumber: cpVat || undefined,
-      } : undefined,
+      subject: subject || "Послуги з проживання",
+      legalEntityIdOverride: legalEntityId ? parseInt(legalEntityId) : undefined,
+      counterpartyOverride: {
+        name: cpName || undefined,
+        edrpou: cpEdrpou || undefined,
+        address: cpAddress || undefined,
+        vatNumber: cpVat || undefined,
+      },
     });
   }
 
@@ -386,90 +415,133 @@ function CreateFromInvoiceDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Акт виконаних робіт — з рахунку {invoice.invoiceNumber}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            Акт виконаних робіт — {invoice.invoiceNumber}
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {/* VAT mode */}
-          <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="space-y-5">
+          {/* ── Виконавець ── */}
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+            <div className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">Виконавець</div>
             <div>
-              <div className="font-medium text-sm">З ПДВ (20%)</div>
-              <div className="text-xs text-muted-foreground">
-                {vatMode === "with_vat" ? "Сума включає ПДВ" : "Без ПДВ / звільнено"}
-              </div>
-            </div>
-            <Switch
-              checked={vatMode === "with_vat"}
-              onCheckedChange={(c) => setVatMode(c ? "with_vat" : "no_vat")}
-            />
-          </div>
-
-          {/* Amount */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-3">
-              <Label>Загальна сума (грн)</Label>
-              <Input
-                value={adjustedAmount}
-                onChange={(e) => setAdjustedAmount(e.target.value)}
-                placeholder={invoice.amount}
-                type="number" step="0.01"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Без ПДВ</Label>
-              <div className="text-sm font-mono pt-1">{sub.toFixed(2)}</div>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">ПДВ</Label>
-              <div className="text-sm font-mono pt-1">{vat.toFixed(2)}</div>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Разом</Label>
-              <div className="text-sm font-mono font-bold pt-1">{amount.toFixed(2)}</div>
+              <Label>Юридична особа</Label>
+              <Select value={legalEntityId} onValueChange={setLegalEntityId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Виберіть виконавця" />
+                </SelectTrigger>
+                <SelectContent>
+                  {legalEntities.map(le => (
+                    <SelectItem key={le.id} value={String(le.id)}>
+                      {le.name}
+                      {le.edrpou && <span className="text-muted-foreground ml-2 text-xs">ЄДРПОУ {le.edrpou}</span>}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedLe && (
+                <div className="mt-2 text-xs text-muted-foreground space-y-0.5 bg-background rounded border p-2">
+                  {selectedLe.edrpou && <div>ЄДРПОУ: <b>{selectedLe.edrpou}</b></div>}
+                  {selectedLe.ipn && <div>ІПН: <b>{selectedLe.ipn}</b></div>}
+                  {selectedLe.vatNumber && <div>Свід. ПДВ: <b>{selectedLe.vatNumber}</b></div>}
+                  {(selectedLe.legalAddress || selectedLe.actualAddress) && (
+                    <div>Адреса: {selectedLe.legalAddress || selectedLe.actualAddress}</div>
+                  )}
+                  {selectedLe.iban && <div>IBAN: {selectedLe.iban}</div>}
+                  {selectedLe.bank && <div>Банк: {selectedLe.bank}</div>}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Subject */}
-          <div>
-            <Label>Предмет / назва послуги</Label>
-            <Input
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder="Послуги з проживання"
-            />
-          </div>
-
-          {/* Counterparty */}
-          <div className="rounded-lg border p-3 space-y-3">
-            <div className="font-medium text-sm flex items-center gap-2">
+          {/* ── Замовник ── */}
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+            <div className="font-semibold text-sm uppercase tracking-wide text-muted-foreground flex items-center gap-2">
               <Building2 className="h-4 w-4" /> Замовник
             </div>
             <div>
               <Label>Назва</Label>
-              <Input value={cpName} onChange={(e) => setCpName(e.target.value)} placeholder="ТОВ «Назва компанії»" />
+              <Input className="mt-1" value={cpName} onChange={(e) => setCpName(e.target.value)} placeholder="ТОВ «Назва компанії»" />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>ЄДРПОУ / ІПН</Label>
-                <Input value={cpEdrpou} onChange={(e) => setCpEdrpou(e.target.value)} placeholder="12345678" />
+                <Input className="mt-1" value={cpEdrpou} onChange={(e) => setCpEdrpou(e.target.value)} placeholder="12345678" />
               </div>
               <div>
                 <Label>№ свід. ПДВ</Label>
-                <Input value={cpVat} onChange={(e) => setCpVat(e.target.value)} placeholder="необов'язково" />
+                <Input className="mt-1" value={cpVat} onChange={(e) => setCpVat(e.target.value)} placeholder="необов'язково" />
               </div>
             </div>
             <div>
               <Label>Юридична адреса</Label>
-              <Input value={cpAddress} onChange={(e) => setCpAddress(e.target.value)} placeholder="м. Київ, вул. ..." />
+              <Input className="mt-1" value={cpAddress} onChange={(e) => setCpAddress(e.target.value)} placeholder="м. Київ, вул. ..." />
+            </div>
+          </div>
+
+          {/* ── Послуга та сума ── */}
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+            <div className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">Послуга та сума</div>
+
+            <div>
+              <Label>Предмет / назва послуги</Label>
+              <Input
+                className="mt-1"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Послуги з проживання"
+              />
+            </div>
+
+            {/* VAT toggle */}
+            <div className="flex items-center justify-between rounded-lg border bg-background px-4 py-3">
+              <div>
+                <div className="font-medium text-sm">З ПДВ (20%)</div>
+                <div className="text-xs text-muted-foreground">
+                  {vatMode === "with_vat" ? "Загальна сума включає ПДВ 20%" : "Послуги без ПДВ / звільнено"}
+                </div>
+              </div>
+              <Switch
+                checked={vatMode === "with_vat"}
+                onCheckedChange={(c) => setVatMode(c ? "with_vat" : "no_vat")}
+              />
+            </div>
+
+            {/* Amount */}
+            <div>
+              <Label>Загальна сума (грн)</Label>
+              <Input
+                className="mt-1"
+                value={adjustedAmount}
+                onChange={(e) => setAdjustedAmount(e.target.value)}
+                type="number" step="0.01"
+              />
+            </div>
+
+            {/* Breakdown */}
+            <div className="grid grid-cols-3 gap-2 bg-background rounded border p-3 text-sm">
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground mb-1">Без ПДВ</div>
+                <div className="font-mono font-medium">{sub.toFixed(2)}</div>
+              </div>
+              <div className="text-center border-x">
+                <div className="text-xs text-muted-foreground mb-1">ПДВ {vatMode === "with_vat" ? "20%" : "0%"}</div>
+                <div className="font-mono font-medium">{vat.toFixed(2)}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground mb-1">Разом</div>
+                <div className="font-mono font-bold text-base">{amount.toFixed(2)}</div>
+              </div>
             </div>
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="mt-2">
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
-          <Button onClick={handleSubmit} disabled={mutation.isPending}>
+          <Button onClick={handleSubmit} disabled={mutation.isPending || !cpName}>
             {mutation.isPending ? "Створення..." : "Створити акт"}
           </Button>
         </DialogFooter>

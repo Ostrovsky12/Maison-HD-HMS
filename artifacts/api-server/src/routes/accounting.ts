@@ -173,7 +173,10 @@ router.post("/documents/from-invoice/:invoiceId", async (req: any, res) => {
     if (!invRow.rows.length) return res.status(404).json({ error: "Рахунок не знайдено" });
     const inv = invRow.rows[0];
 
-    const { vatMode = "with_vat", adjustedAmount, subject, counterpartyOverride } = req.body;
+    const {
+      vatMode = "with_vat", adjustedAmount, subject,
+      counterpartyOverride, legalEntityIdOverride,
+    } = req.body;
 
     const total = parseFloat(adjustedAmount || inv.amount || "0");
     let subtotal: number, vatAmount: number, totalAmount: number;
@@ -181,29 +184,54 @@ router.post("/documents/from-invoice/:invoiceId", async (req: any, res) => {
     if (vatMode === "no_vat") {
       subtotal = total; vatAmount = 0; totalAmount = total;
     } else {
-      // with_vat: total already includes 20% VAT
       subtotal = total / 1.2; vatAmount = total - subtotal; totalAmount = total;
+    }
+
+    // Resolve legal entity — override from dialog or from invoice
+    const resolvedLeId = legalEntityIdOverride || inv.legal_entity_id || null;
+
+    // Verify resolved legal entity belongs to this org
+    if (resolvedLeId) {
+      const leCheck = await db_.$client.query(
+        `SELECT id FROM legal_entities WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+        [resolvedLeId, orgId]
+      );
+      if (!leCheck.rows.length) return res.status(403).json({ error: "Юридична особа не знайдена" });
     }
 
     const docNumber = await genDocNumber(orgId, "act");
 
-    // Find or create counterparty
+    // Find or create counterparty — merge data from invoice + user edits
     const cpName = counterpartyOverride?.name || inv.counterparty_name;
     const cpEdrpou = counterpartyOverride?.edrpou || inv.counterparty_edrpou;
+    const cpAddress = counterpartyOverride?.address || inv.buyer_address;
+    const cpVatNumber = counterpartyOverride?.vatNumber || inv.buyer_vat_number;
 
     let cpId: number | null = null;
     if (cpName) {
       const existing = await db_.$client.query(
-        `SELECT id FROM counterparties WHERE organization_id = $1 AND name = $2 LIMIT 1`, [orgId, cpName]
+        `SELECT id FROM counterparties WHERE organization_id = $1 AND (name = $2 OR (edrpou IS NOT NULL AND edrpou = $3)) LIMIT 1`,
+        [orgId, cpName, cpEdrpou || ""]
       );
       if (existing.rows.length) {
         cpId = existing.rows[0].id;
+        // Update with latest data if fields provided
+        await db_.$client.query(
+          `UPDATE counterparties SET
+            name = $1,
+            edrpou = COALESCE($2, edrpou),
+            vat_number = COALESCE($3, vat_number),
+            legal_address = COALESCE($4, legal_address),
+            is_vat_payer = $5,
+            updated_at = NOW()
+           WHERE id = $6`,
+          [cpName, cpEdrpou || null, cpVatNumber || null, cpAddress || null, vatMode === "with_vat", cpId]
+        );
       } else {
         const inserted = await db_.$client.query(
           `INSERT INTO counterparties (organization_id, name, edrpou, vat_number, legal_address, is_vat_payer)
            VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-          [orgId, cpName, cpEdrpou || null, counterpartyOverride?.vatNumber || inv.buyer_vat_number || null,
-           counterpartyOverride?.address || inv.buyer_address || null, vatMode === "with_vat"]
+          [orgId, cpName, cpEdrpou || null, cpVatNumber || null, cpAddress || null, vatMode === "with_vat"]
         );
         cpId = inserted.rows[0].id;
       }
@@ -215,7 +243,7 @@ router.post("/documents/from-invoice/:invoiceId", async (req: any, res) => {
       status: "draft" as any,
       docNumber,
       docDate: new Date().toISOString().split("T")[0] as any,
-      legalEntityId: inv.legal_entity_id || null,
+      legalEntityId: resolvedLeId,
       counterpartyId: cpId,
       counterpartyName: cpName || null,
       counterpartyEdrpou: cpEdrpou || null,
