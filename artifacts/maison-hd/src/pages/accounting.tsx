@@ -376,15 +376,15 @@ function BookingInvoicesTab() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: entities } = useQuery({
-    queryKey: ["legal-entities"],
+  const { data: leResp } = useQuery({
+    queryKey: ["acc-legal-entities-full"],
     queryFn: async () => {
-      const r = await fetch(`${API_BASE}/api/organizations/me`, { headers: { Authorization: `Bearer ${tok()}` } });
-      const org = await r.json();
-      return (org.legalEntities || []) as { id: number; name: string }[];
+      const r = await fetch(`${API_BASE}/api/accounting/legal-entities`, { headers: { Authorization: `Bearer ${tok()}` } });
+      return r.json();
     },
     staleTime: 60_000,
   });
+  const entities: any[] = leResp?.entities || [];
 
   const { data: invoices, isLoading, refetch } = useQuery({
     queryKey: ["booking-invoices", dateFrom, dateTo, legalEntityId],
@@ -593,6 +593,7 @@ function BookingInvoicesTab() {
       {actInvoice && (
         <CreateActFromInvoiceDialog
           invoice={actInvoice}
+          legalEntities={entities}
           onClose={() => setActInvoice(null)}
           onCreated={() => { setActInvoice(null); queryClient.invalidateQueries({ queryKey: ["accounting"] }); }}
         />
@@ -604,15 +605,28 @@ function BookingInvoicesTab() {
 
 // ─── CREATE ACT FROM INVOICE DIALOG ──────────────────────────────────────────
 function CreateActFromInvoiceDialog({
-  invoice, onClose, onCreated,
+  invoice, legalEntities, onClose, onCreated,
 }: {
   invoice: any | null;
+  legalEntities: any[];
   onClose: () => void;
   onCreated?: () => void;
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const tok = () => localStorage.getItem("hms_token") || "";
+
+  // Fetch legal entities directly inside dialog — avoids prop-timing issues
+  const { data: _leResp } = useQuery({
+    queryKey: ["legal-entities-for-act-dialog"],
+    queryFn: async () => {
+      const r = await fetch(`${API_BASE}/api/legal-entities`, { headers: { Authorization: `Bearer ${tok()}` } });
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+  const _ownEntities: any[] = (_leResp as any)?.legalEntities || [];
+  const effectiveLegalEntities: any[] = _ownEntities.length > 0 ? _ownEntities : legalEntities;
 
   const [vatMode, setVatMode] = useState<"with_vat" | "no_vat">("with_vat");
   const [adjustedAmount, setAdjustedAmount] = useState("");
@@ -623,20 +637,7 @@ function CreateActFromInvoiceDialog({
   const [cpVat, setCpVat] = useState("");
   const [legalEntityId, setLegalEntityId] = useState("");
 
-  // Fetch full legal entities (with all details)
-  const { data: leData } = useQuery({
-    queryKey: ["acc-legal-entities-full"],
-    queryFn: async () => {
-      const r = await fetch(`${API_BASE}/api/accounting/legal-entities`, {
-        headers: { Authorization: `Bearer ${tok()}` },
-      });
-      return r.json();
-    },
-    staleTime: 60_000,
-  });
-  const legalEntities: any[] = leData?.entities || [];
-
-  // Auto-fill from invoice when dialog opens
+  // Auto-fill ALL fields from invoice when dialog opens (invoice changes)
   useEffect(() => {
     if (!invoice) return;
     setAdjustedAmount(invoice.amount || "");
@@ -649,28 +650,31 @@ function CreateActFromInvoiceDialog({
     setCpEdrpou(invoice.counterpartyEdrpou || "");
     setCpAddress(invoice.buyerAddress || "");
     setCpVat(invoice.buyerVatNumber || "");
+    // Set executor legal entity
     if (invoice.legalEntityId) {
       setLegalEntityId(String(invoice.legalEntityId));
-    } else if (legalEntities.length > 0) {
-      setLegalEntityId(String(legalEntities[0].id));
+    } else if (effectiveLegalEntities.length > 0) {
+      setLegalEntityId(String(effectiveLegalEntities[0].id));
+    } else {
+      setLegalEntityId("");
     }
-  }, [invoice?.id]);
+  }, [invoice?.id, effectiveLegalEntities.length]);
 
-  // When legalEntities load after dialog opens — set default if not yet set
+  // When entities load after dialog opens — set default if not yet chosen
   useEffect(() => {
-    if (legalEntities.length === 0 || legalEntityId) return;
+    if (effectiveLegalEntities.length === 0 || legalEntityId) return;
     if (invoice?.legalEntityId) {
       setLegalEntityId(String(invoice.legalEntityId));
     } else {
-      setLegalEntityId(String(legalEntities[0].id));
+      setLegalEntityId(String(effectiveLegalEntities[0].id));
     }
-  }, [legalEntities]);
+  }, [effectiveLegalEntities.length]);
 
   const total = parseFloat(adjustedAmount || invoice?.amount || "0");
   const subtotal = vatMode === "with_vat" ? total / 1.2 : total;
   const vatAmt = vatMode === "with_vat" ? total - subtotal : 0;
 
-  const selectedLe = legalEntities.find((le: any) => le.id === parseInt(legalEntityId));
+  const selectedLe = effectiveLegalEntities.find((le: any) => le.id === parseInt(legalEntityId));
 
   const mut = useMutation({
     mutationFn: async (body: any) => {
@@ -718,7 +722,7 @@ function CreateActFromInvoiceDialog({
                 className="mt-1 w-full h-9 px-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
               >
                 <option value="">— Оберіть виконавця —</option>
-                {legalEntities.map((le: any) => (
+                {effectiveLegalEntities.map((le: any) => (
                   <option key={le.id} value={String(le.id)}>
                     {le.name}{le.edrpou ? ` (ЄДРПОУ ${le.edrpou})` : ""}
                   </option>

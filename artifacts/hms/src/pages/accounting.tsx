@@ -339,6 +339,16 @@ function CreateFromInvoiceDialog({
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  // Fetch legal entities directly inside dialog — avoids prop-timing race conditions
+  const { data: _leOwnData } = useQuery({
+    queryKey: ["/api/legal-entities"],
+    queryFn: () => apiFetch("/api/legal-entities"),
+    staleTime: 60_000,
+    enabled: open,
+  });
+  const _ownLEs: LegalEntity[] = (_leOwnData as any)?.legalEntities || [];
+  const effectiveLEs: LegalEntity[] = _ownLEs.length > 0 ? _ownLEs : legalEntities;
+
   const [vatMode, setVatMode] = useState<"with_vat" | "no_vat">("with_vat");
   const [adjustedAmount, setAdjustedAmount] = useState("");
   const [subject, setSubject] = useState("");
@@ -352,50 +362,42 @@ function CreateFromInvoiceDialog({
   useEffect(() => {
     if (!invoice || !open) return;
 
-    // Amount
     setAdjustedAmount(invoice.amount || "");
-
-    // VAT mode — detect from invoice taxAmount/vatAmount
     const invoiceVat = parseFloat(invoice.vatAmount || invoice.taxAmount || "0");
     setVatMode(invoiceVat > 0 ? "with_vat" : "no_vat");
-
-    // Subject: from first invoice item name, or description
     const firstItem = invoice.invoiceItems?.[0];
     const itemName = firstItem?.name || firstItem?.description || firstItem?.service || "";
     setSubject(itemName || invoice.description || invoice.notes || "");
-
-    // Counterparty (Замовник)
     setCpName(invoice.counterpartyName || "");
     setCpEdrpou(invoice.counterpartyEdrpou || "");
     setCpAddress(invoice.buyerAddress || "");
     setCpVat(invoice.buyerVatNumber || "");
 
-    // Legal entity (Виконавець): set if legalEntities already loaded
     if (invoice.legalEntityId) {
       setLegalEntityId(String(invoice.legalEntityId));
-    } else if (legalEntities.length > 0) {
-      setLegalEntityId(String(legalEntities[0].id));
+    } else if (effectiveLEs.length > 0) {
+      setLegalEntityId(String(effectiveLEs[0].id));
     } else {
-      setLegalEntityId(""); // will be set by the second effect when entities load
+      setLegalEntityId("");
     }
-  }, [invoice?.id, open]);
+  }, [invoice?.id, open, effectiveLEs.length]);
 
-  // Secondary effect: once legalEntities load, set default if not yet chosen
+  // Secondary effect: once entities load, set default if not yet chosen
   useEffect(() => {
-    if (!open || legalEntities.length === 0) return;
-    if (legalEntityId) return; // already chosen by user or first effect
+    if (!open || effectiveLEs.length === 0) return;
+    if (legalEntityId) return;
     if (invoice?.legalEntityId) {
       setLegalEntityId(String(invoice.legalEntityId));
     } else {
-      setLegalEntityId(String(legalEntities[0].id));
+      setLegalEntityId(String(effectiveLEs[0].id));
     }
-  }, [legalEntities, open]);
+  }, [effectiveLEs.length, open]);
 
   const amount = parseFloat(adjustedAmount || invoice?.amount || "0");
   const sub = vatMode === "with_vat" ? amount / 1.2 : amount;
   const vat = vatMode === "with_vat" ? amount - sub : 0;
 
-  const selectedLe = legalEntities.find(le => le.id === parseInt(legalEntityId));
+  const selectedLe = effectiveLEs.find(le => le.id === parseInt(legalEntityId));
 
   const mutation = useMutation({
     mutationFn: (data: any) =>
@@ -447,7 +449,7 @@ function CreateFromInvoiceDialog({
                   <SelectValue placeholder="Виберіть виконавця" />
                 </SelectTrigger>
                 <SelectContent>
-                  {legalEntities.map(le => (
+                  {effectiveLEs.map(le => (
                     <SelectItem key={le.id} value={String(le.id)}>
                       {le.name}
                       {le.edrpou && <span className="text-muted-foreground ml-2 text-xs">ЄДРПОУ {le.edrpou}</span>}
