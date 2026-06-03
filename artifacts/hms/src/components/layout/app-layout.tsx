@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import {
+  FileCheck2,
   LayoutDashboard, CalendarDays, Users, Bed,
   Settings, LogOut, Moon, Sun, Wallet,
   Sparkles, Hotel, ClipboardList, Download, BedDouble,
@@ -125,6 +126,14 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Wrench,
     items: [
       { href: "/fb/config", label: "Налаштування", icon: Wrench },
+    ],
+  },
+  {
+    id: "accounting",
+    label: "Бухгалтерія",
+    icon: FileCheck2,
+    items: [
+      { href: "/accounting", label: "Акти виконаних робіт", icon: FileCheck2 },
     ],
   },
   {

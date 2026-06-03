@@ -125,6 +125,135 @@ router.patch("/legal-entities/:id", async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── COUNTERPARTIES FROM PAID INVOICES ───────────────────────────────────────
+router.get("/counterparties-from-invoices", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const db_ = db as any;
+    const rows = await db_.$client.query(`
+      SELECT
+        i.counterparty_name AS name,
+        i.counterparty_edrpou AS edrpou,
+        i.buyer_vat_number AS vat_number,
+        i.buyer_address AS address,
+        COUNT(*) AS invoice_count,
+        SUM(i.amount)::float AS total_amount,
+        MAX(i.paid_at) AS last_paid_at
+      FROM invoices i
+      INNER JOIN legal_entities le ON le.id = i.legal_entity_id AND le.organization_id = $1
+      WHERE i.counterparty_name IS NOT NULL
+      GROUP BY i.counterparty_name, i.counterparty_edrpou, i.buyer_vat_number, i.buyer_address
+      ORDER BY MAX(i.paid_at) DESC NULLS LAST
+    `, [orgId]);
+    res.json({ counterparties: rows.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── CREATE ACT FROM INVOICE ──────────────────────────────────────────────────
+router.post("/documents/from-invoice/:invoiceId", async (req: any, res) => {
+  try {
+    const orgId = req.user?.organizationId;
+    const userId = req.user?.id;
+    const invoiceId = parseInt(req.params.invoiceId);
+    const db_ = db as any;
+
+    const invRow = await db_.$client.query(
+      `SELECT i.*, le.name as le_name, le.short_name as le_short_name, le.edrpou as le_edrpou,
+              le.ipn as le_ipn, le.vat_number as le_vat_number, le.is_vat_payer as le_is_vat_payer,
+              le.iban as le_iban, le.bank as le_bank, le.mfo as le_mfo,
+              le.director as le_director, le.accountant as le_accountant,
+              le.legal_address as le_address, le.type as le_type
+       FROM invoices i
+       LEFT JOIN legal_entities le ON le.id = i.legal_entity_id
+       WHERE i.id = $1
+         AND (le.organization_id = $2 OR i.legal_entity_id IS NULL)`,
+      [invoiceId, orgId]
+    );
+
+    if (!invRow.rows.length) return res.status(404).json({ error: "Рахунок не знайдено" });
+    const inv = invRow.rows[0];
+
+    const { vatMode = "with_vat", adjustedAmount, subject, counterpartyOverride } = req.body;
+
+    const total = parseFloat(adjustedAmount || inv.amount || "0");
+    let subtotal: number, vatAmount: number, totalAmount: number;
+
+    if (vatMode === "no_vat") {
+      subtotal = total; vatAmount = 0; totalAmount = total;
+    } else {
+      // with_vat: total already includes 20% VAT
+      subtotal = total / 1.2; vatAmount = total - subtotal; totalAmount = total;
+    }
+
+    const docNumber = await genDocNumber(orgId, "act");
+
+    // Find or create counterparty
+    const cpName = counterpartyOverride?.name || inv.counterparty_name;
+    const cpEdrpou = counterpartyOverride?.edrpou || inv.counterparty_edrpou;
+
+    let cpId: number | null = null;
+    if (cpName) {
+      const existing = await db_.$client.query(
+        `SELECT id FROM counterparties WHERE organization_id = $1 AND name = $2 LIMIT 1`, [orgId, cpName]
+      );
+      if (existing.rows.length) {
+        cpId = existing.rows[0].id;
+      } else {
+        const inserted = await db_.$client.query(
+          `INSERT INTO counterparties (organization_id, name, edrpou, vat_number, legal_address, is_vat_payer)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [orgId, cpName, cpEdrpou || null, counterpartyOverride?.vatNumber || inv.buyer_vat_number || null,
+           counterpartyOverride?.address || inv.buyer_address || null, vatMode === "with_vat"]
+        );
+        cpId = inserted.rows[0].id;
+      }
+    }
+
+    const [doc] = await db.insert(accountingDocumentsTable).values({
+      organizationId: orgId,
+      docType: "act" as any,
+      status: "draft" as any,
+      docNumber,
+      docDate: new Date().toISOString().split("T")[0] as any,
+      legalEntityId: inv.legal_entity_id || null,
+      counterpartyId: cpId,
+      counterpartyName: cpName || null,
+      counterpartyEdrpou: cpEdrpou || null,
+      subject: subject || inv.description || "Послуги з проживання",
+      currency: inv.currency || "UAH",
+      subtotal: subtotal.toFixed(2),
+      vatAmount: vatAmount.toFixed(2),
+      totalAmount: totalAmount.toFixed(2),
+      bookingId: inv.booking_id || null,
+      createdById: userId,
+    }).returning();
+
+    // Create single line item
+    const vatRateStr = vatMode === "no_vat" ? "exempt" : "20";
+    await db.insert(documentItemsTable).values({
+      documentId: doc.id,
+      sortOrder: 1,
+      description: subject || inv.description || "Послуги з проживання",
+      unit: "послуга",
+      quantity: "1",
+      unitPrice: subtotal.toFixed(2),
+      vatRate: vatRateStr as any,
+      vatAmount: vatAmount.toFixed(2),
+      totalPrice: totalAmount.toFixed(2),
+    });
+
+    // Fetch full doc with items and legal entity
+    const items = await db.select().from(documentItemsTable).where(eq(documentItemsTable.documentId, doc.id));
+    let legalEntity = null;
+    if (doc.legalEntityId) {
+      const [le] = await db.select().from(legalEntitiesTable).where(eq(legalEntitiesTable.id, doc.legalEntityId));
+      legalEntity = le;
+    }
+
+    res.json({ document: doc, items, legalEntity, invoiceRef: inv });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── COUNTERPARTIES ───────────────────────────────────────────────────────────
 router.get("/counterparties", async (req: any, res) => {
   try {

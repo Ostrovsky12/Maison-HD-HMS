@@ -60,6 +60,7 @@ import FbReports from "@/pages/fb-reports";
 import FbConfig from "@/pages/fb-config";
 import OwnerDashboard from "@/pages/owner";
 import SuperAdmin from "@/pages/super-admin";
+import Accounting from "@/pages/accounting";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -170,6 +171,7 @@ function Router() {
       <Route path="/fb/suppliers"><ProtectedRoute component={FbWarehouse} /></Route>
       <Route path="/owner"><ProtectedRoute component={OwnerDashboard} /></Route>
       <Route path="/super-admin"><ProtectedRoute component={SuperAdmin} /></Route>
+      <Route path="/accounting"><ProtectedRoute component={Accounting} /></Route>
       <Route path="/"><HomeRedirect /></Route>
       <Route component={NotFound} />
     </Switch>
