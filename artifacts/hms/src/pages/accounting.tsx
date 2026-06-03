@@ -577,7 +577,17 @@ function CreateActDialog({
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const [legalEntityId, setLegalEntityId] = useState<string>(legalEntities[0]?.id?.toString() || "");
+  // Fetch entities directly inside the dialog — avoids race condition with parent loading
+  const { data: _leOwn } = useQuery({
+    queryKey: ["/api/legal-entities"],
+    queryFn: () => apiFetch("/api/legal-entities"),
+    staleTime: 60_000,
+    enabled: open,
+  });
+  const _ownLEs: LegalEntity[] = (_leOwn as any)?.legalEntities || [];
+  const effectiveLEs: LegalEntity[] = _ownLEs.length > 0 ? _ownLEs : legalEntities;
+
+  const [legalEntityId, setLegalEntityId] = useState<string>("");
   const [cpName, setCpName] = useState("");
   const [cpEdrpou, setCpEdrpou] = useState("");
   const [cpAddress, setCpAddress] = useState("");
@@ -587,6 +597,12 @@ function CreateActDialog({
   const [items, setItems] = useState<Omit<DocumentItem, "id">[]>([
     { description: "Послуги з проживання", unit: "послуга", quantity: 1, unitPrice: 0, vatRate: "20", vatAmount: 0, totalPrice: 0 },
   ]);
+
+  // Auto-select first entity when dialog opens and entities are ready
+  useEffect(() => {
+    if (!open || legalEntityId) return;
+    if (effectiveLEs.length > 0) setLegalEntityId(effectiveLEs[0].id.toString());
+  }, [open, effectiveLEs.length]);
 
   function updateItem(i: number, field: keyof typeof items[0], value: any) {
     setItems(prev => {
@@ -653,7 +669,7 @@ function CreateActDialog({
                 <SelectValue placeholder="Виберіть виконавця" />
               </SelectTrigger>
               <SelectContent>
-                {legalEntities.map(le => (
+                {effectiveLEs.map(le => (
                   <SelectItem key={le.id} value={le.id.toString()}>
                     {le.name}
                     {le.edrpou && <span className="text-muted-foreground ml-2">ЄДРПОУ {le.edrpou}</span>}
