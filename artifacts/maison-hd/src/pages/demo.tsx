@@ -784,6 +784,21 @@ export default function DemoPage() {
 
   const f = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
 
+  const scrollTo = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const FOOTER_LINKS: Record<string, string> = {
+    "Features": "features", "Функції": "features",
+    "Pricing": "pricing",   "Ціни": "pricing",
+    "Security": "security", "Безпека": "security",
+    "Changelog": "modules", "Оновлення": "modules",
+    "About": "modules",     "Про нас": "modules",
+    "Contact": "contact",   "Контакти": "contact",
+    "Privacy Policy": "faq","Політика конфіденційності": "faq",
+    "Terms of Use": "faq",  "Умови використання": "faq",
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.email.trim() || !form.company.trim()) {
@@ -842,7 +857,7 @@ export default function DemoPage() {
             {t.nav.login}
           </a>
           <a
-            href="#demo-form"
+            href="#contact"
             className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-indigo-600/25"
           >
             {t.nav.demo} <ChevronRight className="w-3.5 h-3.5" />
@@ -877,7 +892,7 @@ export default function DemoPage() {
               ))}
             </div>
             <div className="flex flex-wrap gap-3">
-              <a href="#demo-form" className="flex items-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-2xl transition-all shadow-xl shadow-indigo-600/30 hover:-translate-y-0.5">
+              <a href="#contact" className="flex items-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-2xl transition-all shadow-xl shadow-indigo-600/30 hover:-translate-y-0.5">
                 {t.hero.cta1} <ArrowRight className="w-4 h-4" />
               </a>
               <a href="#modules" className="flex items-center gap-2 px-6 py-3.5 bg-white/6 hover:bg-white/10 text-white/70 hover:text-white text-sm font-semibold rounded-2xl border border-white/10 transition-all hover:-translate-y-0.5">
@@ -904,7 +919,7 @@ export default function DemoPage() {
       </section>
 
       {/* ── PROBLEMS ────────────────────────────────────────────────────── */}
-      <section className="py-24 px-6 md:px-12 max-w-7xl mx-auto">
+      <section id="features" className="py-24 px-6 md:px-12 max-w-7xl mx-auto">
         <FadeIn>
           <div className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-black text-white mb-4">{t.problems.title}</h2>
@@ -1102,7 +1117,7 @@ export default function DemoPage() {
                       ))}
                     </ul>
                     <a
-                      href="#demo-form"
+                      href="#contact"
                       className={`flex items-center justify-center gap-2 py-3 rounded-xl text-white font-semibold text-sm transition-all ${c.btn} shadow-lg`}
                     >
                       {t.pricing.cta} <ArrowRight className="w-4 h-4" />
@@ -1119,7 +1134,7 @@ export default function DemoPage() {
                 {lang === "ua"
                   ? "Потрібен індивідуальний пакет для мережі або великого об'єкту? "
                   : "Need a custom package for a chain or large property? "}
-                <a href="#demo-form" className="text-indigo-400 hover:text-indigo-300 font-semibold transition-colors">
+                <a href="#contact" className="text-indigo-400 hover:text-indigo-300 font-semibold transition-colors">
                   {lang === "ua" ? "Зв'яжіться з нами →" : "Contact us →"}
                 </a>
               </div>
@@ -1145,7 +1160,7 @@ export default function DemoPage() {
       </section>
 
       {/* ── DEMO FORM ───────────────────────────────────────────────────── */}
-      <section id="demo-form" className="py-24 px-6 md:px-12 bg-white/[0.02]">
+      <section id="contact" className="py-24 px-6 md:px-12 bg-white/[0.02]">
         <div className="max-w-5xl mx-auto grid lg:grid-cols-2 gap-16 items-start">
           <FadeIn>
             <div>
@@ -1249,7 +1264,7 @@ export default function DemoPage() {
                     : "Onboarding takes 48 hours. First results visible in the first week."}
                 </p>
                 <div className="flex flex-wrap justify-center gap-4">
-                  <a href="#demo-form" className="flex items-center gap-2 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-base rounded-2xl transition-all shadow-xl shadow-indigo-600/30 hover:-translate-y-0.5">
+                  <a href="#contact" className="flex items-center gap-2 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-base rounded-2xl transition-all shadow-xl shadow-indigo-600/30 hover:-translate-y-0.5">
                     {t.hero.cta1} <ArrowRight className="w-5 h-5" />
                   </a>
                   <a href={`${BASE}/login`} className="flex items-center gap-2 px-8 py-4 bg-white/6 hover:bg-white/10 text-white/70 hover:text-white font-semibold text-base rounded-2xl border border-white/10 transition-all hover:-translate-y-0.5">
@@ -1278,7 +1293,7 @@ export default function DemoPage() {
               <div className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-4">{t.footer.product}</div>
               <ul className="space-y-2.5">
                 {t.footer.links.map(l => (
-                  <li key={l}><a href="#" className="text-sm text-white/40 hover:text-white transition-colors">{l}</a></li>
+                  <li key={l}><button onClick={() => scrollTo(FOOTER_LINKS[l] ?? "features")} className="text-sm text-white/40 hover:text-white transition-colors text-left">{l}</button></li>
                 ))}
               </ul>
             </div>
@@ -1286,7 +1301,7 @@ export default function DemoPage() {
               <div className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-4">{lang === "ua" ? "Компанія" : "Company"}</div>
               <ul className="space-y-2.5">
                 {t.footer.company.map(l => (
-                  <li key={l}><a href="#" className="text-sm text-white/40 hover:text-white transition-colors">{l}</a></li>
+                  <li key={l}><button onClick={() => scrollTo(FOOTER_LINKS[l] ?? "contact")} className="text-sm text-white/40 hover:text-white transition-colors text-left">{l}</button></li>
                 ))}
               </ul>
             </div>

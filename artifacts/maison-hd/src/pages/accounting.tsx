@@ -181,6 +181,7 @@ const ACC_NAV = [
     items: [
       { id: "invoices",       label: "Рахунки",            icon: Receipt },
       { id: "documents",      label: "Договори та акти",   icon: FileText },
+      { id: "acc-documents",  label: "Обл. документи",     icon: FileText },
       { id: "tax-invoices",   label: "Подат. накладні",    icon: Landmark },
       { id: "bas",            label: "BAS / 1C",           icon: Cpu },
       { id: "signing",        label: "Підписання КЕП",     icon: PenSquare },
@@ -214,10 +215,11 @@ const ACC_NAV = [
   {
     section: "НАЛАШТУВАННЯ",
     items: [
-      { id: "entities",       label: "Юр. особи",          icon: Building2 },
-      { id: "counterparties", label: "Контрагенти",        icon: Users },
-      { id: "acc-accounts",   label: "План рахунків",      icon: BookOpen },
-      { id: "integrations",   label: "Інтеграції",         icon: Settings },
+      { id: "entities",         label: "Юр. особи",          icon: Building2 },
+      { id: "counterparties",   label: "Контрагенти",        icon: Users },
+      { id: "acc-contractors",  label: "Контрагенти (бух.)", icon: Users },
+      { id: "acc-accounts",     label: "План рахунків",      icon: BookOpen },
+      { id: "integrations",     label: "Інтеграції",         icon: Settings },
     ],
   },
 ] as const;
