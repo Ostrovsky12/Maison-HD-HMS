@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Save, Loader2, Receipt, Eye, Wifi, QrCode, MessageSquare,
-  Store, Clock, Image, Upload, X,
+  Store, Clock, Image, Upload, X, Building2,
 } from "lucide-react";
 
 const API = "/api/fb/config";
@@ -334,6 +335,18 @@ export default function FbConfigReceipt() {
     },
   });
 
+  const BASE_API = API.replace("/fb/config", "");
+  const { data: legalEntities = [] } = useQuery<any[]>({
+    queryKey: ["legal-entities-receipt"],
+    queryFn: async () => {
+      const token = localStorage.getItem("hms_token");
+      const r = await fetch(`${BASE_API}/legal-entities`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return [];
+      const d = await r.json();
+      return d.entities || [];
+    },
+  });
+
   const set = <K extends keyof ReceiptCfg>(k: K, v: ReceiptCfg[K]) =>
     setCfg(p => ({ ...p, [k]: v }));
 
@@ -395,6 +408,32 @@ export default function FbConfigReceipt() {
 
                 {/* LEGAL ENTITY */}
                 <SectionHeader icon={<Receipt className="w-4 h-4" />} title="Юридична особа (для фіскального чека)" />
+
+                {legalEntities.length > 0 && (
+                  <Field label="Завантажити з налаштувань" hint="Оберіть юридичну особу — поля заповняться автоматично">
+                    <Select onValueChange={selectedId => {
+                      const le = legalEntities.find((e: any) => String(e.id) === selectedId);
+                      if (!le) return;
+                      set("legal_name", le.name || "");
+                      set("legal_address", le.legal_address || le.address || "");
+                      set("tax_id", le.edrpou || le.ipn || "");
+                    }}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <div className="flex items-center gap-2">
+                          <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <SelectValue placeholder="Обрати юридичну особу зі списку..." />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {legalEntities.map((le: any) => (
+                          <SelectItem key={le.id} value={String(le.id)}>
+                            {le.name}{le.edrpou ? ` · ${le.edrpou}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
 
                 <Field label="Назва юр. особи" hint="напр. ФОП КРАВЧЕНКО ОЛЕКСІЙ МИКОЛАЙОВИЧ">
                   <input

@@ -2597,6 +2597,159 @@ function PaymentUrlSection() {
   );
 }
 
+// ── F&B Staff Section (in Персонал tab) ──────────────────────────
+function FbStaffSection() {
+  const qc = useQueryClient();
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: "", phone: "", role: "waiter", pin: "" });
+
+  const { data: staff = [], isLoading } = useQuery<any[]>({
+    queryKey: ["fb-staff-settings"],
+    queryFn: async () => {
+      const r = await authFetch(`${API}/fb/staff`);
+      if (!r.ok) return [];
+      const d = await r.json();
+      return d.staff || [];
+    },
+  });
+
+  const ROLES: Record<string, { label: string; color: string }> = {
+    waiter:    { label: "Офіціант",  color: "bg-blue-50 text-blue-700 border-blue-200" },
+    bartender: { label: "Бармен",    color: "bg-purple-50 text-purple-700 border-purple-200" },
+    cook:      { label: "Кухар",     color: "bg-orange-50 text-orange-700 border-orange-200" },
+    cashier:   { label: "Касир",     color: "bg-green-50 text-green-700 border-green-200" },
+    manager:   { label: "Менеджер",  color: "bg-gray-50 text-gray-700 border-gray-200" },
+  };
+
+  const handleAdd = async () => {
+    if (!form.name || !form.role) { toast({ title: "Введіть ім'я та роль", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const r = await authFetch(`${API}/fb/staff`, {
+        method: "POST",
+        body: JSON.stringify({ name: form.name, phone: form.phone || null, role: form.role, pin: form.pin || undefined }),
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Помилка"); }
+      toast({ title: "Співробітника додано" });
+      setForm({ name: "", phone: "", role: "waiter", pin: "" });
+      setShowAdd(false);
+      qc.invalidateQueries({ queryKey: ["fb-staff-settings"] });
+    } catch (e: any) {
+      toast({ title: "Помилка", description: e.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  const toggleActive = async (s: any) => {
+    await authFetch(`${API}/fb/staff/${s.id}`, { method: "PATCH", body: JSON.stringify({ is_active: !s.is_active }) });
+    qc.invalidateQueries({ queryKey: ["fb-staff-settings"] });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {isLoading ? "Завантаження..." : `${staff.filter((s: any) => s.is_active).length} активних з ${staff.length}`}
+        </p>
+        <Button size="sm" onClick={() => setShowAdd(v => !v)} variant={showAdd ? "outline" : "default"} className="gap-1.5 h-8">
+          <Plus className="w-3.5 h-3.5" /> Додати
+        </Button>
+      </div>
+
+      {showAdd && (
+        <div className="border rounded-xl p-4 bg-muted/30 space-y-3">
+          <p className="text-sm font-semibold">Новий співробітник</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Ім'я *</Label>
+              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Марія Коваль" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Телефон</Label>
+              <Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+380..." className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Роль *</Label>
+              <Select value={form.role} onValueChange={v => setForm(f => ({ ...f, role: v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ROLES).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">PIN-код (для каси, 4–6 цифр)</Label>
+              <Input value={form.pin} onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, "") }))} placeholder="1234" maxLength={6} className="h-8 text-sm font-mono" />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" onClick={handleAdd} disabled={saving || !form.name} className="h-8">
+              {saving && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}Зберегти
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowAdd(false)} className="h-8">Скасувати</Button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+      ) : staff.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground border rounded-xl">
+          <Users2 className="w-8 h-8 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">Персонал ще не доданий</p>
+          <p className="text-xs mt-1 opacity-70">Додайте офіціантів, барменів та кухарів</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Ім'я</th>
+                <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Роль</th>
+                <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Телефон</th>
+                <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">PIN</th>
+                <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Статус</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {staff.map((s: any) => {
+                const roleMeta = ROLES[s.role] || { label: s.role, color: "bg-gray-50 text-gray-700 border-gray-200" };
+                return (
+                  <tr key={s.id} className={`hover:bg-muted/30 ${!s.is_active ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-2.5 font-medium">{s.name}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${roleMeta.color}`}>{roleMeta.label}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground text-xs">{s.phone || "—"}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${s.pin_hash ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "text-muted-foreground"}`}>
+                        {s.pin_hash ? "●●●●" : "—"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        onClick={() => toggleActive(s)}
+                        className={`text-xs font-medium px-2 py-0.5 rounded-lg border cursor-pointer transition-colors ${
+                          s.is_active
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
+                            : "bg-red-50 text-red-700 border-red-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                        }`}
+                      >
+                        {s.is_active ? "✓ Активний" : "✗ Неактивний"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">Детальне управління, PIN та права доступу — у розділі <strong>F&B → Персонал</strong></p>
+    </div>
+  );
+}
+
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
   const [mainTab, setMainTab] = useState("profile");
@@ -2699,7 +2852,7 @@ export default function SettingsPage() {
               <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
               <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
               {(user.role === "owner" || user.role === "manager") && (
-                <TabsTrigger value="team" className="gap-1.5"><Users2 className="w-3.5 h-3.5" /> Команда</TabsTrigger>
+                <TabsTrigger value="team" className="gap-1.5"><Users2 className="w-3.5 h-3.5" /> Персонал</TabsTrigger>
               )}
               {mod("legal_entities") && <TabsTrigger value="legal" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Юр. особи</TabsTrigger>}
               {mod("discounts") && <TabsTrigger value="discounts" className="gap-1.5"><Percent className="w-3.5 h-3.5" /> Знижки</TabsTrigger>}
@@ -2711,13 +2864,22 @@ export default function SettingsPage() {
             <TabsContent value="profile"><ProfileTab /></TabsContent>
             {(user.role === "owner" || user.role === "manager") && (
               <TabsContent value="team">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><Users2 className="w-4 h-4" /> Команда</CardTitle>
-                    <CardDescription>Управління обліковими записами та паролями персоналу вашого об'єкту.</CardDescription>
-                  </CardHeader>
-                  <CardContent><UsersManagementTab isSuperAdmin={false} /></CardContent>
-                </Card>
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2"><Lock className="w-4 h-4" /> Системний доступ</CardTitle>
+                      <CardDescription>Люди з логіном та паролем до Maison HD — власники, менеджери, рецепція.</CardDescription>
+                    </CardHeader>
+                    <CardContent><UsersManagementTab isSuperAdmin={false} /></CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2"><Users2 className="w-4 h-4" /> Персонал закладу</CardTitle>
+                      <CardDescription>Офіціанти, бармени, кухарі, касири — вхід через PIN-код на касі F&B.</CardDescription>
+                    </CardHeader>
+                    <CardContent><FbStaffSection /></CardContent>
+                  </Card>
+                </div>
               </TabsContent>
             )}
             <TabsContent value="hotel">
