@@ -1457,7 +1457,7 @@ function CalendarSettingsTab() {
 }
 
 // ── Billing Tab ───────────────────────────────────────────────────
-function BillingTab() {
+function BillingTab({ onGoToLegal }: { onGoToLegal?: () => void }) {
   const [, navigate] = useLocation();
 
   const { data: sub } = useQuery<any>({
@@ -1523,7 +1523,7 @@ function BillingTab() {
         <p className="text-sm font-medium text-amber-800 mb-1">LiqPay інтеграція</p>
         <p className="text-xs text-amber-700">
           Для прийому онлайн-оплат налаштуйте LiqPay ключі у вкладці{" "}
-          <button onClick={() => {}} className="underline font-medium">Юр. особи</button>.
+          <button onClick={() => onGoToLegal?.()} className="underline font-medium text-amber-800 hover:text-amber-900">Юр. особи</button>.
           Ваші LiqPay ключі зберігаються безпечно.
         </p>
       </div>
@@ -2599,6 +2599,7 @@ function PaymentUrlSection() {
 
 // ── Main Settings Page ────────────────────────────────────────────
 export default function SettingsPage() {
+  const [mainTab, setMainTab] = useState("profile");
   const { data: user, isLoading: userLoading } = useGetMe();
   const isSAEarly = user?.role === "super_admin";
 
@@ -2693,7 +2694,7 @@ export default function SettingsPage() {
             </TabsContent>
           </Tabs>
         ) : (
-          <Tabs defaultValue="profile" className="w-full">
+          <Tabs value={mainTab} onValueChange={setMainTab} className="w-full">
             <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
               <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
               <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
@@ -2791,7 +2792,7 @@ export default function SettingsPage() {
                   <CardTitle className="flex items-center gap-2"><CreditCard className="w-4 h-4" /> Підписка та оплата</CardTitle>
                   <CardDescription>Керування підпискою Maison HD та платіжними налаштуваннями.</CardDescription>
                 </CardHeader>
-                <CardContent><BillingTab /></CardContent>
+                <CardContent><BillingTab onGoToLegal={() => setMainTab("legal")} /></CardContent>
               </Card>
             </TabsContent>
           </Tabs>
