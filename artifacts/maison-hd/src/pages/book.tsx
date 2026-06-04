@@ -82,6 +82,7 @@ export default function BookPage() {
   const [confirmed, setConfirmed] = useState<any>(null);
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", country: "UA", specialRequests: "", agreeTerms: false });
   const [payMethod, setPayMethod] = useState("arrival");
+  const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
 
   useEffect(() => {
     const params = slug ? `?slug=${slug}` : "";
@@ -632,7 +633,7 @@ export default function BookPage() {
                   <label className="flex items-start gap-2 cursor-pointer">
                     <input type="checkbox" checked={form.agreeTerms} onChange={e => setForm(f => ({ ...f, agreeTerms: e.target.checked }))}
                       className="mt-0.5 accent-[#0071c2]" />
-                    <span className="text-xs text-gray-600">Я погоджуюсь з <a href="#" className="text-[#0071c2] underline">умовами бронювання</a> та <a href="#" className="text-[#0071c2] underline">політикою конфіденційності</a> *</span>
+                    <span className="text-xs text-gray-600">Я погоджуюсь з <button type="button" onClick={() => setLegalModal("terms")} className="text-[#0071c2] underline hover:text-[#005fa3]">умовами бронювання</button> та <button type="button" onClick={() => setLegalModal("privacy")} className="text-[#0071c2] underline hover:text-[#005fa3]">політикою конфіденційності</button> *</span>
                   </label>
                 </div>
               </Section>
@@ -703,6 +704,49 @@ export default function BookPage() {
           </div>
         )}
       </div>
+
+      {/* Legal modal */}
+      {legalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setLegalModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">
+                {legalModal === "terms" ? "Умови бронювання" : "Політика конфіденційності"}
+              </h2>
+              <button onClick={() => setLegalModal(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4 text-sm text-gray-700 space-y-3 leading-relaxed">
+              {legalModal === "terms" ? (
+                <>
+                  <p><strong>1. Загальні положення.</strong> Ці умови регулюють відносини між гостем та готелем при здійсненні онлайн-бронювання.</p>
+                  <p><strong>2. Підтвердження бронювання.</strong> Бронювання вважається підтвердженим після отримання письмового підтвердження на вказану електронну адресу.</p>
+                  <p><strong>3. Оплата.</strong> При виборі онлайн-оплати стягується передоплата у розмірі 30% від вартості проживання. Решта суми оплачується при заїзді.</p>
+                  <p><strong>4. Скасування та зміна бронювання.</strong> Безкоштовне скасування можливе за 48 годин до дати заїзду. При скасуванні пізніше — передоплата не повертається.</p>
+                  <p><strong>5. Заїзд та виїзд.</strong> Стандартний час заїзду — 14:00, виїзду — 12:00. Ранній заїзд або пізній виїзд можливі за доступністю та додаткову плату.</p>
+                  <p><strong>6. Правила проживання.</strong> Гості зобов'язані дотримуватись внутрішніх правил закладу, не турбувати інших гостей та нести відповідальність за збереження майна.</p>
+                  <p><strong>7. Відповідальність.</strong> Готель не несе відповідальності за особисті речі гостей. Рекомендується користуватись сейфом у номері.</p>
+                </>
+              ) : (
+                <>
+                  <p><strong>1. Збір даних.</strong> При бронюванні ми збираємо ім'я, прізвище, електронну адресу, номер телефону та країну проживання.</p>
+                  <p><strong>2. Мета обробки.</strong> Дані використовуються виключно для обробки бронювання, підтвердження заїзду та забезпечення безпеки проживання.</p>
+                  <p><strong>3. Зберігання даних.</strong> Персональні дані зберігаються протягом терміну, необхідного для виконання договору та відповідно до вимог законодавства України.</p>
+                  <p><strong>4. Передача третім особам.</strong> Дані не передаються третім особам, крім випадків, передбачених законодавством (органи державної влади, фіскальні органи).</p>
+                  <p><strong>5. Права суб'єкта даних.</strong> Ви маєте право на доступ, виправлення або видалення своїх персональних даних, звернувшись до адміністрації закладу.</p>
+                  <p><strong>6. Cookies.</strong> Сайт використовує технічні cookies для забезпечення функціональності форми бронювання. Маркетингові cookies не використовуються.</p>
+                </>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-100">
+              <button onClick={() => setLegalModal(null)} className="w-full bg-[#0071c2] hover:bg-[#005fa3] text-white font-semibold text-sm py-2.5 rounded-lg transition">
+                Зрозуміло
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
