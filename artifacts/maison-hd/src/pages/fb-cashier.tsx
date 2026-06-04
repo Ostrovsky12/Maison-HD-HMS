@@ -378,6 +378,13 @@ async function printFinalReceiptBrowser(order: any) {
   const fiscalQrUrl  = order.fiscal_qr_url     || order.fiscalQrUrl      || fiscalUrl;
   const isFiscal     = fiscalStatus === "done" && !!fiscalUrl;
 
+  const vatTotal = items.reduce((s: number, it: any) => {
+    const tp   = parseFloat(it.total_price || "0");
+    const rate = parseFloat(it.vat_rate    || "0");
+    return s + (rate > 0 ? tp - tp / (1 + rate / 100) : 0);
+  }, 0);
+  const baseTotal = total - vatTotal;
+
   const logoHtml = cfg.logo_url
     ? `<div style="text-align:center;margin-bottom:5px"><img src="${cfg.logo_url}" style="max-height:60px;max-width:200px" onerror="this.remove()"/></div>`
     : "";
@@ -442,7 +449,8 @@ ${discountAmount > 0 ? `<div class="row sm"><span>Знижка</span><span>-${fm
 ${tipAmount > 0 ? `<div class="row sm"><span>Сервісний збір</span><span>+${fmtNum(tipAmount)}&nbsp;грн</span></div>` : ""}
 <hr/>
 <div class="row"><span>Сума</span><span>${fmtNum(total)}&nbsp;грн</span></div>
-<div class="row sm"><span>Без ПДВ ₴</span><span>0,00</span></div>
+${vatTotal > 0 ? `<div class="row sm"><span>Без ПДВ ₴</span><span>${fmtNum(baseTotal)}&nbsp;грн</span></div>
+<div class="row sm"><span>ПДВ ₴</span><span>${fmtNum(vatTotal)}&nbsp;грн</span></div>` : ""}
 <div class="row bold"><span>До сплати</span><span>${fmtNum(total)}&nbsp;грн</span></div>
 ${isFiscal ? `<hr/>
 <div class="c sm" style="line-height:1.7">
@@ -450,10 +458,10 @@ ${isFiscal ? `<hr/>
   <div>${closedAt}</div>
   <div>ОНЛАЙН</div>
   <div class="bold">ФІСКАЛЬНИЙ ЧЕК</div>
-  <div>Maison HD</div>
+  <div>${estName}</div>
 </div>
 <hr/>
-<div class="c"><img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(fiscalQrUrl)}" style="width:120px;height:120px;margin:4px auto;display:block"/></div>` : ""}
+<div class="c"><img src="${fiscalQrUrl}" style="width:120px;height:120px;margin:4px auto;display:block" onerror="this.style.display='none'"/></div>` : ""}
 ${cfg.guest_message ? `<hr/><div class="c sm" style="font-style:italic;margin:3px 0">${cfg.guest_message}</div>` : ""}
 ${cfg.print_wifi && cfg.wifi_name ? `<hr/><div class="c sm">Wi-Fi: <b>${cfg.wifi_name}</b>${cfg.wifi_password ? `<br/>Пароль: ${cfg.wifi_password}` : ""}</div>` : ""}
 ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}

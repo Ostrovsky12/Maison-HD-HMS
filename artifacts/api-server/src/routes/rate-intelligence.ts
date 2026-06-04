@@ -195,7 +195,7 @@ ${websiteHint}
 Ціни мають бути в гривнях (UAH), реалістичними для українського ринку.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -304,7 +304,7 @@ ${existingNames.length > 0 ? `Вже відстежуються (виключи 
 [{"name":"...","websiteUrl":"https://...","starRating":3,"roomType":"Котедж","notes":"де знаходиться і чому конкурент","confidence":"high"}]`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -486,7 +486,7 @@ ${rateTable || "Даних немає"}
 Відповідай українською мовою. Будь конкретним — вказуй конкретні відсотки, суми, дати. Уникай загальних фраз.`;
 
     const stream = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       messages: [
         { role: "system", content: "Ти — провідний Revenue Manager для готельного бізнесу. Даєш конкретні, дієві рекомендації з числами." },
         { role: "user", content: prompt },

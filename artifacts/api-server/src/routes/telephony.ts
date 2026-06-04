@@ -242,7 +242,7 @@ router.post("/calls/:id/summarize", requireAuth, async (req: any, res) => {
 
     const notesText = call.notes || "Нотатки відсутні";
     const completion = await openai.chat.completions.create({
-      model: "gpt-5-nano",
+      model: "gpt-4.1-nano",
       max_completion_tokens: 1024,
       messages: [{
         role: "system",
@@ -287,7 +287,7 @@ router.post("/ai/suggest-script", requireAuth, async (req: any, res) => {
   const { scenario, context } = req.body;
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-5-nano",
+      model: "gpt-4.1-nano",
       max_completion_tokens: 1024,
       messages: [{
         role: "system",
@@ -616,7 +616,7 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
       if (settings?.aiEnabled && status === "completed" && billsec > 30) {
         try {
           const completion = await openai.chat.completions.create({
-            model: "gpt-5-nano",
+            model: "gpt-4.1-nano",
             max_completion_tokens: 512,
             messages: [{
               role: "system",

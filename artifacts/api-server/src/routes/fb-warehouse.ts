@@ -734,7 +734,7 @@ ${ingredientsList || "список порожній"}
 - "supplier_id": id постачальника або null`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       max_completion_tokens: 8000,
       messages: [
         { role: "system", content: systemPrompt },
@@ -826,7 +826,7 @@ router.post("/receipts/ai-voice-receipt", async (req, res) => {
 КОНВЕРТАЦІЯ УПАКОВОК: якщо у назві є розфасовка (напр. "2л*6", "900г 10шт") — конвертуй quantity в базові одиниці (л або кг). Приклад: "вода 2л пак 6" × 5 паків = 60л; "молоко 900г" × 10 шт = 9л. Рідини → л, тверді → кг.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       max_completion_tokens: 2000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
@@ -900,7 +900,7 @@ router.post("/recipes/ai-voice-recipe", async (req, res) => {
 Зіставляй ingredient_id де можливо (нечутливо до регістру, часткове співпадіння назви).`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       max_completion_tokens: 2000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
@@ -966,7 +966,7 @@ router.post("/ai-voice-writeoff", async (req, res) => {
 Знайди ingredient_id де можливо.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       max_completion_tokens: 1000,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }]
     });
@@ -1363,7 +1363,7 @@ router.post("/ai/classify-alcohol", async (req, res) => {
     if (!name) return res.status(400).json({ error: "name required" });
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1",
       max_completion_tokens: 500,
       messages: [
         {

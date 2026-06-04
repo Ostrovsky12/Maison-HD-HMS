@@ -2633,7 +2633,7 @@ ${peakHour ? `\nНайактивніша година: ${String(peakHour.hour).p
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${aiKey}` },
       body: JSON.stringify({
-        model: "gpt-5-mini",
+        model: "gpt-4.1-mini",
         max_completion_tokens: 16000,
         messages: [
           {

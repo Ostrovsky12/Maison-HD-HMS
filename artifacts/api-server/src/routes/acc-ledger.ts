@@ -3763,7 +3763,7 @@ router.post("/bank/ai-categorize/:id", async (req: any, res) => {
     const contractorNames = contractorRows.map((c: any) => c.name).join(", ");
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+      model: "gpt-4.1-mini",
       response_format: { type: "json_object" },
       messages: [
         {
@@ -3863,7 +3863,7 @@ router.post("/bank/ai-categorize-bulk", async (req: any, res) => {
           const amount = parseFloat(stmt.amount);
           const direction = amount > 0 ? "НАДХОДЖЕННЯ" : "ВИТРАТА";
           const completion = await openai.chat.completions.create({
-            model: "gpt-5-mini",
+            model: "gpt-4.1-mini",
             response_format: { type: "json_object" },
             messages: [
               { role: "system", content: `Бухгалтер UA. Категоризуй транзакцію. Рахунки:\n${accounts}\nJSON: {debit_code,credit_code,vat_percent,contractor_name,category,description,confidence}` },
@@ -4147,7 +4147,7 @@ router.post("/documents/ocr", async (req: any, res) => {
     const contractorList = contractors.rows.map((c: any) => c.name).join(", ");
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+      model: "gpt-4.1-mini",
       response_format: { type: "json_object" },
       messages: [
         {
