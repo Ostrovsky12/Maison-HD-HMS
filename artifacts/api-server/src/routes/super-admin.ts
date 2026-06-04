@@ -210,7 +210,13 @@ router.patch("/tenants/:id", async (req, res) => {
       setClauses.push(`is_active = $${vals.length}`);
     }
     if (enabledModules !== undefined) {
-      vals.push(JSON.stringify(enabledModules));
+      // Auto-include sub-modules: enabling "fb" also enables fb_pos and fb_warehouse
+      let mods = enabledModules;
+      if (Array.isArray(mods) && mods.includes("fb")) {
+        if (!mods.includes("fb_pos")) mods = [...mods, "fb_pos"];
+        if (!mods.includes("fb_warehouse")) mods = [...mods, "fb_warehouse"];
+      }
+      vals.push(JSON.stringify(mods));
       setClauses.push(`enabled_modules = $${vals.length}`);
     }
 

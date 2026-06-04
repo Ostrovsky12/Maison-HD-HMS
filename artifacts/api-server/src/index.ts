@@ -321,6 +321,9 @@ async function ensureSchema() {
   await db.execute(sql`
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS with_pets BOOLEAN NOT NULL DEFAULT false;
   `);
+  await db.execute(sql`
+    ALTER TABLE organizations ADD COLUMN IF NOT EXISTS guest_guide_url TEXT;
+  `);
 
   // Pricing calendar rules (rate calendar)
   await db.execute(sql`

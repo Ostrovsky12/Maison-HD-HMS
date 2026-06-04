@@ -46,7 +46,7 @@ const NAV: NavSection[] = [
       { name: "Ціновий календар", path: "/pricing-calendar", icon: CalendarRange, roles: ["super_admin","owner","manager"] },
       { name: "Номери",      path: "/units",        icon: KeyRound,     roles: null },
       { name: "Гості",       path: "/guests",       icon: Users,        roles: null },
-      { name: "Бронювати онлайн", path: "/book",    icon: Sparkles,     roles: null },
+      { name: "Онлайн-бронювання", path: "/book",   icon: Globe,        roles: ["super_admin","owner","manager"] },
     ],
   },
   {
@@ -90,7 +90,7 @@ const NAV: NavSection[] = [
   {
     label: "F&B — Операції",
     items: [
-      { name: "Ресторан & F&B",   path: "/fb",           icon: UtensilsCrossed, roles: null,                                   moduleKey: "fb" },
+      { name: "Операційний центр F&B", path: "/fb",        icon: UtensilsCrossed, roles: null,                                   moduleKey: "fb" },
       { name: "Каса / Замовлення",path: "/fb/cashier",   icon: Coins,           roles: null,                                   moduleKey: "fb" },
       { name: "Станція офіціанта",path: "/waiter",       icon: ClipboardList,   roles: null,                                   moduleKey: "fb_pos" },
       { name: "F&B Каса (POS)",   path: "/fb-pos",       icon: Coins,           roles: null,                                   moduleKey: "fb_pos" },
@@ -104,8 +104,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Меню",             path: "/fb/menu",       icon: ChefHat,         roles: ["super_admin","owner","manager"],      moduleKey: "fb" },
       { name: "Торгові точки",    path: "/fb/outlets",    icon: Building2,       roles: ["super_admin","owner","manager"],      moduleKey: "fb" },
-      { name: "Склад",            path: "/fb-warehouse",  icon: Warehouse,       roles: null,                                   moduleKey: "fb_warehouse" },
-      { name: "Склади список",    path: "/fb/warehouses", icon: Warehouse,       roles: ["super_admin","owner","manager"],      moduleKey: "fb_warehouse" },
+      { name: "Склади",           path: "/fb/warehouses", icon: Warehouse,       roles: ["super_admin","owner","manager"],      moduleKey: "fb_warehouse" },
       { name: "Списання",         path: "/fb/writeoffs",  icon: FileText,        roles: ["super_admin","owner","manager"],      moduleKey: "fb_warehouse" },
       { name: "Переміщення",      path: "/fb/transfers",  icon: ArrowRightLeft,  roles: ["super_admin","owner","manager"],      moduleKey: "fb_warehouse" },
       { name: "Персонал F&B",     path: "/fb/staff",      icon: Users,           roles: ["super_admin","owner","manager"],      moduleKey: "fb" },
@@ -120,7 +119,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Звіти F&B",        path: "/fb/reports",          icon: BarChart3,  roles: ["super_admin","owner","manager"],    moduleKey: "fb" },
       { name: "Продажі",          path: "/fb/report/sales",     icon: TrendingUp, roles: ["super_admin","owner","manager"],    moduleKey: "fb" },
-      { name: "Замовлення",       path: "/fb/report/orders",    icon: FileText,   roles: ["super_admin","owner","manager"],    moduleKey: "fb" },
+      { name: "Звіт: Замовлення", path: "/fb/report/orders",    icon: FileText,   roles: ["super_admin","owner","manager"],    moduleKey: "fb" },
       { name: "Продукти",         path: "/fb/report/products",  icon: Target,     roles: ["super_admin","owner","manager"],    moduleKey: "fb" },
       { name: "ABC-аналіз",       path: "/fb/report/abc",       icon: Activity,   roles: ["super_admin","owner","manager"],    moduleKey: "fb" },
       { name: "AI Аналітика F&B", path: "/fb/report/ai",        icon: Brain,      roles: ["super_admin","owner","manager"],    moduleKey: "fb" },
@@ -132,7 +131,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Клієнти",          path: "/fb/clients",       icon: Users,     roles: ["super_admin","owner","manager"],        moduleKey: "fb" },
       { name: "Групи клієнтів",   path: "/fb/client-groups", icon: Users,     roles: ["super_admin","owner","manager"],        moduleKey: "fb" },
-      { name: "Лояльність",       path: "/fb/loyalty",       icon: Star,      roles: ["super_admin","owner","manager"],        moduleKey: "fb" },
+      { name: "Лояльність F&B",   path: "/fb/loyalty",       icon: Star,      roles: ["super_admin","owner","manager"],        moduleKey: "fb" },
       { name: "Акції",            path: "/fb/promotions",    icon: Sparkles,  roles: ["super_admin","owner","manager"],        moduleKey: "fb" },
       { name: "Виключення",       path: "/fb/exceptions",    icon: Tag,       roles: ["super_admin","owner","manager"],        moduleKey: "fb" },
       { name: "F&B CRM",          path: "/fb-customers",     icon: Users,     roles: null,                                     moduleKey: "fb_pos" },
@@ -143,7 +142,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Конфігурація",     path: "/fb/config",             icon: Settings,      roles: ["super_admin","owner","manager"], moduleKey: "fb" },
       { name: "Загальні",         path: "/fb/config/general",     icon: Settings,      roles: ["super_admin","owner","manager"], moduleKey: "fb" },
-      { name: "Замовлення",       path: "/fb/config/orders",      icon: FileText,      roles: ["super_admin","owner","manager"], moduleKey: "fb" },
+      { name: "Налаштування замовлень", path: "/fb/config/orders", icon: FileText,   roles: ["super_admin","owner","manager"], moduleKey: "fb" },
       { name: "Доставка",         path: "/fb/config/delivery",    icon: Truck,         roles: ["super_admin","owner","manager"], moduleKey: "fb" },
       { name: "Столики",          path: "/fb/config/tables",      icon: Grid3X3,       roles: ["super_admin","owner","manager"], moduleKey: "fb" },
       { name: "Безпека",          path: "/fb/config/security",    icon: KeyRound,      roles: ["super_admin","owner","manager"], moduleKey: "fb" },
@@ -163,7 +162,7 @@ const NAV: NavSection[] = [
       { name: "AI Hub",       path: "/ai-hub",     icon: Brain,   roles: ["super_admin", "owner", "manager"], moduleKey: "ai_hub" },
       { name: "Автоматизація",path: "/automation", icon: Bot,     roles: ["super_admin", "owner", "manager"], moduleKey: "automation" },
       { name: "Пакети",       path: "/packages",   icon: Package, roles: ["super_admin", "owner", "manager"] },
-      { name: "Лояльність",   path: "/loyalty",    icon: Coins,   roles: ["super_admin", "owner", "manager"] },
+      { name: "Лояльність гостей", path: "/loyalty", icon: Coins,   roles: ["super_admin", "owner", "manager"] },
       { name: "Upsell Engine",path: "/upsell",     icon: Zap,     roles: ["super_admin", "owner", "manager"], moduleKey: "upsell" },
     ],
   },
@@ -175,7 +174,7 @@ const NAV: NavSection[] = [
       { name: "Бухгалтерія",       path: "/accounting",        icon: Landmark,        roles: ["super_admin", "owner", "manager"], moduleKey: "accounting" },
       { name: "Нічний аудит",      path: "/night-audit",       icon: Moon,            roles: ["super_admin", "owner", "manager"], moduleKey: "night_audit" },
       { name: "Продажі & CRM",     path: "/sales",             icon: Target,          roles: ["super_admin", "owner", "manager", "reception"] },
-      { name: "Migration Center",  path: "/migration-center",  icon: ArrowRightLeft,  roles: ["super_admin", "owner", "manager"] },
+      { name: "Migration Center",  path: "/migration-center",  icon: ArrowRightLeft,  roles: ["super_admin", "owner", "manager"], badge: "NEW" },
     ],
   },
   {
@@ -196,7 +195,7 @@ const NAV: NavSection[] = [
     items: [
       { name: "Інтеграції",    path: "/integrations",  icon: Plug,          roles: ["super_admin", "owner", "manager"] },
       { name: "Підписка",      path: "/subscription",  icon: CreditCard,    roles: ["owner", "super_admin"] },
-      { name: "Міграція",      path: "/migration",     icon: ArrowRightLeft,roles: ["super_admin", "owner", "manager"] },
+      { name: "Міграція (Servio)", path: "/migration", icon: ArrowRightLeft,roles: ["super_admin", "owner", "manager"] },
       { name: "Презентація",   path: "/pitch",         icon: Sparkles,      roles: ["super_admin", "owner", "manager"] },
     ],
   },

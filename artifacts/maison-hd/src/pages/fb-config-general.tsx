@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Save, Loader2, Settings, ImageIcon, Upload, X } from "lucide-react";
+import { useGetMyOrganization } from "@workspace/api-client-react";
 
 const API = "/api/fb/config";
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -75,9 +76,14 @@ interface GeneralConfig {
 
 interface GuestBranding { logo_url?: string; primary_color?: string; accent_color?: string; service_card?: string; }
 
+const ORG_API = import.meta.env.BASE_URL.replace(/\/$/, "").replace("/maison-hd", "") + "/api/organizations";
+
 export default function FbConfigGeneral() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { data: orgData } = useGetMyOrganization();
+  const orgId = (orgData as any)?.id;
+  const [guideUrl, setGuideUrl] = useState("");
   const [cfg, setCfg] = useState<GeneralConfig>({
     timezone: "Europe/Kiev", shift_end_time: "0:00", currency: "Українська гривня, ₴",
     language: "Українська", show_floor_plan: true, select_guest_count: true,
@@ -93,6 +99,10 @@ export default function FbConfigGeneral() {
   const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
   const companyLogoInputRef = useRef<HTMLInputElement>(null);
 
+  // Sync guideUrl from org data
+  const orgGuideUrl = (orgData as any)?.guestGuideUrl || (orgData as any)?.guest_guide_url || "";
+  useState(() => { if (orgGuideUrl) setGuideUrl(orgGuideUrl); });
+
   const { isLoading } = useQuery({
     queryKey: ["fb-config-general"],
     queryFn: () => apiFetch(`${API}/section/general`),
@@ -103,6 +113,21 @@ export default function FbConfigGeneral() {
     queryKey: ["fb-config-guest-branding"],
     queryFn: () => apiFetch(`${API}/section/guest_branding`),
     onSuccess: (d) => { if (d.data && Object.keys(d.data).length > 0) setBranding(prev => ({ ...prev, ...d.data })); },
+  });
+
+  const saveGuideUrl = useMutation({
+    mutationFn: async (url: string) => {
+      const token = localStorage.getItem("hms_token");
+      const r = await fetch(`${ORG_API}/${orgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ guestGuideUrl: url }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["organization", "me"] }); toast({ title: "URL гіду збережено" }); },
+    onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
   });
 
   const set = <K extends keyof GeneralConfig>(k: K, v: GeneralConfig[K]) => setCfg(p => ({ ...p, [k]: v }));
@@ -175,22 +200,29 @@ export default function FbConfigGeneral() {
             </Row>
             <Row label="Гостьовий гід">
               {(() => {
-                const guideUrl = `${window.location.origin}/dogoda-guide/`;
                 return (
-                  <div className="max-w-sm">
-                    <div className="flex items-center rounded-md border bg-muted/40 overflow-hidden h-9">
-                      <span className="px-3 text-sm font-mono text-foreground flex-1 truncate select-all">{guideUrl}</span>
+                  <div className="max-w-sm space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={guideUrl}
+                        onChange={e => setGuideUrl(e.target.value)}
+                        placeholder="https://yourdomain.com/guide/"
+                        className="flex-1 h-9 text-sm font-mono"
+                      />
                       <button
-                        className="px-3 h-full border-l text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                        onClick={() => { navigator.clipboard.writeText(guideUrl); }}
+                        className="px-3 h-9 border rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                        onClick={() => { if (guideUrl) navigator.clipboard.writeText(guideUrl); }}
                         title="Скопіювати посилання"
                       >
                         Копіювати
                       </button>
+                      <Button size="sm" className="h-9 shrink-0" onClick={() => saveGuideUrl.mutate(guideUrl)} disabled={saveGuideUrl.isPending}>
+                        {saveGuideUrl.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                      </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Пряме посилання на гостьовий гід.{" "}
-                      <a href={guideUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">Відкрити →</a>
+                    <p className="text-xs text-muted-foreground">
+                      Пряме посилання на гостьовий гід вашого закладу.{" "}
+                      {guideUrl && <a href={guideUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">Відкрити →</a>}
                     </p>
                   </div>
                 );

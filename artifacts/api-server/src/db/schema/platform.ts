@@ -29,6 +29,7 @@ export const tenants = pgTable("organizations", {
   subscriptionStatus:  text("subscription_status").notNull().default("trial"),
   trialEndsAt:         timestamp("trial_ends_at"),
   subscriptionEndsAt:  timestamp("subscription_ends_at"),
+  guestGuideUrl:       text("guest_guide_url"),
   createdAt:           timestamp("created_at").notNull().defaultNow(),
   updatedAt:           timestamp("updated_at").notNull().defaultNow(),
 });
