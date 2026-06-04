@@ -242,6 +242,53 @@ export async function autoSeedIfEmpty() {
   }
 }
 
+// Runs on EVERY startup — ensures org 39 (Заміський комплекс DOGODA Resort) has legal entities
+export async function seedOrg39LegalEntities() {
+  try {
+    // Only run if org 39 actually exists (production only)
+    const { rows: orgRows } = await (db as any).$client.query(
+      `SELECT id FROM organizations WHERE id = 39`
+    );
+    if (orgRows.length === 0) return; // org doesn't exist in this environment
+
+    const { rows } = await (db as any).$client.query(
+      `SELECT COUNT(*) as cnt FROM legal_entities WHERE organization_id = 39`
+    );
+    const cnt = parseInt(rows[0]?.cnt || "0");
+    if (cnt > 0) return; // already seeded
+
+    await (db as any).$client.query(`
+      INSERT INTO legal_entities (
+        organization_id, name, type, edrpou, iban, bank, mfo, address,
+        liqpay_public_key, liqpay_private_key,
+        is_default, is_active, category_ids, handles_alcohol, prro_enabled
+      ) VALUES (
+        39, 'ТОВ Догода Резортс', 'tov', '43053129',
+        'UA063052990000026000030109963', 'АТ КБ «ПриватБанк»', '305299',
+        'Україна, 08620, Київська обл., Фастівський р-н, село Дзвінкове, вул.Березова, будинок 4',
+        'i9532877227', 'jjSyrioPr7klmZT8FOdoZYZrmzNjDNzsXZ9p3w6q',
+        false, true, '[]', false, false
+      )
+    `);
+
+    await (db as any).$client.query(`
+      INSERT INTO legal_entities (
+        organization_id, name, type, edrpou, iban, bank, mfo, legal_address,
+        short_name, is_default, is_active, category_ids, handles_alcohol, prro_enabled
+      ) VALUES (
+        39, 'ФОП Немеш М. В.', 'fop', '3050508578',
+        'UA583052990000026001031030687', 'ПАТ Приватбанк', '305299',
+        'Україна, 03035, місто Київ, вул.Липківського Василя Митрополита, будинок 16А, квартира 51',
+        'ФОП Немеш М. В.', true, true, '[]', false, false
+      )
+    `);
+
+    logger.info("Seeded legal entities for org 39 (Заміський комплекс DOGODA Resort)");
+  } catch (err) {
+    logger.error({ err }, "seedOrg39LegalEntities failed");
+  }
+}
+
 // Runs on EVERY startup — ensures super_admin credentials match env vars
 export async function syncSuperAdmin() {
   try {

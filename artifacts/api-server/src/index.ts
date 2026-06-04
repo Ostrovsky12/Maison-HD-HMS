@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { autoSeedIfEmpty, syncSuperAdmin } from "./lib/auto-seed";
+import { autoSeedIfEmpty, syncSuperAdmin, seedOrg39LegalEntities } from "./lib/auto-seed";
 import { seedGuideDataIfEmpty } from "./routes/guide.js";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -754,6 +754,7 @@ async function bootstrap() {
 
     await autoSeedIfEmpty();
     await syncSuperAdmin();
+    await seedOrg39LegalEntities();
 
     scheduleBackups();
     logger.info("Backup scheduler started (daily at 02:00 UTC)");
