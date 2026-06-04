@@ -817,7 +817,7 @@ function OutletsQrTab() {
           <Store className="w-10 h-10 mx-auto mb-3 opacity-20" />
           <p className="text-sm font-medium mb-1">Точок продажу ще немає</p>
           <p className="text-xs mb-4">Спочатку створіть точки продажу у розділі «Ресторан → Точки продажу»</p>
-          <Button size="sm" variant="outline" onClick={() => window.location.href = "/hms/fb/outlets"}>
+          <Button size="sm" variant="outline" onClick={() => { window.location.href = (import.meta.env.BASE_URL || "/") + "fb/outlets"; }}>
             <Store className="w-4 h-4 mr-1" />Перейти до точок продажу
           </Button>
         </div>
