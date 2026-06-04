@@ -38,6 +38,54 @@ import FbPosPage from "@/pages/fb-pos";
 import FbCostingPage from "@/pages/fb-costing";
 import PosSettingsPage from "@/pages/pos-settings";
 import FbCustomersPage from "@/pages/fb-customers";
+import FbAdminPinPage from "@/pages/fb-admin-pin";
+import FbAppsPage from "@/pages/fb-apps";
+import FbCashierPage from "@/pages/fb-cashier";
+import FbClientGroupsPage from "@/pages/fb-client-groups";
+import FbClientsPage from "@/pages/fb-clients";
+import FbConfigDeliveryPage from "@/pages/fb-config-delivery";
+import FbConfigGeneralPage from "@/pages/fb-config-general";
+import FbConfigOrdersPage from "@/pages/fb-config-orders";
+import FbConfigReceiptPage from "@/pages/fb-config-receipt";
+import FbConfigSecurityPage from "@/pages/fb-config-security";
+import FbConfigSubscriptionPage from "@/pages/fb-config-subscription";
+import FbConfigTablesPage from "@/pages/fb-config-tables";
+import FbConfigTaxesPage from "@/pages/fb-config-taxes";
+import FbConfigPage from "@/pages/fb-config";
+import FbDeliveryBotPage from "@/pages/fb-delivery-bot";
+import FbExceptionsPage from "@/pages/fb-exceptions";
+import FbImportPage from "@/pages/fb-import";
+import FbIntegrationsPage from "@/pages/fb-integrations";
+import FbInventorySessionsPage from "@/pages/fb-inventory-sessions";
+import FbLegalEntitiesPage from "@/pages/fb-legal-entities";
+import FbLoyaltyPage from "@/pages/fb-loyalty";
+import FbMarketingPage from "@/pages/fb-marketing";
+import FbMenuPage from "@/pages/fb-menu";
+import FbMovementReportPage from "@/pages/fb-movement-report";
+import FbOutletsPage from "@/pages/fb-outlets";
+import FbPackagingPage from "@/pages/fb-packaging";
+import FbPositionsPage from "@/pages/fb-positions";
+import FbPostiePage from "@/pages/fb-postie";
+import FbPrintCardsPage from "@/pages/fb-print-cards";
+import FbPromotionsPage from "@/pages/fb-promotions";
+import FbPrroPage from "@/pages/fb-prro";
+import FbQrPage from "@/pages/fb-qr";
+import FbRegistersPage from "@/pages/fb-registers";
+import FbReportAbcPage from "@/pages/fb-report-abc";
+import FbReportAiPage from "@/pages/fb-report-ai";
+import FbReportOrdersPage from "@/pages/fb-report-orders";
+import FbReportProductsPage from "@/pages/fb-report-products";
+import FbReportSalesPage from "@/pages/fb-report-sales";
+import FbReportsPage from "@/pages/fb-reports";
+import FbSessionsPage from "@/pages/fb-sessions";
+import FbSettingsPage from "@/pages/fb-settings";
+import FbShiftsPage from "@/pages/fb-shifts";
+import FbStaffAccessPage from "@/pages/fb-staff-access";
+import FbStaffPage from "@/pages/fb-staff";
+import FbStopListPage from "@/pages/fb-stop-list";
+import FbTransfersPage from "@/pages/fb-transfers";
+import FbWarehousesListPage from "@/pages/fb-warehouses-list";
+import FbWriteoffsPage from "@/pages/fb-writeoffs";
 import HqPage from "@/pages/hq";
 import AutomationPage from "@/pages/automation";
 import BookPage from "@/pages/book";
@@ -173,6 +221,54 @@ function Router() {
       <Route path="/fb-costing"><ProtectedRoute component={FbCostingPage} /></Route>
       <Route path="/pos-settings"><ProtectedRoute component={PosSettingsPage} /></Route>
       <Route path="/fb-customers"><ProtectedRoute component={FbCustomersPage} /></Route>
+      <Route path="/fb/legal-entities"><ProtectedRoute component={FbLegalEntitiesPage} /></Route>
+      <Route path="/fb/settings"><ProtectedRoute component={FbSettingsPage} /></Route>
+      <Route path="/fb/prro"><ProtectedRoute component={FbPrroPage} /></Route>
+      <Route path="/fb/menu"><ProtectedRoute component={FbMenuPage} /></Route>
+      <Route path="/fb/import"><ProtectedRoute component={FbImportPage} /></Route>
+      <Route path="/fb/qr"><ProtectedRoute component={FbQrPage} /></Route>
+      <Route path="/fb/admin-pin"><ProtectedRoute component={FbAdminPinPage} /></Route>
+      <Route path="/fb/staff"><ProtectedRoute component={FbStaffPage} /></Route>
+      <Route path="/fb/outlets"><ProtectedRoute component={FbOutletsPage} /></Route>
+      <Route path="/fb/staff-access"><ProtectedRoute component={FbStaffAccessPage} /></Route>
+      <Route path="/fb/positions"><ProtectedRoute component={FbPositionsPage} /></Route>
+      <Route path="/fb/registers"><ProtectedRoute component={FbRegistersPage} /></Route>
+      <Route path="/fb/sessions"><ProtectedRoute component={FbSessionsPage} /></Route>
+      <Route path="/fb/integrations"><ProtectedRoute component={FbIntegrationsPage} /></Route>
+      <Route path="/fb/cashier"><ProtectedRoute component={FbCashierPage} /></Route>
+      <Route path="/fb/report/ai"><ProtectedRoute component={FbReportAiPage} /></Route>
+      <Route path="/fb/report/sales"><ProtectedRoute component={FbReportSalesPage} /></Route>
+      <Route path="/fb/report/orders"><ProtectedRoute component={FbReportOrdersPage} /></Route>
+      <Route path="/fb/report/products"><ProtectedRoute component={FbReportProductsPage} /></Route>
+      <Route path="/fb/report/abc"><ProtectedRoute component={FbReportAbcPage} /></Route>
+      <Route path="/fb/shifts"><ProtectedRoute component={FbShiftsPage} /></Route>
+      <Route path="/fb/writeoffs"><ProtectedRoute component={FbWriteoffsPage} /></Route>
+      <Route path="/fb/transfers"><ProtectedRoute component={FbTransfersPage} /></Route>
+      <Route path="/fb/movement-report"><ProtectedRoute component={FbMovementReportPage} /></Route>
+      <Route path="/fb/inventory"><ProtectedRoute component={FbInventorySessionsPage} /></Route>
+      <Route path="/fb/marketing"><ProtectedRoute component={FbMarketingPage} /></Route>
+      <Route path="/fb/promotions"><ProtectedRoute component={FbPromotionsPage} /></Route>
+      <Route path="/fb/clients"><ProtectedRoute component={FbClientsPage} /></Route>
+      <Route path="/fb/client-groups"><ProtectedRoute component={FbClientGroupsPage} /></Route>
+      <Route path="/fb/loyalty"><ProtectedRoute component={FbLoyaltyPage} /></Route>
+      <Route path="/fb/exceptions"><ProtectedRoute component={FbExceptionsPage} /></Route>
+      <Route path="/fb/reports"><ProtectedRoute component={FbReportsPage} /></Route>
+      <Route path="/fb/apps"><ProtectedRoute component={FbAppsPage} /></Route>
+      <Route path="/fb/stop-list"><ProtectedRoute component={FbStopListPage} /></Route>
+      <Route path="/fb/print-cards"><ProtectedRoute component={FbPrintCardsPage} /></Route>
+      <Route path="/fb/postie"><ProtectedRoute component={FbPostiePage} /></Route>
+      <Route path="/fb/delivery-bot"><ProtectedRoute component={FbDeliveryBotPage} /></Route>
+      <Route path="/fb/config"><ProtectedRoute component={FbConfigPage} /></Route>
+      <Route path="/fb/config/general"><ProtectedRoute component={FbConfigGeneralPage} /></Route>
+      <Route path="/fb/config/subscription"><ProtectedRoute component={FbConfigSubscriptionPage} /></Route>
+      <Route path="/fb/config/orders"><ProtectedRoute component={FbConfigOrdersPage} /></Route>
+      <Route path="/fb/config/delivery"><ProtectedRoute component={FbConfigDeliveryPage} /></Route>
+      <Route path="/fb/config/tables"><ProtectedRoute component={FbConfigTablesPage} /></Route>
+      <Route path="/fb/config/security"><ProtectedRoute component={FbConfigSecurityPage} /></Route>
+      <Route path="/fb/config/receipt"><ProtectedRoute component={FbConfigReceiptPage} /></Route>
+      <Route path="/fb/config/taxes"><ProtectedRoute component={FbConfigTaxesPage} /></Route>
+      <Route path="/fb/warehouses"><ProtectedRoute component={FbWarehousesListPage} /></Route>
+      <Route path="/fb/packaging"><ProtectedRoute component={FbPackagingPage} /></Route>
       <Route path="/hq"><ProtectedRoute component={HqPage} /></Route>
       <Route path="/automation"><ProtectedRoute component={AutomationPage} /></Route>
       <Route path="/minibar" component={() => <ProtectedRoute component={MinibarPage} />} />
