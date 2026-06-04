@@ -655,4 +655,96 @@ router.patch("/invoices/:id/mark-paid", async (req, res) => {
   }
 });
 
+// ── DELETE TENANT (cascade) ──────────────────────────────────────────────────
+router.delete("/tenants/:id", async (req, res) => {
+  try {
+    const orgId = parseInt(req.params.id);
+    if (isNaN(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+    const db_ = db as any;
+    const q = (sql: string, params: any[] = []) => db_.$client.query(sql, params);
+
+    // Cascade delete in dependency order
+    const tables = [
+      "subscription_invoices", "notifications", "automation_logs", "automation_rules",
+      "fb_order_items", "fb_orders", "fb_sessions", "fb_registers", "fb_shifts",
+      "fb_menu_items", "fb_categories", "fb_outlets", "fb_settings",
+      "fb_warehouses", "fb_staff", "fb_clients", "fb_loyalty_transactions",
+      "maintenance_requests", "maintenance_schedules",
+      "folio_entries", "act_documents", "act_document_items",
+      "tax_invoices", "tax_invoice_items", "invoice_payments", "invoices",
+      "booking_addons", "bookings",
+      "guests", "units", "properties",
+      "legal_entities", "addons",
+      "spa_bookings", "event_bookings",
+      "housekeeping_tasks", "staff_schedules",
+      "night_audit_entries", "revenue_entries",
+      "ai_conversations", "upsell_templates",
+      "activities", "accommodation_entries",
+      "sales_campaigns", "discount_types",
+      "canned_replies", "inbox_threads", "inbox_messages",
+      "green_initiatives",
+      "users",
+      "organizations",
+    ];
+
+    const deleted: Record<string, number> = {};
+    for (const table of tables) {
+      try {
+        const col = table === "organizations" ? "id" : "organization_id";
+        const r = await q(`DELETE FROM ${table} WHERE ${col} = $1`, [orgId]);
+        if (r.rowCount > 0) deleted[table] = r.rowCount;
+      } catch { /* table may not exist, skip */ }
+    }
+
+    res.json({ ok: true, orgId, deleted });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── DELETE ALL TENANTS (wipe slate) ──────────────────────────────────────────
+router.delete("/tenants", async (_req, res) => {
+  try {
+    const db_ = db as any;
+    const q = (sql: string, params: any[] = []) => db_.$client.query(sql, params);
+
+    const orgsRes = await q(`SELECT id FROM organizations`);
+    const orgIds: number[] = orgsRes.rows.map((r: any) => r.id);
+
+    const tables = [
+      "subscription_invoices", "notifications", "automation_logs", "automation_rules",
+      "fb_order_items", "fb_orders", "fb_sessions", "fb_registers", "fb_shifts",
+      "fb_menu_items", "fb_categories", "fb_outlets", "fb_settings",
+      "fb_warehouses", "fb_staff", "fb_clients", "fb_loyalty_transactions",
+      "maintenance_requests", "maintenance_schedules",
+      "folio_entries", "act_documents", "act_document_items",
+      "tax_invoices", "tax_invoice_items", "invoice_payments", "invoices",
+      "booking_addons", "bookings",
+      "guests", "units", "properties",
+      "legal_entities", "addons",
+      "spa_bookings", "event_bookings",
+      "housekeeping_tasks", "staff_schedules",
+      "night_audit_entries", "revenue_entries",
+      "ai_conversations", "upsell_templates",
+      "activities", "accommodation_entries",
+      "sales_campaigns", "discount_types",
+      "canned_replies", "inbox_threads", "inbox_messages",
+      "green_initiatives",
+      "users",
+      "organizations",
+    ];
+
+    for (const table of tables) {
+      try {
+        const col = table === "organizations" ? "id" : "organization_id";
+        await q(`DELETE FROM ${table} WHERE ${col} = ANY($1::int[])`, [orgIds]);
+      } catch { /* skip */ }
+    }
+
+    res.json({ ok: true, deletedOrgs: orgIds });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

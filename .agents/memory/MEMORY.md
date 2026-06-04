@@ -1,0 +1,4 @@
+- [Maison HD consolidation](maison-hd-consolidation.md) — ONE app architecture: all modules in Maison HD, HMS is legacy/deprecated
+- [Auto-seed guard](auto-seed-guard.md) — seed guard checks users table (not orgs) so deleted tenants don't re-seed
+- [Tenant deletion API](tenant-deletion-api.md) — DELETE /api/super-admin/tenants endpoint for wiping all orgs (cascade)
+- [F&B module migration](fb-migration.md) — all 52 HMS F&B pages copied to Maison HD with full routes and sidebar sections

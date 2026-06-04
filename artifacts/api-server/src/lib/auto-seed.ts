@@ -18,8 +18,10 @@ async function hp(password: string) {
 
 export async function autoSeedIfEmpty() {
   try {
-    const existing = await db.select().from(organizationsTable).limit(1);
-    if (existing.length > 0) {
+    // Guard: if ANY user exists (including super admin with no org), skip seeding.
+    // This prevents re-seeding after tenants are deliberately deleted.
+    const existingUsers = await db.select().from(usersTable).limit(1);
+    if (existingUsers.length > 0) {
       logger.info("Database already seeded, skipping.");
       return;
     }
