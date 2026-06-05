@@ -641,7 +641,34 @@ router.get("/documents/:id/export/:format", async (req: any, res) => {
       return res.send(xml);
     }
 
-    // JSON export
+    if (format === "act-ua" || format === "invoice-ua") {
+      // Drizzle returns camelCase — normalize to snake_case for HTML generators
+      const docSnake = {
+        ...doc,
+        doc_number:        (doc as any).docNumber       ?? (doc as any).doc_number,
+        doc_date:          (doc as any).docDate         ?? (doc as any).doc_date,
+        vat_amount:        (doc as any).vatAmount       ?? (doc as any).vat_amount,
+        total_amount:      (doc as any).totalAmount     ?? (doc as any).total_amount,
+        counterparty_name: (doc as any).counterpartyName  ?? (doc as any).counterparty_name,
+        counterparty_edrpou:(doc as any).counterpartyEdrpou ?? (doc as any).counterparty_edrpou,
+      };
+      const itemsSnake = items.map((it: any) => ({
+        ...it,
+        unit_price:  it.unitPrice  ?? it.unit_price,
+        total_price: it.totalPrice ?? it.total_price,
+        total_amount: it.totalPrice ?? it.total_amount,
+        vat_rate:    it.vatRate    ?? it.vat_rate,
+      }));
+      const html = format === "act-ua"
+        ? generateActHtml(docSnake, itemsSnake, le, cp)
+        : generateInvoiceHtml(docSnake, itemsSnake, le, cp);
+      const fname = format === "act-ua" ? `act_${docSnake.doc_number}.html` : `invoice_${docSnake.doc_number}.html`;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Content-Disposition", `inline; filename="${fname}"`);
+      return res.send(html);
+    }
+
+    // JSON export (fallback)
     res.json({ document: doc, items, legalEntity: le, counterparty: cp });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
