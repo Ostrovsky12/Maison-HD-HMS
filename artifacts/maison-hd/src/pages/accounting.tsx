@@ -36,7 +36,7 @@ import {
   ChevronUp, Eye, EyeOff, Link, Copy, Check, BarChart2,
   Activity, Percent, Banknote, Package,
   Sparkles, Camera, ScanLine, Bot, Wand2, AlertOctagon,
-  ShieldAlert, CircleAlert, ShieldX, ArrowUpDown,
+  ShieldAlert, CircleAlert, ShieldX, ArrowUpDown, Printer,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
@@ -1781,6 +1781,42 @@ function DocumentsTab({ filter, setFilter }: any) {
 }
 
 // ─── DOC DETAIL DIALOG ────────────────────────────────────────────────────────
+// Drizzle returns camelCase; raw SQL list returns snake_case — normalize both
+function normDoc(raw: any) {
+  if (!raw) return raw;
+  return {
+    ...raw,
+    doc_number:        raw.doc_number        ?? raw.docNumber,
+    doc_type:          raw.doc_type          ?? raw.docType,
+    doc_date:          raw.doc_date          ?? raw.docDate,
+    due_date:          raw.due_date          ?? raw.dueDate,
+    signed_at:         raw.signed_at         ?? raw.signedAt,
+    paid_at:           raw.paid_at           ?? raw.paidAt,
+    subtotal:          raw.subtotal          ?? raw.subtotal,
+    vat_amount:        raw.vat_amount        ?? raw.vatAmount,
+    total_amount:      raw.total_amount      ?? raw.totalAmount,
+    paid_amount:       raw.paid_amount       ?? raw.paidAmount,
+    bas_exported_at:   raw.bas_exported_at   ?? raw.basExportedAt,
+    medoc_sent_at:     raw.medoc_sent_at     ?? raw.medocSentAt,
+    medoc_reg_number:  raw.medoc_reg_number  ?? raw.medocRegNumber,
+    vchasno_id:        raw.vchasno_id        ?? raw.vchasnoId,
+    counterparty_name: raw.counterparty_name ?? raw.counterpartyName,
+    counterparty_edrpou: raw.counterparty_edrpou ?? raw.counterpartyEdrpou,
+    legal_entity_id:   raw.legal_entity_id   ?? raw.legalEntityId,
+    counterparty_id:   raw.counterparty_id   ?? raw.counterpartyId,
+  };
+}
+function normItem(raw: any) {
+  if (!raw) return raw;
+  return {
+    ...raw,
+    unit_price:  raw.unit_price  ?? raw.unitPrice,
+    vat_rate:    raw.vat_rate    ?? raw.vatRate,
+    vat_amount:  raw.vat_amount  ?? raw.vatAmount,
+    total_price: raw.total_price ?? raw.totalPrice,
+  };
+}
+
 function DocDetailDialog({ doc, onClose, onRefresh }: any) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -1794,8 +1830,8 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
     },
   });
 
-  const d = data?.document || doc;
-  const items = data?.items || [];
+  const d = normDoc(data?.document || doc);
+  const items = (data?.items || []).map(normItem);
   const le = data?.legalEntity;
   const cp = data?.counterparty;
   const typeInfo = DOC_TYPE_LABELS[d.doc_type] || DOC_TYPE_LABELS.other;
@@ -1965,6 +2001,27 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
                 <Button size="sm" onClick={() => paidMut.mutate()} disabled={paidMut.isPending}
                   className="bg-green-600 hover:bg-green-700 text-white">
                   <CreditCard className="h-4 w-4 mr-1" /> Позначити оплаченим
+                </Button>
+              )}
+              {/* Print button — fetch HTML with Bearer token then open as blob */}
+              {(d.doc_type === "act" || d.doc_type === "invoice") && (
+                <Button size="sm" variant="outline"
+                  className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                  onClick={async () => {
+                    const fmt = d.doc_type === "act" ? "act-ua" : "invoice-ua";
+                    const token = localStorage.getItem("hms_token");
+                    try {
+                      const r = await fetch(`${API_BASE}/api/accounting/documents/${d.id}/export/${fmt}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      const html = await r.text();
+                      const blob = new Blob([html], { type: "text/html; charset=utf-8" });
+                      const url = URL.createObjectURL(blob);
+                      const win = window.open(url, "_blank");
+                      win?.addEventListener("load", () => { win.print(); URL.revokeObjectURL(url); });
+                    } catch { /* ignore */ }
+                  }}>
+                  <Printer className="h-4 w-4 mr-1" /> Роздрукувати
                 </Button>
               )}
               <Button size="sm" variant="outline" onClick={() => exportDoc("bas-xml")}>
