@@ -156,6 +156,7 @@ function Router() {
       <Route path="/fb/postie"><ProtectedRoute component={FbApps} /></Route>
       <Route path="/fb/delivery-bot"><ProtectedRoute component={FbApps} /></Route>
       {/* ── Config hub + individual config pages still work ── */}
+      <Route path="/settings/organization"><ProtectedRoute component={FbConfigGeneral} /></Route>
       <Route path="/fb/config"><ProtectedRoute component={FbConfig} /></Route>
       <Route path="/fb/config/general"><ProtectedRoute component={FbConfigGeneral} /></Route>
       <Route path="/fb/config/subscription"><ProtectedRoute component={FbConfigSubscription} /></Route>
