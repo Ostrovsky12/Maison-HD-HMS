@@ -4,7 +4,26 @@ import { pool } from "@workspace/db";
 
 const router = Router();
 router.use(requireAuth);
-const org = (req: any): number => req.user?.organizationId ?? req.user?.organization_id;
+
+// Resolve organizationId: JWT field (new tokens) OR DB lookup (old/stale tokens)
+router.use(async (req: any, res: any, next) => {
+  let orgId = req.user?.organizationId ?? req.user?.organization_id;
+  if (!orgId) {
+    const userId = req.user?.userId ?? req.user?.id;
+    if (userId) {
+      try {
+        const { rows } = await pool.query(
+          `SELECT organization_id FROM users WHERE id = $1`, [userId]
+        );
+        orgId = rows[0]?.organization_id ?? null;
+      } catch { /* ignore, orgId stays null */ }
+    }
+  }
+  req.orgId = orgId;
+  next();
+});
+
+const org = (req: any): number => req.orgId;
 
 async function ensureTables() {
   await pool.query(`
