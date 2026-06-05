@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -103,17 +103,21 @@ export default function FbConfigGeneral() {
   const orgGuideUrl = (orgData as any)?.guestGuideUrl || (orgData as any)?.guest_guide_url || "";
   useState(() => { if (orgGuideUrl) setGuideUrl(orgGuideUrl); });
 
-  const { isLoading } = useQuery({
+  const { isLoading, data: generalData } = useQuery({
     queryKey: ["fb-config-general"],
     queryFn: () => apiFetch(`${API}/section/general`),
-    onSuccess: (d) => { if (d.data && Object.keys(d.data).length > 0) setCfg(d.data); },
   });
+  useEffect(() => {
+    if (generalData?.data && Object.keys(generalData.data).length > 0) setCfg(generalData.data);
+  }, [generalData]);
 
-  useQuery({
+  const { data: brandingData } = useQuery({
     queryKey: ["fb-config-guest-branding"],
     queryFn: () => apiFetch(`${API}/section/guest_branding`),
-    onSuccess: (d) => { if (d.data && Object.keys(d.data).length > 0) setBranding(prev => ({ ...prev, ...d.data })); },
   });
+  useEffect(() => {
+    if (brandingData?.data && Object.keys(brandingData.data).length > 0) setBranding(prev => ({ ...prev, ...brandingData.data }));
+  }, [brandingData]);
 
   const saveGuideUrl = useMutation({
     mutationFn: async (url: string) => {

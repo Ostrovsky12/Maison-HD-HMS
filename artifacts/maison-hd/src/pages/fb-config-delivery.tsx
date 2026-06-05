@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -39,11 +39,13 @@ export default function FbConfigDelivery() {
     min_order_amount: 0, free_delivery_from: 0, default_delivery_time: 45, require_address: true,
   });
 
-  const { isLoading } = useQuery({
+  const { isLoading, data: deliveryData } = useQuery({
     queryKey: ["fb-config-delivery"],
     queryFn: () => apiFetch(`${API}/section/delivery`),
-    onSuccess: (d) => { if (d.data && Object.keys(d.data).length > 0) setCfg(d.data); },
   });
+  useEffect(() => {
+    if (deliveryData?.data && Object.keys(deliveryData.data).length > 0) setCfg(deliveryData.data);
+  }, [deliveryData]);
   const set = <K extends keyof DeliveryCfg>(k: K, v: DeliveryCfg[K]) => setCfg(p => ({ ...p, [k]: v }));
   const save = useMutation({
     mutationFn: () => apiFetch(`${API}/section/delivery`, { method: "PUT", body: JSON.stringify({ data: cfg }) }),

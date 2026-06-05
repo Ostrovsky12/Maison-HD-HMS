@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -327,13 +327,14 @@ export default function FbConfigReceipt() {
   const qc = useQueryClient();
   const [cfg, setCfg] = useState<ReceiptCfg>(DEFAULTS);
 
-  const { isLoading } = useQuery({
+  const { isLoading, data: receiptData } = useQuery({
     queryKey: ["fb-config-receipt"],
     queryFn: () => apiFetch(`${API}/section/receipt`),
-    onSuccess: (d: any) => {
-      if (d.data && Object.keys(d.data).length > 0) setCfg({ ...DEFAULTS, ...d.data });
-    },
   });
+  useEffect(() => {
+    if ((receiptData as any)?.data && Object.keys((receiptData as any).data).length > 0)
+      setCfg({ ...DEFAULTS, ...(receiptData as any).data });
+  }, [receiptData]);
 
   const BASE_API = API.replace("/fb/config", "");
   const { data: legalEntities = [] } = useQuery<any[]>({
