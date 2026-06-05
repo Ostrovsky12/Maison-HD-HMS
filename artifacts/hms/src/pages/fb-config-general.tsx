@@ -75,6 +75,37 @@ interface GeneralConfig {
 
 interface GuestBranding { logo_url?: string; primary_color?: string; accent_color?: string; service_card?: string; }
 
+function Section({ title }: { title: string }) {
+  return <h2 className="text-base font-semibold mt-6 mb-4 pb-2 border-b">{title}</h2>;
+}
+function Row({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
+  return (
+    <div className="grid grid-cols-[180px_1fr] gap-4 items-start py-2">
+      <Label className="pt-2 text-sm text-muted-foreground">{label}</Label>
+      <div>{children}{hint && <p className="text-xs text-muted-foreground mt-1">{hint}</p>}</div>
+    </div>
+  );
+}
+function Check({ id, label, desc, val, onChange }: { id: string; label: string; desc?: string; val: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 cursor-pointer py-1">
+      <input type="checkbox" id={id} checked={val} onChange={e => onChange(e.target.checked)} className="mt-0.5 w-4 h-4 rounded" />
+      <span>
+        <span className="text-sm">{label}</span>
+        {desc && <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>}
+      </span>
+    </label>
+  );
+}
+function Sel({ val, opts, onChange }: { val: string; opts: string[]; onChange: (v: string) => void }) {
+  return (
+    <select value={val} onChange={e => onChange(e.target.value)}
+      className="border rounded-md px-3 py-2 text-sm bg-background w-full max-w-xs">
+      {opts.map(o => <option key={o}>{o}</option>)}
+    </select>
+  );
+}
+
 export default function FbConfigGeneral() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -119,37 +150,6 @@ export default function FbConfigGeneral() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["fb-config-guest-branding"] }); toast({ title: "Брендинг збережено" }); },
     onError: (e: any) => toast({ title: "Помилка", description: e.message, variant: "destructive" }),
   });
-
-  function Section({ title }: { title: string }) {
-    return <h2 className="text-base font-semibold mt-6 mb-4 pb-2 border-b">{title}</h2>;
-  }
-  function Row({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
-    return (
-      <div className="grid grid-cols-[180px_1fr] gap-4 items-start py-2">
-        <Label className="pt-2 text-sm text-muted-foreground">{label}</Label>
-        <div>{children}{hint && <p className="text-xs text-muted-foreground mt-1">{hint}</p>}</div>
-      </div>
-    );
-  }
-  function Check({ id, label, desc, val, onChange }: { id: string; label: string; desc?: string; val: boolean; onChange: (v: boolean) => void }) {
-    return (
-      <label className="flex items-start gap-2 cursor-pointer py-1">
-        <input type="checkbox" id={id} checked={val} onChange={e => onChange(e.target.checked)} className="mt-0.5 w-4 h-4 rounded" />
-        <span>
-          <span className="text-sm">{label}</span>
-          {desc && <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>}
-        </span>
-      </label>
-    );
-  }
-  function Sel({ val, opts, onChange }: { val: string; opts: string[]; onChange: (v: string) => void }) {
-    return (
-      <select value={val} onChange={e => onChange(e.target.value)}
-        className="border rounded-md px-3 py-2 text-sm bg-background w-full max-w-xs">
-        {opts.map(o => <option key={o}>{o}</option>)}
-      </select>
-    );
-  }
 
   if (isLoading) return <AppLayout><div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div></AppLayout>;
 
