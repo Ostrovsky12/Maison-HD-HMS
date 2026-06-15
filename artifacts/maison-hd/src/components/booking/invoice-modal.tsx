@@ -365,17 +365,34 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   );
   const [items, setItems] = useState<InvoiceItem[]>(data.items);
   const [note, setNote] = useState<string>(data.note || "");
+  const [invoiceDate, setInvoiceDate] = useState<string>(data.date || new Date().toISOString().slice(0, 10));
   const [entityMenuOpen, setEntityMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(null);
   const [showSendModal, setShowSendModal] = useState(false);
   const [showSplitBilling, setShowSplitBilling] = useState(false);
 
+  const hasVatItems = items.some(it => (it.vatRate || 0) > 0);
+
+  const applyGlobalVat = (withVat: boolean) => {
+    setItems(prev => prev.map(it => {
+      const base = Math.round(it.qty * it.price * 100) / 100;
+      const disc = it.discount || 0;
+      const net = Math.max(0, Math.round((base - disc) * 100) / 100);
+      if (withVat) {
+        const vatAmt = Math.round(net * 0.20 * 100) / 100;
+        return { ...it, vatRate: 20, amount: Math.round((net + vatAmt) * 100) / 100 };
+      } else {
+        return { ...it, vatRate: 0, amount: net };
+      }
+    }));
+  };
+
   const total = items.reduce((s, it) => s + it.amount, 0);
   const due = total - (data.booking.paidAmount || 0);
 
   const handlePrint = () => {
-    const html = buildPrintHtml({ ...data, buyer, note }, buyer, items);
+    const html = buildPrintHtml({ ...data, date: invoiceDate, buyer, note }, buyer, items);
     const w = window.open("", "_blank", "width=900,height=700");
     if (!w) { toast({ title: "Дозвольте спливаючі вікна для друку", variant: "destructive" }); return; }
     w.document.write(html);
@@ -413,7 +430,7 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
     try {
       const payload = {
         invoiceNumber: data.invoiceNumber,
-        date: data.date,
+        date: invoiceDate,
         dueDate: data.dueDate,
         legalEntityId: data.legalEntityId,
         note,
@@ -545,8 +562,17 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
               <p className="text-sm text-gray-400 mt-0.5">№ {data.invoiceNumber}</p>
             </div>
             <div className="text-right space-y-1">
-              <div className="text-xs text-gray-400">Дата</div>
-              <div className="font-bold text-gray-900">{fmtDate(data.date)}</div>
+              <div className="text-xs text-gray-400">Дата рахунку</div>
+              {editing ? (
+                <input
+                  type="date"
+                  value={invoiceDate}
+                  onChange={e => setInvoiceDate(e.target.value)}
+                  className="border border-dashed border-indigo-300 bg-indigo-50/40 rounded px-2 py-1 text-sm font-bold text-gray-900 focus:outline-none focus:border-indigo-500"
+                />
+              ) : (
+                <div className="font-bold text-gray-900">{fmtDate(invoiceDate)}</div>
+              )}
               {data.dueDate && (
                 <>
                   <div className="text-xs text-gray-400 mt-1">Дата оплати</div>
@@ -644,6 +670,27 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
 
           {/* Items table */}
           <div>
+            {editing && (
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Позиції</span>
+                <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => applyGlobalVat(false)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${!hasVatItems ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                  >
+                    Без ПДВ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyGlobalVat(true)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${hasVatItems ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                  >
+                    З ПДВ 20%
+                  </button>
+                </div>
+              </div>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b-2 border-gray-200">

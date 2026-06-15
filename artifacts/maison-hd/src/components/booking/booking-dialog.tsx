@@ -372,11 +372,22 @@ function StepRoom({ form, f, unitsData, ratesData, pricingPreview, draftConflict
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label required>Дата заїзду</Label>
-          <Input type="date" value={form.checkIn} onChange={e => f("checkIn", e.target.value)} />
+          <input
+            type="date"
+            value={form.checkIn}
+            onChange={e => f("checkIn", e.target.value)}
+            className="w-full h-11 pl-4 pr-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:bg-white transition-all"
+          />
         </div>
         <div>
           <Label required>Дата виїзду</Label>
-          <Input type="date" value={form.checkOut} min={form.checkIn} onChange={e => f("checkOut", e.target.value)} />
+          <input
+            type="date"
+            value={form.checkOut}
+            min={form.checkIn}
+            onChange={e => f("checkOut", e.target.value)}
+            className="w-full h-11 pl-4 pr-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:bg-white transition-all"
+          />
         </div>
       </div>
 
