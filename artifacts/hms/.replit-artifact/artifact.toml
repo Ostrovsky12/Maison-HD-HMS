@@ -1,6 +1,6 @@
 kind = "web"
-previewPath = "/hms/"
-title = "HMS - Hotel Management System"
+previewPath = "/mini-bar/"
+title = "Mini-Bar — Maison HD"
 version = "1.0.0"
 id = "artifacts/hms"
 router = "path"
@@ -11,7 +11,7 @@ version = "1.0.0"
 
 [[services]]
 name = "web"
-paths = [ "/hms/" ]
+paths = [ "/mini-bar/" ]
 localPort = 22938
 
 [services.development]
@@ -28,4 +28,4 @@ to = "/index.html"
 
 [services.env]
 PORT = "22938"
-BASE_PATH = "/hms/"
+BASE_PATH = "/mini-bar/"
