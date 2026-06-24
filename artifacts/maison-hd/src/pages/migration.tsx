@@ -831,16 +831,17 @@ export default function MigrationPage() {
                 <Input value={connForm.hotelCode} onChange={e => setConnForm(p => ({ ...p, hotelCode: e.target.value }))} placeholder="HOTEL001" />
               </div>
               <div className="space-y-1.5 md:col-span-2">
-                <Label>URL Servio API <span className="text-gray-400 font-normal">(або "demo")</span></Label>
-                <Input value={connForm.baseUrl} onChange={e => setConnForm(p => ({ ...p, baseUrl: e.target.value }))} placeholder="https://servio.yourhotel.com/api" />
+                <Label>URL Servio <span className="text-gray-400 font-normal">(або "demo" для тесту)</span></Label>
+                <Input value={connForm.baseUrl} onChange={e => setConnForm(p => ({ ...p, baseUrl: e.target.value }))} placeholder="https://hms3.servio.support/HMS_Готель/Base/LivingGuests.aspx?Action=1..." />
+                <p className="text-xs text-gray-400">Вставте повний URL з Servio або лише базову адресу — система визначить тип автоматично</p>
               </div>
               <div className="space-y-1.5">
-                <Label>API ключ <span className="text-gray-400 font-normal">(якщо є)</span></Label>
-                <Input type="password" value={connForm.apiKey} onChange={e => setConnForm(p => ({ ...p, apiKey: e.target.value }))} placeholder="••••••••" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Логін <span className="text-gray-400 font-normal">(якщо є)</span></Label>
+                <Label>Логін</Label>
                 <Input value={connForm.username} onChange={e => setConnForm(p => ({ ...p, username: e.target.value }))} placeholder="admin" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Пароль</Label>
+                <Input type="password" value={connForm.apiKey} onChange={e => setConnForm(p => ({ ...p, apiKey: e.target.value }))} placeholder="••••••••" />
               </div>
             </div>
 

@@ -329,8 +329,20 @@ export class ServioAdapter {
 
   constructor(creds: ServioCredentials) {
     this.creds = creds;
-    // Demo mode if no real credentials provided, or URL contains "demo"
-    this.isDemoMode = !creds.baseUrl || creds.baseUrl.includes("demo") || creds.baseUrl === "demo";
+    // Demo mode only when explicitly set to "demo" or empty
+    this.isDemoMode = !creds.baseUrl || creds.baseUrl.trim().toLowerCase() === "demo";
+  }
+
+  /** Build the test URL for Servio based on the provided baseUrl */
+  private buildTestUrl(): string {
+    const raw = this.creds.baseUrl.trim();
+    // If the user already provided a full ASPX endpoint — use it directly
+    if (raw.toLowerCase().includes(".aspx")) return raw;
+    // If it looks like a Servio /Base/ path — append the standard guest endpoint
+    const base = raw.replace(/\/$/, "");
+    if (base.toLowerCase().includes("/base")) return `${base}/LivingGuests.aspx?Action=1&hotelid=0&valuteid=1&cpw=true`;
+    // Otherwise assume it's the root and build the full path
+    return `${base}/Base/LivingGuests.aspx?Action=1&hotelid=0&valuteid=1&cpw=true`;
   }
 
   /** Test connection to Servio and return basic info */
@@ -338,10 +350,10 @@ export class ServioAdapter {
     const start = Date.now();
 
     if (this.isDemoMode) {
-      await new Promise(r => setTimeout(r, 800)); // simulate latency
+      await new Promise(r => setTimeout(r, 800));
       return {
         success: true,
-        servioVersion: "Servio HMS v14.2.1",
+        servioVersion: "Servio HMS v14.2.1 (Demo)",
         hotelName: this.creds.hotelCode ? `Готель ${this.creds.hotelCode}` : "Demo Hotel",
         hotelCode: this.creds.hotelCode || "DEMO001",
         totalGuests: randomInt(450, 2000),
@@ -351,39 +363,87 @@ export class ServioAdapter {
       };
     }
 
-    // Real mode: attempt HTTP connection
+    // Real mode: connect to Servio server
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => controller.abort(), 10000);
 
-      const res = await fetch(`${this.creds.baseUrl}/api/v1/hotel/info`, {
-        headers: {
-          "X-Api-Key": this.creds.apiKey || "",
-          "Accept": "application/json",
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      const testUrl = this.buildTestUrl();
+      const password = this.creds.apiKey;
 
-      if (!res.ok) {
-        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, latencyMs: Date.now() - start };
+      const headers: Record<string, string> = {
+        "Accept": "*/*",
+        "User-Agent": "Maison-HD/1.0",
+      };
+
+      // Basic Auth if credentials provided
+      if (this.creds.username && password) {
+        headers["Authorization"] = `Basic ${Buffer.from(`${this.creds.username}:${password}`).toString("base64")}`;
       }
 
-      const data = await res.json();
-      return {
-        success: true,
-        servioVersion: data.version,
-        hotelName: data.name,
-        hotelCode: data.code,
-        totalGuests: data.stats?.guests,
-        totalBookings: data.stats?.bookings,
-        totalRooms: data.stats?.rooms,
-        latencyMs: Date.now() - start,
-      };
+      const res = await fetch(testUrl, { headers, signal: controller.signal });
+      clearTimeout(timeout);
+
+      const responseText = await res.text();
+      const trimmed = responseText.trimStart();
+      const isHtml = trimmed.startsWith("<!") || trimmed.toLowerCase().startsWith("<html");
+      const isXml  = !isHtml && (trimmed.startsWith("<?xml") || (trimmed.startsWith("<") && !isHtml));
+
+      // HTML response = login page or error page
+      if (isHtml) {
+        const statusNote = res.status === 401 || res.status === 403
+          ? `Помилка авторизації (HTTP ${res.status})`
+          : `Сервер повернув HTML-сторінку (HTTP ${res.status})`;
+        return {
+          success: false,
+          error: `${statusNote} — перевірте URL, логін та пароль`,
+          latencyMs: Date.now() - start,
+        };
+      }
+
+      // XML response — Servio native format
+      if (isXml) {
+        // Count records in XML (guests/rows)
+        const rowMatches = responseText.match(/<(?:Guest|Row|Record|Booking|Item)\b[^>]*>/gi) || [];
+        return {
+          success: true,
+          servioVersion: "Servio HMS",
+          hotelName: this.creds.hotelCode ? `Готель ${this.creds.hotelCode}` : "Підключено",
+          hotelCode: this.creds.hotelCode,
+          totalGuests: rowMatches.length || undefined,
+          latencyMs: Date.now() - start,
+        };
+      }
+
+      // Try JSON fallback
+      try {
+        const data = JSON.parse(responseText);
+        return {
+          success: true,
+          servioVersion: data.version || "Servio HMS",
+          hotelName: data.name || this.creds.hotelCode || "Підключено",
+          hotelCode: data.code || this.creds.hotelCode,
+          totalGuests: data.stats?.guests,
+          totalBookings: data.stats?.bookings,
+          totalRooms: data.stats?.rooms,
+          latencyMs: Date.now() - start,
+        };
+      } catch {
+        // Got some response but can't parse it — still treat as connected
+        return {
+          success: true,
+          servioVersion: "Servio HMS",
+          hotelName: this.creds.hotelCode || "Підключено",
+          hotelCode: this.creds.hotelCode,
+          latencyMs: Date.now() - start,
+        };
+      }
     } catch (err: any) {
       return {
         success: false,
-        error: err.name === "AbortError" ? "Connection timeout (5s)" : err.message,
+        error: err.name === "AbortError"
+          ? "Timeout (10с) — сервер не відповів. Перевірте URL та мережу."
+          : `Помилка з'єднання: ${err.message}`,
         latencyMs: Date.now() - start,
       };
     }
