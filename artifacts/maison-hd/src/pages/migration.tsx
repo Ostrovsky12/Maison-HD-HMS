@@ -812,12 +812,10 @@ export default function MigrationPage() {
               <p className="text-sm text-gray-500">Вкажіть параметри вашої інсталяції Servio HMS. Для тестування використайте режим "demo".</p>
             </div>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex gap-2 text-sm text-amber-800">
-              <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex gap-2 text-sm text-blue-800">
+              <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-600" />
               <div>
-                <span className="font-semibold">Це тестовий/демонстраційний режим.</span>{" "}
-                Реальне підключення до Servio API ще не реалізовано — майстер генерує синтетичні дані для демонстрації процесу.
-                Для реального імпорту бронювань використовуйте кнопку <span className="font-semibold">«Імпорт CSV»</span> на попередньому екрані.
+                Вставте URL з Servio, логін і пароль — система підключиться напряму. Для тесту без реального сервера вкажіть <span className="font-mono font-semibold">demo</span> в полі URL.
               </div>
             </div>
 

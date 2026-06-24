@@ -333,16 +333,31 @@ export class ServioAdapter {
     this.isDemoMode = !creds.baseUrl || creds.baseUrl.trim().toLowerCase() === "demo";
   }
 
-  /** Build the test URL for Servio based on the provided baseUrl */
-  private buildTestUrl(): string {
+  /** Build the test URL for Servio, injecting auth credentials as query params */
+  private buildTestUrl(username?: string, password?: string): string {
     const raw = this.creds.baseUrl.trim();
-    // If the user already provided a full ASPX endpoint — use it directly
-    if (raw.toLowerCase().includes(".aspx")) return raw;
-    // If it looks like a Servio /Base/ path — append the standard guest endpoint
-    const base = raw.replace(/\/$/, "");
-    if (base.toLowerCase().includes("/base")) return `${base}/LivingGuests.aspx?Action=1&hotelid=0&valuteid=1&cpw=true`;
-    // Otherwise assume it's the root and build the full path
-    return `${base}/Base/LivingGuests.aspx?Action=1&hotelid=0&valuteid=1&cpw=true`;
+
+    // Determine the base ASPX endpoint
+    let endpoint: string;
+    if (raw.toLowerCase().includes(".aspx")) {
+      endpoint = raw;
+    } else {
+      const base = raw.replace(/\/$/, "");
+      endpoint = base.toLowerCase().includes("/base")
+        ? `${base}/LivingGuests.aspx?Action=1&hotelid=0&valuteid=1&cpw=true`
+        : `${base}/Base/LivingGuests.aspx?Action=1&hotelid=0&valuteid=1&cpw=true`;
+    }
+
+    // Append credentials as query params (Servio uses login/pass, not Basic Auth)
+    if (username || password) {
+      const sep = endpoint.includes("?") ? "&" : "?";
+      const params = new URLSearchParams();
+      if (username) params.set("login", username);
+      if (password) params.set("pass", password);
+      return `${endpoint}${sep}${params.toString()}`;
+    }
+
+    return endpoint;
   }
 
   /** Test connection to Servio and return basic info */
@@ -368,18 +383,13 @@ export class ServioAdapter {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
 
-      const testUrl = this.buildTestUrl();
       const password = this.creds.apiKey;
+      const testUrl = this.buildTestUrl(this.creds.username, password);
 
       const headers: Record<string, string> = {
         "Accept": "*/*",
         "User-Agent": "Maison-HD/1.0",
       };
-
-      // Basic Auth if credentials provided
-      if (this.creds.username && password) {
-        headers["Authorization"] = `Basic ${Buffer.from(`${this.creds.username}:${password}`).toString("base64")}`;
-      }
 
       const res = await fetch(testUrl, { headers, signal: controller.signal });
       clearTimeout(timeout);
