@@ -29,6 +29,10 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+app.get("/api", (_req, res) => {
+  res.json({ ok: true, service: "maison-hd-api" });
+});
+
 app.use("/api", router);
 
 export default app;
