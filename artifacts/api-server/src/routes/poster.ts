@@ -142,6 +142,7 @@ router.post("/sync", requireAuth, async (req: any, res) => {
     let totalRevenue = 0;
     let totalTransactions = 0;
     let source = "demo";
+    let syncError: string | null = null;
 
     if (config?.apiKey) {
       try {
@@ -152,7 +153,7 @@ router.post("/sync", requireAuth, async (req: any, res) => {
           dateFrom: dateFromPoster, dateTo: dateToPoster,
         });
 
-        if (Array.isArray(analytics)) {
+        if (Array.isArray(analytics) && analytics.length > 0) {
           dailyRevenue = analytics.map((a: any) => ({
             date: `${a.date.slice(0, 4)}-${a.date.slice(4, 6)}-${a.date.slice(6, 8)}`,
             revenue: parseFloat(a.revenue || 0) / 100, // Poster stores in kopecks
@@ -162,11 +163,15 @@ router.post("/sync", requireAuth, async (req: any, res) => {
           totalRevenue = dailyRevenue.reduce((s, d) => s + d.revenue, 0);
           totalTransactions = dailyRevenue.reduce((s, d) => s + d.transactions, 0);
           source = "live";
+        } else if (Array.isArray(analytics) && analytics.length === 0) {
+          // Empty period — still live data, just no revenue
+          dailyRevenue = [];
+          source = "live";
         } else {
-          throw new Error("Unexpected Poster response format");
+          throw new Error(`Неочікуваний формат відповіді Poster: ${JSON.stringify(analytics).slice(0, 200)}`);
         }
       } catch (e: any) {
-        // Fall back to demo data
+        syncError = e.message || "Помилка Poster API";
         dailyRevenue = demoRevenue(30);
         totalRevenue = dailyRevenue.reduce((s, d) => s + d.revenue, 0);
         totalTransactions = dailyRevenue.reduce((s, d) => s + d.transactions, 0);
@@ -186,7 +191,7 @@ router.post("/sync", requireAuth, async (req: any, res) => {
       await savePosterConfig(orgId, { ...config, lastSync: new Date().toISOString(), syncedData });
     }
 
-    res.json({ ok: true, source, totalRevenue: Math.round(totalRevenue), totalTransactions, avgCheck, dailyRevenue, dateFrom, dateTo });
+    res.json({ ok: true, source, totalRevenue: Math.round(totalRevenue), totalTransactions, avgCheck, dailyRevenue, dateFrom, dateTo, syncError });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

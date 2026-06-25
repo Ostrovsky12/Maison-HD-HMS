@@ -309,7 +309,13 @@ function PosterTab() {
       const r = await authFetch("/poster/sync", { method: "POST", body: JSON.stringify({}) });
       const d = await r.json();
       setRevenue(d);
-      toast({ title: d.source === "live" ? "Дані синхронізовано з Poster" : "Дані оновлено (демо режим)" });
+      if (d.source === "live") {
+        toast({ title: "Дані синхронізовано з Poster" });
+      } else if (d.syncError) {
+        toast({ title: "Помилка Poster API — показано демо-дані", description: d.syncError, variant: "destructive" });
+      } else {
+        toast({ title: "Показано демо-дані (API ключ не підключено)" });
+      }
     } catch { toast({ title: "Помилка синхронізації", variant: "destructive" }); }
     setSyncing(false);
   };
@@ -423,9 +429,16 @@ function PosterTab() {
       {revenue && (
         <>
           {isDemo && (
-            <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-              Демо-дані — підключіть Poster API для відображення реальної виручки
+            <div className="flex flex-col gap-1 text-xs bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
+              <div className="flex items-center gap-2 text-amber-600">
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                {revenue?.syncError
+                  ? "Poster API недоступний — показано демо-дані"
+                  : "Демо-дані — підключіть Poster API для відображення реальної виручки"}
+              </div>
+              {revenue?.syncError && (
+                <p className="text-amber-700 font-mono pl-5">{revenue.syncError}</p>
+              )}
             </div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
