@@ -1,3 +1,4 @@
+import React from "react";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -138,6 +139,45 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[ErrorBoundary]", error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background p-8">
+          <div className="max-w-lg w-full space-y-4">
+            <h1 className="text-xl font-bold text-destructive">Помилка додатку</h1>
+            <pre className="text-xs bg-muted p-4 rounded-lg overflow-auto whitespace-pre-wrap">
+              {this.state.error.message}
+              {"\n\n"}
+              {this.state.error.stack}
+            </pre>
+            <button
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm"
+              onClick={() => { this.setState({ error: null }); window.location.href = "/dashboard"; }}
+            >
+              Перейти на головну
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function ProtectedRoute({ component: Component, roles }: { component: React.ComponentType; roles?: string[] }) {
   const { data: user, isLoading, error } = useGetMe();
@@ -336,9 +376,11 @@ function App() {
       <TooltipProvider>
         <TelephonyProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <PushSubscriber />
-            <Router />
-            <ConditionalHelp />
+            <ErrorBoundary>
+              <PushSubscriber />
+              <Router />
+              <ConditionalHelp />
+            </ErrorBoundary>
           </WouterRouter>
           <Toaster />
         </TelephonyProvider>
