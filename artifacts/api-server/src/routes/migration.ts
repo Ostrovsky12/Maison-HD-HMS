@@ -361,6 +361,65 @@ router.get("/stats", requireAuth, async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── HELPERS ───────────────────────────────────────────────────────
+
+/** Returns the first property for this org, creating a default one if none exists */
+async function getOrCreateProperty(orgId: number, connectionId: number | null): Promise<number> {
+  const [existing] = await db.select({ id: propertiesTable.id })
+    .from(propertiesTable).where(eq(propertiesTable.organizationId, orgId)).limit(1);
+  if (existing) return existing.id;
+
+  const [created] = await db.insert(propertiesTable).values({
+    organizationId: orgId,
+    name: "Готель (імпорт Servio)",
+    type: "hotel",
+    checkInTime: "14:00",
+    checkOutTime: "12:00",
+    isActive: true,
+  }).returning({ id: propertiesTable.id });
+  return created.id;
+}
+
+/** Returns unit id for the given roomNumber, creating the unit if it doesn't exist */
+async function getOrCreateUnit(
+  orgId: number,
+  batchId: number,
+  connectionId: number | null,
+  roomNumber: string,
+  roomType: string | undefined,
+  unitExternalIdMap: Record<string, number>
+): Promise<number> {
+  if (unitExternalIdMap[roomNumber]) return unitExternalIdMap[roomNumber];
+
+  const propertyId = await getOrCreateProperty(orgId, connectionId);
+
+  const [unit] = await db.insert(unitsTable).values({
+    propertyId,
+    name: roomNumber,
+    category: roomType || "room",
+    capacity: 2,
+    maxCapacity: 2,
+    status: "active" as const,
+    description: `Автоматично створено під час міграції з Servio. Тип: ${roomType || "—"}`,
+  }).returning();
+
+  unitExternalIdMap[roomNumber] = unit.id;
+
+  await db.insert(externalEntityMappingsTable).values({
+    organizationId: orgId,
+    connectionId,
+    externalSystem: "servio",
+    entityType: "unit",
+    internalId: unit.id,
+    externalId: `room-${roomNumber}`,
+    syncStatus: "synced",
+    lastSyncedAt: new Date(),
+    batchId,
+  });
+
+  return unit.id;
+}
+
 // ── IMPORT JOB (async) ───────────────────────────────────────────
 
 async function runImportBatch(
@@ -410,11 +469,8 @@ async function runImportBatch(
           continue;
         }
 
-        // Create unit - find the first property for this org
-        const [firstProp] = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-          .where(eq(propertiesTable.organizationId, orgId)).limit(1);
-        const propertyId = firstProp?.id;
-        if (!propertyId) { skippedItems++; continue; }
+        // Get or auto-create the default property for this org
+        const propertyId = await getOrCreateProperty(orgId, batch.connectionId as number | null);
 
         const [unit] = await db.insert(unitsTable).values({
           propertyId,
@@ -570,13 +626,12 @@ async function runImportBatch(
             continue;
           }
 
-          const mapped_booking = mapServioBookingToInternal(booking, unitExternalIdMap, guestExternalIdMap);
-
-          if (!mapped_booking.unitId) {
-            await insertBatchItem(batchId, orgId, "booking", booking.id, booking, null, "skipped", "skip", `Кімнату ${booking.roomNumber} не знайдено в Maison HD`);
-            skippedItems++;
-            continue;
+          // Auto-create room if it doesn't exist in Maison HD yet
+          if (booking.roomNumber && !unitExternalIdMap[booking.roomNumber]) {
+            await getOrCreateUnit(orgId, batchId, batch.connectionId as number | null, booking.roomNumber, booking.roomType, unitExternalIdMap);
           }
+
+          const mapped_booking = mapServioBookingToInternal(booking, unitExternalIdMap, guestExternalIdMap);
 
           const statusMap: Record<string, any> = {
             "confirmed": "confirmed", "pending": "pending", "checked_in": "checked_in",
