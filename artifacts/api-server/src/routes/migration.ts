@@ -573,8 +573,8 @@ async function runImportBatch(
           const mapped_booking = mapServioBookingToInternal(booking, unitExternalIdMap, guestExternalIdMap);
 
           if (!mapped_booking.unitId) {
-            await insertBatchItem(batchId, orgId, "booking", booking.id, booking, null, "conflict", "skip", `Room ${booking.roomNumber} not found`);
-            conflictItems++;
+            await insertBatchItem(batchId, orgId, "booking", booking.id, booking, null, "skipped", "skip", `Кімнату ${booking.roomNumber} не знайдено в Maison HD`);
+            skippedItems++;
             continue;
           }
 

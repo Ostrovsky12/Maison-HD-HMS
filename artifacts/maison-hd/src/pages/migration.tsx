@@ -1058,14 +1058,15 @@ export default function MigrationPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                   {[
                     { label: "Всього", val: currentBatch.totalItems, color: "text-gray-700", bg: "bg-gray-50" },
                     { label: "Успішно", val: currentBatch.successItems, color: "text-green-700", bg: "bg-green-50" },
-                    { label: "Конфліктів", val: currentBatch.conflictItems, color: "text-amber-700", bg: "bg-amber-50" },
+                    { label: "Конфліктів", val: currentBatch.conflictItems, color: "text-amber-700", bg: "bg-amber-50", hint: "Потребують вирішення" },
+                    { label: "Пропущено", val: currentBatch.skippedItems, color: "text-blue-700", bg: "bg-blue-50", hint: "Дублікати або не знайдено" },
                     { label: "Помилок", val: currentBatch.failedItems, color: "text-red-700", bg: "bg-red-50" },
                   ].map(s => (
-                    <div key={s.label} className={`${s.bg} rounded-lg p-3 text-center`}>
+                    <div key={s.label} className={`${s.bg} rounded-lg p-3 text-center`} title={(s as any).hint}>
                       <p className={`text-2xl font-bold ${s.color}`}>{s.val}</p>
                       <p className="text-xs text-gray-500">{s.label}</p>
                     </div>
