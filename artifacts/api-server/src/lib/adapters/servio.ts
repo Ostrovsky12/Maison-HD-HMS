@@ -156,6 +156,12 @@ export interface ServioPreviewData {
 
 // ── MOCK DATA GENERATOR ──────────────────────────────────────────
 // Generates realistic Ukrainian hotel data for demo/testing
+// Uses a seeded deterministic RNG so the same call always returns the same data.
+
+// Fixed demo dataset size — never changes between calls
+const DEMO_GUEST_COUNT   = 1043;
+const DEMO_ROOM_COUNT    = 86;
+const DEMO_BOOKING_COUNT = 3210;
 
 const UA_LAST_NAMES = ["Іванченко", "Петренко", "Коваленко", "Бондаренко", "Шевченко", "Ткаченко", "Кравченко", "Олійник", "Мороз", "Лисенко", "Хоменко", "Білоус", "Данченко", "Гончар", "Захарченко"];
 const UA_FIRST_NAMES_M = ["Олексій", "Михайло", "Дмитро", "Сергій", "Андрій", "Василь", "Ігор", "Олег", "Павло", "Роман"];
@@ -166,159 +172,149 @@ const ROOM_TYPES = ["Стандарт", "Комфорт", "Делюкс", "Лю�
 const SERVICE_CATS = ["Харчування", "SPA", "Трансфер", "Оренда", "Розваги", "Інше"];
 const SERVICES = ["Сніданок", "Обід", "Вечеря", "Масаж класичний", "Масаж спортивний", "Велосипед", "Вудки", "Трансфер зі Львова", "Трансфер до Києва", "SPA-процедура", "Дитячий стілець", "Барбекю"];
 
-function randomItem<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+/** Mulberry32 — fast, good-quality seeded PRNG returning [0, 1) */
+function makeRng(seed: number) {
+  let s = seed >>> 0;
+  return {
+    next(): number {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 0x100000000;
+    },
+    int(min: number, max: number): number {
+      return Math.floor(this.next() * (max - min + 1)) + min;
+    },
+    item<T>(arr: T[]): T {
+      return arr[Math.floor(this.next() * arr.length)];
+    },
+    bool(p = 0.5): boolean {
+      return this.next() < p;
+    },
+  };
 }
 
-function randomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+/** Generate guest at absolute index i (stable across calls) */
+function generateGuest(i: number): ServioGuest {
+  const rng = makeRng(0xABCD_0000 + i);
+  const isMale = rng.bool();
+  const lastName = rng.item(UA_LAST_NAMES);
+  const firstName = isMale ? rng.item(UA_FIRST_NAMES_M) : rng.item(UA_FIRST_NAMES_F);
+  const totalStays = rng.int(1, 20);
+  const bornYear = rng.int(1960, 2000);
+  const bornMonth = String(rng.int(1, 12)).padStart(2, "0");
+  const bornDay   = String(rng.int(1, 28)).padStart(2, "0");
+  const prefix = rng.int(50, 99);
+  const suffix = rng.int(1000000, 9999999);
+  return {
+    id: `SRV-G-${String(i + 1).padStart(5, "0")}`,
+    lastName,
+    firstName,
+    middleName: isMale ? "Олексійович" : "Олексіївна",
+    phone: `+380${prefix}${suffix}`,
+    email: `${lastName.toLowerCase().replace(/[іїє]/g, "i")}${i + 1}@gmail.com`,
+    birthDate: `${bornYear}-${bornMonth}-${bornDay}`,
+    nationality: "UA",
+    category: rng.item(["Regular", "Regular", "Regular", "VIP", "Corporate"]),
+    totalStays,
+    firstStayDate: dateOffset(-(totalStays * 180 + rng.int(0, 30))),
+    lastStayDate: dateOffset(-rng.int(0, 55)),
+    totalRevenue: rng.int(1500, 120000),
+    tags: rng.bool(0.3) ? [rng.item(["VIP", "Постійний", "Корпоратив", "Повторний"])] : [],
+    notes: rng.bool(0.2) ? "Алергія на горіхи" : undefined,
+    createdAt: new Date(Date.now() - rng.int(100, 1000) * 86400000).toISOString(),
+  } as ServioGuest;
 }
 
-function randomPhone(): string {
-  return `+380${randomInt(50, 99)}${randomInt(1000000, 9999999)}`;
+/** Generate room at absolute index i (stable across calls) */
+function generateRoom(i: number): ServioRoom {
+  const rng = makeRng(0xBEEF_0000 + i);
+  const type = rng.item(ROOM_TYPES);
+  const floor = rng.int(1, 3);
+  return {
+    id: `SRV-R-${String(i + 1).padStart(3, "0")}`,
+    number: `${floor}${String(i + 1).padStart(2, "0")}`,
+    type,
+    category: type,
+    floor,
+    capacity: type.includes("Сімейний") || type.includes("Будинок") ? rng.int(3, 6) : rng.int(1, 3),
+    baseRate: rng.int(800, 5000),
+    status: rng.item(["Available", "Available", "Available", "Occupied", "Maintenance"]),
+  } as ServioRoom;
 }
 
-function randomDate(daysAgo: number, daysRange: number): string {
+/** Generate booking at absolute index i (stable across calls) */
+function generateBooking(i: number): ServioBooking {
+  const rng = makeRng(0xCAFE_0000 + i);
+  const guestIdx = rng.int(0, DEMO_GUEST_COUNT - 1);
+  const roomIdx  = rng.int(0, DEMO_ROOM_COUNT - 1);
+  const guest = generateGuest(guestIdx);
+  const room  = generateRoom(roomIdx);
+  const checkInDays = rng.int(-200, 60);
+  const nights = rng.int(1, 7);
+  const checkIn = new Date();
+  checkIn.setDate(checkIn.getDate() + checkInDays);
+  const checkOut = new Date(checkIn);
+  checkOut.setDate(checkOut.getDate() + nights);
+  const rate = rng.int(800, 5000);
+  return {
+    id: `SRV-B-${String(i + 1).padStart(6, "0")}`,
+    guestId: guest.id,
+    guestName: `${guest.lastName} ${guest.firstName}`,
+    roomNumber: room.number,
+    roomType: room.type,
+    checkIn: checkIn.toISOString().split("T")[0],
+    checkOut: checkOut.toISOString().split("T")[0],
+    status: rng.item(["Confirmed", "CheckedIn", "CheckedOut", "CheckedOut", "CheckedOut"]),
+    adults: rng.int(1, room.capacity),
+    children: rng.bool(0.2) ? rng.int(1, 2) : 0,
+    totalAmount: rate * nights,
+    paidAmount: rng.bool(0.8) ? rate * nights : 0,
+    source: rng.item(SOURCES),
+    ratePlan: rng.item(RATE_PLANS),
+    notes: rng.bool(0.15) ? "Прохання — тихий номер" : undefined,
+    createdAt: new Date(checkIn.getTime() - rng.int(1, 30) * 86400000).toISOString(),
+  } as ServioBooking;
+}
+
+function dateOffset(days: number): string {
   const d = new Date();
-  d.setDate(d.getDate() - daysAgo + randomInt(0, daysRange));
+  d.setDate(d.getDate() + days);
   return d.toISOString().split("T")[0];
 }
 
-function generateGuests(count: number): ServioGuest[] {
-  return Array.from({ length: count }, (_, i) => {
-    const isMale = Math.random() > 0.5;
-    const lastName = randomItem(UA_LAST_NAMES);
-    const firstName = isMale ? randomItem(UA_FIRST_NAMES_M) : randomItem(UA_FIRST_NAMES_F);
-    const totalStays = randomInt(1, 20);
-    return {
-      id: `SRV-G-${String(i + 1).padStart(5, "0")}`,
-      lastName,
-      firstName,
-      middleName: isMale ? "Олексійович" : "Олексіївна",
-      phone: randomPhone(),
-      email: `${lastName.toLowerCase().replace(/[іїє]/g, "i")}${i + 1}@gmail.com`,
-      birthDate: `${randomInt(1960, 2000)}-${String(randomInt(1, 12)).padStart(2, "0")}-${String(randomInt(1, 28)).padStart(2, "0")}`,
-      nationality: "UA",
-      category: randomItem(["Regular", "Regular", "Regular", "VIP", "Corporate"]),
-      totalStays,
-      firstStayDate: randomDate(totalStays * 180, 30),
-      lastStayDate: randomDate(30, 25),
-      totalRevenue: randomInt(1500, 120000),
-      tags: Math.random() > 0.7 ? [randomItem(["VIP", "Постійний", "Корпоратив", "Повторний"])] : [],
-      notes: Math.random() > 0.8 ? "Алергія на горіхи" : undefined,
-      createdAt: new Date(Date.now() - randomInt(100, 1000) * 86400000).toISOString(),
-    } as ServioGuest;
-  });
-}
-
-function generateRooms(count: number): ServioRoom[] {
-  return Array.from({ length: count }, (_, i) => {
-    const type = randomItem(ROOM_TYPES);
-    return {
-      id: `SRV-R-${String(i + 1).padStart(3, "0")}`,
-      number: `${randomInt(1, 3)}${String(i + 1).padStart(2, "0")}`,
-      type,
-      category: type,
-      floor: randomInt(1, 3),
-      capacity: type.includes("Сімейний") || type.includes("Будинок") ? randomInt(3, 6) : randomInt(1, 3),
-      baseRate: randomInt(800, 5000),
-      status: randomItem(["Available", "Available", "Available", "Occupied", "Maintenance"]),
-    } as ServioRoom;
-  });
-}
-
 function generateRatePlans(): ServioRatePlan[] {
-  return RATE_PLANS.map((name, i) => ({
-    id: `SRV-RATE-${i + 1}`,
-    name,
-    code: name.toUpperCase().replace(/\s+/g, "_").substring(0, 8),
-    type: i === 0 ? "BAR" : i < 4 ? "Package" : "Corporate",
-    amount: randomInt(700, 4500),
-    currency: "UAH",
-    minNights: randomInt(1, 3),
-    isActive: true,
-  }));
-}
-
-function generateBookings(guests: ServioGuest[], rooms: ServioRoom[], count: number): ServioBooking[] {
-  return Array.from({ length: count }, (_, i) => {
-    const guest = guests[randomInt(0, guests.length - 1)];
-    const room = rooms[randomInt(0, rooms.length - 1)];
-    const checkInDays = randomInt(-200, 60); // mix of past/future
-    const nights = randomInt(1, 7);
-    const checkIn = randomDate(0, 0);
-    const checkInDate = new Date();
-    checkInDate.setDate(checkInDate.getDate() + checkInDays);
-    const checkOutDate = new Date(checkInDate);
-    checkOutDate.setDate(checkOutDate.getDate() + nights);
-    const totalAmount = room.baseRate! * nights * randomInt(85, 115) / 100;
-    const isPaid = Math.random() > 0.3;
-    const paidAmount = isPaid ? totalAmount : totalAmount * randomInt(0, 8) / 10;
-    const isPast = checkInDays < -nights;
-    const isFuture = checkInDays > 0;
-    const status = isPast
-      ? randomItem(["CheckedOut", "CheckedOut", "CheckedOut", "Cancelled", "NoShow"])
-      : isFuture
-        ? randomItem(["Confirmed", "Confirmed", "Confirmed"])
-        : randomItem(["CheckedIn", "CheckedIn"]);
-
-    const services: ServioService[] = Math.random() > 0.5
-      ? Array.from({ length: randomInt(1, 4) }, (_, si) => ({
-          id: `SRV-SVC-${i}-${si}`,
-          bookingId: `SRV-B-${i + 1}`,
-          name: randomItem(SERVICES),
-          category: randomItem(SERVICE_CATS),
-          quantity: randomInt(1, 3),
-          amount: randomInt(50, 800),
-          date: checkInDate.toISOString().split("T")[0],
-        }))
-      : [];
-
+  return RATE_PLANS.map((name, i) => {
+    const rng = makeRng(0xDADA_0000 + i);
     return {
-      id: `SRV-B-${String(i + 1).padStart(5, "0")}`,
-      confirmationNumber: `HB${String(randomInt(10000, 99999))}`,
-      guestId: guest.id,
-      guestName: `${guest.lastName} ${guest.firstName}`,
-      roomNumber: room.number,
-      roomType: room.type,
-      checkIn: checkInDate.toISOString().split("T")[0],
-      checkOut: checkOutDate.toISOString().split("T")[0],
-      status,
-      adults: randomInt(1, room.capacity),
-      children: Math.random() > 0.7 ? randomInt(1, 2) : 0,
-      totalAmount: Math.round(totalAmount),
-      paidAmount: Math.round(paidAmount),
-      balance: Math.round(totalAmount - paidAmount),
-      source: randomItem(SOURCES),
-      ratePlan: randomItem(RATE_PLANS),
-      notes: Math.random() > 0.7 ? "Алергія на пил" : undefined,
-      services,
-      payments: isPaid ? [{
-        id: `SRV-PAY-${i}`,
-        bookingId: `SRV-B-${i + 1}`,
-        amount: Math.round(paidAmount),
-        type: randomItem(["LiqPay", "Готівка", "Термінал"]),
-        status: "Paid",
-        date: checkInDate.toISOString().split("T")[0],
-      }] : [],
-      createdAt: new Date(checkInDate.getTime() - randomInt(1, 30) * 86400000).toISOString(),
-    } as ServioBooking;
+      id: `SRV-RATE-${i + 1}`,
+      name,
+      code: name.toUpperCase().replace(/\s+/g, "_").substring(0, 8),
+      type: i === 0 ? "BAR" : i < 4 ? "Package" : "Corporate",
+      amount: rng.int(700, 4500),
+      currency: "UAH",
+      minNights: rng.int(1, 3),
+      isActive: true,
+    };
   });
 }
 
 function generateCompanies(count: number): ServioCompany[] {
-  const companies = ["ТОВ «Альфа Буд»", "ДП «Укртранс»", "ПП Мороз В.І.", "ТОВ «Зеленець»", "ФОП Петренко О.М.", "АТ «Карпатські мінводи»", "ТОВ «Медіагруп»", "ПП «Сонячний край»"];
-  return companies.slice(0, count).map((name, i) => ({
-    id: `SRV-COMP-${i + 1}`,
-    name,
-    taxId: String(randomInt(10000000, 99999999)),
-    address: `м. Київ, вул. ${randomItem(["Хрещатик", "Лесі Українки", "Шевченка"])} ${randomInt(1, 100)}`,
-    contactName: `${randomItem(UA_FIRST_NAMES_M)} ${randomItem(UA_LAST_NAMES)}`,
-    phone: randomPhone(),
-    email: `contracts@company${i + 1}.ua`,
-    discount: randomItem([5, 10, 15, 0, 0]),
-    creditLimit: randomInt(5000, 50000),
-  }));
+  const names = ["ТОВ «Альфа Буд»", "ДП «Укртранс»", "ПП Мороз В.І.", "ТОВ «Зеленець»", "ФОП Петренко О.М.", "АТ «Карпатські мінводи»", "ТОВ «Медіагруп»", "ПП «Сонячний край»"];
+  return names.slice(0, count).map((name, i) => {
+    const rng = makeRng(0xC0DE_0000 + i);
+    return {
+      id: `SRV-COMP-${i + 1}`,
+      name,
+      taxId: String(rng.int(10000000, 99999999)),
+      address: `м. Київ, вул. ${rng.item(["Хрещатик", "Лесі Українки", "Шевченка"])} ${rng.int(1, 100)}`,
+      contactName: `${rng.item(UA_FIRST_NAMES_M)} ${rng.item(UA_LAST_NAMES)}`,
+      phone: `+380${rng.int(50, 99)}${rng.int(1000000, 9999999)}`,
+      email: `contracts@company${i + 1}.ua`,
+      discount: rng.item([5, 10, 15, 0, 0]),
+      creditLimit: rng.int(5000, 50000),
+    };
+  });
 }
 
 // ── SERVIO ADAPTER CLASS ─────────────────────────────────────────
@@ -371,9 +367,9 @@ export class ServioAdapter {
         servioVersion: "Servio HMS v14.2.1 (Demo)",
         hotelName: this.creds.hotelCode ? `Готель ${this.creds.hotelCode}` : "Demo Hotel",
         hotelCode: this.creds.hotelCode || "DEMO001",
-        totalGuests: randomInt(450, 2000),
-        totalBookings: randomInt(1200, 5000),
-        totalRooms: randomInt(20, 150),
+        totalGuests: DEMO_GUEST_COUNT,
+        totalBookings: DEMO_BOOKING_COUNT,
+        totalRooms: DEMO_ROOM_COUNT,
         latencyMs: Date.now() - start,
       };
     }
@@ -463,34 +459,31 @@ export class ServioAdapter {
   async previewData(): Promise<ServioPreviewData> {
     if (this.isDemoMode) {
       await new Promise(r => setTimeout(r, 1200));
-      const guestCount = randomInt(450, 1800);
-      const roomCount = randomInt(30, 120);
-      const bookingCount = randomInt(1200, 5000);
-      const guests = generateGuests(Math.min(guestCount, 8));
-      const rooms = generateRooms(Math.min(roomCount, 6));
-      const bookings = generateBookings(guests, rooms, Math.min(bookingCount, 10));
+      const activeBookings = Math.round(DEMO_BOOKING_COUNT * 0.05);
+      const futureBookings = Math.round(DEMO_BOOKING_COUNT * 0.15);
       const ratePlans = generateRatePlans();
       const companies = generateCompanies(5);
-      const activeBookings = Math.round(bookingCount * 0.05);
-      const futureBookings = Math.round(bookingCount * 0.15);
+      const guests  = Array.from({ length: 8 }, (_, i) => generateGuest(i));
+      const rooms   = Array.from({ length: 6 }, (_, i) => generateRoom(i));
+      const bookings = Array.from({ length: 10 }, (_, i) => generateBooking(i));
 
       return {
         hotel: {
           name: this.creds.hotelCode ? `Готель ${this.creds.hotelCode}` : "Demo Resort",
           code: this.creds.hotelCode || "DEMO001",
-          rooms: roomCount,
+          rooms: DEMO_ROOM_COUNT,
         },
         counts: {
-          guests: guestCount,
-          bookings: bookingCount,
+          guests: DEMO_GUEST_COUNT,
+          bookings: DEMO_BOOKING_COUNT,
           activeBookings,
           futureBookings,
-          historicalBookings: bookingCount - activeBookings - futureBookings,
-          rooms: roomCount,
+          historicalBookings: DEMO_BOOKING_COUNT - activeBookings - futureBookings,
+          rooms: DEMO_ROOM_COUNT,
           ratePlans: ratePlans.length,
           companies: companies.length,
-          services: randomInt(500, 3000),
-          payments: randomInt(900, 4000),
+          services: 1870,
+          payments: 2940,
         },
         samples: { guests, bookings, rooms, ratePlans, companies },
       };
@@ -504,8 +497,10 @@ export class ServioAdapter {
   async fetchGuests(page = 0, pageSize = 100): Promise<{ items: ServioGuest[]; total: number }> {
     if (this.isDemoMode) {
       await new Promise(r => setTimeout(r, 300));
-      const total = randomInt(450, 1800);
-      const items = generateGuests(Math.min(pageSize, total - page * pageSize));
+      const total = DEMO_GUEST_COUNT;
+      const start = page * pageSize;
+      const count = Math.max(0, Math.min(pageSize, total - start));
+      const items = Array.from({ length: count }, (_, k) => generateGuest(start + k));
       return { items, total };
     }
     throw new Error("Not implemented for live mode");
@@ -520,10 +515,10 @@ export class ServioAdapter {
   ): Promise<{ items: ServioBooking[]; total: number }> {
     if (this.isDemoMode) {
       await new Promise(r => setTimeout(r, 400));
-      const rooms = generateRooms(40);
-      const guests = generateGuests(50);
-      const total = randomInt(500, 3000);
-      const items = generateBookings(guests, rooms, Math.min(pageSize, total - page * pageSize));
+      const total = DEMO_BOOKING_COUNT;
+      const start = page * pageSize;
+      const count = Math.max(0, Math.min(pageSize, total - start));
+      const items = Array.from({ length: count }, (_, k) => generateBooking(start + k));
       return { items, total };
     }
     throw new Error("Not implemented for live mode");
@@ -533,7 +528,7 @@ export class ServioAdapter {
   async fetchRooms(): Promise<ServioRoom[]> {
     if (this.isDemoMode) {
       await new Promise(r => setTimeout(r, 200));
-      return generateRooms(randomInt(30, 80));
+      return Array.from({ length: DEMO_ROOM_COUNT }, (_, i) => generateRoom(i));
     }
     throw new Error("Not implemented for live mode");
   }
@@ -551,7 +546,7 @@ export class ServioAdapter {
   async fetchCompanies(): Promise<ServioCompany[]> {
     if (this.isDemoMode) {
       await new Promise(r => setTimeout(r, 200));
-      return generateCompanies(randomInt(5, 30));
+      return generateCompanies(8);
     }
     throw new Error("Not implemented for live mode");
   }
