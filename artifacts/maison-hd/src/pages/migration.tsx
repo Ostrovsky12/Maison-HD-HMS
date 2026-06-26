@@ -1173,11 +1173,11 @@ export default function MigrationPage() {
             <div className="bg-white border rounded-xl shadow-sm p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Підсумок імпорту</h2>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
                 {[
                   { label: "Імпортовано", val: currentBatch.successItems, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
                   { label: "Конфліктів", val: currentBatch.conflictItems, icon: AlertTriangle, color: "text-amber-600", bg: "bg-amber-50" },
-                  { label: "Пропущено", val: currentBatch.skippedItems, icon: Info, color: "text-blue-600", bg: "bg-blue-50" },
+                  { label: "Вже в системі", val: currentBatch.skippedItems, icon: Info, color: "text-blue-600", bg: "bg-blue-50" },
                   { label: "Помилок", val: currentBatch.failedItems, icon: XCircle, color: "text-red-600", bg: "bg-red-50" },
                   { label: "Всього оброблено", val: currentBatch.processedItems, icon: Database, color: "text-gray-600", bg: "bg-gray-50" },
                 ].map(s => (
@@ -1189,12 +1189,32 @@ export default function MigrationPage() {
                 ))}
               </div>
 
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <CheckCircle2 className="w-4 h-4 text-green-600" />
-                  <p className="font-medium text-green-800">Дані успішно перенесено в Maison HD</p>
+              {currentBatch.skippedItems > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex gap-2">
+                  <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                  <div className="text-sm text-blue-800">
+                    <span className="font-medium">{currentBatch.skippedItems} записів вже є в Maison HD</span> — вони були імпортовані раніше і не дублюються повторно. Ніякі дані не загублені.
+                    {currentBatch.skippedItems > currentBatch.successItems && (
+                      <span className="block mt-0.5 text-blue-700">Це нормально при повторному запуску міграції — система розпізнала існуючі записи і захистила від дублів.</span>
+                    )}
+                  </div>
                 </div>
-                <p className="text-sm text-green-700">Всі гості та бронювання доступні у відповідних розділах. Ви можете перейти до наступного кроку — активації Maison HD як основної системи.</p>
+              )}
+
+              <div className={`border rounded-lg p-4 ${currentBatch.failedItems > 0 ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200"}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <CheckCircle2 className={`w-4 h-4 ${currentBatch.failedItems > 0 ? "text-amber-600" : "text-green-600"}`} />
+                  <p className={`font-medium ${currentBatch.failedItems > 0 ? "text-amber-800" : "text-green-800"}`}>
+                    {currentBatch.failedItems > 0
+                      ? `Імпорт завершено з ${currentBatch.failedItems} помилками`
+                      : "Дані успішно перенесено в Maison HD"}
+                  </p>
+                </div>
+                <p className={`text-sm ${currentBatch.failedItems > 0 ? "text-amber-700" : "text-green-700"}`}>
+                  {currentBatch.failedItems > 0
+                    ? `Імпортовано ${currentBatch.successItems} записів. Перевірте помилки перед переходом.`
+                    : `Імпортовано ${currentBatch.successItems} нових записів. Всі гості та бронювання доступні у відповідних розділах.`}
+                </p>
               </div>
             </div>
 
