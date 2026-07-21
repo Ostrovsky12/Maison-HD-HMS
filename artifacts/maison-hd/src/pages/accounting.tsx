@@ -2074,7 +2074,7 @@ function NewDocumentDialog() {
       return (await fetch(`${API_BASE}/api/accounting/legal-entities`, { headers: { Authorization: `Bearer ${token}` } })).json();
     },
   });
-  const legalEntities: any[] = leData?.legalEntities || [];
+  const legalEntities: any[] = leData?.entities || leData?.legalEntities || [];
 
   const { data: cpData } = useQuery({
     queryKey: ["accounting", "counterparties"],
