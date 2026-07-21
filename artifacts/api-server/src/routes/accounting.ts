@@ -676,9 +676,10 @@ router.get("/documents/:id/export/:format", async (req: any, res) => {
       const html = format === "act-ua"
         ? generateActHtml(docSnake, itemsSnake, le, cp)
         : generateInvoiceHtml(docSnake, itemsSnake, le, cp);
-      const fname = format === "act-ua" ? `act_${docSnake.doc_number}.html` : `invoice_${docSnake.doc_number}.html`;
+      const fnameRaw = format === "act-ua" ? `act_${docSnake.doc_number}.html` : `invoice_${docSnake.doc_number}.html`;
+      const fnameEncoded = encodeURIComponent(fnameRaw);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Content-Disposition", `inline; filename="${fname}"`);
+      res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${fnameEncoded}`);
       return res.send(html);
     }
 
@@ -1424,7 +1425,7 @@ router.get("/documents/:id/export/invoice-ua", async (req: any, res) => {
 
     const html = generateInvoiceHtml(doc, items, entity, cp);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Content-Disposition", `inline; filename="invoice_${doc.doc_number}.html"`);
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(`invoice_${doc.doc_number}.html`)}`);
     res.send(html);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -1451,7 +1452,7 @@ router.get("/documents/:id/export/act-ua", async (req: any, res) => {
 
     const html = generateActHtml(doc, items, entity, cp);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Content-Disposition", `inline; filename="act_${doc.doc_number}.html"`);
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(`act_${doc.doc_number}.html`)}`);
     res.send(html);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
