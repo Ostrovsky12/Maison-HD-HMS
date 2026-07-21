@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import {
   counterpartiesTable, accountingDocumentsTable, documentItemsTable,
-  accountingIntegrationsTable, legalEntitiesTable,
+  accountingIntegrationsTable, legalEntitiesTable, usersTable,
 } from "@workspace/db";
 import { eq, and, desc, asc, ilike, or, sql, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
@@ -410,8 +410,16 @@ router.get("/documents/:id", async (req: any, res) => {
 
 router.post("/documents", async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId ? Number(req.user.organizationId) : null;
     const userId = req.user?.userId ?? req.user?.id ?? null;
+    let orgId: number | null = req.user?.organizationId ? Number(req.user.organizationId) : null;
+
+    // Fallback: look up orgId from DB (handles old tokens missing organizationId)
+    if (!orgId && userId) {
+      const [u] = await db.select({ organizationId: usersTable.organizationId })
+        .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+      orgId = u?.organizationId ?? null;
+    }
+
     const {
       docType, docDate, dueDate, deliveryDate,
       legalEntityId, counterpartyId, counterpartyName, counterpartyEdrpou,
@@ -419,7 +427,7 @@ router.post("/documents", async (req: any, res) => {
       items = [], status,
     } = req.body;
 
-    if (!orgId) return res.status(400).json({ error: "Не вдалося визначити організацію. Будь ласка, перелогіньтесь." });
+    if (!orgId) return res.status(400).json({ error: "Super-admin не може створювати документи напряму. Спочатку увійдіть від імені тенанта." });
     if (!docType || !docDate) return res.status(400).json({ error: "Тип та дата обов'язкові" });
 
     const docNumber = await genDocNumber(orgId, docType);
