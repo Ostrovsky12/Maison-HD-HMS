@@ -2042,9 +2042,18 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
 }
 
 // ─── NEW DOCUMENT DIALOG ──────────────────────────────────────────────────────
+function getJwtOrgId(): number | null {
+  try {
+    const token = localStorage.getItem("hms_token") || "";
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.organizationId ?? null;
+  } catch { return null; }
+}
+
 function NewDocumentDialog() {
   const [open, setOpen] = useState(false);
   const [vatRate, setVatRate] = useState<0 | 7 | 20>(20);
+  const isSuperAdminWithoutOrg = open && !getJwtOrgId();
   const [form, setForm] = useState({
     docType: "invoice", docDate: format(new Date(), "yyyy-MM-dd"), dueDate: "",
     counterpartyName: "", counterpartyEdrpou: "", subject: "", paymentTerms: "",
@@ -2218,9 +2227,21 @@ function NewDocumentDialog() {
             </div>
           </div>
 
+          {isSuperAdminWithoutOrg && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                Ви увійшли як <strong>Super Admin</strong> без прив'язки до організації.
+                Щоб створювати документи — спочатку{" "}
+                <a href="/admin" className="underline font-semibold">увійдіть від імені тенанта</a>{" "}
+                у Admin панелі (кнопка «Impersonate»).
+              </span>
+            </div>
+          )}
+
           <div className="flex gap-2 pt-2">
             <Button variant="outline" onClick={() => setOpen(false)} className="flex-1">Скасувати</Button>
-            <Button disabled={mut.isPending || !form.docType || !form.docDate}
+            <Button disabled={mut.isPending || !form.docType || !form.docDate || isSuperAdminWithoutOrg}
               onClick={() => mut.mutate({
                 docType: form.docType, docDate: form.docDate, dueDate: form.dueDate || undefined,
                 counterpartyName: form.counterpartyName, counterpartyEdrpou: form.counterpartyEdrpou,
