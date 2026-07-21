@@ -372,21 +372,32 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   const [showSendModal, setShowSendModal] = useState(false);
   const [showSplitBilling, setShowSplitBilling] = useState(false);
 
-  const hasVatItems = items.some(it => (it.vatRate || 0) > 0);
+  // Which rate is active globally (−1 = mixed)
+  const globalVatRate = items.length === 0 ? 0
+    : items.every(it => (it.vatRate ?? 0) === 0)  ? 0
+    : items.every(it => (it.vatRate ?? 0) === 7)  ? 7
+    : items.every(it => (it.vatRate ?? 0) === 20) ? 20
+    : -1;
 
-  const applyGlobalVat = (withVat: boolean) => {
-    setItems(prev => prev.map(it => {
-      const base = Math.round(it.qty * it.price * 100) / 100;
-      const disc = it.discount || 0;
-      const net = Math.max(0, Math.round((base - disc) * 100) / 100);
-      if (withVat) {
-        const vatAmt = Math.round(net * 0.20 * 100) / 100;
-        return { ...it, vatRate: 20, amount: Math.round((net + vatAmt) * 100) / 100 };
-      } else {
-        return { ...it, vatRate: 0, amount: net };
-      }
-    }));
+  // ПДВ — внутрішня складова суми (inclusive), amount не змінюємо
+  const applyGlobalVat = (rate: number) => {
+    setItems(prev => prev.map(it => ({ ...it, vatRate: rate })));
   };
+
+  // VAT breakdown for UI totals block
+  const vatBreakdown = (() => {
+    const groups: Record<number, { base: number; vat: number }> = {};
+    items.forEach(it => {
+      const r = it.vatRate ?? 0;
+      const vat = r > 0 ? it.amount - it.amount / (1 + r / 100) : 0;
+      const base = it.amount - vat;
+      if (!groups[r]) groups[r] = { base: 0, vat: 0 };
+      groups[r].base += base;
+      groups[r].vat  += vat;
+    });
+    return Object.entries(groups).map(([rate, g]) => ({ rate: Number(rate), ...g }));
+  })();
+  const hasVat = vatBreakdown.some(g => g.rate > 0);
 
   const total = items.reduce((s, it) => s + it.amount, 0);
   const due = total - (data.booking.paidAmount || 0);
@@ -673,21 +684,25 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
             {editing && (
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Позиції</span>
-                <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => applyGlobalVat(false)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${!hasVatItems ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
-                  >
-                    Без ПДВ
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyGlobalVat(true)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${hasVatItems ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
-                  >
-                    З ПДВ 20%
-                  </button>
+                <div className="flex items-center gap-0.5 p-1 bg-gray-100 rounded-xl">
+                  {([
+                    { rate: 0,  label: "Без ПДВ" },
+                    { rate: 7,  label: "ПДВ 7%" },
+                    { rate: 20, label: "ПДВ 20%" },
+                  ] as const).map(({ rate, label }) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => applyGlobalVat(rate)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                        globalVatRate === rate
+                          ? "bg-white shadow text-gray-900"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -817,11 +832,28 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
 
           {/* Totals */}
           <div className="flex justify-end">
-            <div className="min-w-[220px] space-y-1.5 text-sm">
+            <div className="min-w-[240px] space-y-1.5 text-sm">
               <div className="flex justify-between text-gray-500">
                 <span>Всього:</span>
                 <span className="font-semibold text-gray-800">{uah(total)}</span>
               </div>
+              {/* VAT breakdown — inclusive */}
+              {hasVat && (
+                <div className="border-t border-dashed border-gray-200 pt-1.5 space-y-1">
+                  {vatBreakdown.map(g => g.rate > 0 && (
+                    <div key={g.rate} className="flex justify-between text-xs text-gray-400">
+                      <span>в т.ч. ПДВ {g.rate}%:</span>
+                      <span>{uah(Math.round(g.vat * 100) / 100)}</span>
+                    </div>
+                  ))}
+                  {vatBreakdown.map(g => g.rate > 0 && (
+                    <div key={`b${g.rate}`} className="flex justify-between text-xs text-gray-400">
+                      <span>база {g.rate}%:</span>
+                      <span>{uah(Math.round(g.base * 100) / 100)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {data.booking.paidAmount > 0 && (
                 <div className="flex justify-between text-gray-500">
                   <span>Оплачено:</span>
