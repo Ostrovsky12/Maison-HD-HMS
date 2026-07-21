@@ -442,6 +442,11 @@ router.post("/documents", async (req: any, res) => {
       totalAmount = parseFloat(req.body.totalAmount || 0);
     }
 
+    // Round to 2 decimal places (numeric(14,2) column constraint)
+    const subtotalStr   = subtotal.toFixed(2);
+    const vatAmountStr  = vatAmount.toFixed(2);
+    const totalAmountStr = totalAmount.toFixed(2);
+
     const [doc] = await db.insert(accountingDocumentsTable).values({
       organizationId: orgId, docType: docType as any, status: (status || "draft") as any,
       docNumber, docDate, dueDate: dueDate || null, deliveryDate: deliveryDate || null,
@@ -449,7 +454,7 @@ router.post("/documents", async (req: any, res) => {
       counterpartyName: counterpartyName || null, counterpartyEdrpou: counterpartyEdrpou || null,
       subject: subject || null, description: description || null, paymentTerms: paymentTerms || null,
       notes: notes || null, currency: currency || "UAH",
-      subtotal: subtotal.toString(), vatAmount: vatAmount.toString(), totalAmount: totalAmount.toString(),
+      subtotal: subtotalStr, vatAmount: vatAmountStr, totalAmount: totalAmountStr,
       bookingId: bookingId || null, createdById: userId,
     }).returning();
 
