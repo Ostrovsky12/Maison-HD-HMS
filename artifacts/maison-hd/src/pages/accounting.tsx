@@ -2044,10 +2044,11 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
 // ─── NEW DOCUMENT DIALOG ──────────────────────────────────────────────────────
 function NewDocumentDialog() {
   const [open, setOpen] = useState(false);
+  const [vatRate, setVatRate] = useState<0 | 7 | 20>(20);
   const [form, setForm] = useState({
     docType: "invoice", docDate: format(new Date(), "yyyy-MM-dd"), dueDate: "",
     counterpartyName: "", counterpartyEdrpou: "", subject: "", paymentTerms: "",
-    subtotal: "", vatAmount: "", totalAmount: "",
+    totalAmount: "",
   });
   const qc = useQueryClient();
 
@@ -2076,9 +2077,10 @@ function NewDocumentDialog() {
     setForm(f => ({ ...f, counterpartyName: cp.name, counterpartyEdrpou: cp.edrpou || "" }));
   };
 
-  const subtotal = parseFloat(form.subtotal || "0");
-  const vat = subtotal * 0.2;
-  const total = subtotal + vat;
+  // ПДВ — внутрішня складова (inclusive): адмін вводить загальну суму
+  const total    = parseFloat(form.totalAmount || "0");
+  const vat      = vatRate > 0 ? total * vatRate / (100 + vatRate) : 0;
+  const subtotal = total - vat;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -2160,19 +2162,48 @@ function NewDocumentDialog() {
             </div>
           </div>
 
+          {/* VAT rate selector */}
+          <div>
+            <Label className="mb-1.5 block">Ставка ПДВ</Label>
+            <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
+              {([
+                { rate: 0  as const, label: "Без ПДВ" },
+                { rate: 7  as const, label: "ПДВ 7%" },
+                { rate: 20 as const, label: "ПДВ 20%" },
+              ]).map(({ rate, label }) => (
+                <button
+                  key={rate}
+                  type="button"
+                  onClick={() => setVatRate(rate)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                    vatRate === rate ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label>Сума без ПДВ, ₴</Label>
-              <Input type="number" value={form.subtotal}
-                onChange={e => setForm(f => ({ ...f, subtotal: e.target.value }))} />
+            <div className="col-span-3 sm:col-span-1">
+              <Label>Загальна сума, ₴</Label>
+              <Input type="number" min={0} step={0.01}
+                value={form.totalAmount}
+                onChange={e => setForm(f => ({ ...f, totalAmount: e.target.value }))}
+                placeholder="0.00" />
             </div>
             <div>
-              <Label>ПДВ 20%, ₴</Label>
-              <Input readOnly value={form.subtotal ? vat.toFixed(2) : ""} className="bg-gray-50" />
+              <Label>в т.ч. ПДВ {vatRate > 0 ? `${vatRate}%` : ""}, ₴</Label>
+              <Input readOnly
+                value={form.totalAmount && vatRate > 0 ? vat.toFixed(2) : vatRate === 0 ? "Без ПДВ" : ""}
+                className="bg-gray-50 text-gray-500" />
             </div>
             <div>
-              <Label>Всього з ПДВ, ₴</Label>
-              <Input readOnly value={form.subtotal ? total.toFixed(2) : ""} className="bg-gray-50 font-medium" />
+              <Label>База (без ПДВ), ₴</Label>
+              <Input readOnly
+                value={form.totalAmount ? subtotal.toFixed(2) : ""}
+                className="bg-gray-50 text-gray-500" />
             </div>
           </div>
 
@@ -2184,6 +2215,7 @@ function NewDocumentDialog() {
                 counterpartyName: form.counterpartyName, counterpartyEdrpou: form.counterpartyEdrpou,
                 subject: form.subject, paymentTerms: form.paymentTerms,
                 subtotal: subtotal, vatAmount: vat, totalAmount: total,
+                vatRate,
                 status: "draft",
               })}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white">
