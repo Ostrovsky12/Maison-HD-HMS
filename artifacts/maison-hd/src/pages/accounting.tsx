@@ -1955,7 +1955,11 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
             {/* Totals */}
             <div className="border rounded-lg p-3 space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-gray-600">Сума без ПДВ:</span><span className="font-mono">{fmtNum(d.subtotal)} ₴</span></div>
-              <div className="flex justify-between"><span className="text-gray-600">ПДВ 20%:</span><span className="font-mono">{fmtNum(d.vat_amount)} ₴</span></div>
+              {parseFloat(d.vat_amount || "0") > 0 ? (
+                <div className="flex justify-between"><span className="text-gray-600">{(() => { const vat = parseFloat(d.vat_amount||"0"); const base = parseFloat(d.total_amount||"0") - vat; const r = base > 0 ? Math.round(vat/base*100) : 0; return `ПДВ ${r}%`; })()}:</span><span className="font-mono">{fmtNum(d.vat_amount)} ₴</span></div>
+              ) : (
+                <div className="flex justify-between"><span className="text-gray-600">Без ПДВ</span><span className="font-mono">—</span></div>
+              )}
               <div className="flex justify-between font-bold text-base border-t pt-1.5"><span>Разом до сплати:</span><span className="font-mono text-emerald-700">{fmtNum(d.total_amount)} ₴</span></div>
               {parseFloat(d.paid_amount || "0") > 0 && (
                 <div className="flex justify-between text-green-600"><span>Оплачено:</span><span className="font-mono">{fmtNum(d.paid_amount)} ₴</span></div>
@@ -2056,11 +2060,21 @@ function NewDocumentDialog() {
   const isSuperAdminWithoutOrg = open && !getJwtOrgId();
   const [form, setForm] = useState({
     docType: "invoice", docDate: format(new Date(), "yyyy-MM-dd"), dueDate: "",
+    legalEntityId: "",
     counterpartyName: "", counterpartyEdrpou: "", subject: "", paymentTerms: "",
     totalAmount: "",
   });
   const qc = useQueryClient();
   const { toast } = useToast();
+
+  const { data: leData } = useQuery({
+    queryKey: ["accounting", "legal-entities-dialog"],
+    queryFn: async () => {
+      const token = localStorage.getItem("hms_token");
+      return (await fetch(`${API_BASE}/api/accounting/legal-entities`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    },
+  });
+  const legalEntities: any[] = leData?.legalEntities || [];
 
   const { data: cpData } = useQuery({
     queryKey: ["accounting", "counterparties"],
@@ -2129,6 +2143,20 @@ function NewDocumentDialog() {
               <Input type="date" value={form.docDate}
                 onChange={e => setForm(f => ({ ...f, docDate: e.target.value }))} />
             </div>
+          </div>
+
+          {/* Seller (legal entity) */}
+          <div>
+            <Label>Від кого (продавець)</Label>
+            <Select value={form.legalEntityId || "__none__"} onValueChange={v => setForm(f => ({ ...f, legalEntityId: v === "__none__" ? "" : v }))}>
+              <SelectTrigger><SelectValue placeholder="Оберіть юридичну особу" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— не вказано —</SelectItem>
+                {legalEntities.map((le: any) => (
+                  <SelectItem key={le.id} value={String(le.id)}>{le.short_name || le.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -2244,6 +2272,7 @@ function NewDocumentDialog() {
             <Button disabled={mut.isPending || !form.docType || !form.docDate || isSuperAdminWithoutOrg}
               onClick={() => mut.mutate({
                 docType: form.docType, docDate: form.docDate, dueDate: form.dueDate || undefined,
+                legalEntityId: form.legalEntityId ? parseInt(form.legalEntityId) : undefined,
                 counterpartyName: form.counterpartyName, counterpartyEdrpou: form.counterpartyEdrpou,
                 subject: form.subject, paymentTerms: form.paymentTerms,
                 subtotal: subtotal, vatAmount: vat, totalAmount: total,
