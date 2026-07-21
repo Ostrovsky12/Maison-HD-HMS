@@ -2051,6 +2051,7 @@ function NewDocumentDialog() {
     totalAmount: "",
   });
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   const { data: cpData } = useQuery({
     queryKey: ["accounting", "counterparties"],
@@ -2068,9 +2069,19 @@ function NewDocumentDialog() {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      return r.json();
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || `Помилка ${r.status}`);
+      return data;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounting"] }); setOpen(false); },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["accounting", "documents"] });
+      qc.invalidateQueries({ queryKey: ["accounting"] });
+      toast({ title: "Документ створено", description: data?.document?.docNumber || data?.docNumber || "" });
+      setOpen(false);
+    },
+    onError: (e: any) => {
+      toast({ title: "Помилка збереження", description: e.message, variant: "destructive" });
+    },
   });
 
   const handleCpSelect = (cp: any) => {
