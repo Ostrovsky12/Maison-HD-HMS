@@ -410,8 +410,8 @@ router.get("/documents/:id", async (req: any, res) => {
 
 router.post("/documents", async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const userId = req.user?.id;
+    const orgId = req.user?.organizationId ? Number(req.user.organizationId) : null;
+    const userId = req.user?.userId ?? req.user?.id ?? null;
     const {
       docType, docDate, dueDate, deliveryDate,
       legalEntityId, counterpartyId, counterpartyName, counterpartyEdrpou,
@@ -419,6 +419,7 @@ router.post("/documents", async (req: any, res) => {
       items = [], status,
     } = req.body;
 
+    if (!orgId) return res.status(400).json({ error: "Не вдалося визначити організацію. Будь ласка, перелогіньтесь." });
     if (!docType || !docDate) return res.status(400).json({ error: "Тип та дата обов'язкові" });
 
     const docNumber = await genDocNumber(orgId, docType);
