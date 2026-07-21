@@ -659,12 +659,16 @@ router.get("/documents/:id/export/:format", async (req: any, res) => {
       // Drizzle returns camelCase — normalize to snake_case for HTML generators
       const docSnake = {
         ...doc,
-        doc_number:        (doc as any).docNumber       ?? (doc as any).doc_number,
-        doc_date:          (doc as any).docDate         ?? (doc as any).doc_date,
-        vat_amount:        (doc as any).vatAmount       ?? (doc as any).vat_amount,
-        total_amount:      (doc as any).totalAmount     ?? (doc as any).total_amount,
-        counterparty_name: (doc as any).counterpartyName  ?? (doc as any).counterparty_name,
-        counterparty_edrpou:(doc as any).counterpartyEdrpou ?? (doc as any).counterparty_edrpou,
+        doc_number:          (doc as any).docNumber          ?? (doc as any).doc_number,
+        doc_date:            (doc as any).docDate            ?? (doc as any).doc_date,
+        vat_amount:          (doc as any).vatAmount          ?? (doc as any).vat_amount,
+        subtotal:            (doc as any).subtotal           ?? (doc as any).subtotal,
+        total_amount:        (doc as any).totalAmount        ?? (doc as any).total_amount,
+        counterparty_name:   (doc as any).counterpartyName   ?? (doc as any).counterparty_name,
+        counterparty_edrpou: (doc as any).counterpartyEdrpou ?? (doc as any).counterparty_edrpou,
+        payment_terms:       (doc as any).paymentTerms       ?? (doc as any).payment_terms,
+        subject:             (doc as any).subject            ?? (doc as any).subject,
+        notes:               (doc as any).notes              ?? (doc as any).notes,
       };
       const itemsSnake = items.map((it: any) => ({
         ...it,
@@ -914,7 +918,7 @@ function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): stri
 <div style="overflow:hidden">
   <table class="totals">
     <tr><td class="label">Без ПДВ:</td><td class="right">${parseFloat(doc?.subtotal || 0).toFixed(2)} ₴</td></tr>
-    <tr><td class="label">ПДВ 20%:</td><td class="right">${parseFloat(doc?.vat_amount || 0).toFixed(2)} ₴</td></tr>
+    ${(() => { const vat = parseFloat(doc?.vat_amount || 0); const total = parseFloat(doc?.total_amount || 0); const base = total - vat; const rate = (vat > 0 && base > 0) ? Math.round(vat / base * 100) : 0; return rate > 0 ? `<tr><td class="label">ПДВ ${rate}%:</td><td class="right">${vat.toFixed(2)} ₴</td></tr>` : `<tr><td class="label">Без ПДВ / не обкладається:</td><td class="right">—</td></tr>`; })()}
     <tr><td class="label"><b>Разом до оплати:</b></td><td class="right"><b>${parseFloat(doc?.total_amount || 0).toFixed(2)} ₴</b></td></tr>
   </table>
 </div>
