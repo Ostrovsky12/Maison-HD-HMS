@@ -867,24 +867,32 @@ function generatePnXml(pn: any, items: any[]): string {
 
 function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): string {
   // If no line items — use subject as the single row (standard UA invoice format)
-  const effectiveItems = items.length > 0 ? items : (doc?.subject ? [{
+  const noItems = items.length === 0;
+  const syntheticVatRate = (() => { const vat = parseFloat(doc?.vat_amount || 0); const total = parseFloat(doc?.total_amount || 0); const base = total - vat; return (vat > 0 && base > 0) ? Math.round(vat / base * 100) : 0; })();
+  const effectiveItems = noItems ? (doc?.subject ? [{
     name: doc.subject,
     unit: "послуга",
     quantity: 1,
-    unit_price: parseFloat(doc?.total_amount || 0),
-    vat_rate: (() => { const vat = parseFloat(doc?.vat_amount || 0); const total = parseFloat(doc?.total_amount || 0); const base = total - vat; return (vat > 0 && base > 0) ? Math.round(vat / base * 100) : 0; })(),
+    unit_price: parseFloat(doc?.subtotal || 0),
+    vat_rate: syntheticVatRate,
+    vat_amount: parseFloat(doc?.vat_amount || 0),
     total_amount: parseFloat(doc?.total_amount || 0),
-  }] : []);
-  const itemsHtml = effectiveItems.map((it, i) => `
+  }] : []) : items;
+  const itemsHtml = effectiveItems.map((it, i) => {
+    const vatCell = (it.vat_amount !== undefined && noItems)
+      ? `${parseFloat(it.vat_amount).toFixed(2)} ₴`
+      : `${parseFloat(it.vat_rate || 0)}%`;
+    return `
     <tr>
       <td class="num">${i + 1}</td>
       <td>${escXml(it.name || it.description || "Послуга")}</td>
       <td class="center">${it.unit || "шт"}</td>
       <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
       <td class="right">${parseFloat(it.unit_price || 0).toFixed(2)}</td>
-      <td class="right">${parseFloat(it.vat_rate || 0)}%</td>
+      <td class="right">${vatCell}</td>
       <td class="right"><b>${parseFloat(it.total_amount || 0).toFixed(2)}</b></td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
 
   return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
 <style>
