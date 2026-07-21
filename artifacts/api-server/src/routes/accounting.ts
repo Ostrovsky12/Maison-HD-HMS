@@ -910,6 +910,7 @@ function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): stri
 <div class="meta">
   <b>Постачальник:</b> ${escXml(entity?.name || "—")} | ЄДРПОУ: ${escXml(entity?.edrpou || "—")}<br>
   <b>Покупець:</b> ${escXml(cp?.name || doc?.counterparty_name || "—")} | ЄДРПОУ: ${escXml(cp?.edrpou || doc?.counterparty_edrpou || "—")}${cp?.iban ? `<br><b>IBAN покупця:</b> ${escXml(cp.iban)}` : ""}
+  ${doc?.subject ? `<br><b>Призначення платежу:</b> ${escXml(doc.subject)}` : ""}
 </div>
 <table>
   <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна, ₴</th><th class="right">ПДВ</th><th class="right">Сума, ₴</th></tr></thead>
