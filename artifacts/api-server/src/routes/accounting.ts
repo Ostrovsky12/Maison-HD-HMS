@@ -866,14 +866,23 @@ function generatePnXml(pn: any, items: any[]): string {
 }
 
 function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): string {
-  const itemsHtml = items.map((it, i) => `
+  // If no line items — use subject as the single row (standard UA invoice format)
+  const effectiveItems = items.length > 0 ? items : (doc?.subject ? [{
+    name: doc.subject,
+    unit: "послуга",
+    quantity: 1,
+    unit_price: parseFloat(doc?.total_amount || 0),
+    vat_rate: (() => { const vat = parseFloat(doc?.vat_amount || 0); const total = parseFloat(doc?.total_amount || 0); const base = total - vat; return (vat > 0 && base > 0) ? Math.round(vat / base * 100) : 0; })(),
+    total_amount: parseFloat(doc?.total_amount || 0),
+  }] : []);
+  const itemsHtml = effectiveItems.map((it, i) => `
     <tr>
       <td class="num">${i + 1}</td>
       <td>${escXml(it.name || it.description || "Послуга")}</td>
       <td class="center">${it.unit || "шт"}</td>
       <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
       <td class="right">${parseFloat(it.unit_price || 0).toFixed(2)}</td>
-      <td class="right">${parseFloat(it.vat_rate || 20)}%</td>
+      <td class="right">${parseFloat(it.vat_rate || 0)}%</td>
       <td class="right"><b>${parseFloat(it.total_amount || 0).toFixed(2)}</b></td>
     </tr>`).join("");
 
@@ -910,7 +919,6 @@ function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): stri
 <div class="meta">
   <b>Постачальник:</b> ${escXml(entity?.name || "—")} | ЄДРПОУ: ${escXml(entity?.edrpou || "—")}<br>
   <b>Покупець:</b> ${escXml(cp?.name || doc?.counterparty_name || "—")} | ЄДРПОУ: ${escXml(cp?.edrpou || doc?.counterparty_edrpou || "—")}${cp?.iban ? `<br><b>IBAN покупця:</b> ${escXml(cp.iban)}` : ""}
-  ${doc?.subject ? `<br><b>Призначення платежу:</b> ${escXml(doc.subject)}` : ""}
 </div>
 <table>
   <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна, ₴</th><th class="right">ПДВ</th><th class="right">Сума, ₴</th></tr></thead>
