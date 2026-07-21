@@ -2007,27 +2007,56 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
                   <CreditCard className="h-4 w-4 mr-1" /> Позначити оплаченим
                 </Button>
               )}
-              {/* Print button — fetch HTML with Bearer token then open as blob */}
-              {(d.doc_type === "act" || d.doc_type === "invoice") && (
-                <Button size="sm" variant="outline"
-                  className="border-blue-300 text-blue-700 hover:bg-blue-50"
-                  onClick={async () => {
-                    const fmt = d.doc_type === "act" ? "act-ua" : "invoice-ua";
-                    const token = localStorage.getItem("hms_token");
-                    try {
+              {/* Print / Save PDF / Send buttons — fetch HTML with Bearer token then open as blob */}
+              {(d.doc_type === "act" || d.doc_type === "invoice") && (() => {
+                const openHtml = async (autoPrint: boolean) => {
+                  const fmt = d.doc_type === "act" ? "act-ua" : "invoice-ua";
+                  const token = localStorage.getItem("hms_token");
+                  const r = await fetch(`${API_BASE}/api/accounting/documents/${d.id}/export/${fmt}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  const html = await r.text();
+                  const blob = new Blob([html], { type: "text/html; charset=utf-8" });
+                  const url = URL.createObjectURL(blob);
+                  const win = window.open(url, "_blank");
+                  if (autoPrint) win?.addEventListener("load", () => { win.print(); URL.revokeObjectURL(url); });
+                };
+                return (<>
+                  <Button size="sm" variant="outline"
+                    className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                    onClick={() => openHtml(true)}>
+                    <Printer className="h-4 w-4 mr-1" /> Роздрукувати
+                  </Button>
+                  <Button size="sm" variant="outline"
+                    className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    onClick={() => openHtml(false)}
+                    title="Відкриє документ у новій вкладці → Ctrl+P → Зберегти як PDF">
+                    <Download className="h-4 w-4 mr-1" /> Зберегти PDF
+                  </Button>
+                  <Button size="sm" variant="outline"
+                    className="border-sky-300 text-sky-700 hover:bg-sky-50"
+                    onClick={async () => {
+                      const fmt = d.doc_type === "act" ? "act-ua" : "invoice-ua";
+                      const token = localStorage.getItem("hms_token");
                       const r = await fetch(`${API_BASE}/api/accounting/documents/${d.id}/export/${fmt}`, {
                         headers: { Authorization: `Bearer ${token}` },
                       });
                       const html = await r.text();
                       const blob = new Blob([html], { type: "text/html; charset=utf-8" });
                       const url = URL.createObjectURL(blob);
-                      const win = window.open(url, "_blank");
-                      win?.addEventListener("load", () => { win.print(); URL.revokeObjectURL(url); });
-                    } catch { /* ignore */ }
-                  }}>
-                  <Printer className="h-4 w-4 mr-1" /> Роздрукувати
-                </Button>
-              )}
+                      const cpName = d.counterparty_name || "";
+                      const docNum = d.doc_number || "";
+                      const total = d.total_amount ? parseFloat(d.total_amount).toLocaleString("uk-UA", { minimumFractionDigits: 2 }) : "";
+                      const subject = encodeURIComponent(`${d.doc_type === "act" ? "Акт" : "Рахунок"} ${docNum}`);
+                      const body = encodeURIComponent(`Доброго дня${cpName ? `, ${cpName}` : ""}!\n\nНадсилаємо ${d.doc_type === "act" ? "акт виконаних робіт" : "рахунок"} ${docNum} на суму ${total} ₴.\n\nДокумент відкрийте за посиланням нижче або зверніться до нас за додатковою інформацією.\n\nЗ повагою,\nMaison HD`);
+                      // Open document in new tab + prefill mailto
+                      window.open(url, "_blank");
+                      setTimeout(() => { window.location.href = `mailto:?subject=${subject}&body=${body}`; }, 500);
+                    }}>
+                    <Send className="h-4 w-4 mr-1" /> Надіслати рахунок
+                  </Button>
+                </>);
+              })()}
               <Button size="sm" variant="outline" onClick={() => exportDoc("bas-xml")}>
                 <Download className="h-4 w-4 mr-1" /> Вивантажити в BAS
               </Button>
