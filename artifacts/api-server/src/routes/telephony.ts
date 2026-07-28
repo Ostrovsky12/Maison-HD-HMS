@@ -19,7 +19,7 @@ const BINOTEL_IPS = new Set([
 ]);
 
 // ── Inline schemas ────────────────────────────────────────────────────────────
-const settingsTable = pgTable("telephony_settings", {
+export const settingsTable = pgTable("telephony_settings", {
   id: serial("id").primaryKey(),
   organizationId: integer("organization_id").notNull(),
   isEnabled: boolean("is_enabled").notNull().default(true),
@@ -55,7 +55,7 @@ const linesTable = pgTable("phone_lines", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-const callLogsTable = pgTable("call_logs", {
+export const callLogsTable = pgTable("call_logs", {
   id: serial("id").primaryKey(),
   organizationId: integer("organization_id").notNull(),
   direction: varchar("direction", { length: 10 }).notNull().default("inbound"),

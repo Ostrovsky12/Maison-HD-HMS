@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { setupVoiceWebsocket } from "./routes/voice-agent.js";
 import { autoSeedIfEmpty, syncSuperAdmin, seedOrg39LegalEntities } from "./lib/auto-seed";
 import { seedGuideDataIfEmpty } from "./routes/guide.js";
 import { db } from "@workspace/db";
@@ -773,6 +774,9 @@ async function bootstrap() {
   }
 
   const server = createServer(app);
+
+  // ── Twilio Media Stream WebSocket (voice-agent) ────────────────────────────
+  setupVoiceWebsocket(server);
 
   // ── WebSocket signaling server for WebRTC internal calls ───────────────────
   const wss = new WebSocketServer({ server, path: "/ws/telephony" });

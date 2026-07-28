@@ -11,6 +11,7 @@
     "seed:demo": "node_modules/.bin/tsx src/lib/demo-seed.ts"
   },
   "dependencies": {
+    "@deepgram/sdk": "^5.7.0",
     "@google-cloud/storage": "^7.19.0",
     "@types/nodemailer": "^7.0.11",
     "@types/web-push": "^3.6.4",
@@ -25,12 +26,14 @@
     "express": "^5",
     "google-auth-library": "^10.6.2",
     "jsonwebtoken": "^9.0.3",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^8.0.4",
     "openai": "^6.33.0",
     "pg": "^8.20.0",
     "pino": "^9",
     "pino-http": "^10",
     "qrcode": "^1.5.4",
+    "twilio": "^6.0.2",
     "web-push": "^3.6.7",
     "ws": "^8.20.0"
   },
@@ -41,6 +44,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "catalog:",
+    "@types/node-fetch": "^2.6.13",
     "@types/qrcode": "^1.5.6",
     "esbuild": "^0.27.3",
     "esbuild-plugin-pino": "^2.3.3",
