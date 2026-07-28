@@ -1,0 +1,70 @@
+// backend/routes/servio.ts
+import { Router } from "express";
+import { requireAuth } from "../lib/auth.js";
+import fetch from "node-fetch";
+
+const router = Router();
+
+// Mock data for MVP (until Servio provides real API)
+const MOCK_ROOMS = [
+  { id: 1, name: "Стандартний", price: 1500, capacity: 2, available: true },
+  { id: 2, name: "Напівлюкс", price: 2000, capacity: 2, available: true },
+  { id: 3, name: "Люкс", price: 2800, capacity: 3, available: false },
+  { id: 4, name: "Сімейний", price: 3500, capacity: 4, available: true }
+];
+
+/**
+ * GET /api/telephony/servio/availability
+ * Повертає список доступних номерів на вказані дати
+ */
+router.get("/servio/availability", requireAuth, async (req, res) => {
+  const { checkIn, checkOut, guests } = req.query;
+  
+  try {
+    // В МАЙБУТНЬОМУ: Тут буде реальний запит до Servio API
+    /*
+    const response = await fetch(`https://api.servio.support/v1/availability`, {
+      headers: { "Authorization": `Bearer ${process.env.SERVIO_API_KEY}` },
+      body: JSON.stringify({ checkIn, checkOut, guests })
+    });
+    const data = await response.json();
+    return res.json(data);
+    */
+
+    // ДЛЯ MVP: Повертаємо mock дані
+    // Фільтруємо номери, які доступні і вміщують потрібну кількість гостей
+    const guestCount = parseInt(guests as string) || 2;
+    
+    const availableRooms = MOCK_ROOMS.filter(room => 
+      room.available && room.capacity >= guestCount
+    );
+
+    res.json({
+      checkIn: checkIn || new Date().toISOString().split('T')[0],
+      checkOut: checkOut || new Date(Date.now() + 86400000).toISOString().split('T')[0],
+      availableRooms,
+      totalFound: availableRooms.length
+    });
+    
+  } catch (error: any) {
+    console.error("[Servio API Error]", error);
+    res.status(500).json({ error: "Failed to fetch availability from Servio" });
+  }
+});
+
+/**
+ * POST /api/telephony/servio/book (Draft)
+ * Створює попереднє бронювання
+ */
+router.post("/servio/book", requireAuth, async (req, res) => {
+  const { roomId, checkIn, checkOut, guestName, phone } = req.body;
+  
+  // Для MVP просто повертаємо успіх
+  res.json({
+    success: true,
+    bookingId: `B-${Math.floor(Math.random() * 10000)}`,
+    message: "Бронювання успішно створено. Очікуйте дзвінка адміністратора."
+  });
+});
+
+export default router;
