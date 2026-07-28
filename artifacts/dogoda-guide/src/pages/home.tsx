@@ -33,9 +33,9 @@ export default function Home() {
               <Leaf className="w-5 h-5" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-sm font-semibold text-foreground">Весна у Дзвінковому</h3>
+              <h3 className="text-sm font-semibold text-foreground">Літо у Дзвінковому</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Ліс прокидається — ідеальний час для прогулянок та спостереження за перелітними птахами на Ірпені.
+                Розпал сезону — гриби та ягоди вже у лісі, Ірпінь теплий і тихий, ранкові прогулянки — найкраще, що тут є.
               </p>
             </div>
           </CardContent>

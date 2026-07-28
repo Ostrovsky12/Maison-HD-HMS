@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Filter, X, Navigation, Crosshair, Loader2 } from "lucide-react";
 
-const DOGODA_CENTER: [number, number] = [50.2705, 30.0395];
+const DOGODA_CENTER: [number, number] = [50.2583, 30.0468];
 
 const categoryColors: Record<string, string> = {
   trees: "#3d6b4f",
