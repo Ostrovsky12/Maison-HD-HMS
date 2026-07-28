@@ -496,7 +496,7 @@ async function seedGuideDataIfEmpty() {
     // Route points
     // locIds indices: 0=lisove-dzherelo, 1=grybna-galyavyna, 2=vikova-sosna,
     //   3=bereh-irpenya, 4=mohyla-ferchuka, 5=dub-velyeten,
-    //   6=vyd-na-dolyny-irpenya, 7=konyushnya-dogoda, 8=pishchani-kruchy
+    //   6=vyd-na-dolyny-irpenya, 7=konyushnya-zvinkove, 8=pishchani-kruchy
     if (locIds.length >= 9 && routeIds.length >= 5) {
       const ptData = [
         { ri: 0, pts: [0, 2, 6] },       // Ранковий до джерела: dzherelo → vikova-sosna → vyd
