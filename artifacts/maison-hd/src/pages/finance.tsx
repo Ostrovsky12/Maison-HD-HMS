@@ -24,8 +24,17 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 const token = () => localStorage.getItem("hms_token") || "";
-const apiFetch = (path: string, opts?: RequestInit) =>
-  fetch(`${API_BASE}/api/finance/${path}`, { ...opts, headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json", ...(opts?.headers || {}) } }).then(r => r.json());
+const apiFetch = async (path: string, opts?: RequestInit) => {
+  const r = await fetch(`${API_BASE}/api/finance/${path}`, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json", ...(opts?.headers || {}) },
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.message || err.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+};
 
 const fmtDate = (d: any) => { try { return format(new Date(d), "dd.MM.yyyy", { locale: uk }); } catch { return "—"; } };
 const fmtDateTime = (d: any) => { try { return format(new Date(d), "dd.MM HH:mm", { locale: uk }); } catch { return "—"; } };

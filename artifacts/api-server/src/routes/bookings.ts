@@ -3,6 +3,7 @@ import { db, pool } from "@workspace/db";
 import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable, housekeepingTasksTable, guestServiceOrdersTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, inArray, desc, sql, or, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { validateTransition, canCancel, type BookingStatus } from "../lib/bookingStateMachine.js";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
 import { generateBookingQR } from "../lib/qr.js";
 import { logger } from "../lib/logger.js";
@@ -85,7 +86,12 @@ router.get("/", requireAuth, async (req, res) => {
   const { unitId, guestId, status, dateFrom, dateTo, propertyId } = req.query;
 
   let propIds: number[] = [];
-  if (propertyId) {
+  if (propertyId && user.organizationId) {
+    // Validate the supplied propertyId belongs to caller's org
+    const propCheck = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(and(eq(propertiesTable.id, parseInt(propertyId as string)), eq(propertiesTable.organizationId, user.organizationId)));
+    propIds = propCheck.map(p => p.id);
+  } else if (propertyId && user.role === "super_admin") {
     propIds = [parseInt(propertyId as string)];
   } else if (user.organizationId) {
     const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
@@ -94,7 +100,13 @@ router.get("/", requireAuth, async (req, res) => {
   }
 
   let unitIds: number[] = [];
-  if (unitId) {
+  if (unitId && user.organizationId) {
+    // Validate the supplied unitId belongs to caller's org via property join
+    const unitCheck = await db.select({ id: unitsTable.id }).from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(and(eq(unitsTable.id, parseInt(unitId as string)), eq(propertiesTable.organizationId, user.organizationId)));
+    unitIds = unitCheck.map(u => u.id);
+  } else if (unitId && user.role === "super_admin") {
     unitIds = [parseInt(unitId as string)];
   } else if (propIds.length > 0) {
     const units = await db.select({ id: unitsTable.id }).from(unitsTable)
@@ -201,6 +213,17 @@ router.post("/", requireAuth, async (req, res) => {
     }
   }
 
+  // Validate dates
+  if (checkIn && checkOut) {
+    const ci = new Date(checkIn); const co = new Date(checkOut);
+    if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
+      res.status(400).json({ error: "Validation", message: "Invalid date format" }); return;
+    }
+    if (ci >= co) {
+      res.status(400).json({ error: "Validation", message: "checkOut must be after checkIn" }); return;
+    }
+  }
+
   const isDraft = status === "draft";
   const draftExpiresAt = isDraft ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null;
   const guestsCount = (adults || 1) + (childrenUnder6 || 0) + (childrenOver6 || 0);
@@ -209,6 +232,11 @@ router.post("/", requireAuth, async (req, res) => {
   const isPayOnArrival = Boolean(payOnArrival);
   const partial = partialAmount ? Number(partialAmount) : null;
   const total = Number(totalAmount || 0);
+  // Validate totalAmount — must be a non-negative finite number
+  if (!Number.isFinite(total) || total < 0) {
+    res.status(400).json({ error: "Validation", message: "totalAmount must be a non-negative number" });
+    return;
+  }
   let initialPaid = "0";
   let initialPaymentStatus = "unpaid";
   if (partial !== null && partial > 0 && partial < total) {
@@ -217,40 +245,81 @@ router.post("/", requireAuth, async (req, res) => {
   }
   const arrivalNote = isPayOnArrival ? "Оплата при заїзді" : null;
 
-  const [booking] = await db.insert(bookingsTable).values({
-    unitId,
-    guestId: guestId || null,
-    checkIn,
-    checkOut,
-    checkinTime: checkinTime || "14:00",
-    checkoutTime: checkoutTime || "12:00",
-    status: status || "confirmed",
-    source: source || "direct",
-    rateId: rateId || null,
-    rateName: rateName || null,
-    adults: adults || 1,
-    childrenUnder6: childrenUnder6 || 0,
-    childrenOver6: childrenOver6 || 0,
-    extraBeds: extraBeds || 0,
-    guestsCount,
-    withPets: Boolean(withPets),
-    firstName: firstName || null,
-    lastName: lastName || null,
-    middleName: middleName || null,
-    phone: phone || null,
-    totalAmount: String(total),
-    paidAmount: initialPaid,
-    paymentStatus: initialPaymentStatus,
-    payOnArrival: isPayOnArrival,
-    discountId: discountId || null,
-    discountValue: discountValue ? String(discountValue) : null,
-    discountType: discountType || null,
-    selectedAddons: selectedAddons || {},
-    legalEntityId: legalEntityId || null,
-    notes,
-    internalNotes: arrivalNote,
-    draftExpiresAt,
-  }).returning();
+  // ── Atomic availability check + insert inside a transaction ─────────────
+  // Uses FOR UPDATE lock on the unit row to prevent concurrent double-booking.
+  const client = await pool.connect();
+  let booking: any;
+  try {
+    await client.query("BEGIN");
+
+    // Validate unit belongs to caller's org (prevents booking units from other tenants)
+    if (user.organizationId) {
+      const orgCheck = await client.query(
+        `SELECT u.id FROM units u JOIN properties p ON p.id = u.property_id
+         WHERE u.id = $1 AND p.organization_id = $2 LIMIT 1`,
+        [unitId, user.organizationId],
+      );
+      if (!orgCheck.rows.length) {
+        await client.query("ROLLBACK");
+        res.status(403).json({ error: "Forbidden", message: "Unit not in your organization" });
+        return;
+      }
+    }
+
+    // Lock the unit row to serialize concurrent booking attempts
+    await client.query("SELECT id FROM units WHERE id = $1 FOR UPDATE", [unitId]);
+
+    // Check for overlapping active bookings [checkIn, checkOut)
+    const overlapResult = await client.query(
+      `SELECT id FROM bookings
+       WHERE unit_id = $1
+         AND status IN ('pending','confirmed','checked_in')
+         AND check_in  < $3
+         AND check_out > $2
+       LIMIT 1`,
+      [unitId, checkIn, checkOut],
+    );
+
+    if (overlapResult.rows.length > 0 && !isDraft) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ error: "Conflict", message: "Номер вже зайнятий на ці дати" });
+      return;
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO bookings (
+        unit_id, guest_id, organization_id, check_in, check_out,
+        checkin_time, checkout_time, status, source,
+        rate_id, rate_name, adults, children_under6, children_over6,
+        extra_beds, guests_count, with_pets,
+        first_name, last_name, middle_name, phone,
+        total_amount, paid_amount, payment_status, pay_on_arrival,
+        discount_id, discount_value, discount_type,
+        selected_addons, legal_entity_id, notes, internal_notes, draft_expires_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+        $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
+      ) RETURNING *`,
+      [
+        unitId, guestId || null, user.organizationId || null, checkIn, checkOut,
+        checkinTime || "14:00", checkoutTime || "12:00", status || "confirmed", source || "direct",
+        rateId || null, rateName || null, adults || 1, childrenUnder6 || 0, childrenOver6 || 0,
+        extraBeds || 0, guestsCount, Boolean(withPets),
+        firstName || null, lastName || null, middleName || null, phone || null,
+        String(total), initialPaid, initialPaymentStatus, isPayOnArrival,
+        discountId || null, discountValue ? String(discountValue) : null, discountType || null,
+        JSON.stringify(selectedAddons || {}), legalEntityId || null, notes || null, arrivalNote, draftExpiresAt,
+      ],
+    );
+
+    await client.query("COMMIT");
+    booking = inserted.rows[0];
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 
   if (guestId && !isDraft) {
     await db.update(guestsTable).set({
@@ -265,17 +334,41 @@ router.post("/", requireAuth, async (req, res) => {
 
   const guestName = g ? `${g.firstName} ${g.lastName}` : (lastName ? `${lastName} ${firstName || ""}`.trim() : "Гість");
 
+  // Raw SQL returns snake_case — map to camelCase for API consistency
+  const bookingId2 = booking.id;
+  const normalizedBooking = {
+    id: booking.id,
+    unitId: booking.unit_id,
+    guestId: booking.guest_id,
+    organizationId: booking.organization_id,
+    checkIn: booking.check_in,
+    checkOut: booking.check_out,
+    checkinTime: booking.checkin_time,
+    checkoutTime: booking.checkout_time,
+    status: booking.status,
+    source: booking.source,
+    totalAmount: Number(booking.total_amount),
+    paidAmount: Number(booking.paid_amount),
+    paymentStatus: booking.payment_status,
+    guestsCount: booking.guests_count,
+    adults: booking.adults,
+    firstName: booking.first_name,
+    lastName: booking.last_name,
+    phone: booking.phone,
+    notes: booking.notes,
+    guestAccessCode: booking.guest_access_code,
+    createdAt: booking.created_at,
+  };
+
   // Auto-generate guest access code for confirmed/checked_in bookings
-  let guestAccessCode = booking.guestAccessCode;
+  let guestAccessCode = normalizedBooking.guestAccessCode;
   if (!isDraft && !guestAccessCode) {
     guestAccessCode = genGuestCode();
-    await db.update(bookingsTable).set({ guestAccessCode, updatedAt: new Date() }).where(eq(bookingsTable.id, booking.id));
+    await db.update(bookingsTable).set({ guestAccessCode, updatedAt: new Date() }).where(eq(bookingsTable.id, bookingId2));
   }
 
   res.status(201).json({
-    ...booking,
-    totalAmount: Number(booking.totalAmount),
-    paidAmount: Number(booking.paidAmount),
+    ...normalizedBooking,
     guestName,
     unitName: u?.name || null,
     guestAccessCode,
@@ -284,7 +377,7 @@ router.post("/", requireAuth, async (req, res) => {
   // Fire-and-forget notifications (don't block response)
   if (!isDraft && user.organizationId) {
     notifyBookingCreated(user.organizationId, {
-      id: booking.id,
+      id: normalizedBooking.id,
       guestName,
       unitName: u?.name,
       checkIn: booking.checkIn,
@@ -353,53 +446,106 @@ router.post("/group", requireAuth, async (req, res) => {
     initialPaymentStatus = "partial";
   }
 
+  // ── Atomic group booking: single transaction with per-unit lock + overlap check ──
+  const client = await pool.connect();
   const created: any[] = [];
-  for (const unit of units) {
-    const guestsCount = (unit.adults || 1) + (unit.childrenUnder6 || 0) + (unit.childrenOver6 || 0);
-    const unitTotal = Number(unit.totalAmount || 0);
-    const [booking] = await db.insert(bookingsTable).values({
-      unitId: unit.unitId,
-      guestId: guestId || null,
-      organizationId: user.organizationId || null,
-      checkIn,
-      checkOut,
-      checkinTime: checkinTime || "14:00",
-      checkoutTime: checkoutTime || "12:00",
-      status: bookingStatus as any,
-      source: (source || "direct") as any,
-      rateId: rateId || null,
-      rateName: rateName || null,
-      adults: unit.adults || 1,
-      childrenUnder6: unit.childrenUnder6 || 0,
-      childrenOver6: unit.childrenOver6 || 0,
-      extraBeds: unit.extraBeds || 0,
-      guestsCount,
-      firstName: firstName || null,
-      lastName: lastName || null,
-      middleName: middleName || null,
-      phone: phone || null,
-      totalAmount: String(unitTotal),
-      paidAmount: initialPaid,
-      paymentStatus: initialPaymentStatus as any,
-      payOnArrival: isPayOnArrival,
-      discountId: discountId || null,
-      discountValue: discountValue ? String(discountValue) : null,
-      discountType: discountType || null,
-      selectedAddons: selectedAddons || {},
-      legalEntityId: legalEntityId || null,
-      notes,
-      internalNotes: isPayOnArrival ? "Оплата при заїзді" : null,
-      groupBookingId,
-      draftExpiresAt,
-    } as any).returning();
-    const [u] = await db.select().from(unitsTable).where(eq(unitsTable.id, unit.unitId)).limit(1);
-    // Auto-generate guest access code for non-draft bookings
-    let guestAccessCode = booking.guestAccessCode;
-    if (!isDraft && !guestAccessCode) {
-      guestAccessCode = genGuestCode();
-      await db.update(bookingsTable).set({ guestAccessCode, updatedAt: new Date() }).where(eq(bookingsTable.id, booking.id));
+  try {
+    await client.query("BEGIN");
+
+    for (const unit of units) {
+      const unitId = unit.unitId;
+
+      // Verify unit belongs to caller's org
+      if (user.organizationId) {
+        const orgCheck = await client.query(
+          `SELECT u.id FROM units u JOIN properties p ON p.id = u.property_id
+           WHERE u.id = $1 AND p.organization_id = $2 LIMIT 1`,
+          [unitId, user.organizationId],
+        );
+        if (!orgCheck.rows.length) {
+          await client.query("ROLLBACK");
+          res.status(403).json({ error: "Forbidden", message: `Unit ${unitId} not in your organization` });
+          return;
+        }
+      }
+
+      // Lock unit row to prevent concurrent double-booking
+      await client.query("SELECT id FROM units WHERE id = $1 FOR UPDATE", [unitId]);
+
+      // Check overlap for non-draft bookings
+      if (!isDraft) {
+        const overlap = await client.query(
+          `SELECT id FROM bookings WHERE unit_id = $1 AND status IN ('pending','confirmed','checked_in')
+           AND check_in < $3 AND check_out > $2 LIMIT 1`,
+          [unitId, checkIn, checkOut],
+        );
+        if (overlap.rows.length) {
+          await client.query("ROLLBACK");
+          res.status(409).json({ error: "Conflict", message: `Номер ${unitId} вже зайнятий на ці дати` });
+          return;
+        }
+      }
+
+      const guestsCount = (unit.adults || 1) + (unit.childrenUnder6 || 0) + (unit.childrenOver6 || 0);
+      const unitTotal = Number(unit.totalAmount || 0);
+      const ins = await client.query(
+        `INSERT INTO bookings (
+          unit_id, guest_id, organization_id, check_in, check_out,
+          checkin_time, checkout_time, status, source,
+          rate_id, rate_name, adults, children_under6, children_over6,
+          extra_beds, guests_count, first_name, last_name, middle_name, phone,
+          total_amount, paid_amount, payment_status, pay_on_arrival,
+          discount_id, discount_value, discount_type, selected_addons,
+          legal_entity_id, notes, internal_notes, group_booking_id, draft_expires_at
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+          $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
+        ) RETURNING *`,
+        [
+          unitId, guestId || null, user.organizationId || null, checkIn, checkOut,
+          checkinTime || "14:00", checkoutTime || "12:00", bookingStatus, source || "direct",
+          rateId || null, rateName || null, unit.adults || 1, unit.childrenUnder6 || 0, unit.childrenOver6 || 0,
+          unit.extraBeds || 0, guestsCount, firstName || null, lastName || null, middleName || null, phone || null,
+          String(unitTotal), initialPaid, initialPaymentStatus, isPayOnArrival,
+          discountId || null, discountValue ? String(discountValue) : null, discountType || null,
+          JSON.stringify(selectedAddons || {}), legalEntityId || null, notes || null,
+          isPayOnArrival ? "Оплата при заїзді" : null, groupBookingId, draftExpiresAt,
+        ],
+      );
+      const booking = ins.rows[0];
+
+      // Auto-generate guest access code
+      let guestAccessCode = booking.guest_access_code;
+      if (!isDraft && !guestAccessCode) {
+        guestAccessCode = genGuestCode();
+        await client.query(
+          "UPDATE bookings SET guest_access_code = $1, updated_at = NOW() WHERE id = $2",
+          [guestAccessCode, booking.id],
+        );
+      }
+
+      // Fetch unit name
+      const uRow = await client.query("SELECT name FROM units WHERE id = $1 LIMIT 1", [unitId]);
+      created.push({
+        id: booking.id,
+        unitId: booking.unit_id,
+        organizationId: booking.organization_id,
+        checkIn: booking.check_in,
+        checkOut: booking.check_out,
+        status: booking.status,
+        totalAmount: Number(booking.total_amount),
+        paidAmount: Number(booking.paid_amount),
+        unitName: uRow.rows[0]?.name || null,
+        guestAccessCode,
+      });
     }
-    created.push({ ...booking, totalAmount: Number(booking.totalAmount), unitName: u?.name || null, guestAccessCode });
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
 
   // Update guest stats
@@ -789,6 +935,7 @@ router.get("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
 
 router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
+  const user = (req as any).user;
   const {
     checkIn, checkOut, status, paymentStatus, source, totalAmount, notes,
     checkinTime, checkoutTime, rateId, rateName,
@@ -798,6 +945,37 @@ router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
     selectedAddons, legalEntityId,
     payOnArrival, partialAmount, withPets,
   } = req.body;
+
+  // Validate dates if supplied — checkIn must be before checkOut
+  if (checkIn !== undefined || checkOut !== undefined) {
+    const ci = new Date(checkIn ?? ""); const co = new Date(checkOut ?? "");
+    // If both are present, validate order
+    if (checkIn && checkOut) {
+      if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
+        res.status(400).json({ error: "Validation", message: "Invalid date format" }); return;
+      }
+      if (ci >= co) {
+        res.status(400).json({ error: "Validation", message: "checkOut must be after checkIn" }); return;
+      }
+    } else if (checkIn && isNaN(ci.getTime())) {
+      res.status(400).json({ error: "Validation", message: "Invalid checkIn date" }); return;
+    } else if (checkOut && isNaN(co.getTime())) {
+      res.status(400).json({ error: "Validation", message: "Invalid checkOut date" }); return;
+    }
+  }
+
+  // Validate status transition if status is being changed
+  if (status !== undefined) {
+    const [current] = await db.select({ status: bookingsTable.status }).from(bookingsTable)
+      .where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (current && current.status !== status) {
+      const check = validateTransition(current.status as BookingStatus, status as BookingStatus, user.role);
+      if (!check.ok) {
+        res.status(check.httpStatus ?? 422).json({ error: check.error });
+        return;
+      }
+    }
+  }
 
   const guestsCount = (adults ?? undefined) !== undefined
     ? (adults || 1) + (childrenUnder6 || 0) + (childrenOver6 || 0)
@@ -825,7 +1003,15 @@ router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
     ...(lastName !== undefined && { lastName }),
     ...(middleName !== undefined && { middleName }),
     ...(phone !== undefined && { phone }),
-    ...(totalAmount !== undefined && { totalAmount: String(totalAmount) }),
+    // totalAmount: validate it's a non-negative finite number; NaN/negative/non-finite rejected with 400
+    ...(totalAmount !== undefined && (() => {
+      const n = Number(totalAmount);
+      if (!Number.isFinite(n) || n < 0) {
+        res.status(400).json({ error: "Validation", message: "totalAmount must be a non-negative number" });
+        return null; // signal to caller
+      }
+      return { totalAmount: n.toFixed(2) };
+    })() || {}),
     ...(discountId !== undefined && { discountId }),
     ...(discountValue !== undefined && { discountValue: String(discountValue) }),
     ...(discountType !== undefined && { discountType }),
@@ -846,6 +1032,16 @@ router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
 
 router.delete("/:bookingId", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
+  const [current] = await db.select({ status: bookingsTable.status }).from(bookingsTable)
+    .where(eq(bookingsTable.id, bookingId)).limit(1);
+  if (!current) {
+    res.status(404).json({ error: "Not Found", message: "Booking not found" });
+    return;
+  }
+  if (!canCancel(current.status as BookingStatus)) {
+    res.status(409).json({ error: `Cannot cancel a booking with status "${current.status}"` });
+    return;
+  }
   const [booking] = await db.update(bookingsTable).set({ status: "cancelled", updatedAt: new Date() })
     .where(eq(bookingsTable.id, bookingId)).returning();
   if (!booking) {
@@ -857,13 +1053,18 @@ router.delete("/:bookingId", requireAuth, requireBookingOwnership, async (req, r
 
 router.patch("/:bookingId/status", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
-  const { status } = req.body;
-  const [booking] = await db.update(bookingsTable).set({ status, updatedAt: new Date() })
+  const { status: newStatus } = req.body;
+  const user = (req as any).user;
+
+  const [current] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+  if (!current) { res.status(404).json({ error: "Not Found", message: "Booking not found" }); return; }
+
+  const check = validateTransition(current.status as BookingStatus, newStatus as BookingStatus, user.role);
+  if (!check.ok) { res.status(check.httpStatus ?? 422).json({ error: check.error }); return; }
+
+  const [booking] = await db.update(bookingsTable)
+    .set({ status: newStatus, updatedAt: new Date() })
     .where(eq(bookingsTable.id, bookingId)).returning();
-  if (!booking) {
-    res.status(404).json({ error: "Not Found", message: "Booking not found" });
-    return;
-  }
   res.json({ ...booking, totalAmount: Number(booking.totalAmount), paidAmount: Number(booking.paidAmount) });
 });
 
@@ -876,10 +1077,10 @@ router.post("/:bookingId/checkin", requireAuth, requireBookingOwnership, async (
     res.status(404).json({ error: "Not Found", message: "Booking not found" });
     return;
   }
-  if (booking.status === "checked_in") {
-    res.status(400).json({ error: "Гість вже заселений" });
-    return;
-  }
+
+  const check = validateTransition(booking.status as BookingStatus, "checked_in", user.role);
+  if (!check.ok) { res.status(check.httpStatus ?? 422).json({ error: check.error }); return; }
+
   const [updated] = await db.update(bookingsTable)
     .set({ status: "checked_in", updatedAt: new Date() })
     .where(eq(bookingsTable.id, bookingId))
@@ -915,10 +1116,9 @@ router.post("/:bookingId/checkout", requireAuth, requireBookingOwnership, async 
     res.status(404).json({ error: "Not Found", message: "Booking not found" });
     return;
   }
-  if (booking.status === "checked_out") {
-    res.status(400).json({ error: "Гість вже виселений" });
-    return;
-  }
+
+  const check = validateTransition(booking.status as BookingStatus, "checked_out", user.role);
+  if (!check.ok) { res.status(check.httpStatus ?? 422).json({ error: check.error }); return; }
   const [updated] = await db.update(bookingsTable)
     .set({ status: "checked_out", updatedAt: new Date() })
     .where(eq(bookingsTable.id, bookingId))
@@ -983,6 +1183,12 @@ router.post("/:bookingId/cancel", requireAuth, requireBookingOwnership, async (r
     res.status(404).json({ error: "Not Found", message: "Booking not found" });
     return;
   }
+
+  if (!canCancel(booking.status as BookingStatus)) {
+    res.status(409).json({ error: `Не можна скасувати бронювання зі статусом "${booking.status}"` });
+    return;
+  }
+
   const [updated] = await db.update(bookingsTable)
     .set({ status: "cancelled", updatedAt: new Date() })
     .where(eq(bookingsTable.id, bookingId))

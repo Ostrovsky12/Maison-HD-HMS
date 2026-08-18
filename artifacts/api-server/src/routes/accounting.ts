@@ -109,19 +109,55 @@ router.patch("/legal-entities/:id", async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
     const orgId = req.user?.organizationId;
-    const fields = req.body;
-    const sets = Object.entries(fields)
-      .filter(([k]) => !["id", "organizationId", "createdAt"].includes(k))
-      .map(([k, v]) => `${k.replace(/([A-Z])/g, '_$1').toLowerCase()} = ${v === null ? 'NULL' : `'${v}'`}`)
-      .join(", ");
+    if (!orgId) { res.status(401).json({ error: "Unauthorized" }); return; }
 
-    if (!sets) return res.json({ success: true });
-    if (fields.isDefault) {
+    // Explicit allowlist — never use arbitrary body keys in SQL (SQL-injection + org_id overwrite risk)
+    const {
+      name, shortName, fullName, type, edrpou, ipn, vatNumber, isVatPayer,
+      iban, bank, mfo, director, accountant, phone, email,
+      legalAddress, actualAddress, liqpayPublicKey, liqpayPrivateKey, isDefault, isActive,
+    } = req.body;
+
+    // If marking as default, clear all others first (org-scoped)
+    if (isDefault) {
       await db.execute(sql`UPDATE legal_entities SET is_default = false WHERE organization_id = ${orgId}`);
     }
-    await db.execute(sql`UPDATE legal_entities SET ${sql.raw(sets)}, updated_at = NOW() WHERE id = ${id} AND organization_id = ${orgId}`);
-    const [updated] = await db.select().from(legalEntitiesTable).where(eq(legalEntitiesTable.id, id));
-    res.json({ entity: updated });
+
+    // Build safe parameterized update
+    const db_ = (db as any).$client;
+    const updates: string[] = ["updated_at = NOW()"];
+    const params: any[] = [id, orgId];
+    let idx = 3;
+    const addField = (col: string, val: any) => {
+      if (val !== undefined) { updates.push(`${col} = $${idx++}`); params.push(val); }
+    };
+    addField("name", name);
+    addField("short_name", shortName);
+    addField("full_name", fullName);
+    addField("type", type);
+    addField("edrpou", edrpou);
+    addField("ipn", ipn);
+    addField("vat_number", vatNumber);
+    addField("is_vat_payer", isVatPayer);
+    addField("iban", iban);
+    addField("bank", bank);
+    addField("mfo", mfo);
+    addField("director", director);
+    addField("accountant", accountant);
+    addField("phone", phone);
+    addField("email", email);
+    addField("legal_address", legalAddress);
+    addField("actual_address", actualAddress);
+    addField("liqpay_public_key", liqpayPublicKey);
+    addField("liqpay_private_key", liqpayPrivateKey);
+    addField("is_default", isDefault);
+    addField("is_active", isActive);
+
+    const { rows } = await db_.query(
+      `UPDATE legal_entities SET ${updates.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *`,
+      params,
+    );
+    res.json({ entity: rows[0] || null });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -350,22 +386,36 @@ router.get("/documents", async (req: any, res) => {
     const orgId = req.user?.organizationId;
     const { type, status, search, year, limit: lim } = req.query;
 
-    let whereClause = `organization_id = ${orgId}`;
-    if (type) whereClause += ` AND doc_type = '${type}'::acc_doc_type`;
-    if (status) whereClause += ` AND status = '${status}'::acc_doc_status`;
-    if (year) whereClause += ` AND EXTRACT(YEAR FROM doc_date) = ${year}`;
-    if (search) whereClause += ` AND (doc_number ILIKE '%${search}%' OR counterparty_name ILIKE '%${search}%' OR subject ILIKE '%${search}%')`;
-
-    const docs = await db.execute(sql`
-      SELECT d.*, le.name as legal_entity_name, le.short_name as legal_entity_short_name,
-             c.name as counterparty_name_from_table, c.edrpou as counterparty_edrpou_from_table
-      FROM accounting_documents d
-      LEFT JOIN legal_entities le ON le.id = d.legal_entity_id
-      LEFT JOIN counterparties c ON c.id = d.counterparty_id
-      WHERE d.${sql.raw(whereClause)}
-      ORDER BY d.doc_date DESC, d.id DESC
-      LIMIT ${parseInt(lim as string) || 200}
-    `);
+    // Build parameterized query — never use sql.raw with user input
+    const ACC_DOC_TYPES = ["invoice","act","contract","estimate","payment_order","tax_invoice","other"];
+    const ACC_DOC_STATUSES_GET = ["draft","sent","approved","signed","paid","cancelled","overdue"];
+    const conditions: string[] = ["d.organization_id = $1"];
+    const params: any[] = [orgId];
+    const add = (clause: string, val: any) => { params.push(val); conditions.push(clause.replace("?", `$${params.length}`)); };
+    if (type && ACC_DOC_TYPES.includes(type as string)) add("d.doc_type = ?::acc_doc_type", type);
+    if (status && ACC_DOC_STATUSES_GET.includes(status as string)) add("d.status = ?::acc_doc_status", status);
+    if (year && /^\d{4}$/.test(year as string)) add("EXTRACT(YEAR FROM d.doc_date) = ?", parseInt(year as string));
+    if (search) add("(d.doc_number ILIKE ? OR d.counterparty_name ILIKE ? OR d.subject ILIKE ?)", `%${search}%`);
+    // search adds one param but three placeholders — fix:
+    if (search) {
+      // Remove the last added search clause and re-add with proper multi-placeholder
+      conditions.pop(); params.pop();
+      const s = `%${(search as string).replace(/%/g, "\\%")}%`;
+      params.push(s); params.push(s); params.push(s);
+      conditions.push(`(d.doc_number ILIKE $${params.length - 2} OR d.counterparty_name ILIKE $${params.length - 1} OR d.subject ILIKE $${params.length})`);
+    }
+    const db_ = (db as any).$client;
+    const docs = await db_.query(
+      `SELECT d.*, le.name as legal_entity_name, le.short_name as legal_entity_short_name,
+              c.name as counterparty_name_from_table, c.edrpou as counterparty_edrpou_from_table
+       FROM accounting_documents d
+       LEFT JOIN legal_entities le ON le.id = d.legal_entity_id
+       LEFT JOIN counterparties c ON c.id = d.counterparty_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY d.doc_date DESC, d.id DESC
+       LIMIT $${params.length + 1}`,
+      [...params, parseInt(lim as string) || 200],
+    );
 
     // Summary stats
     const stats = await db.execute(sql`
@@ -491,15 +541,39 @@ router.post("/documents", async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+const ACC_DOC_STATUSES = ["draft", "signed", "paid", "partially_paid", "cancelled", "overdue"] as const;
 router.patch("/documents/:id", async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
     const orgId = req.user?.organizationId;
+    if (!orgId) { res.status(401).json({ error: "Unauthorized" }); return; }
     const { status, paidAmount, signedAt, paidAt, medocRegNumber, vchasnoId, vchasnoStatus, notes } = req.body;
+
+    // Validate status against known enum
+    if (status !== undefined && !ACC_DOC_STATUSES.includes(status)) {
+      res.status(422).json({ error: `Invalid document status "${status}". Allowed: ${ACC_DOC_STATUSES.join(", ")}` });
+      return;
+    }
+
+    // paidAmount must be a non-negative number
+    if (paidAmount !== undefined && (isNaN(Number(paidAmount)) || Number(paidAmount) < 0)) {
+      res.status(422).json({ error: "paidAmount must be a non-negative number" });
+      return;
+    }
+
+    // Guard: cannot patch paid/signed documents back to draft without explicit override
+    const [doc] = await db.select().from(accountingDocumentsTable)
+      .where(and(eq(accountingDocumentsTable.id, id), eq(accountingDocumentsTable.organizationId, orgId)))
+      .limit(1);
+    if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
+    if (["paid", "signed"].includes(doc.status) && status === "draft") {
+      res.status(409).json({ error: "Cannot revert a paid or signed document to draft" });
+      return;
+    }
 
     const updates: Record<string, any> = { updatedAt: new Date() };
     if (status !== undefined) updates.status = status;
-    if (paidAmount !== undefined) updates.paidAmount = paidAmount.toString();
+    if (paidAmount !== undefined) updates.paidAmount = Number(paidAmount).toFixed(2);
     if (signedAt !== undefined) updates.signedAt = new Date(signedAt);
     if (paidAt !== undefined) updates.paidAt = new Date(paidAt);
     if (medocRegNumber !== undefined) updates.medocRegNumber = medocRegNumber;
@@ -1232,11 +1306,19 @@ router.post("/tax-invoices/:id/submit-vchasno", async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+const TAX_INVOICE_STATUSES = ["draft", "sent", "registered", "rejected", "cancelled"] as const;
 router.patch("/tax-invoices/:id", async (req: any, res) => {
   try {
     const orgId = req.user?.organizationId;
+    if (!orgId) { res.status(401).json({ error: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
     const { status, registrationNumber, rejectionReason, notes } = req.body;
+
+    if (status !== undefined && !TAX_INVOICE_STATUSES.includes(status)) {
+      res.status(422).json({ error: `Invalid tax invoice status "${status}"` });
+      return;
+    }
+
     const updates: string[] = ["updated_at = NOW()"];
     const params: any[] = [id, orgId];
     let idx = 3;
@@ -1352,10 +1434,11 @@ router.patch("/signing-requests/:id", async (req: any, res) => {
     const { rows } = await (db as any).$client.query(
       `UPDATE ua_signing_requests SET ${updates.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *`, params);
 
-    // If signed, update document status
+    // If signed, update document status — scoped to same org to prevent cross-tenant write
     if (status === "signed" && rows[0]?.doc_id) {
       await (db as any).$client.query(
-        `UPDATE accounting_documents SET status = 'signed', signed_at = NOW() WHERE id = $1`, [rows[0].doc_id]);
+        `UPDATE accounting_documents SET status = 'signed', signed_at = NOW()
+         WHERE id = $1 AND organization_id = $2`, [rows[0].doc_id, orgId]);
     }
     res.json({ request: rows[0] });
   } catch (err: any) { res.status(500).json({ error: err.message }); }

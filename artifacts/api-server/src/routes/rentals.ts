@@ -171,11 +171,30 @@ router.post("/contracts", requireAuth, async (req: any, res) => {
 });
 
 // ─── PATCH /contracts/:id ─────────────────────────────────────────────────────
+const RENTAL_CONTRACT_STATUSES = ["upcoming", "active", "completed", "terminated"] as const;
 router.patch("/contracts/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
+    const { status, notes, monthlyRate, depositAmount, endDate, tenantName, tenantPhone, tenantEmail } = req.body;
+    // Allowlist: never spread req.body — only accept known safe fields
+    const updates: Record<string, any> = { updatedAt: new Date() };
+    if (status !== undefined) {
+      if (!RENTAL_CONTRACT_STATUSES.includes(status)) {
+        res.status(422).json({ error: `Invalid status "${status}". Allowed: ${RENTAL_CONTRACT_STATUSES.join(", ")}` });
+        return;
+      }
+      updates.status = status;
+    }
+    if (notes !== undefined) updates.notes = notes;
+    if (monthlyRate !== undefined) updates.monthlyRate = String(Number(monthlyRate));
+    if (depositAmount !== undefined) updates.depositAmount = String(Number(depositAmount));
+    if (endDate !== undefined) updates.endDate = endDate;
+    if (tenantName !== undefined) updates.tenantName = tenantName;
+    if (tenantPhone !== undefined) updates.tenantPhone = tenantPhone;
+    if (tenantEmail !== undefined) updates.tenantEmail = tenantEmail;
+
     const [c] = await db.update(rentalContractsTable)
-      .set({ ...req.body, updatedAt: new Date() })
+      .set(updates)
       .where(and(eq(rentalContractsTable.id, parseInt(req.params.id)), eq(rentalContractsTable.organizationId, orgId)))
       .returning();
     res.json({ contract: c });
@@ -211,11 +230,26 @@ router.get("/payments", requireAuth, async (req: any, res) => {
 });
 
 // ─── PATCH /payments/:id ──────────────────────────────────────────────────────
+const RENTAL_PAYMENT_STATUSES = ["pending", "paid", "overdue", "partial", "cancelled"] as const;
 router.patch("/payments/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
+    const { status, amount, paidDate, paymentMethod, notes } = req.body;
+    const updates: Record<string, any> = {};
+    if (status !== undefined) {
+      if (!RENTAL_PAYMENT_STATUSES.includes(status)) {
+        res.status(422).json({ error: `Invalid payment status "${status}"` });
+        return;
+      }
+      updates.status = status;
+    }
+    if (amount !== undefined) updates.amount = String(Number(amount));
+    if (paidDate !== undefined) updates.paidDate = paidDate;
+    if (paymentMethod !== undefined) updates.paymentMethod = paymentMethod;
+    if (notes !== undefined) updates.notes = notes;
+
     const [p] = await db.update(rentalPaymentsTable)
-      .set(req.body)
+      .set(updates)
       .where(and(eq(rentalPaymentsTable.id, parseInt(req.params.id)), eq(rentalPaymentsTable.organizationId, orgId)))
       .returning();
     res.json({ payment: p });
@@ -247,11 +281,25 @@ router.get("/requests", requireAuth, async (req: any, res) => {
 });
 
 // ─── PATCH /requests/:id ──────────────────────────────────────────────────────
+const RENTAL_REQUEST_STATUSES = ["open", "in_progress", "resolved", "cancelled"] as const;
 router.patch("/requests/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const updates: any = { ...req.body };
-    if (req.body.status === "resolved") updates.resolvedAt = new Date();
+    const { status, title, description, priority, notes } = req.body;
+    const updates: Record<string, any> = {};
+    if (status !== undefined) {
+      if (!RENTAL_REQUEST_STATUSES.includes(status)) {
+        res.status(422).json({ error: `Invalid request status "${status}"` });
+        return;
+      }
+      updates.status = status;
+      if (status === "resolved") updates.resolvedAt = new Date();
+    }
+    if (title !== undefined) updates.title = title;
+    if (description !== undefined) updates.description = description;
+    if (priority !== undefined) updates.priority = priority;
+    if (notes !== undefined) updates.notes = notes;
+
     const [r] = await db.update(rentalRequestsTable)
       .set(updates)
       .where(and(eq(rentalRequestsTable.id, parseInt(req.params.id)), eq(rentalRequestsTable.organizationId, orgId)))

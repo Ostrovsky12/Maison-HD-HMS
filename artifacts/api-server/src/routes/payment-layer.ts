@@ -65,12 +65,15 @@ router.post("/webhook/liqpay", async (req, res) => {
       sessionId = session.id;
       const privKey = session.liqpay_private_key || process.env.LIQPAY_PRIVATE_KEY || "";
       const expected = crypto.createHash("sha1").update(privKey + data + privKey).digest("base64");
-      isValid = expected === signature;
+      // Use timing-safe comparison to prevent timing attacks on webhook verification
+      isValid = expected.length === signature.length &&
+        crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
     } else {
       const privKey = process.env.LIQPAY_PRIVATE_KEY || "";
       if (privKey) {
         const expected = crypto.createHash("sha1").update(privKey + data + privKey).digest("base64");
-        isValid = expected === signature;
+        isValid = expected.length === signature.length &&
+          crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
       }
     }
 

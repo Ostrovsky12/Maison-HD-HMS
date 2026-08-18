@@ -785,9 +785,10 @@ router.post("/orders", requireAuth, async (req: any, res) => {
     );
 
     if (tableId) {
+      // Scope the table update to the same org to prevent cross-tenant write
       await db_.query(
-        `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2`,
-        [order.id, tableId]
+        `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2 AND organization_id = $3`,
+        [order.id, tableId, orgId]
       );
     }
 
@@ -869,9 +870,10 @@ router.post("/orders/:id/items", requireAuth, async (req: any, res) => {
       [orderId]
     );
     const newTotal = parseFloat(sumRows[0].total).toFixed(2);
+    // Scope total update to org to prevent cross-tenant write
     await db_.query(
-      `UPDATE fb_orders SET total_amount = $1, updated_at = NOW() WHERE id = $2`,
-      [newTotal, orderId]
+      `UPDATE fb_orders SET total_amount = $1, updated_at = NOW() WHERE id = $2 AND organization_id = $3`,
+      [newTotal, orderId, orgId]
     );
 
     res.json({ item: orderItem, newTotal });
@@ -1090,11 +1092,11 @@ router.post("/cashbox/movement", requireAuth, async (req: any, res) => {
     const amt = Math.abs(Number(amount) || 0);
     if (type === "in") {
       await db_.query(
-        `UPDATE cashbox_sessions SET cash_in=cash_in+$1, expected_balance=expected_balance+$1 WHERE id=$2`, [amt, sessionId]
+        `UPDATE cashbox_sessions SET cash_in=cash_in+$1, expected_balance=expected_balance+$1 WHERE id=$2 AND organization_id=$3`, [amt, sessionId, orgId]
       );
     } else {
       await db_.query(
-        `UPDATE cashbox_sessions SET cash_out=cash_out+$1, expected_balance=GREATEST(0,expected_balance-$1) WHERE id=$2`, [amt, sessionId]
+        `UPDATE cashbox_sessions SET cash_out=cash_out+$1, expected_balance=GREATEST(0,expected_balance-$1) WHERE id=$2 AND organization_id=$3`, [amt, sessionId, orgId]
       );
     }
     const r = await db_.query(`SELECT * FROM cashbox_sessions WHERE id=$1`, [sessionId]);
@@ -1347,7 +1349,7 @@ router.post("/orders/:id/return", requireAuth, async (req: any, res) => {
        `ПОВЕРНЕННЯ. Причина: ${reason || "не вказана"}. Оригінал: ${order.receipt_number || orderId}`]
     );
     await db_.query(
-      `UPDATE fb_orders SET notes=CONCAT(COALESCE(notes,''), ' [ПОВЕРНЕНО]'), updated_at=NOW() WHERE id=$1`, [orderId]
+      `UPDATE fb_orders SET notes=CONCAT(COALESCE(notes,''), ' [ПОВЕРНЕНО]'), updated_at=NOW() WHERE id=$1 AND organization_id=$2`, [orderId, orgId]
     );
     res.json({ returnOrder: retR.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -1505,8 +1507,8 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
       // Non-blocking — log but don't fail payment
       console.error("[CHECKBOX ПРРО] Error:", fiscalErr.message);
       await db_.query(
-        `UPDATE fb_orders SET fiscal_status = 'error', fiscal_data = $1 WHERE id = $2`,
-        [JSON.stringify({ error: fiscalErr.message }), orderId]
+        `UPDATE fb_orders SET fiscal_status = 'error', fiscal_data = $1 WHERE id = $2 AND organization_id = $3`,
+        [JSON.stringify({ error: fiscalErr.message }), orderId, orgId]
       );
     }
 
@@ -1828,19 +1830,19 @@ router.post("/orders/:id/merge", requireAuth, async (req: any, res) => {
       [targetOrderId, srcId, orgId]
     );
 
-    // Cancel source order
+    // Cancel source order — org-scoped
     await db_.query(
-      `UPDATE fb_orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
-      [srcId]
+      `UPDATE fb_orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND organization_id = $2`,
+      [srcId, orgId]
     );
 
-    // Recalculate target total
+    // Recalculate target total — org-scoped
     await db_.query(
       `UPDATE fb_orders
        SET total_amount = (SELECT COALESCE(SUM(total_price),0) FROM fb_order_items WHERE order_id = $1 AND status != 'cancelled'),
            updated_at = NOW()
-       WHERE id = $1`,
-      [targetOrderId]
+       WHERE id = $1 AND organization_id = $2`,
+      [targetOrderId, orgId]
     );
 
     // Return updated target order with items

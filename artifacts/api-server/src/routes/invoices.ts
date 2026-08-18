@@ -120,14 +120,31 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Helper: verify invoice belongs to caller's org (via legal entity) ────────
+async function assertInvoiceAccess(invoiceId: number, user: any): Promise<{ invoice: any } | { error: string; status: number }> {
+  const [invoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoiceId)).limit(1);
+  if (!invoice) return { error: "Not found", status: 404 };
+  if (user.role === "super_admin") return { invoice };
+  if (!user.organizationId) return { error: "Forbidden", status: 403 };
+  // Scope via legalEntityId — invoicesTable has no direct organizationId column
+  if (invoice.legalEntityId) {
+    const { legalEntitiesTable } = await import("@workspace/db/schema");
+    const [le] = await db.select({ orgId: legalEntitiesTable.organizationId })
+      .from(legalEntitiesTable).where(eq(legalEntitiesTable.id, invoice.legalEntityId)).limit(1);
+    if (!le || le.orgId !== user.organizationId) return { error: "Forbidden", status: 403 };
+  } else {
+    return { error: "Forbidden", status: 403 };
+  }
+  return { invoice };
+}
+
 // ─── Get single invoice ──────────────────────────────────────────────────────
 router.get("/:invoiceId", requireAuth, async (req, res) => {
   try {
     const invoiceId = parseInt(req.params.invoiceId);
-    const [invoice] = await db.select().from(invoicesTable)
-      .where(eq(invoicesTable.id, invoiceId)).limit(1);
-    if (!invoice) return res.status(404).json({ error: "Not found" });
-    res.json(invoice);
+    const result = await assertInvoiceAccess(invoiceId, (req as any).user);
+    if ("error" in result) return res.status(result.status).json({ error: result.error });
+    res.json(result.invoice);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -137,6 +154,8 @@ router.get("/:invoiceId", requireAuth, async (req, res) => {
 router.put("/:invoiceId", requireAuth, async (req, res) => {
   try {
     const invoiceId = parseInt(req.params.invoiceId);
+    const access = await assertInvoiceAccess(invoiceId, (req as any).user);
+    if ("error" in access) return res.status(access.status).json({ error: access.error });
     const { invoiceType, status, amount, description, dueDate, buyer, items, seller, legalEntityId, notes } = req.body;
 
     const total = items
@@ -169,6 +188,8 @@ router.put("/:invoiceId", requireAuth, async (req, res) => {
 router.delete("/:invoiceId", requireAuth, async (req, res) => {
   try {
     const invoiceId = parseInt(req.params.invoiceId);
+    const access = await assertInvoiceAccess(invoiceId, (req as any).user);
+    if ("error" in access) return res.status(access.status).json({ error: access.error });
     await db.delete(invoicesTable).where(eq(invoicesTable.id, invoiceId));
     res.json({ success: true });
   } catch (e: any) {
@@ -180,10 +201,10 @@ router.delete("/:invoiceId", requireAuth, async (req, res) => {
 router.post("/:invoiceId/pay", requireAuth, async (req, res) => {
   try {
     const invoiceId = parseInt(req.params.invoiceId);
+    const access = await assertInvoiceAccess(invoiceId, (req as any).user);
+    if ("error" in access) return res.status(access.status).json({ error: access.error });
+    const existing = access.invoice;
     const { paymentMethod, paidAmount } = req.body;
-
-    const [existing] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoiceId)).limit(1);
-    if (!existing) return res.status(404).json({ error: "Not found" });
 
     const [invoice] = await db.update(invoicesTable).set({
       status: "paid",

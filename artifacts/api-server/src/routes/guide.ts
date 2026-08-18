@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
 
@@ -123,20 +124,24 @@ router.get("/categories", async (_req, res) => {
 // ─── GET /guide/locations ────────────────────────────────────────────────────
 router.get("/locations", async (req, res) => {
   const { categoryId, internal } = req.query;
+  const params: any[] = [];
   const conditions: string[] = ["l.is_active = true"];
-  if (categoryId) conditions.push(`l.category_id = ${parseInt(String(categoryId))}`);
+  if (categoryId) {
+    const catId = parseInt(String(categoryId));
+    if (!isNaN(catId)) { params.push(catId); conditions.push(`l.category_id = $${params.length}`); }
+  }
   if (internal === "true") conditions.push("l.is_internal = true");
   if (internal === "false") conditions.push("l.is_internal = false");
-  const where = conditions.join(" AND ");
 
-  const rows = await db.execute(sql.raw(`
-    SELECT l.*, c.name_ua AS category_name_ua, c.icon AS category_icon
-    FROM guide_locations l
-    LEFT JOIN guide_categories c ON c.id = l.category_id
-    WHERE ${where}
-    ORDER BY l.id
-  `));
-  res.json(rows.rows.map(mapLocation));
+  const { rows } = await (db as any).$client.query(
+    `SELECT l.*, c.name_ua AS category_name_ua, c.icon AS category_icon
+     FROM guide_locations l
+     LEFT JOIN guide_categories c ON c.id = l.category_id
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY l.id`,
+    params,
+  );
+  res.json(rows.map(mapLocation));
 });
 
 // ─── GET /guide/locations/:id ────────────────────────────────────────────────
@@ -197,8 +202,14 @@ router.put("/locations/:id", async (req, res) => {
 });
 
 // ─── DELETE /guide/locations/:id ─────────────────────────────────────────────
-router.delete("/locations/:id", async (req, res) => {
-  await db.execute(sql`DELETE FROM guide_locations WHERE id = ${parseInt(req.params.id)}`);
+router.delete("/locations/:id", requireAuth, async (req: any, res) => {
+  const orgId = req.user?.organizationId;
+  const id = parseInt(req.params.id);
+  if (orgId) {
+    await db.execute(sql`DELETE FROM guide_locations WHERE id = ${id} AND organization_id = ${orgId}`);
+  } else {
+    await db.execute(sql`DELETE FROM guide_locations WHERE id = ${id}`);
+  }
   res.status(204).end();
 });
 
@@ -303,8 +314,14 @@ router.put("/routes/:id", async (req, res) => {
 });
 
 // ─── DELETE /guide/routes/:id ─────────────────────────────────────────────────
-router.delete("/routes/:id", async (req, res) => {
-  await db.execute(sql`DELETE FROM guide_routes WHERE id = ${parseInt(req.params.id)}`);
+router.delete("/routes/:id", requireAuth, async (req: any, res) => {
+  const orgId = req.user?.organizationId;
+  const id = parseInt(req.params.id);
+  if (orgId) {
+    await db.execute(sql`DELETE FROM guide_routes WHERE id = ${id} AND organization_id = ${orgId}`);
+  } else {
+    await db.execute(sql`DELETE FROM guide_routes WHERE id = ${id}`);
+  }
   res.status(204).end();
 });
 

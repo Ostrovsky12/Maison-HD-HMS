@@ -29,7 +29,29 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, requireRole("super_admin", "owner", "manager"), async (req, res) => {
   const user = (req as any).user;
   const { email, name, password, role, organizationId, propertyId } = req.body;
+
+  // super_admin can create users for any org — but must supply a valid orgId
   const orgId = user.role === "super_admin" ? organizationId : user.organizationId;
+  if (!orgId) {
+    res.status(400).json({ error: "organizationId is required" });
+    return;
+  }
+
+  // Prevent privilege escalation: only super_admin can create super_admin users
+  if (role === "super_admin" && user.role !== "super_admin") {
+    res.status(403).json({ error: "Forbidden", message: "Cannot create super_admin users" });
+    return;
+  }
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: "Validation", message: "Valid email is required" });
+    return;
+  }
+  if (!password || password.length < 8) {
+    res.status(400).json({ error: "Validation", message: "Password must be at least 8 characters" });
+    return;
+  }
+
   const passwordHash = await hashPassword(password);
   const [newUser] = await db.insert(usersTable).values({
     email,

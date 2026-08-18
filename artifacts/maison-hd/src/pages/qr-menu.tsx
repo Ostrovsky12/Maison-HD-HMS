@@ -323,6 +323,10 @@ export default function QrMenuPage() {
         }),
       });
       const d = await r.json();
+      if (!r.ok) {
+        toast({ title: "Помилка замовлення", description: d.error || `HTTP ${r.status}`, variant: "destructive" });
+        return;
+      }
       if (d.orderId) {
         setOrderId(d.orderId);
         setSubmitted(true);

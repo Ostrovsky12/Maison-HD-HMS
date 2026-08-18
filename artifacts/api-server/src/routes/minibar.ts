@@ -93,7 +93,22 @@ router.post("/bookings/:bookingId/charges", requireAuth, async (req: any, res) =
 });
 
 router.delete("/charges/:id", requireAuth, async (req: any, res) => {
+  const orgId = req.user?.organizationId;
   const id = parseInt(req.params.id);
+  // Scope to org via booking → unit → property chain
+  if (orgId) {
+    const check = await db.execute(sql`
+      SELECT mc.id FROM minibar_charges mc
+      JOIN bookings b ON b.id = mc.booking_id
+      JOIN units u ON u.id = b.unit_id
+      JOIN properties p ON p.id = u.property_id
+      WHERE mc.id = ${id} AND p.organization_id = ${orgId}
+      LIMIT 1
+    `);
+    if (!check.rows.length) {
+      res.status(403).json({ error: "Forbidden" }); return;
+    }
+  }
   await db.delete(minibarChargesTable).where(eq(minibarChargesTable.id, id));
   res.json({ ok: true });
 });

@@ -1,12 +1,8 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { pool } from "@workspace/db";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
-
-const raw = (q: string, params: any[] = []) =>
-  db.execute(sql.raw(q.replace(/\$(\d+)/g, (_, i) => `$${i}`), params));
 
 // ── HOLIDAYS ───────────────────────────────────────────────────────────────
 
@@ -15,11 +11,15 @@ router.get("/holidays", requireAuth, async (req: any, res) => {
   try {
     const orgId = req.user?.organizationId;
     const { propertyId } = req.query;
-    let query = `SELECT * FROM calendar_holidays WHERE organization_id = ${orgId}`;
-    if (propertyId && propertyId !== "all") query += ` AND (property_id = ${Number(propertyId)} OR property_id IS NULL)`;
+    const params: any[] = [orgId];
+    let query = `SELECT * FROM calendar_holidays WHERE organization_id = $1`;
+    if (propertyId && propertyId !== "all") {
+      params.push(Number(propertyId));
+      query += ` AND (property_id = $${params.length} OR property_id IS NULL)`;
+    }
     query += ` ORDER BY date ASC`;
-    const result = await db.execute(sql.raw(query));
-    res.json(result.rows);
+    const { rows } = await pool.query(query, params);
+    res.json(rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -31,12 +31,12 @@ router.post("/holidays", requireAuth, async (req: any, res) => {
     const orgId = req.user?.organizationId;
     const { date, name, color = "#ef4444", isRecurring = false, propertyId = null } = req.body;
     if (!date || !name) return res.status(400).json({ error: "date та name обов'язкові" });
-    const result = await db.execute(sql.raw(
+    const { rows } = await pool.query(
       `INSERT INTO calendar_holidays (organization_id, property_id, date, name, color, is_recurring)
-       VALUES (${orgId}, ${propertyId ? propertyId : "NULL"}, '${date}', '${name.replace(/'/g, "''")}', '${color}', ${isRecurring})
-       RETURNING *`
-    ));
-    res.json(result.rows[0]);
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [orgId, propertyId || null, date, name, color, Boolean(isRecurring)],
+    );
+    res.json(rows[0]);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -46,18 +46,23 @@ router.post("/holidays", requireAuth, async (req: any, res) => {
 router.put("/holidays/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = req.user?.organizationId;
-    const { id } = req.params;
+    const id = parseInt(req.params.id);
     const { date, name, color, isRecurring } = req.body;
     const sets: string[] = [];
-    if (date) sets.push(`date = '${date}'`);
-    if (name) sets.push(`name = '${name.replace(/'/g, "''")}'`);
-    if (color) sets.push(`color = '${color}'`);
-    if (isRecurring !== undefined) sets.push(`is_recurring = ${isRecurring}`);
+    const params: any[] = [id, orgId];
+    const addField = (col: string, val: any) => {
+      if (val !== undefined) { sets.push(`${col} = $${params.length + 1}`); params.push(val); }
+    };
+    addField("date", date);
+    addField("name", name);
+    addField("color", color);
+    if (isRecurring !== undefined) addField("is_recurring", Boolean(isRecurring));
     if (!sets.length) return res.status(400).json({ error: "Нічого оновлювати" });
-    const result = await db.execute(sql.raw(
-      `UPDATE calendar_holidays SET ${sets.join(", ")} WHERE id = ${id} AND organization_id = ${orgId} RETURNING *`
-    ));
-    res.json(result.rows[0] || { error: "Not found" });
+    const { rows } = await pool.query(
+      `UPDATE calendar_holidays SET ${sets.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *`,
+      params,
+    );
+    res.json(rows[0] || null);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -67,8 +72,8 @@ router.put("/holidays/:id", requireAuth, async (req: any, res) => {
 router.delete("/holidays/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = req.user?.organizationId;
-    const { id } = req.params;
-    await db.execute(sql.raw(`DELETE FROM calendar_holidays WHERE id = ${id} AND organization_id = ${orgId}`));
+    const id = parseInt(req.params.id);
+    await pool.query(`DELETE FROM calendar_holidays WHERE id = $1 AND organization_id = $2`, [id, orgId]);
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -81,10 +86,11 @@ router.delete("/holidays/:id", requireAuth, async (req: any, res) => {
 router.get("/restrictions", requireAuth, async (req: any, res) => {
   try {
     const orgId = req.user?.organizationId;
-    const result = await db.execute(sql.raw(
-      `SELECT * FROM calendar_restrictions WHERE organization_id = ${orgId} ORDER BY created_at ASC`
-    ));
-    res.json(result.rows);
+    const { rows } = await pool.query(
+      `SELECT * FROM calendar_restrictions WHERE organization_id = $1 ORDER BY created_at ASC`,
+      [orgId],
+    );
+    res.json(rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -100,24 +106,17 @@ router.post("/restrictions", requireAuth, async (req: any, res) => {
       applyToHolidays = false, propertyId = null,
     } = req.body;
     if (!name) return res.status(400).json({ error: "name обов'язкове" });
-    const dows = JSON.stringify(daysOfWeek);
-    const result = await db.execute(sql.raw(
+    const { rows } = await pool.query(
       `INSERT INTO calendar_restrictions
          (organization_id, property_id, name, type, min_nights, max_nights, days_of_week, date_from, date_to, apply_to_holidays)
-       VALUES (
-         ${orgId},
-         ${propertyId ? propertyId : "NULL"},
-         '${name.replace(/'/g, "''")}',
-         '${type}',
-         ${minNights != null ? minNights : "NULL"},
-         ${maxNights != null ? maxNights : "NULL"},
-         '${dows}'::jsonb,
-         ${dateFrom ? `'${dateFrom}'` : "NULL"},
-         ${dateTo ? `'${dateTo}'` : "NULL"},
-         ${applyToHolidays}
-       ) RETURNING *`
-    ));
-    res.json(result.rows[0]);
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10) RETURNING *`,
+      [
+        orgId, propertyId || null, name, type,
+        minNights != null ? minNights : null, maxNights != null ? maxNights : null,
+        JSON.stringify(daysOfWeek), dateFrom || null, dateTo || null, Boolean(applyToHolidays),
+      ],
+    );
+    res.json(rows[0]);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -127,23 +126,31 @@ router.post("/restrictions", requireAuth, async (req: any, res) => {
 router.put("/restrictions/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = req.user?.organizationId;
-    const { id } = req.params;
+    const id = parseInt(req.params.id);
     const { name, type, minNights, maxNights, daysOfWeek, dateFrom, dateTo, applyToHolidays, isActive } = req.body;
     const sets: string[] = [];
-    if (name !== undefined) sets.push(`name = '${name.replace(/'/g, "''")}'`);
-    if (type !== undefined) sets.push(`type = '${type}'`);
-    if (minNights !== undefined) sets.push(`min_nights = ${minNights != null ? minNights : "NULL"}`);
-    if (maxNights !== undefined) sets.push(`max_nights = ${maxNights != null ? maxNights : "NULL"}`);
-    if (daysOfWeek !== undefined) sets.push(`days_of_week = '${JSON.stringify(daysOfWeek)}'::jsonb`);
-    if (dateFrom !== undefined) sets.push(`date_from = ${dateFrom ? `'${dateFrom}'` : "NULL"}`);
-    if (dateTo !== undefined) sets.push(`date_to = ${dateTo ? `'${dateTo}'` : "NULL"}`);
-    if (applyToHolidays !== undefined) sets.push(`apply_to_holidays = ${applyToHolidays}`);
-    if (isActive !== undefined) sets.push(`is_active = ${isActive}`);
+    const params: any[] = [id, orgId];
+    const addField = (col: string, val: any, cast?: string) => {
+      if (val !== undefined) {
+        sets.push(`${col} = $${params.length + 1}${cast ? `::${cast}` : ""}`);
+        params.push(val);
+      }
+    };
+    addField("name", name);
+    addField("type", type);
+    if (minNights !== undefined) addField("min_nights", minNights != null ? minNights : null);
+    if (maxNights !== undefined) addField("max_nights", maxNights != null ? maxNights : null);
+    if (daysOfWeek !== undefined) addField("days_of_week", JSON.stringify(daysOfWeek), "jsonb");
+    if (dateFrom !== undefined) addField("date_from", dateFrom || null);
+    if (dateTo !== undefined) addField("date_to", dateTo || null);
+    if (applyToHolidays !== undefined) addField("apply_to_holidays", Boolean(applyToHolidays));
+    if (isActive !== undefined) addField("is_active", Boolean(isActive));
     if (!sets.length) return res.status(400).json({ error: "Нічого оновлювати" });
-    const result = await db.execute(sql.raw(
-      `UPDATE calendar_restrictions SET ${sets.join(", ")} WHERE id = ${id} AND organization_id = ${orgId} RETURNING *`
-    ));
-    res.json(result.rows[0] || { error: "Not found" });
+    const { rows } = await pool.query(
+      `UPDATE calendar_restrictions SET ${sets.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *`,
+      params,
+    );
+    res.json(rows[0] || null);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -153,8 +160,11 @@ router.put("/restrictions/:id", requireAuth, async (req: any, res) => {
 router.delete("/restrictions/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = req.user?.organizationId;
-    const { id } = req.params;
-    await db.execute(sql.raw(`DELETE FROM calendar_restrictions WHERE id = ${id} AND organization_id = ${orgId}`));
+    const id = parseInt(req.params.id);
+    await pool.query(
+      `DELETE FROM calendar_restrictions WHERE id = $1 AND organization_id = $2`,
+      [id, orgId],
+    );
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

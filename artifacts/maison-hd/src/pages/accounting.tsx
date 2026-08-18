@@ -402,12 +402,24 @@ function BookingInvoicesTab() {
   });
 
   const handleDelete = async (id: number) => {
+    // Guard: find the invoice in cached data and block delete if it's paid or signed
+    const inv = (invoices as any[])?.find((i: any) => i.id === id);
+    if (inv?.status === "paid" || inv?.status === "signed") {
+      toast({ title: "Не можна видалити", description: "Оплачений або підписаний рахунок не можна видалити", variant: "destructive" });
+      setDeleteId(null);
+      return;
+    }
     setDeleting(true);
     try {
-      await fetch(`${API_BASE}/api/invoices/${id}`, {
+      const res = await fetch(`${API_BASE}/api/invoices/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${tok()}` },
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "Помилка видалення", description: err.message || `HTTP ${res.status}`, variant: "destructive" });
+        return;
+      }
       toast({ title: "Рахунок видалено" });
       setDeleteId(null);
       refetch();
@@ -4112,7 +4124,10 @@ function ArchiveTab() {
                     </div>
                   </TableCell>
                   <TableCell className="text-xs text-gray-500">{d.retain_until || "—"}</TableCell>
-                  <TableCell><Button size="sm" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-600 p-0" onClick={() => { if (confirm("Видалити запис архіву?")) deleteMut.mutate(d.id); }}>✕</Button></TableCell>
+                  <TableCell><Button size="sm" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-600 p-0" onClick={() => {
+                    if (d.is_signed || d.has_kep) { alert("Підписаний або КЕП-документ не можна видалити з архіву"); return; }
+                    if (confirm("Видалити запис архіву?")) deleteMut.mutate(d.id);
+                  }}>✕</Button></TableCell>
                 </TableRow>
               ))}
               {!docs.length && <TableRow><TableCell colSpan={10} className="text-center text-xs text-gray-400 py-10">Архів порожній. Додайте перший документ.</TableCell></TableRow>}

@@ -2,3 +2,4 @@
 - [Auto-seed guard](auto-seed-guard.md) — seed guard checks users table (not orgs) so deleted tenants don't re-seed
 - [Tenant deletion API](tenant-deletion-api.md) — DELETE /api/super-admin/tenants endpoint for wiping all orgs (cascade)
 - [F&B module migration](fb-migration.md) — all 52 HMS F&B pages copied to Maison HD with full routes and sidebar sections
+- [Security hardening](security-hardening.md) — full audit pass: rate limits, org scope, state machine, allowlists, helmet, .env.example

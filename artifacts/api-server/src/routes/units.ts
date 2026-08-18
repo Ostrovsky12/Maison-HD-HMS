@@ -238,21 +238,44 @@ router.put("/:unitId", requireAuth, async (req, res) => {
   res.json({ ...unit, basePrice: unit.basePrice ? Number(unit.basePrice) : null, baseGuests: unit.baseGuests ?? 2, extraGuestPrice: Number(unit.extraGuestPrice || 0), squareMeters: unit.squareMeters ? Number(unit.squareMeters) : null });
 });
 
-// PATCH /units/bulk-sort — reorder units within a property
+// PATCH /units/bulk-sort — reorder units within a property (org-scoped)
 router.patch("/bulk-sort", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.organizationId;
   const { orders } = req.body; // [{ id, sortOrder }]
   if (!Array.isArray(orders)) { res.status(400).json({ error: "orders required" }); return; }
   for (const { id, sortOrder } of orders) {
-    await db.execute(sql`UPDATE units SET sort_order = ${sortOrder} WHERE id = ${id}`);
+    // Only update units that belong to the caller's org (via property join)
+    if (orgId) {
+      await db.execute(sql`
+        UPDATE units SET sort_order = ${sortOrder}
+        WHERE id = ${id}
+          AND property_id IN (SELECT id FROM properties WHERE organization_id = ${orgId})
+      `);
+    } else if (user.role === "super_admin") {
+      await db.execute(sql`UPDATE units SET sort_order = ${sortOrder} WHERE id = ${id}`);
+    }
   }
   res.json({ ok: true });
 });
 
-// PATCH /units/bulk-visibility — bulk hide/show units
+// PATCH /units/bulk-visibility — bulk hide/show units (org-scoped)
 router.patch("/bulk-visibility", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.organizationId;
   const { ids, isHidden } = req.body; // { ids: number[], isHidden: boolean }
   if (!Array.isArray(ids) || ids.length === 0) { res.status(400).json({ error: "ids required" }); return; }
-  await db.execute(sql`UPDATE units SET is_hidden = ${Boolean(isHidden)}, updated_at = NOW() WHERE id = ANY(ARRAY[${sql.join(ids.map((id: number) => sql`${id}`), sql`, `)}]::int[])`);
+  const idList = sql.join(ids.map((id: number) => sql`${id}`), sql`, `);
+  if (orgId) {
+    // Only update units belonging to the caller's org
+    await db.execute(sql`
+      UPDATE units SET is_hidden = ${Boolean(isHidden)}, updated_at = NOW()
+      WHERE id = ANY(ARRAY[${idList}]::int[])
+        AND property_id IN (SELECT id FROM properties WHERE organization_id = ${orgId})
+    `);
+  } else if (user.role === "super_admin") {
+    await db.execute(sql`UPDATE units SET is_hidden = ${Boolean(isHidden)}, updated_at = NOW() WHERE id = ANY(ARRAY[${idList}]::int[])`);
+  }
   res.json({ ok: true, updated: ids.length });
 });
 

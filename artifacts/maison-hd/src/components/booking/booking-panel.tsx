@@ -17,8 +17,14 @@ import { InvoiceModal, type InvoiceData } from "./invoice-modal";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API  = BASE.replace("/maison-hd", "") + "/api";
 const tok  = () => localStorage.getItem("hms_token");
-const apiFetch = (url: string, opts: RequestInit = {}) =>
-  fetch(url, { ...opts, headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
+const apiFetch = async (url: string, opts: RequestInit = {}) => {
+  const r = await fetch(url, { ...opts, headers: { Authorization: `Bearer ${tok()}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.message || err.error || `HTTP ${r.status}`);
+  }
+  return r;
+};
 
 // ── Format helpers ─────────────────────────────────────────────────────────
 const uah = (n: number = 0) =>

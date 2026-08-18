@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { randomBytes } from "crypto";
+import rateLimit from "express-rate-limit";
 import { db } from "@workspace/db";
 import {
   propertiesTable, unitsTable, bookingsTable, organizationsTable,
@@ -14,10 +15,41 @@ import { sendGuestConfirmationEmail, sendGuestConfirmationSms, notifyBookingCrea
 
 const router = Router();
 
-// ─── GET /properties — by slug or all ────────────────────────────────────────
+// ─── Rate limiters for public endpoints ──────────────────────────────────────
+const bookingCreateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,                   // max 10 booking attempts per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Забагато спроб. Спробуйте через 15 хвилин." },
+});
+
+const aiChatLimiter = rateLimit({
+  windowMs: 60 * 1000,       // 1 minute
+  max: 20,                   // 20 AI messages per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Занадто багато запитів. Зачекайте хвилину." },
+});
+
+const menuScrapeLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,             // 60 menu loads per minute per IP (generous for real users, blocks scrapers)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Занадто багато запитів." },
+});
+
+// ─── GET /properties — slug is required to prevent exposing all tenants ───────
 router.get("/properties", async (req, res) => {
   try {
     const { slug } = req.query as any;
+
+    // Slug is mandatory — returning all organizations' properties to the public
+    // would expose the full tenant list, which is a multi-tenant data leak.
+    if (!slug) {
+      return res.status(400).json({ error: "slug query parameter is required" });
+    }
 
     let orgs: any[] = [];
     if (slug) {
@@ -133,12 +165,26 @@ router.get("/availability", async (req, res) => {
   } catch (e: any) { console.error("AVAILABILITY ERROR:", e); res.status(500).json({ error: e.message }); }
 });
 
-// ─── POST /bookings — create booking (no auth) ───────────────────────────────
-router.post("/bookings", async (req, res) => {
+// ─── POST /bookings — create booking (no auth, rate-limited) ─────────────────
+router.post("/bookings", bookingCreateLimiter, async (req, res) => {
   try {
     const { unitId, checkIn, checkOut, firstName, lastName, email, phone, guestsCount, specialRequests, adults, children } = req.body;
     if (!unitId || !checkIn || !checkOut || !firstName || !lastName) {
       return res.status(400).json({ error: "Заповніть всі обов'язкові поля" });
+    }
+    // Validate dates: must be valid ISO dates, checkIn must be < checkOut
+    const ciDate = new Date(checkIn);
+    const coDate = new Date(checkOut);
+    if (isNaN(ciDate.getTime()) || isNaN(coDate.getTime())) {
+      return res.status(400).json({ error: "Некоректний формат дат" });
+    }
+    if (ciDate >= coDate) {
+      return res.status(400).json({ error: "Дата виїзду повинна бути пізніше дати заїзду" });
+    }
+    // Prevent bookings starting in the past (allow same-day)
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (ciDate < today) {
+      return res.status(400).json({ error: "Дата заїзду не може бути в минулому" });
     }
 
     // Check availability
@@ -154,11 +200,15 @@ router.post("/bookings", async (req, res) => {
       ));
     if (conflicts.length > 0) return res.status(409).json({ error: "Номер вже заброньований на ці дати" });
 
-    // Get unit info
+    // Get unit info — also validate status is active (not maintenance/inactive)
     const [unit] = await db.select({
-      id: unitsTable.id, basePrice: unitsTable.basePrice, propertyId: unitsTable.propertyId, name: unitsTable.name,
+      id: unitsTable.id, basePrice: unitsTable.basePrice, propertyId: unitsTable.propertyId,
+      name: unitsTable.name, status: unitsTable.status,
     }).from(unitsTable).where(eq(unitsTable.id, parseInt(unitId)));
     if (!unit) return res.status(404).json({ error: "Юніт не знайдено" });
+    if (unit.status && !["active", "available"].includes(unit.status as string)) {
+      return res.status(409).json({ error: "Номер недоступний для бронювання" });
+    }
 
     const [prop] = await db.select({ id: propertiesTable.id, name: propertiesTable.name, organizationId: propertiesTable.organizationId })
       .from(propertiesTable).where(eq(propertiesTable.id, unit.propertyId));
@@ -266,7 +316,7 @@ router.post("/bookings", async (req, res) => {
   } catch (e: any) { console.error("POST BOOKING ERROR:", e.message, e.stack); res.status(500).json({ error: e.message }); }
 });
 
-// ─── POST /liqpay/:bookingId — generate payment form (public) ─────────────────
+// ─── POST /liqpay/:bookingId — generate payment form (public, guestAccessCode required) ──
 router.post("/liqpay/:bookingId", async (req, res) => {
   try {
     if (!process.env.LIQPAY_PUBLIC_KEY || !process.env.LIQPAY_PRIVATE_KEY) {
@@ -277,6 +327,8 @@ router.post("/liqpay/:bookingId", async (req, res) => {
     }
 
     const bookingId = parseInt(req.params.bookingId);
+    const { guestAccessCode } = req.body;
+
     const [result] = await db.select({
       id: bookingsTable.id,
       bookingRef: sql<string>`${bookingsTable}.booking_ref`,
@@ -286,12 +338,19 @@ router.post("/liqpay/:bookingId", async (req, res) => {
       firstName: bookingsTable.firstName,
       lastName: bookingsTable.lastName,
       email: bookingsTable.email,
+      guestAccessCode: bookingsTable.guestAccessCode,
     }).from(bookingsTable)
       .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
       .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
       .where(eq(bookingsTable.id, bookingId)).limit(1);
 
     if (!result) return res.status(404).json({ error: "Бронювання не знайдено" });
+
+    // Validate guest access code — prevents anyone with a bookingId from generating payment forms
+    if (result.guestAccessCode && guestAccessCode !== result.guestAccessCode) {
+      return res.status(403).json({ error: "Forbidden", message: "Невірний код доступу" });
+    }
+
     if (result.paymentStatus === "paid") return res.status(400).json({ error: "Бронювання вже оплачено" });
 
     const amount = Math.max(
@@ -348,7 +407,7 @@ router.post("/liqpay/callback", async (req, res) => {
 });
 
 // ─── GET /menu/:orgSlug — public F&B menu for QR ordering ────────────────────
-router.get("/menu/:orgSlug", async (req, res) => {
+router.get("/menu/:orgSlug", menuScrapeLimiter, async (req, res) => {
   try {
     const { orgSlug } = req.params;
     const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
@@ -557,11 +616,18 @@ router.get("/ai-waiter/guest/:orgSlug/:phone", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── POST /ai-waiter/chat — AI waiter for QR ordering ────────────────────────
-router.post("/ai-waiter/chat", async (req, res) => {
+// ─── POST /ai-waiter/chat — AI waiter for QR ordering (rate-limited) ─────────
+router.post("/ai-waiter/chat", aiChatLimiter, async (req, res) => {
   try {
     const { orgSlug, messages, cart, guestPhone } = req.body;
     if (!orgSlug || !Array.isArray(messages)) return res.status(400).json({ error: "orgSlug and messages required" });
+    // Limit conversation length and per-message size to prevent prompt injection / cost abuse
+    if (messages.length > 20) return res.status(400).json({ error: "Too many messages" });
+    for (const m of messages) {
+      if (typeof m?.content === "string" && m.content.length > 2000) {
+        return res.status(400).json({ error: "Message too long" });
+      }
+    }
 
     const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
     if (!orgs.length) return res.status(404).json({ error: "Organization not found" });

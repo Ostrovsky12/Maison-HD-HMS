@@ -9,6 +9,10 @@ import { tenantSettings } from "../db/schema/platform.js";
 import { eq, and } from "drizzle-orm";
 import { encrypt, decrypt } from "./encrypt.js";
 
+// ─── HTML escape helper — used by all email template builders ─────────────────
+const esc = (s: string) => String(s).replace(/[<>&"']/g, c =>
+  ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" }[c] || c));
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface EmailConfig {
@@ -270,20 +274,20 @@ export function buildGuestConfirmationEmail(booking: {
           <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px;text-align:center">
             <p style="margin:0 0 8px;font-size:28px">🏨</p>
             <h1 style="margin:0;color:#fff;font-size:24px;font-weight:700">Бронювання підтверджено!</h1>
-            <p style="margin:8px 0 0;color:#c4b5fd;font-size:15px">${orgName || propertyName}</p>
+            <p style="margin:8px 0 0;color:#c4b5fd;font-size:15px">${esc(orgName || propertyName)}</p>
           </td>
         </tr>
         <!-- Booking ref banner -->
         <tr>
           <td style="background:#f5f3ff;padding:16px 32px;text-align:center;border-bottom:1px solid #ede9fe">
             <p style="margin:0;font-size:12px;color:#6d28d9;text-transform:uppercase;letter-spacing:1px;font-weight:600">Номер бронювання</p>
-            <p style="margin:4px 0 0;font-size:28px;font-weight:800;color:#4f46e5;letter-spacing:2px">${bookingRef}</p>
+            <p style="margin:4px 0 0;font-size:28px;font-weight:800;color:#4f46e5;letter-spacing:2px">${esc(bookingRef)}</p>
           </td>
         </tr>
         <!-- Greeting -->
         <tr>
           <td style="padding:28px 32px 0">
-            <p style="margin:0;font-size:16px;color:#1e1b4b">Вітаємо, <b>${guestName}</b>!</p>
+            <p style="margin:0;font-size:16px;color:#1e1b4b">Вітаємо, <b>${esc(guestName)}</b>!</p>
             <p style="margin:8px 0 0;color:#6b7280;font-size:15px;line-height:1.6">
               Ваше бронювання прийнято. Нижче деталі вашого перебування.
             </p>
@@ -294,8 +298,8 @@ export function buildGuestConfirmationEmail(booking: {
           <td style="padding:20px 32px">
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb">
               ${[
-                ["🏠 Об'єкт", propertyName],
-                ["🛏️ Номер / Котедж", unitName],
+                ["🏠 Об'єкт", esc(propertyName)],
+                ["🛏️ Номер / Котедж", esc(unitName)],
                 ["📅 Заїзд", `<b>${formatDate(checkIn)}</b> (з 14:00)`],
                 ["📅 Виїзд", `<b>${formatDate(checkOut)}</b> (до 12:00)`],
                 ["🌙 Кількість ночей", `${nights} ${nights === 1 ? "ніч" : nights < 5 ? "ночі" : "ночей"}`],
@@ -328,7 +332,7 @@ export function buildGuestConfirmationEmail(booking: {
           <td style="padding:0 32px 24px">
             <p style="margin:0;font-size:13px;color:#6b7280">Питання? Зв'яжіться з нами:</p>
             <p style="margin:4px 0 0;font-size:14px;color:#1e1b4b">
-              ${orgPhone ? `📞 ${orgPhone}` : ""}${orgPhone && orgEmail ? " · " : ""}${orgEmail ? `✉️ ${orgEmail}` : ""}
+              ${orgPhone ? `📞 ${esc(orgPhone)}` : ""}${orgPhone && orgEmail ? " · " : ""}${orgEmail ? `✉️ ${esc(orgEmail)}` : ""}
             </p>
           </td>
         </tr>` : ""}
@@ -376,8 +380,8 @@ export async function notifyBookingCreated(orgId: number, booking: {
     <div style="font-family:sans-serif;max-width:520px">
       <h2 style="color:#4f46e5">📋 Нове бронювання #${booking.id}</h2>
       <table style="border-collapse:collapse;width:100%">
-        <tr><td style="padding:6px 0;color:#666">Гість</td><td><b>${guestName}</b></td></tr>
-        ${unitName ? `<tr><td style="padding:6px 0;color:#666">Номер</td><td>${unitName}</td></tr>` : ""}
+        <tr><td style="padding:6px 0;color:#666">Гість</td><td><b>${esc(guestName)}</b></td></tr>
+        ${unitName ? `<tr><td style="padding:6px 0;color:#666">Номер</td><td>${esc(unitName)}</td></tr>` : ""}
         <tr><td style="padding:6px 0;color:#666">Заїзд</td><td>${checkIn}</td></tr>
         <tr><td style="padding:6px 0;color:#666">Виїзд</td><td>${checkOut}</td></tr>
         ${totalAmount ? `<tr><td style="padding:6px 0;color:#666">Сума</td><td><b>₴ ${totalAmount}</b></td></tr>` : ""}
@@ -408,7 +412,7 @@ export async function notifyCheckIn(orgId: number, guestName: string, unitName: 
   const emailHtml = `
     <div style="font-family:sans-serif;max-width:520px">
       <h2 style="color:#059669">✅ Заїзд сьогодні</h2>
-      <p>Гість <b>${guestName}</b> заїжджає до <b>${unitName}</b> (бронювання #${bookingId})</p>
+      <p>Гість <b>${esc(guestName)}</b> заїжджає до <b>${esc(unitName)}</b> (бронювання #${bookingId})</p>
       <p style="color:#888;font-size:12px">Maison HD Hospitality OS</p>
     </div>
   `;

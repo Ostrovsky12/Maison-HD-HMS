@@ -29,9 +29,18 @@ router.post("/", requireAuth, async (req, res) => {
   res.status(201).json(group);
 });
 
-// PUT /unit-groups/:id — update a group
+// PUT /unit-groups/:id — update a group (org-scoped)
 router.put("/:id", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.organizationId;
   const id = parseInt(req.params.id);
+  // Validate ownership via property join
+  if (orgId) {
+    const [existing] = await db.select({ orgId: unitGroupsTable.organizationId })
+      .from(unitGroupsTable).where(eq(unitGroupsTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Group not found" }); return; }
+    if (existing.orgId !== orgId) { res.status(403).json({ error: "Forbidden" }); return; }
+  }
   const { name, description, sortOrder } = req.body;
   const [group] = await db.update(unitGroupsTable).set({
     ...(name !== undefined && { name: name.trim() }),
@@ -43,9 +52,18 @@ router.put("/:id", requireAuth, async (req, res) => {
   res.json(group);
 });
 
-// DELETE /unit-groups/:id — delete a group (unlinks units first)
+// DELETE /unit-groups/:id — delete a group (unlinks units first, org-scoped)
 router.delete("/:id", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.organizationId;
   const id = parseInt(req.params.id);
+  // Validate ownership
+  if (orgId) {
+    const [existing] = await db.select({ orgId: unitGroupsTable.organizationId })
+      .from(unitGroupsTable).where(eq(unitGroupsTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Group not found" }); return; }
+    if (existing.orgId !== orgId) { res.status(403).json({ error: "Forbidden" }); return; }
+  }
   // Unlink units from this group first
   await db.update(unitsTable).set({ unitGroupId: null, updatedAt: new Date() })
     .where(eq(unitsTable.unitGroupId, id));

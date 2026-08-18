@@ -328,10 +328,19 @@ router.post("/projects/:id/files", requireAuth, async (req, res) => {
   try {
     const orgId = req.user!.organizationId;
     const { filename, file_type, content_base64 } = req.body;
+    // Validate file type allowlist
+    const ALLOWED_FILE_TYPES = ["csv", "xlsx", "xls", "json"];
+    if (file_type && !ALLOWED_FILE_TYPES.includes(file_type)) {
+      return res.status(400).json({ error: `Unsupported file type. Allowed: ${ALLOWED_FILE_TYPES.join(", ")}` });
+    }
+    // Validate decoded size — reject files >10MB
+    const sizeBytes = content_base64 ? Math.round(content_base64.length * 0.75) : 0;
+    const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+    if (sizeBytes > MAX_FILE_BYTES) {
+      return res.status(413).json({ error: "File too large. Maximum size is 10 MB." });
+    }
     const proj = await pool.query(`SELECT id FROM mig_projects WHERE id=$1 AND org_id=$2`, [req.params.id, orgId]);
     if (!proj.rows[0]) return res.status(404).json({ error: "Project not found" });
-
-    const sizeBytes = content_base64 ? Math.round(content_base64.length * 0.75) : 0;
     const { rows } = await pool.query(
       `INSERT INTO mig_files (project_id, filename, file_type, size_bytes, parse_status, uploaded_by) VALUES ($1,$2,$3,$4,'parsing',$5) RETURNING *`,
       [req.params.id, filename, file_type || 'csv', sizeBytes, req.user!.id]

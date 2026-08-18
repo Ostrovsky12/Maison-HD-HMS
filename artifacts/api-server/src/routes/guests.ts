@@ -23,6 +23,12 @@ router.get("/", requireAuth, async (req, res) => {
   const limit = parseInt(req.query.limit as string || "50");
   const offset = (page - 1) * limit;
 
+  // Non-super-admin without org cannot see any guests
+  if (user.role !== "super_admin" && !orgId) {
+    res.json({ guests: [], total: 0, page, limit });
+    return;
+  }
+
   let conditions: any[] = [];
   if (orgId) conditions.push(eq(guestsTable.organizationId, orgId));
   if (search) {
@@ -209,12 +215,17 @@ router.get("/search", requireAuth, async (req, res) => {
 router.get("/:guestId", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const guestId = parseInt(req.params.guestId);
+  // Reject non-super-admin without org before querying
+  if (user.role !== "super_admin" && !user.organizationId) {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+    return;
+  }
   const [guest] = await db.select().from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1);
   if (!guest) {
     res.status(404).json({ error: "Not Found", message: "Guest not found" });
     return;
   }
-  if (user.role !== "super_admin" && user.organizationId && guest.organizationId !== user.organizationId) {
+  if (user.role !== "super_admin" && guest.organizationId !== user.organizationId) {
     res.status(403).json({ error: "Forbidden", message: "Access denied" });
     return;
   }
@@ -285,7 +296,12 @@ router.get("/:guestId", requireAuth, async (req, res) => {
 router.put("/:guestId", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const guestId = parseInt(req.params.guestId);
-  if (user.role !== "super_admin" && user.organizationId) {
+  // Reject non-super-admin without org — no org means no tenant context
+  if (user.role !== "super_admin" && !user.organizationId) {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+    return;
+  }
+  if (user.role !== "super_admin") {
     const [existing] = await db.select({ orgId: guestsTable.organizationId })
       .from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1);
     if (!existing || existing.orgId !== user.organizationId) {
@@ -346,7 +362,7 @@ router.post("/:guestId/anonymize", requireAuth, async (req, res) => {
   if (!existing) {
     return res.status(404).json({ error: "Not Found" });
   }
-  if (user.role !== "super_admin" && user.organizationId && existing.orgId !== user.organizationId) {
+  if (user.role !== "super_admin" && (!user.organizationId || existing.orgId !== user.organizationId)) {
     return res.status(403).json({ error: "Forbidden" });
   }
 

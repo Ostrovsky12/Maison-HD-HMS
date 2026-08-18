@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import {
   eventSpacesTable, eventsTable, eventServicesTable, eventTasksTable
 } from "@workspace/db";
@@ -361,23 +361,44 @@ router.post("/:id/timings", requireAuth, async (req: any, res) => {
 
 router.patch("/timings/:tid", requireAuth, async (req: any, res) => {
   try {
+    const orgId = req.user?.organizationId;
     const tid = parseInt(req.params.tid);
     const { isConfirmed, assignedTo, timeStart, timeEnd } = req.body;
-    const updates: string[] = [];
-    if (isConfirmed !== undefined) updates.push(`is_confirmed = ${isConfirmed}`);
-    if (assignedTo !== undefined) updates.push(`assigned_to = '${(assignedTo||"").replace(/'/g,"''")}'`);
-    if (timeStart) updates.push(`time_start = '${timeStart}'`);
-    if (timeEnd !== undefined) updates.push(`time_end = ${timeEnd ? `'${timeEnd}'` : "NULL"}`);
-    if (!updates.length) return res.json({ success: true });
-
-    const r = await db.execute(sql.raw(`UPDATE event_timings SET ${updates.join(", ")} WHERE id = ${tid} RETURNING *`));
+    const sets: string[] = [];
+    const params: any[] = [tid];
+    const addField = (col: string, val: any) => {
+      if (val !== undefined) { sets.push(`${col} = $${params.length + 1}`); params.push(val); }
+    };
+    if (isConfirmed !== undefined) addField("is_confirmed", Boolean(isConfirmed));
+    addField("assigned_to", assignedTo);
+    if (timeStart) addField("time_start", timeStart);
+    if (timeEnd !== undefined) addField("time_end", timeEnd || null);
+    if (!sets.length) return res.json({ success: true });
+    // Org scope: only update timing that belongs to an event in caller's org
+    const orgClause = orgId ? `AND event_id IN (SELECT id FROM events WHERE organization_id = $${params.length + 1})` : "";
+    if (orgId) params.push(orgId);
+    const r = await pool.query(
+      `UPDATE event_timings SET ${sets.join(", ")} WHERE id = $1 ${orgClause} RETURNING *`,
+      params,
+    );
     res.json({ timing: r.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/timings/:tid", requireAuth, async (req: any, res) => {
   try {
-    await db.execute(sql`DELETE FROM event_timings WHERE id = ${parseInt(req.params.tid)}`);
+    const orgId = req.user?.organizationId;
+    const tid = parseInt(req.params.tid);
+    // Scope to org via event_timings → events → organization_id chain
+    if (orgId) {
+      await db.execute(sql`
+        DELETE FROM event_timings
+        WHERE id = ${tid}
+          AND event_id IN (SELECT id FROM events WHERE organization_id = ${orgId})
+      `);
+    } else {
+      await db.execute(sql`DELETE FROM event_timings WHERE id = ${tid}`);
+    }
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -415,16 +436,22 @@ router.post("/:id/group-checkins", requireAuth, async (req: any, res) => {
 
 router.patch("/group-checkins/:gid", requireAuth, async (req: any, res) => {
   try {
+    const orgId = getOrg(req);
     const gid = parseInt(req.params.gid);
     const { status, notes, arrivalTime, totalGuests } = req.body;
-    const updates: string[] = ["updated_at = NOW()"];
-    if (status) updates.push(`status = '${status}'`);
-    if (notes !== undefined) updates.push(`notes = '${(notes||"").replace(/'/g,"''")}'`);
-    if (arrivalTime) updates.push(`arrival_time = '${arrivalTime}'`);
-    if (totalGuests) updates.push(`total_guests = ${totalGuests}`);
-
-    const r = await db.execute(sql.raw(`UPDATE event_group_checkins SET ${updates.join(", ")} WHERE id = ${gid} RETURNING *`));
-    res.json({ group: r.rows[0] });
+    const sets: string[] = ["updated_at = NOW()"];
+    const params: any[] = [gid, orgId];
+    const add = (col: string, val: any) => { sets.push(`${col} = $${params.length + 1}`); params.push(val); };
+    if (status) add("status", status);
+    if (notes !== undefined) add("notes", notes || null);
+    if (arrivalTime) add("arrival_time", arrivalTime);
+    if (totalGuests) add("total_guests", Number(totalGuests));
+    const { rows } = await pool.query(
+      `UPDATE event_group_checkins SET ${sets.join(", ")}
+       WHERE id = $1 AND organization_id = $2 RETURNING *`,
+      params,
+    );
+    res.json({ group: rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -476,18 +503,24 @@ router.post("/:id/allocations", requireAuth, async (req: any, res) => {
 
 router.patch("/allocations/:aid", requireAuth, async (req: any, res) => {
   try {
+    const orgId = getOrg(req);
     const aid = parseInt(req.params.aid);
     const { status, unitId, notes } = req.body;
-    const updates: string[] = ["updated_at = NOW()"];
+    const sets: string[] = ["updated_at = NOW()"];
+    const params: any[] = [aid, orgId];
+    const add = (col: string, val: any) => { sets.push(`${col} = $${params.length + 1}`); params.push(val); };
     if (status) {
-      updates.push(`status = '${status}'`);
-      if (status === "checked_in") updates.push("checked_in_at = NOW()");
+      add("status", status);
+      if (status === "checked_in") sets.push("checked_in_at = NOW()");
     }
-    if (unitId !== undefined) updates.push(`unit_id = ${unitId || "NULL"}`);
-    if (notes !== undefined) updates.push(`notes = '${(notes||"").replace(/'/g,"''")}'`);
-
-    const r = await db.execute(sql.raw(`UPDATE event_guest_allocations SET ${updates.join(", ")} WHERE id = ${aid} RETURNING *`));
-    res.json({ allocation: r.rows[0] });
+    if (unitId !== undefined) add("unit_id", unitId || null);
+    if (notes !== undefined) add("notes", notes || null);
+    const { rows } = await pool.query(
+      `UPDATE event_guest_allocations SET ${sets.join(", ")}
+       WHERE id = $1 AND organization_id = $2 RETURNING *`,
+      params,
+    );
+    res.json({ allocation: rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -420,6 +420,13 @@ router.patch("/receipts/:id", async (req, res) => {
 router.put("/receipts/:id/items", async (req, res) => {
   try {
     const receiptId = parseInt(req.params.id);
+    const orgId = org(req);
+    // Verify receipt belongs to caller's org before modifying its items
+    const [receiptCheck] = (await db.execute(sql`
+      SELECT id FROM fb_stock_receipts WHERE id = ${receiptId} AND organization_id = ${orgId}
+    `)).rows;
+    if (!receiptCheck) return res.status(403).json({ error: "Forbidden" });
+
     const { items } = req.body as { items: Array<{
       ingredient_id?: number; name: string;
       quantity: number; unit: string;
@@ -429,7 +436,6 @@ router.put("/receipts/:id/items", async (req, res) => {
     }> };
 
     await db.execute(sql`DELETE FROM fb_stock_receipt_items WHERE receipt_id = ${receiptId}`);
-    const orgId = org(req);
     let total = 0;
     let vat = 0;
     for (const item of items || []) {
@@ -467,7 +473,7 @@ router.put("/receipts/:id/items", async (req, res) => {
                 ${item.match_confidence ?? null}, ${itemType})
       `);
     }
-    await db.execute(sql`UPDATE fb_stock_receipts SET total_amount = ${total}, vat_amount = ${vat}, updated_at = NOW() WHERE id = ${receiptId}`);
+    await db.execute(sql`UPDATE fb_stock_receipts SET total_amount = ${total}, vat_amount = ${vat}, updated_at = NOW() WHERE id = ${receiptId} AND organization_id = ${orgId}`);
     res.json({ success: true, total_amount: total, vat_amount: vat });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -526,7 +532,7 @@ router.post("/receipts/:id/confirm", async (req, res) => {
 
     await db.execute(sql`
       UPDATE fb_stock_receipts SET status = 'confirmed', confirmed_at = NOW(), updated_at = NOW()
-      WHERE id = ${receiptId}
+      WHERE id = ${receiptId} AND organization_id = ${orgId}
     `);
 
     // Бухгалтерська проводка: Дт 281 Товари → Кт 631 Розрахунки з постачальниками
@@ -593,7 +599,7 @@ router.post("/receipts/:id/cancel", async (req, res) => {
     }
 
     await db.execute(sql`
-      UPDATE fb_stock_receipts SET status = 'cancelled', updated_at = NOW() WHERE id = ${receiptId}
+      UPDATE fb_stock_receipts SET status = 'cancelled', updated_at = NOW() WHERE id = ${receiptId} AND organization_id = ${orgId}
     `);
 
     // Reverse accounting entry: Дт 631 → Кт 281 (сторно)
@@ -1092,7 +1098,10 @@ router.post("/writeoffs", async (req, res) => {
     const writeoff = r.rows[0] as any;
 
     for (const item of items) {
-      const [ing] = (await db.execute(sql`SELECT cost_per_unit FROM fb_ingredients WHERE id = ${item.ingredient_id}`)).rows as any[];
+      // Scope ingredient lookup to caller's org to prevent cross-tenant data reads
+      const [ing] = (await db.execute(sql`
+        SELECT cost_per_unit FROM fb_ingredients WHERE id = ${item.ingredient_id} AND organization_id = ${org(req)}
+      `)).rows as any[];
       const costPerUnit = item.cost_per_unit || parseFloat(ing?.cost_per_unit || "0");
       const totalCost = item.quantity * costPerUnit;
       total += totalCost;
@@ -1138,7 +1147,7 @@ router.post("/writeoffs/:id/confirm", async (req, res) => {
       `);
     }
 
-    await db.execute(sql`UPDATE fb_stock_writeoffs SET status = 'confirmed', confirmed_at = NOW() WHERE id = ${writeoffId}`);
+    await db.execute(sql`UPDATE fb_stock_writeoffs SET status = 'confirmed', confirmed_at = NOW() WHERE id = ${writeoffId} AND organization_id = ${orgId}`);
 
     // Бухгалтерська проводка:
     // Дт 902 (СВОТ) → Кт 281 для реалізації/виробництва
@@ -1608,16 +1617,25 @@ router.patch("/inventory/:id", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/inventory/:id/lines", async (req, res) => {
+router.put("/inventory/:id/lines", requireAuth, async (req: any, res) => {
   try {
+    const orgId = org(req);
     const db_ = (db as any).$client;
-    const { id } = req.params;
+    const sessionId = req.params.id;
     const { lines } = req.body;
     if (!Array.isArray(lines)) return res.status(400).json({ error: "lines array required" });
+    // Verify the inventory session belongs to caller's org before updating lines
+    const sessionCheck = await db_.query(
+      `SELECT id FROM fb_inventory_sessions WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+      [sessionId, orgId],
+    );
+    if (!sessionCheck.rows.length) return res.status(403).json({ error: "Forbidden" });
     for (const l of lines) {
       if (l.id) {
-        await db_.query(`UPDATE fb_inventory_lines SET actual_qty = $1 WHERE id = $2 AND session_id = $3`,
-          [l.actual_qty !== "" && l.actual_qty !== null ? parseFloat(l.actual_qty) : null, l.id, id]);
+        await db_.query(
+          `UPDATE fb_inventory_lines SET actual_qty = $1 WHERE id = $2 AND session_id = $3`,
+          [l.actual_qty !== "" && l.actual_qty !== null ? parseFloat(l.actual_qty) : null, l.id, sessionId],
+        );
       }
     }
     res.json({ ok: true });
@@ -1817,7 +1835,7 @@ router.delete("/inventory/:id", async (req, res) => {
     const sr = await db_.query(`SELECT status FROM fb_inventory_sessions WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     if (!sr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
     if (sr.rows[0].status === "completed") return res.status(400).json({ error: "Не можна видалити завершену інвентаризацію" });
-    await db_.query(`DELETE FROM fb_inventory_sessions WHERE id=$1`, [id]);
+    await db_.query(`DELETE FROM fb_inventory_sessions WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -2046,7 +2064,7 @@ router.post("/transfers/:id/confirm", async (req, res) => {
     if (!tr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
     if (tr.rows[0].status === "confirmed") return res.status(400).json({ error: "Вже підтверджено" });
     await db_.query(
-      `UPDATE fb_transfers SET status='confirmed', confirmed_at=NOW() WHERE id=$1`, [req.params.id]
+      `UPDATE fb_transfers SET status='confirmed', confirmed_at=NOW() WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]
     );
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -2060,7 +2078,7 @@ router.delete("/transfers/:id", async (req, res) => {
     );
     if (!tr.rows[0]) return res.status(404).json({ error: "Не знайдено" });
     if (tr.rows[0].status === "confirmed") return res.status(400).json({ error: "Не можна видалити підтверджене переміщення" });
-    await db_.query(`DELETE FROM fb_transfers WHERE id=$1`, [req.params.id]);
+    await db_.query(`DELETE FROM fb_transfers WHERE id=$1 AND organization_id=$2`, [req.params.id, org(req)]);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

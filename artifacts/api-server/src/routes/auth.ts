@@ -3,10 +3,20 @@ import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { signToken, hashPassword, comparePassword, requireAuth } from "../lib/auth.js";
+import rateLimit from "express-rate-limit";
 
 const router = Router();
 
-router.post("/login", async (req, res) => {
+// Max 10 login attempts per IP per 15 minutes — prevents brute-force
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Забагато спроб входу. Спробуйте через 15 хвилин." },
+});
+
+router.post("/login", loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Bad Request", message: "Email and password required" });
@@ -115,8 +125,14 @@ router.post("/logout", requireAuth, (_req, res) => {
 
 // ── Admin: upsert user (protected by SUPER_ADMIN_PASSWORD) ────────────────────
 router.post("/admin-upsert-user", async (req, res) => {
-  const pw = req.headers["x-admin-password"] || req.body?.adminPassword;
-  if (!pw || pw !== process.env["SUPER_ADMIN_PASSWORD"]) {
+  const pw = String(req.headers["x-admin-password"] || req.body?.adminPassword || "");
+  const expected = String(process.env["SUPER_ADMIN_PASSWORD"] || "");
+  // Constant-time comparison to prevent timing-based enumeration
+  const { timingSafeEqual } = await import("crypto");
+  const pwBuf = Buffer.from(pw.padEnd(Math.max(pw.length, expected.length)));
+  const exBuf = Buffer.from(expected.padEnd(Math.max(pw.length, expected.length)));
+  const valid = pw.length === expected.length && timingSafeEqual(pwBuf, exBuf);
+  if (!valid) {
     res.status(401).json({ error: "Unauthorized" }); return;
   }
   const { email, password, role, organizationId, name } = req.body;

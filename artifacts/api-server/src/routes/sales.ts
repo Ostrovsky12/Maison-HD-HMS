@@ -3,7 +3,7 @@
  * Leads CRM · Channels · Campaigns · Upsells · Booking Widget · Repeat Sales
  */
 import { Router } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { bookingsTable, guestsTable, conversationsTable, unitsTable } from "@workspace/db";
 import { eq, sql, desc, and, or, inArray } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
@@ -165,23 +165,35 @@ router.patch("/leads/:id", async (req: any, res) => {
     const orgId: number = req.user?.organizationId;
     const { status, quotedAmount, notes, followUpAt, assignedToId, lostReason, priority, estimatedValue } = req.body;
 
-    const updates: string[] = ["updated_at = NOW()"];
+    const sets: string[] = ["updated_at = NOW()"];
+    const params: any[] = [id, orgId];
+    const add = (col: string, val: any) => { sets.push(`${col} = $${params.length + 1}`); params.push(val); };
     if (status) {
-      updates.push(`status = '${status}'::lead_status`);
-      if (status === 'contacted') updates.push(`contacted_at = NOW()`);
-      if (status === 'quote_sent') updates.push(`quoted_at = NOW()`);
-      if (status === 'booked') updates.push(`booked_at = NOW()`);
+      // Validate against known lead statuses
+      const LEAD_STATUSES = ["new","contacted","quote_sent","negotiating","booked","lost","cancelled"];
+      if (!LEAD_STATUSES.includes(status)) return res.status(400).json({ error: "Invalid status" });
+      add("status", status);
+      if (status === "contacted") sets.push("contacted_at = NOW()");
+      if (status === "quote_sent") sets.push("quoted_at = NOW()");
+      if (status === "booked") sets.push("booked_at = NOW()");
     }
-    if (quotedAmount !== undefined) updates.push(`quoted_amount = ${quotedAmount}`);
-    if (estimatedValue !== undefined) updates.push(`estimated_value = ${estimatedValue}`);
-    if (notes !== undefined) updates.push(`notes = '${(notes || "").replace(/'/g, "''")}'`);
-    if (lostReason) updates.push(`lost_reason = '${lostReason.replace(/'/g, "''")}'`);
-    if (followUpAt) updates.push(`follow_up_at = '${followUpAt}'`);
-    if (assignedToId !== undefined) updates.push(`assigned_to_id = ${assignedToId || "NULL"}`);
-    if (priority) updates.push(`priority = '${priority}'`);
+    if (quotedAmount !== undefined) add("quoted_amount", quotedAmount != null ? Number(quotedAmount) : null);
+    if (estimatedValue !== undefined) add("estimated_value", estimatedValue != null ? Number(estimatedValue) : null);
+    if (notes !== undefined) add("notes", notes || null);
+    if (lostReason) add("lost_reason", lostReason);
+    if (followUpAt) add("follow_up_at", followUpAt);
+    if (assignedToId !== undefined) add("assigned_to_id", assignedToId || null);
+    if (priority) {
+      const PRIORITIES = ["low","medium","high","urgent"];
+      if (!PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid priority" });
+      add("priority", priority);
+    }
 
-    const updResult = await db.execute(sql.raw(`UPDATE leads SET ${updates.join(", ")} WHERE id = ${id} AND organization_id = ${orgId} RETURNING *`));
-    res.json({ lead: updResult.rows[0] });
+    const { rows } = await pool.query(
+      `UPDATE leads SET ${sets.join(", ")} WHERE id = $1 AND organization_id = $2 RETURNING *`,
+      params,
+    );
+    res.json({ lead: rows[0] });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

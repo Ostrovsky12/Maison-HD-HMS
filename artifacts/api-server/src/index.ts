@@ -109,6 +109,14 @@ async function ensureSchema() {
       created_at TIMESTAMP DEFAULT NOW() NOT NULL,
       updated_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
+    -- Ensure bookings.organization_id exists (added in hardening sprint)
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id);
+
+    -- Performance + availability indexes for bookings
+    CREATE INDEX IF NOT EXISTS idx_bookings_org_unit   ON bookings (organization_id, unit_id);
+    CREATE INDEX IF NOT EXISTS idx_bookings_org_status ON bookings (organization_id, status);
+    CREATE INDEX IF NOT EXISTS idx_bookings_unit_dates ON bookings (unit_id, check_in, check_out);
+
     CREATE TABLE IF NOT EXISTS housekeeping_tasks (
       id SERIAL PRIMARY KEY,
       unit_id INTEGER NOT NULL REFERENCES units(id),

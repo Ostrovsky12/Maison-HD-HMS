@@ -2,7 +2,7 @@
  * Finance API — Payments, Deposits, LiqPay, Invoices, Installments, Reconciliation
  */
 import { Router } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { paymentsTable, bookingsTable, invoicesTable, legalEntitiesTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
@@ -43,8 +43,12 @@ async function getDefaultLegalEntity(orgId: number) {
   return (r.rows[0] as any) || null;
 }
 
-async function updateBookingPayment(bookingId: number, amount: number, type: string) {
-  const [b] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId));
+async function updateBookingPayment(bookingId: number, amount: number, type: string, orgId?: number) {
+  // Scope the lookup to org when provided — prevents cross-tenant payment ledger manipulation
+  const conditions = orgId
+    ? and(eq(bookingsTable.id, bookingId), eq(bookingsTable.organizationId, orgId))
+    : eq(bookingsTable.id, bookingId);
+  const [b] = await db.select().from(bookingsTable).where(conditions);
   if (!b) return;
   let paid = parseFloat(b.paidAmount || "0");
   if (type === "refund") paid = Math.max(0, paid - amount);
@@ -52,7 +56,7 @@ async function updateBookingPayment(bookingId: number, amount: number, type: str
   const total = parseFloat(b.totalAmount || "0");
   const status: "unpaid" | "partial" | "paid" = paid >= total ? "paid" : paid > 0 ? "partial" : "unpaid";
   await db.update(bookingsTable).set({ paidAmount: paid.toString(), paymentStatus: status, updatedAt: new Date() })
-    .where(eq(bookingsTable.id, bookingId));
+    .where(conditions);
 }
 
 // ─── SUMMARY ─────────────────────────────────────────────────────────────────
@@ -183,6 +187,20 @@ router.post("/payments", async (req: any, res) => {
     const { bookingId, amount, method, description, paymentType = "payment", currency = "UAH" } = req.body;
     if (!bookingId || !amount) return res.status(400).json({ error: "bookingId та amount обов'язкові" });
 
+    // Verify booking belongs to caller's org (prevent cross-tenant payment injection)
+    if (orgId) {
+      const check = await db.execute(sql`
+        SELECT b.id FROM bookings b
+        JOIN units u ON u.id = b.unit_id
+        JOIN properties p ON p.id = u.property_id
+        WHERE b.id = ${bookingId} AND p.organization_id = ${orgId}
+        LIMIT 1
+      `);
+      if (!check.rows.length) {
+        return res.status(403).json({ error: "Forbidden", message: "Бронювання не належить вашій організації" });
+      }
+    }
+
     const le = await getDefaultLegalEntity(orgId);
     const receipt = `REC-${Date.now()}`;
 
@@ -194,7 +212,7 @@ router.post("/payments", async (req: any, res) => {
       currency, description, netAmount: amount.toString(),
     } as any).returning();
 
-    await updateBookingPayment(bookingId, parseFloat(amount), paymentType);
+    await updateBookingPayment(bookingId, parseFloat(amount), paymentType, orgId);
     res.json({ payment, receiptNumber: receipt });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -203,10 +221,25 @@ router.post("/payments", async (req: any, res) => {
 router.post("/payments/:id/refund", async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
+    const orgId: number = req.user?.organizationId;
     const userId: number = req.user?.id;
     const { amount, reason } = req.body;
     const [orig] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id));
     if (!orig) return res.status(404).json({ error: "Платіж не знайдено" });
+
+    // Verify the payment's booking belongs to caller's org
+    if (orgId) {
+      const check = await db.execute(sql`
+        SELECT b.id FROM bookings b
+        JOIN units u ON u.id = b.unit_id
+        JOIN properties p ON p.id = u.property_id
+        WHERE b.id = ${orig.bookingId} AND p.organization_id = ${orgId}
+        LIMIT 1
+      `);
+      if (!check.rows.length) {
+        return res.status(403).json({ error: "Forbidden", message: "Платіж не належить вашій організації" });
+      }
+    }
 
     const refAmt = parseFloat(amount) || parseFloat(orig.amount.toString());
     const receipt = `REF-${Date.now()}`;
@@ -222,7 +255,7 @@ router.post("/payments/:id/refund", async (req: any, res) => {
     } as any).returning();
 
     await db.update(paymentsTable).set({ status: "refunded" } as any).where(eq(paymentsTable.id, id));
-    await updateBookingPayment(orig.bookingId, refAmt, "refund");
+    await updateBookingPayment(orig.bookingId, refAmt, "refund", orgId);
     res.json({ refund, receiptNumber: receipt });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -234,6 +267,20 @@ router.post("/invoices/generate", async (req: any, res) => {
     const userId: number = req.user?.id;
     const { bookingId, type = "accommodation" } = req.body;
     if (!bookingId) return res.status(400).json({ error: "bookingId обов'язковий" });
+
+    // Verify booking belongs to caller's org
+    if (orgId) {
+      const check = await db.execute(sql`
+        SELECT b.id FROM bookings b
+        JOIN units u ON u.id = b.unit_id
+        JOIN properties p ON p.id = u.property_id
+        WHERE b.id = ${bookingId} AND p.organization_id = ${orgId}
+        LIMIT 1
+      `);
+      if (!check.rows.length) {
+        return res.status(403).json({ error: "Forbidden", message: "Бронювання не належить вашій організації" });
+      }
+    }
 
     const existing = await db.select().from(invoicesTable).where(eq(invoicesTable.bookingId, bookingId));
     if (existing.length) return res.json({ invoice: existing[0], existed: true });
@@ -895,14 +942,16 @@ router.patch("/revenue-categories/:id", async (req: any, res) => {
   try {
     const orgId: number = req.user?.organizationId;
     const { name, code, type, description, vatRate, sortOrder, isActive } = req.body;
-    const updates: string[] = [];
-    if (name !== undefined) updates.push(`name = '${name}'`);
-    if (code !== undefined) updates.push(`code = ${code ? `'${code}'` : 'NULL'}`);
-    if (type !== undefined) updates.push(`type = '${type}'`);
-    if (vatRate !== undefined) updates.push(`vat_rate = '${vatRate}'`);
-    if (isActive !== undefined) updates.push(`is_active = ${isActive}`);
-    if (updates.length === 0) return res.json({ success: true });
-    await db.execute(sql`UPDATE revenue_categories SET ${sql.raw(updates.join(', '))} WHERE id = ${parseInt(req.params.id)} AND organization_id = ${orgId}`);
+    const sets: string[] = [];
+    const params: any[] = [parseInt(req.params.id), orgId];
+    const add = (col: string, val: any) => { sets.push(`${col} = $${params.length + 1}`); params.push(val); };
+    if (name !== undefined) add("name", name);
+    if (code !== undefined) add("code", code || null);
+    if (type !== undefined) add("type", type);
+    if (vatRate !== undefined) add("vat_rate", vatRate != null ? Number(vatRate) : null);
+    if (isActive !== undefined) add("is_active", Boolean(isActive));
+    if (sets.length === 0) return res.json({ success: true });
+    await pool.query(`UPDATE revenue_categories SET ${sets.join(", ")} WHERE id = $1 AND organization_id = $2`, params);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

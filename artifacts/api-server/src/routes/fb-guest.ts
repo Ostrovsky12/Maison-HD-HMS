@@ -7,8 +7,26 @@ import { pool } from "@workspace/db";
 import { requireAuth } from "../lib/auth.js";
 import { generateLiqPayForm, verifyLiqPayCallbackWithKey, parseLiqPayData, sendLiqPayP2P } from "../lib/liqpay.js";
 import { decrypt } from "../lib/encrypt.js";
+import rateLimit from "express-rate-limit";
 
 const router = Router();
+
+// Rate limiters for public F&B guest endpoints
+const paymentLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,  // 5 minutes
+  max: 5,                    // max 5 payment requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Забагато запитів оплати. Спробуйте через 5 хвилин." },
+});
+
+const orderLimiter = rateLimit({
+  windowMs: 60 * 1000,      // 1 minute
+  max: 15,                   // 15 order submissions per IP per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Забагато замовлень. Зачекайте хвилину." },
+});
 
 // ── Helper: map item station → printer type ───────────────────────────────────
 function stationToPrinterType(station: string | null): "kitchen" | "bar" {
@@ -287,7 +305,7 @@ router.get("/public/guest-menu", async (req, res) => {
 });
 
 // ─── POST /fb/public/guest-orders ────────────────────────────────────────────
-router.post("/public/guest-orders", async (req, res) => {
+router.post("/public/guest-orders", orderLimiter, async (req, res) => {
   const { tableId, items, guestName, guestCount, notes, tipPct, outletId, outletSlug } = req.body;
   if (!Array.isArray(items) || !items.length) {
     return res.status(400).json({ error: "items required" });
@@ -392,7 +410,7 @@ router.post("/public/guest-orders", async (req, res) => {
 // ─── POST /fb/public/liqpay-checkout ─────────────────────────────────────────
 // Generates a LiqPay checkout URL for the current open FB order at a table.
 // Returns { url } — guest is redirected to LiqPay (supports Apple Pay / Google Pay).
-router.post("/public/liqpay-checkout", async (req, res) => {
+router.post("/public/liqpay-checkout", paymentLimiter, async (req, res) => {
   const { tableId, tipPct } = req.body;
   if (!tableId) return res.status(400).json({ error: "tableId required" });
 
@@ -588,7 +606,7 @@ router.post("/public/call-waiter", async (req, res) => {
 });
 
 // ─── POST /fb/public/request-payment ─────────────────────────────────────────
-router.post("/public/request-payment", async (req, res) => {
+router.post("/public/request-payment", paymentLimiter, async (req, res) => {
   const { tableId, method } = req.body;
   if (!tableId || !method) return res.status(400).json({ error: "tableId and method required" });
   const allowedMethods = ["cash", "terminal"];

@@ -323,12 +323,18 @@ export default function GuestPortalPage() {
         body: JSON.stringify(checkinForm),
       });
       const d = await r.json();
+      if (!r.ok) {
+        toast({ title: "Помилка", description: d.error || `HTTP ${r.status}`, variant: "destructive" });
+        return;
+      }
       if (d.success) {
         setCheckinDone(true);
         toast({ title: "✅ Форму подано!", description: d.message || "Дякуємо! Ваші дані збережено." });
       } else {
         toast({ title: "Помилка", description: d.error, variant: "destructive" });
       }
+    } catch {
+      toast({ title: "Помилка мережі", variant: "destructive" });
     } finally { setCheckinSubmitting(false); }
   }
 
@@ -347,12 +353,18 @@ export default function GuestPortalPage() {
         }),
       });
       const d = await r.json();
+      if (!r.ok) {
+        toast({ title: "Помилка", description: d.error || `HTTP ${r.status}`, variant: "destructive" });
+        return;
+      }
       if (d.success) {
         toast({ title: "✅ Замовлення прийнято!", description: `${selectedService.name} — очікуйте підтвердження` });
         setSelectedService(null); setServiceQty(1); setServiceTime(""); setServiceNotes("");
       } else {
         toast({ title: "Помилка", description: d.error, variant: "destructive" });
       }
+    } catch {
+      toast({ title: "Помилка мережі", variant: "destructive" });
     } finally { setOrderingService(false); }
   }
 
@@ -364,10 +376,16 @@ export default function GuestPortalPage() {
         body: JSON.stringify({ preferredTime: checkoutTime, luggageStorage }),
       });
       const d = await r.json();
+      if (!r.ok) {
+        toast({ title: "Помилка", description: d.error || `HTTP ${r.status}`, variant: "destructive" });
+        return;
+      }
       if (d.success) {
         setCheckoutDone(true);
         toast({ title: "Запит прийнято", description: "Адміністратор зв'яжеться з вами незабаром" });
       }
+    } catch {
+      toast({ title: "Помилка мережі", variant: "destructive" });
     } finally { setCheckoutSubmitting(false); }
   }
 

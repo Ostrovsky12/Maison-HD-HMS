@@ -228,8 +228,12 @@ router.post('/equipment/rentals', async (req, res) => {
       RETURNING *
     `);
 
-    // Mark item as rented (unavailable)
-    await db.execute(sql`UPDATE equipment_items SET is_available = FALSE, updated_at = NOW() WHERE id = ${item_id}`);
+    // Mark item as rented (unavailable) — scope to org via category join
+    await db.execute(sql`
+      UPDATE equipment_items SET is_available = FALSE, updated_at = NOW()
+      WHERE id = ${item_id}
+        AND category_id IN (SELECT id FROM equipment_categories WHERE organization_id = ${orgId})
+    `);
 
     res.json({ rental: result.rows[0] });
   } catch (e: any) {
@@ -258,11 +262,16 @@ router.patch('/equipment/rentals/:id/return', async (req, res) => {
         deposit_returned = ${deposit_returned !== false},
         updated_at = NOW()
       WHERE id = ${parseInt(id)}
+        AND organization_id = ${orgId}
       RETURNING *
     `);
 
-    // Mark item as available again
-    await db.execute(sql`UPDATE equipment_items SET is_available = TRUE, updated_at = NOW() WHERE id = ${rental.item_id}`);
+    // Mark item as available again — org-scoped via category join
+    await db.execute(sql`
+      UPDATE equipment_items SET is_available = TRUE, updated_at = NOW()
+      WHERE id = ${rental.item_id}
+        AND category_id IN (SELECT id FROM equipment_categories WHERE organization_id = ${orgId})
+    `);
 
     res.json({ rental: result.rows[0] });
   } catch (e: any) {
@@ -464,8 +473,12 @@ router.post('/sessions/:id/book', async (req, res) => {
       RETURNING *
     `);
 
-    // Update participant count
-    await db.execute(sql`UPDATE activity_sessions SET current_participants = current_participants + ${count}, updated_at = NOW() WHERE id = ${parseInt(id)}`);
+    // Update participant count — org-scoped via activity_types join
+    await db.execute(sql`
+      UPDATE activity_sessions SET current_participants = current_participants + ${count}, updated_at = NOW()
+      WHERE id = ${parseInt(id)}
+        AND activity_type_id IN (SELECT id FROM activity_types WHERE organization_id = ${orgId})
+    `);
 
     res.json({ booking: result.rows[0] });
   } catch (e: any) {
@@ -485,8 +498,12 @@ router.patch('/bookings/:id/cancel', async (req, res) => {
     `)).rows as any[];
     if (!booking) return res.status(404).json({ error: 'Not found' });
 
-    await db.execute(sql`UPDATE activity_bookings SET status = 'cancelled' WHERE id = ${parseInt(id)}`);
-    await db.execute(sql`UPDATE activity_sessions SET current_participants = GREATEST(0, current_participants - ${booking.participant_count}), updated_at = NOW() WHERE id = ${booking.session_id}`);
+    await db.execute(sql`UPDATE activity_bookings SET status = 'cancelled' WHERE id = ${parseInt(id)} AND organization_id = ${orgId}`);
+    await db.execute(sql`
+      UPDATE activity_sessions SET current_participants = GREATEST(0, current_participants - ${booking.participant_count}), updated_at = NOW()
+      WHERE id = ${booking.session_id}
+        AND activity_type_id IN (SELECT id FROM activity_types WHERE organization_id = ${orgId})
+    `);
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

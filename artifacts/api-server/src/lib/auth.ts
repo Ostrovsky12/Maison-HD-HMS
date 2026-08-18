@@ -3,6 +3,9 @@ import bcrypt from "bcryptjs";
 import { Request, Response, NextFunction } from "express";
 
 const JWT_SECRET = process.env.JWT_SECRET || "hms-secret-key-change-in-production";
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  console.warn("[security] JWT_SECRET is missing or too short — set a strong random secret in production");
+}
 
 export interface JwtPayload {
   userId: number;

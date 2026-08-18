@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { db } from "@workspace/db";
 import {
   bookingsTable, unitsTable, propertiesTable, guestServiceOrdersTable, organizationsTable,
@@ -11,6 +12,15 @@ import { randomBytes } from "crypto";
 import { requireAuth } from "../lib/auth.js";
 import { sendPushToOrg } from "./push.js";
 import { sendTelegram } from "../lib/notify.js";
+
+// Rate limiter for access-code endpoints — prevents brute-force of 10-char codes
+const accessCodeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 20, // 20 attempts per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Забагато спроб. Спробуйте пізніше." },
+});
 
 // ── Helper: notify all staff of an org about a guest portal action ──────────
 async function notifyOrgStaff(
@@ -166,11 +176,27 @@ router.get("/checkin-data/:bookingId", requireAuth, async (req: any, res) => {
   }
 });
 
-// ── Staff: Mark message as read ────────────────────────────────────────────
+// ── Staff: Mark message as read ─────────────────────────────────────────────
 router.patch("/messages/:id/read", requireAuth, async (req: any, res) => {
   try {
-    await db.update(guestPortalMessagesTable).set({ isRead: true })
-      .where(eq(guestPortalMessagesTable.id, parseInt(req.params.id)));
+    const orgId = req.user?.organizationId;
+    const msgId = parseInt(req.params.id);
+    // Scope read-mark to org: only mark messages whose booking belongs to the caller's org
+    if (orgId) {
+      await db.execute(sql`
+        UPDATE guest_portal_messages SET is_read = true
+        WHERE id = ${msgId}
+          AND booking_id IN (
+            SELECT b.id FROM bookings b
+            JOIN units u ON u.id = b.unit_id
+            JOIN properties p ON p.id = u.property_id
+            WHERE p.organization_id = ${orgId}
+          )
+      `);
+    } else {
+      await db.update(guestPortalMessagesTable).set({ isRead: true })
+        .where(eq(guestPortalMessagesTable.id, msgId));
+    }
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -260,8 +286,16 @@ router.get("/reviews", requireAuth, async (req: any, res) => {
 
 router.patch("/reviews/:id", requireAuth, async (req: any, res) => {
   try {
+    const orgId = req.user?.organizationId;
     const id = parseInt(req.params.id);
     const { isPublished, staffResponse } = req.body;
+    // Validate review belongs to caller's org before updating
+    if (orgId) {
+      const [rev] = await db.select({ orgId: guestReviewsTable.organizationId })
+        .from(guestReviewsTable).where(eq(guestReviewsTable.id, id)).limit(1);
+      if (!rev) return res.status(404).json({ error: "Review not found" });
+      if (rev.orgId !== orgId) return res.status(403).json({ error: "Forbidden" });
+    }
     const updated = await db.update(guestReviewsTable)
       .set({ isPublished: isPublished ?? undefined, staffResponse: staffResponse ?? undefined })
       .where(eq(guestReviewsTable.id, id)).returning();
@@ -319,8 +353,13 @@ router.patch("/offers/:id", requireAuth, async (req: any, res) => {
 
 router.delete("/offers/:id", requireAuth, async (req: any, res) => {
   try {
+    const orgId = req.user?.organizationId;
     const id = parseInt(req.params.id);
-    await db.delete(guestSpecialOffersTable).where(eq(guestSpecialOffersTable.id, id));
+    // Scope to org — only delete offers that belong to the caller's organization
+    await db.delete(guestSpecialOffersTable)
+      .where(orgId
+        ? and(eq(guestSpecialOffersTable.id, id), eq(guestSpecialOffersTable.organizationId, orgId))
+        : eq(guestSpecialOffersTable.id, id));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -540,7 +579,7 @@ router.patch("/service-orders/:id", requireAuth, async (req: any, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/guest/:code — full booking info
-router.get("/:code", async (req, res) => {
+router.get("/:code", accessCodeLimiter, async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
     const [booking] = await db.select({
@@ -606,7 +645,7 @@ router.get("/:code", async (req, res) => {
 });
 
 // POST /api/guest/:code/checkin
-router.post("/:code/checkin", async (req, res) => {
+router.post("/:code/checkin", accessCodeLimiter, async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.guestAccessCode, code));
@@ -632,8 +671,9 @@ router.post("/:code/checkin", async (req, res) => {
       updatedAt: new Date(),
     }).where(eq(bookingsTable.guestAccessCode, code));
 
-    // Auto-create or update loyalty account
-    if (email) {
+    // Auto-create or update loyalty account — only award points on FIRST checkin submission
+    const alreadySubmitted = (booking as any).checkinFormSubmitted;
+    if (email && !alreadySubmitted) {
       const [unit] = await db.select({ propertyId: unitsTable.propertyId }).from(unitsTable).where(eq(unitsTable.id, booking.unitId));
       if (unit) {
         const [prop] = await db.select({ organizationId: propertiesTable.organizationId }).from(propertiesTable).where(eq(propertiesTable.id, unit.propertyId));
@@ -647,7 +687,7 @@ router.post("/:code/checkin", async (req, res) => {
               tier: "bronze", points: 50, totalPoints: 50,
             });
           } else {
-            // Add checkin bonus points
+            // Add checkin bonus points (only once — guarded by alreadySubmitted above)
             await db.update(guestLoyaltyTable).set({
               points: sql`${guestLoyaltyTable.points} + 50`,
               totalPoints: sql`${guestLoyaltyTable.totalPoints} + 50`,
@@ -738,7 +778,7 @@ router.get("/:code/services", async (req, res) => {
 });
 
 // POST /api/guest/:code/service-order
-router.post("/:code/service-order", async (req, res) => {
+router.post("/:code/service-order", accessCodeLimiter, async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.guestAccessCode, code));
@@ -748,8 +788,22 @@ router.post("/:code/service-order", async (req, res) => {
     const { serviceId, addonId, serviceName, serviceType, quantity, requestedTime, guestNotes, price } = req.body;
     if (!serviceName) return res.status(400).json({ error: "Назва послуги обов'язкова" });
 
-    const qty = parseInt(quantity) || 1;
-    const pricePerUnit = parseFloat(price) || 0;
+    // Validate quantity — must be a positive integer
+    const qty = Math.max(1, Math.min(99, parseInt(quantity) || 1));
+
+    // Price must come from the server-side catalog when an addonId is supplied.
+    // For free-form service requests (no addonId), price is informational and clamped to non-negative.
+    let pricePerUnit = 0;
+    if (addonId) {
+      const addonRow = await db.execute(sql`
+        SELECT price FROM unit_addons WHERE id = ${parseInt(addonId)} LIMIT 1
+      `);
+      pricePerUnit = addonRow.rows.length ? parseFloat(String(addonRow.rows[0].price)) || 0 : 0;
+    } else {
+      // Free-form request: accept the submitted price only as a non-negative hint
+      const submitted = parseFloat(price);
+      pricePerUnit = Number.isFinite(submitted) && submitted >= 0 ? submitted : 0;
+    }
 
     const [order] = await db.insert(guestServiceOrdersTable).values({
       bookingId: booking.id,
@@ -781,7 +835,7 @@ router.post("/:code/service-order", async (req, res) => {
 });
 
 // POST /api/guest/:code/checkout-request
-router.post("/:code/checkout-request", async (req, res) => {
+router.post("/:code/checkout-request", accessCodeLimiter, async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.guestAccessCode, code));
