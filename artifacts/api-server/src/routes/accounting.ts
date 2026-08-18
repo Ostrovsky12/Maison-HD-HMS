@@ -951,11 +951,27 @@ ${doc?.payment_terms ? `<p>Умови оплати: ${escXml(doc.payment_terms)}
 }
 
 function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
-  const itemsHtml = items.map((it, i) => `
+  // If no line items — use subject as the single row (same as invoice logic)
+  const noItems = items.length === 0;
+  const syntheticVatRate = (() => {
+    const vat = parseFloat(doc?.vat_amount || 0);
+    const total = parseFloat(doc?.total_amount || 0);
+    const base = total - vat;
+    return (vat > 0 && base > 0) ? Math.round(vat / base * 100) : 0;
+  })();
+  const effectiveItems = noItems ? (doc?.subject ? [{
+    name: doc.subject,
+    unit: "послуга",
+    quantity: 1,
+    unit_price: parseFloat(doc?.subtotal || doc?.total_amount || 0),
+    total_amount: parseFloat(doc?.total_amount || 0),
+  }] : []) : items;
+
+  const itemsHtml = effectiveItems.map((it, i) => `
     <tr>
       <td class="num">${i + 1}</td>
       <td>${escXml(it.name || it.description || "Послуга")}</td>
-      <td class="center">${it.unit || "шт"}</td>
+      <td class="center">${it.unit || "послуга"}</td>
       <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
       <td class="right">${parseFloat(it.unit_price || 0).toFixed(2)}</td>
       <td class="right"><b>${parseFloat(it.total_amount || 0).toFixed(2)}</b></td>
@@ -988,7 +1004,7 @@ function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
 <div style="overflow:hidden">
   <table class="totals">
     <tr><td>Без ПДВ:</td><td class="right">${parseFloat(doc?.subtotal || 0).toFixed(2)} ₴</td></tr>
-    <tr><td>ПДВ 20%:</td><td class="right">${parseFloat(doc?.vat_amount || 0).toFixed(2)} ₴</td></tr>
+    ${syntheticVatRate > 0 ? `<tr><td>ПДВ ${syntheticVatRate}%:</td><td class="right">${parseFloat(doc?.vat_amount || 0).toFixed(2)} ₴</td></tr>` : ""}
     <tr><td><b>Разом:</b></td><td class="right"><b>${parseFloat(doc?.total_amount || 0).toFixed(2)} ₴</b></td></tr>
   </table>
 </div>
