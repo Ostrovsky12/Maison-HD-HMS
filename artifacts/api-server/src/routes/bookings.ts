@@ -18,7 +18,8 @@ async function requireBookingOwnership(req: any, res: any, next: any) {
   const user = req.user;
   if (!user || user.role === "super_admin") { next(); return; }
   const orgId = user.organizationId;
-  if (!orgId) { next(); return; }
+  // Non-super-admin with no org cannot own any booking — deny immediately
+  if (!orgId) { res.status(403).json({ error: "Forbidden", message: "Access denied" }); return; }
   const bookingId = parseInt(req.params.bookingId);
   if (isNaN(bookingId)) { res.status(400).json({ error: "Invalid booking ID" }); return; }
   const [row] = await db
@@ -85,43 +86,78 @@ router.get("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const { unitId, guestId, status, dateFrom, dateTo, propertyId } = req.query;
 
+  // ── Tenant isolation ───────────────────────────────────────────────────────
+  // Users without an organizationId are only allowed through if they are
+  // explicitly a super_admin. Any other role with null org gets nothing.
+  if (!user.organizationId && user.role !== "super_admin") {
+    res.json([]);
+    return;
+  }
+
+  // ── Derive the authorised property/unit scope ──────────────────────────────
+  //
+  // For org-scoped users: authorised property IDs always come from the DB
+  // (token org → properties). A requested ?propertyId or ?unitId is only
+  // accepted when it falls within that authorised set — cross-tenant scope
+  // injection via query params is therefore impossible.
+  //
+  // For super_admin (organizationId = null): trust explicit scope params as-is.
+
   let propIds: number[] = [];
-  if (propertyId && user.organizationId) {
-    // Validate the supplied propertyId belongs to caller's org
-    const propCheck = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(and(eq(propertiesTable.id, parseInt(propertyId as string)), eq(propertiesTable.organizationId, user.organizationId)));
-    propIds = propCheck.map(p => p.id);
-  } else if (propertyId && user.role === "super_admin") {
-    propIds = [parseInt(propertyId as string)];
-  } else if (user.organizationId) {
-    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, user.organizationId));
-    propIds = props.map(p => p.id);
-  }
-
   let unitIds: number[] = [];
-  if (unitId && user.organizationId) {
-    // Validate the supplied unitId belongs to caller's org via property join
-    const unitCheck = await db.select({ id: unitsTable.id }).from(unitsTable)
-      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
-      .where(and(eq(unitsTable.id, parseInt(unitId as string)), eq(propertiesTable.organizationId, user.organizationId)));
-    unitIds = unitCheck.map(u => u.id);
-  } else if (unitId && user.role === "super_admin") {
-    unitIds = [parseInt(unitId as string)];
-  } else if (propIds.length > 0) {
-    const units = await db.select({ id: unitsTable.id }).from(unitsTable)
-      .where(inArray(unitsTable.propertyId, propIds));
-    unitIds = units.map(u => u.id);
-  }
 
-  // If the org has been determined but yielded no units — return empty (security: no cross-tenant leak)
-  if (!unitId && user.organizationId && propIds.length === 0) {
-    res.json([]);
-    return;
-  }
-  if (!unitId && propIds.length > 0 && unitIds.length === 0) {
-    res.json([]);
-    return;
+  if (user.organizationId) {
+    // Step 1: fetch all properties owned by this org
+    const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    const authorisedPropIds = orgProps.map((p: { id: number }) => p.id);
+
+    if (authorisedPropIds.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    if (propertyId) {
+      // Requested propertyId must belong to this org
+      const reqPropId = parseInt(propertyId as string);
+      if (!authorisedPropIds.includes(reqPropId)) {
+        res.json([]);
+        return;
+      }
+      propIds = [reqPropId];
+    } else {
+      propIds = authorisedPropIds;
+    }
+
+    if (unitId) {
+      // Requested unitId must belong to one of the authorised properties
+      const reqUnitId = parseInt(unitId as string);
+      const validUnit = await db.select({ id: unitsTable.id }).from(unitsTable)
+        .where(and(eq(unitsTable.id, reqUnitId), inArray(unitsTable.propertyId, propIds)));
+      if (!validUnit.length) {
+        res.json([]);
+        return;
+      }
+      unitIds = [reqUnitId];
+    } else {
+      const units = await db.select({ id: unitsTable.id }).from(unitsTable)
+        .where(inArray(unitsTable.propertyId, propIds));
+      unitIds = units.map((u: { id: number }) => u.id);
+      if (unitIds.length === 0) {
+        res.json([]);
+        return;
+      }
+    }
+  } else {
+    // super_admin — trust explicit scope params
+    if (propertyId) propIds = [parseInt(propertyId as string)];
+    if (unitId) {
+      unitIds = [parseInt(unitId as string)];
+    } else if (propIds.length > 0) {
+      const units = await db.select({ id: unitsTable.id }).from(unitsTable)
+        .where(inArray(unitsTable.propertyId, propIds));
+      unitIds = units.map((u: { id: number }) => u.id);
+    }
   }
 
   const conditions: any[] = [];
@@ -181,6 +217,13 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   try {
   const user = (req as any).user;
+
+  // Non-super-admin with no org cannot create bookings
+  if (!user.organizationId && user.role !== "super_admin") {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+    return;
+  }
+
   const {
     unitId, checkIn, checkOut, status, source, totalAmount, notes,
     checkinTime, checkoutTime, rateId, rateName,
@@ -191,7 +234,37 @@ router.post("/", requireAuth, async (req, res) => {
     payOnArrival, partialAmount, withPets,
   } = req.body;
 
+  // Validate that the requested unit belongs to the caller's org (pre-transaction check)
+  if (user.organizationId && unitId) {
+    const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    const authorisedPropIds = orgProps.map((p: any) => p.id);
+    if (authorisedPropIds.length === 0) {
+      res.status(403).json({ error: "Forbidden", message: "No properties in your organization" });
+      return;
+    }
+    const validUnit = await db.select({ id: unitsTable.id }).from(unitsTable)
+      .where(and(eq(unitsTable.id, unitId), inArray(unitsTable.propertyId, authorisedPropIds)));
+    if (!validUnit.length) {
+      res.status(403).json({ error: "Forbidden", message: "Unit does not belong to your organization" });
+      return;
+    }
+  }
+
+
   let { guestId } = req.body;
+
+  // Validate supplied guestId belongs to the caller's org (prevents cross-tenant guest PII leak)
+  if (guestId && user.organizationId) {
+    const [guestCheck] = await db.select({ id: guestsTable.id })
+      .from(guestsTable)
+      .where(and(eq(guestsTable.id, guestId), eq(guestsTable.organizationId, user.organizationId)))
+      .limit(1);
+    if (!guestCheck) {
+      res.status(403).json({ error: "Forbidden", message: "Guest does not belong to your organization" });
+      return;
+    }
+  }
 
   // Auto-find or create guest from phone/name
   if (!guestId && (phone || firstName)) {
@@ -394,6 +467,13 @@ router.post("/", requireAuth, async (req, res) => {
 // POST /api/bookings/group — create multiple units as one group booking
 router.post("/group", requireAuth, async (req, res) => {
   const user = (req as any).user;
+
+  // Non-super-admin with no org cannot create bookings
+  if (!user.organizationId && user.role !== "super_admin") {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+    return;
+  }
+
   const {
     units, // array of { unitId, adults, childrenUnder6, childrenOver6, extraBeds }
     checkIn, checkOut, checkinTime, checkoutTime,
@@ -409,7 +489,40 @@ router.post("/group", requireAuth, async (req, res) => {
     return;
   }
 
+  // Validate all supplied unit IDs belong to the caller's org (pre-transaction check)
+  if (user.organizationId) {
+    const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    const authorisedPropIds = orgProps.map((p: any) => p.id);
+    if (authorisedPropIds.length === 0) {
+      res.status(403).json({ error: "Forbidden", message: "No properties in your organization" });
+      return;
+    }
+    const requestedUnitIds = units.map((u: any) => u.unitId).filter(Boolean);
+    if (requestedUnitIds.length > 0) {
+      const validUnits = await db.select({ id: unitsTable.id }).from(unitsTable)
+        .where(and(inArray(unitsTable.id, requestedUnitIds), inArray(unitsTable.propertyId, authorisedPropIds)));
+      if (validUnits.length !== requestedUnitIds.length) {
+        res.status(403).json({ error: "Forbidden", message: "One or more units do not belong to your organization" });
+        return;
+      }
+    }
+  }
+
+
   let { guestId } = req.body;
+
+  // Validate supplied guestId belongs to the caller's org (prevents cross-tenant guest PII leak)
+  if (guestId && user.organizationId) {
+    const [guestCheck] = await db.select({ id: guestsTable.id })
+      .from(guestsTable)
+      .where(and(eq(guestsTable.id, guestId), eq(guestsTable.organizationId, user.organizationId)))
+      .limit(1);
+    if (!guestCheck) {
+      res.status(403).json({ error: "Forbidden", message: "Guest does not belong to your organization" });
+      return;
+    }
+  }
 
   // Auto-find or create guest
   if (!guestId && (phone || firstName)) {
@@ -584,13 +697,38 @@ router.get("/calendar", requireAuth, async (req, res) => {
     dates.push(d.toISOString().split("T")[0]);
   }
 
+  // ── Tenant isolation ───────────────────────────────────────────────────────
+  if (!user.organizationId && user.role !== "super_admin") {
+    res.json({ units: [], bookings: [], dates, startDate, days });
+    return;
+  }
+
   let propIds: number[] = [];
-  if (propertyId) {
-    propIds = [propertyId];
-  } else if (user.organizationId) {
-    const props = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+  if (user.organizationId) {
+    // Always derive authorised property IDs from the token org
+    const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
       .where(eq(propertiesTable.organizationId, user.organizationId));
-    propIds = props.map((p: any) => p.id);
+    const authorisedPropIds = orgProps.map((p: any) => p.id);
+
+    // Org with no properties → return empty immediately (prevent full unit scan)
+    if (authorisedPropIds.length === 0) {
+      res.json({ units: [], bookings: [], dates, startDate, days });
+      return;
+    }
+
+    if (propertyId !== undefined) {
+      // Requested propertyId must belong to this org
+      if (!authorisedPropIds.includes(propertyId)) {
+        res.json({ units: [], bookings: [], dates, startDate, days });
+        return;
+      }
+      propIds = [propertyId];
+    } else {
+      propIds = authorisedPropIds;
+    }
+  } else {
+    // super_admin — trust explicit propertyId
+    if (propertyId !== undefined) propIds = [propertyId];
   }
 
   const propertiesRaw = propIds.length > 0
@@ -789,11 +927,37 @@ router.get("/payment-summary", requireAuth, async (req, res) => {
 
 // GET /api/bookings/pricing-preview?checkIn=&checkOut=&unitId= — dynamic price breakdown
 router.get("/pricing-preview", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+
+  // Tenant isolation: non-super-admin with no org cannot access any unit data
+  if (!user.organizationId && user.role !== "super_admin") {
+    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+    return;
+  }
+
   const { checkIn, checkOut, unitId } = req.query;
   if (!checkIn || !checkOut || !unitId) {
     res.status(400).json({ error: "checkIn, checkOut, unitId required" });
     return;
   }
+
+  // Validate the requested unit belongs to the caller's org before returning its data
+  if (user.organizationId) {
+    const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      .where(eq(propertiesTable.organizationId, user.organizationId));
+    const authorisedPropIds = orgProps.map((p: any) => p.id);
+    if (authorisedPropIds.length === 0) {
+      res.status(403).json({ error: "Forbidden", message: "No properties in your organization" });
+      return;
+    }
+    const validUnit = await db.select({ id: unitsTable.id }).from(unitsTable)
+      .where(and(eq(unitsTable.id, parseInt(unitId as string)), inArray(unitsTable.propertyId, authorisedPropIds)));
+    if (!validUnit.length) {
+      res.status(403).json({ error: "Forbidden", message: "Unit does not belong to your organization" });
+      return;
+    }
+  }
+
   const [unit] = await db.select().from(unitsTable).where(eq(unitsTable.id, parseInt(unitId as string))).limit(1);
   if (!unit) {
     res.status(404).json({ error: "Unit not found" });
@@ -864,8 +1028,34 @@ router.get("/pricing-preview", requireAuth, async (req, res) => {
 // GET /api/bookings/check-draft (MUST be before /:bookingId)
 router.get("/check-draft", requireAuth, async (req, res) => {
   try {
+    const user = (req as any).user;
+
+    // Tenant isolation: non-super-admin with no org cannot read any unit draft data
+    if (!user.organizationId && user.role !== "super_admin") {
+      res.json({ hasDraft: false });
+      return;
+    }
+
     const { unitId, checkIn, checkOut } = req.query;
     if (!unitId || !checkIn || !checkOut) return res.json({ hasDraft: false });
+
+    // Validate the unitId belongs to the caller's org before querying drafts
+    if (user.organizationId) {
+      const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+        .where(eq(propertiesTable.organizationId, user.organizationId));
+      const authorisedPropIds = orgProps.map((p: any) => p.id);
+      if (authorisedPropIds.length > 0) {
+        const validUnit = await db.select({ id: unitsTable.id }).from(unitsTable)
+          .where(and(eq(unitsTable.id, parseInt(unitId as string)), inArray(unitsTable.propertyId, authorisedPropIds)));
+        if (!validUnit.length) {
+          res.json({ hasDraft: false });
+          return;
+        }
+      } else {
+        res.json({ hasDraft: false });
+        return;
+      }
+    }
     const now = new Date();
     const drafts = await db.select({
       id: bookingsTable.id, checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
