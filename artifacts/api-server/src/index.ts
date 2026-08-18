@@ -294,6 +294,21 @@ async function ensureSchema() {
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS public_token TEXT UNIQUE;
   `);
 
+  // Migrate: direct tenant isolation column on invoices
+  await db.execute(sql`
+    ALTER TABLE invoices
+      ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE;
+
+    -- Backfill from legal_entities where possible
+    UPDATE invoices i
+    SET organization_id = le.organization_id
+    FROM legal_entities le
+    WHERE i.legal_entity_id = le.id
+      AND i.organization_id IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_invoices_organization_id ON invoices(organization_id);
+  `);
+
   // Migrate: add SPA/Pool booking settings to properties
   await db.execute(sql`
     ALTER TABLE properties ADD COLUMN IF NOT EXISTS spa_booking_mode  VARCHAR(20)     DEFAULT 'allday';

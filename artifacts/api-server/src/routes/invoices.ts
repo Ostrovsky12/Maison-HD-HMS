@@ -15,14 +15,16 @@ router.get("/", requireAuth, async (req, res) => {
 
     const orgId = user?.organizationId ?? null;
 
+    // Non-super-admin callers must have an org — otherwise we'd return all invoices
+    if (user?.role !== "super_admin" && !orgId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
     const conditions: any[] = [];
 
-    // ── Tenant isolation ──────────────────────────────────────────────────────
-    // invoicesTable has no organizationId column; scope via legalEntitiesTable
-    // (org invoices always have a legalEntityId; orphan rows without one are
-    //  excluded when an org context is present — safer than leaking all orgs)
+    // ── Tenant isolation via direct organizationId column ────────────────────
     if (orgId) {
-      conditions.push(eq(legalEntitiesTable.organizationId, orgId));
+      conditions.push(eq(invoicesTable.organizationId, orgId));
     }
 
     if (bookingId) conditions.push(eq(invoicesTable.bookingId, parseInt(bookingId as string)));
@@ -50,6 +52,7 @@ router.get("/", requireAuth, async (req, res) => {
       description: invoicesTable.description,
       dueDate: invoicesTable.dueDate,
       createdAt: invoicesTable.createdAt,
+      organizationId: invoicesTable.organizationId,
       legalEntityId: invoicesTable.legalEntityId,
       counterpartyName: invoicesTable.counterpartyName,
       counterpartyEdrpou: invoicesTable.counterpartyEdrpou,
@@ -62,7 +65,6 @@ router.get("/", requireAuth, async (req, res) => {
       guestLastName: guestsTable.lastName,
     }).from(invoicesTable)
       .leftJoin(guestsTable, eq(invoicesTable.guestId, guestsTable.id))
-      .leftJoin(legalEntitiesTable, eq(invoicesTable.legalEntityId, legalEntitiesTable.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(invoicesTable.createdAt));
 
@@ -93,6 +95,7 @@ router.post("/", requireAuth, async (req, res) => {
     const num = invoiceNumber || `Р-${new Date().getFullYear()}-${String(bookingId || 0).padStart(4, "0")}`;
 
     const [invoice] = await db.insert(invoicesTable).values({
+      organizationId: user.organizationId ?? null,
       invoiceNumber: num,
       bookingId: bookingId || null,
       guestId: guestId || null,
@@ -120,21 +123,14 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
-// ─── Helper: verify invoice belongs to caller's org (via legal entity) ────────
+// ─── Helper: verify invoice belongs to caller's org ──────────────────────────
 async function assertInvoiceAccess(invoiceId: number, user: any): Promise<{ invoice: any } | { error: string; status: number }> {
   const [invoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoiceId)).limit(1);
   if (!invoice) return { error: "Not found", status: 404 };
   if (user.role === "super_admin") return { invoice };
   if (!user.organizationId) return { error: "Forbidden", status: 403 };
-  // Scope via legalEntityId — invoicesTable has no direct organizationId column
-  if (invoice.legalEntityId) {
-    const { legalEntitiesTable } = await import("@workspace/db/schema");
-    const [le] = await db.select({ orgId: legalEntitiesTable.organizationId })
-      .from(legalEntitiesTable).where(eq(legalEntitiesTable.id, invoice.legalEntityId)).limit(1);
-    if (!le || le.orgId !== user.organizationId) return { error: "Forbidden", status: 403 };
-  } else {
-    return { error: "Forbidden", status: 403 };
-  }
+  // Direct organizationId check — no JOIN required
+  if (invoice.organizationId !== user.organizationId) return { error: "Forbidden", status: 403 };
   return { invoice };
 }
 
@@ -254,19 +250,20 @@ router.get("/public/:token", async (req, res) => {
 router.post("/:invoiceId/public-link", requireAuth, async (req, res) => {
   try {
     const invoiceId = parseInt(req.params.invoiceId);
-    let [invoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoiceId)).limit(1);
-    if (!invoice) return res.status(404).json({ error: "Not found" });
+    const access = await assertInvoiceAccess(invoiceId, (req as any).user);
+    if ("error" in access) return res.status(access.status).json({ error: access.error });
+    let invoice = access.invoice;
 
     // Generate token if not exists
-    if (!(invoice as any).public_token) {
+    if (!invoice.public_token) {
       const token = randomUUID();
       await db.execute(sql`UPDATE invoices SET public_token = ${token} WHERE id = ${invoiceId}`);
-      (invoice as any).public_token = token;
+      invoice.public_token = token;
     }
 
     const siteUrl = process.env.API_BASE_URL || `https://${process.env.REPLIT_DEV_DOMAIN || req.headers.host}`;
-    const link = `${siteUrl}/invoice/${(invoice as any).public_token}`;
-    res.json({ link, token: (invoice as any).public_token });
+    const link = `${siteUrl}/invoice/${invoice.public_token}`;
+    res.json({ link, token: invoice.public_token });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -279,11 +276,12 @@ router.post("/:invoiceId/send", requireAuth, async (req, res) => {
     const invoiceId = parseInt(req.params.invoiceId);
     const { channel, recipient } = req.body; // channel: telegram|sms|link
 
-    let [invoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoiceId)).limit(1);
-    if (!invoice) return res.status(404).json({ error: "Not found" });
+    const access = await assertInvoiceAccess(invoiceId, user);
+    if ("error" in access) return res.status(access.status).json({ error: access.error });
+    const invoice = access.invoice;
 
     // ── Generate / reuse public token ────────────────────────────────────────
-    let publicToken = (invoice as any).public_token as string | null;
+    let publicToken = invoice.public_token as string | null;
     if (!publicToken) {
       publicToken = randomUUID();
       await db.execute(sql`UPDATE invoices SET public_token = ${publicToken} WHERE id = ${invoiceId}`);

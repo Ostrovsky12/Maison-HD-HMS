@@ -1673,6 +1673,7 @@ router.post("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (
       .limit(1);
 
     const payload: any = {
+      organizationId: user.organizationId ?? null,
       invoiceNumber,
       bookingId,
       legalEntityId: legalEntityId || null,

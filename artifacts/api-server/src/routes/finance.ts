@@ -295,6 +295,7 @@ router.post("/invoices/generate", async (req: any, res) => {
     const vat = Math.round((total - subtotal) * 100) / 100;
 
     const [invoice] = await db.insert(invoicesTable).values({
+      organizationId: orgId ?? null,
       invoiceNumber, bookingId, guestId: booking.guestId ?? null,
       invoiceType: type as any, status: "pending",
       amount: total.toString(), taxAmount: vat.toString(),
