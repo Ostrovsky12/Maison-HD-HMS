@@ -30,3 +30,10 @@ id = "IyZnax9rAbXVQw2DvIRec"
 uri = "file://telephony-export.zip"
 type = "unspecified"
 title = "Telephony Module — Maison HD"
+
+[[outputs]]
+id = "k1JlyHC9AkgzpiKWC2Ajd"
+uri = "file://maison-hd-audit.zip"
+type = "unspecified"
+title = "Maison HD — Аудит коду"
+description = "Вихідний код: API Server, Maison HD HMS, DOGODA Guide, Room Concierge, Waiter, DB schema. Без node_modules та dist."
