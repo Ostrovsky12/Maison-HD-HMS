@@ -102,6 +102,16 @@ router.get("/", requireAuth, async (req, res) => {
     unitIds = units.map(u => u.id);
   }
 
+  // If the org has been determined but yielded no units — return empty (security: no cross-tenant leak)
+  if (!unitId && user.organizationId && propIds.length === 0) {
+    res.json([]);
+    return;
+  }
+  if (!unitId && propIds.length > 0 && unitIds.length === 0) {
+    res.json([]);
+    return;
+  }
+
   const conditions: any[] = [];
   if (unitIds.length > 0) conditions.push(inArray(bookingsTable.unitId, unitIds));
   if (guestId) conditions.push(eq(bookingsTable.guestId, parseInt(guestId as string)));

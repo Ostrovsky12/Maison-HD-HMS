@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
-import { invoicesTable, bookingsTable, guestsTable, usersTable, channelConfigsTable } from "@workspace/db/schema";
-import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
+import { invoicesTable, bookingsTable, guestsTable, usersTable, channelConfigsTable, legalEntitiesTable } from "@workspace/db/schema";
+import { eq, and, desc, gte, lte, sql, isNull, or } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
@@ -13,7 +13,18 @@ router.get("/", requireAuth, async (req, res) => {
     const user = (req as any).user;
     const { bookingId, status, guestId, legalEntityId, dateFrom, dateTo } = req.query;
 
+    const orgId = user?.organizationId ?? null;
+
     const conditions: any[] = [];
+
+    // ── Tenant isolation ──────────────────────────────────────────────────────
+    // invoicesTable has no organizationId column; scope via legalEntitiesTable
+    // (org invoices always have a legalEntityId; orphan rows without one are
+    //  excluded when an org context is present — safer than leaking all orgs)
+    if (orgId) {
+      conditions.push(eq(legalEntitiesTable.organizationId, orgId));
+    }
+
     if (bookingId) conditions.push(eq(invoicesTable.bookingId, parseInt(bookingId as string)));
     if (status) conditions.push(eq(invoicesTable.status, status as any));
     if (guestId) conditions.push(eq(invoicesTable.guestId, parseInt(guestId as string)));
@@ -51,6 +62,7 @@ router.get("/", requireAuth, async (req, res) => {
       guestLastName: guestsTable.lastName,
     }).from(invoicesTable)
       .leftJoin(guestsTable, eq(invoicesTable.guestId, guestsTable.id))
+      .leftJoin(legalEntitiesTable, eq(invoicesTable.legalEntityId, legalEntitiesTable.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(invoicesTable.createdAt));
 

@@ -601,7 +601,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 const superToken = localStorage.getItem("hms_super_admin_token") || "";
                 localStorage.setItem("hms_token", superToken);
                 localStorage.removeItem("hms_super_admin_token");
-                window.location.href = "/admin";
+                window.location.href = (import.meta.env.BASE_URL || "/").replace(/\/$/, "") + "/admin";
               }}
               className="shrink-0 bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg font-bold transition-colors"
             >
