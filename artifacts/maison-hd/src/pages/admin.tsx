@@ -555,7 +555,7 @@ function TenantDetailModal({ tenant, onClose, onSaved }: { tenant: any; onClose:
         localStorage.setItem("hms_token", d.token);
         toast({ title: `🔑 Увійшли як ${d.user.name}`, description: `${d.user.email} · ${d.user.role}` });
         onClose();
-        window.location.href = import.meta.env.BASE_URL || "/";
+        window.location.href = (import.meta.env.VITE_ROUTER_BASE ?? import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
       } else {
         toast({ title: "Помилка", description: d.error, variant: "destructive" });
       }
