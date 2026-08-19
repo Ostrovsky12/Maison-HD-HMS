@@ -395,7 +395,8 @@ function BookingInvoicesTab() {
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
       if (legalEntityId !== "all") params.set("legalEntityId", legalEntityId);
-      const r = await fetch(`${API_BASE}/api/invoices?${params}`, { headers: { Authorization: `Bearer ${tok()}` } });
+      const r = await fetch(`${API_BASE}/api/accounting/invoices?${params}`, { headers: { Authorization: `Bearer ${tok()}` } });
+      if (!r.ok) throw new Error("Не вдалося завантажити рахунки");
       return r.json() as Promise<any[]>;
     },
     staleTime: 30_000,
@@ -411,7 +412,7 @@ function BookingInvoicesTab() {
     }
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/invoices/${id}`, {
+      const res = await fetch(`${API_BASE}/${inv?.source === "accounting_document" ? "api/accounting/documents" : "api/invoices"}/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${tok()}` },
       });
@@ -431,6 +432,25 @@ function BookingInvoicesTab() {
   };
 
   const handlePrint = (inv: any) => {
+    if (inv.source === "accounting_document") {
+      fetch(`${API_BASE}/api/accounting/documents/${inv.id}/export/invoice-ua`, {
+        headers: { Authorization: `Bearer ${tok()}` },
+      })
+        .then(async response => {
+          if (!response.ok) throw new Error("Не вдалося сформувати рахунок для друку");
+          return response.text();
+        })
+        .then(html => {
+          const printWindow = window.open("", "_blank", "width=900,height=700");
+          if (!printWindow) throw new Error("Дозвольте спливаючі вікна для друку");
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => printWindow.print(), 400);
+        })
+        .catch((error: Error) => toast({ title: "Помилка друку", description: error.message, variant: "destructive" }));
+      return;
+    }
     if (!inv.invoiceItems || !inv.sellerSnapshot) {
       toast({ title: "Немає даних для друку", description: "Рахунок не містить позицій або реквізитів", variant: "destructive" });
       return;
@@ -537,7 +557,7 @@ function BookingInvoicesTab() {
             </TableHeader>
             <TableBody>
               {(invoices || []).map((inv: any) => (
-                <TableRow key={inv.id} className="hover:bg-gray-50/50">
+                <TableRow key={`${inv.source}-${inv.id}`} className="hover:bg-gray-50/50">
                   <TableCell className="pl-5 font-mono text-sm font-semibold text-indigo-700">{inv.invoiceNumber}</TableCell>
                   <TableCell className="text-sm text-gray-700 max-w-[200px] truncate">
                     {inv.counterpartyName || inv.guestName || "—"}
@@ -561,13 +581,15 @@ function BookingInvoicesTab() {
                           <rect x="6" y="14" width="12" height="8"/>
                         </svg>
                       </button>
-                      <button
-                        onClick={() => setActInvoice(inv)}
-                        title="Створити Акт виконаних робіт"
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-                      >
-                        <FileCheck className="w-4 h-4" />
-                      </button>
+                      {inv.source !== "accounting_document" && (
+                        <button
+                          onClick={() => setActInvoice(inv)}
+                          title="Створити Акт виконаних робіт"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                        >
+                          <FileCheck className="w-4 h-4" />
+                        </button>
+                      )}
                       {deleteId === inv.id ? (
                         <div className="flex items-center gap-1">
                           <button
@@ -1609,7 +1631,9 @@ function DocumentsTab({ filter, setFilter }: any) {
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const { type, status, search } = filter;
   const params = new URLSearchParams();
-  if (type) params.set("type", type);
+  // This tab is intentionally for contracts and acts only. Invoices have their
+  // own dedicated tab and remain available there after creation.
+  params.set("type", type || "contract,act");
   if (status) params.set("status", status);
   if (search) params.set("search", search);
 
@@ -1690,9 +1714,11 @@ function DocumentsTab({ filter, setFilter }: any) {
           <SelectTrigger className="w-48 h-9"><SelectValue placeholder="Тип документу" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Всі типи</SelectItem>
-            {Object.entries(DOC_TYPE_LABELS).map(([k, { label }]) => (
+            {Object.entries(DOC_TYPE_LABELS)
+              .filter(([k]) => k === "contract" || k === "act")
+              .map(([k, { label }]) => (
               <SelectItem key={k} value={k}>{label}</SelectItem>
-            ))}
+              ))}
           </SelectContent>
         </Select>
         <Select value={status || "all"} onValueChange={v => setFilter((f: any) => ({ ...f, status: v === "all" ? "" : v }))}>
@@ -2140,6 +2166,7 @@ function NewDocumentDialog() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["accounting", "documents"] });
       qc.invalidateQueries({ queryKey: ["accounting"] });
+      qc.invalidateQueries({ queryKey: ["booking-invoices"] });
       toast({ title: "Документ створено", description: data?.document?.docNumber || data?.docNumber || "" });
       setOpen(false);
     },

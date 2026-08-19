@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import {
   counterpartiesTable, accountingDocumentsTable, documentItemsTable,
   accountingIntegrationsTable, legalEntitiesTable, usersTable,
@@ -183,6 +183,90 @@ router.get("/counterparties-from-invoices", async (req: any, res) => {
     `, [orgId]);
     res.json({ counterparties: rows.rows });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── UNIFIED INVOICE LIST ─────────────────────────────────────────────────────
+// Booking invoices live in `invoices`, while manually created accounting invoices
+// live in `accounting_documents`. The UI must show both in one "Рахунки" list.
+router.get("/invoices", async (req: any, res) => {
+  try {
+    const orgId = Number(req.user?.organizationId);
+    if (!orgId) return res.status(403).json({ error: "Виберіть тенанта для перегляду рахунків" });
+
+    const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : null;
+    const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : null;
+    const legalEntityId = req.query.legalEntityId ? Number(req.query.legalEntityId) : null;
+
+    if (legalEntityId !== null && (!Number.isInteger(legalEntityId) || legalEntityId <= 0)) {
+      return res.status(400).json({ error: "Некоректна юридична особа" });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT *
+       FROM (
+         SELECT
+           'booking_invoice'::text AS source,
+           i.id,
+           i.invoice_number AS "invoiceNumber",
+           i.booking_id AS "bookingId",
+           i.guest_id AS "guestId",
+           i.invoice_type::text AS "invoiceType",
+           i.status::text AS status,
+           i.amount,
+           i.tax_amount AS "taxAmount",
+           i.paid_amount AS "paidAmount",
+           i.currency,
+           i.description,
+           i.due_date AS "dueDate",
+           i.created_at AS "createdAt",
+           i.legal_entity_id AS "legalEntityId",
+           i.counterparty_name AS "counterpartyName",
+           i.counterparty_edrpou AS "counterpartyEdrpou",
+           i.buyer_address AS "buyerAddress",
+           i.buyer_vat_number AS "buyerVatNumber",
+           i.invoice_items AS "invoiceItems",
+           i.seller_snapshot AS "sellerSnapshot"
+         FROM invoices i
+         WHERE i.organization_id = $1
+
+         UNION ALL
+
+         SELECT
+           'accounting_document'::text AS source,
+           d.id,
+           d.doc_number AS "invoiceNumber",
+           d.booking_id AS "bookingId",
+           NULL::integer AS "guestId",
+           'other'::text AS "invoiceType",
+           d.status::text AS status,
+           d.total_amount AS amount,
+           d.vat_amount AS "taxAmount",
+           d.paid_amount AS "paidAmount",
+           d.currency,
+           COALESCE(d.subject, d.description) AS description,
+           d.due_date::timestamp AS "dueDate",
+           d.doc_date::timestamp AS "createdAt",
+           d.legal_entity_id AS "legalEntityId",
+           d.counterparty_name AS "counterpartyName",
+           d.counterparty_edrpou AS "counterpartyEdrpou",
+           NULL::text AS "buyerAddress",
+           NULL::text AS "buyerVatNumber",
+           NULL::jsonb AS "invoiceItems",
+           NULL::jsonb AS "sellerSnapshot"
+         FROM accounting_documents d
+         WHERE d.organization_id = $1 AND d.doc_type = 'invoice'
+       ) AS unified_invoices
+       WHERE ($2::timestamp IS NULL OR "createdAt" >= $2::timestamp)
+         AND ($3::timestamp IS NULL OR "createdAt" < ($3::date + INTERVAL '1 day'))
+         AND ($4::integer IS NULL OR "legalEntityId" = $4)
+       ORDER BY "createdAt" DESC, id DESC`,
+      [orgId, dateFrom, dateTo, legalEntityId],
+    );
+
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── CREATE ACT FROM INVOICE ──────────────────────────────────────────────────
@@ -392,7 +476,16 @@ router.get("/documents", async (req: any, res) => {
     const conditions: string[] = ["d.organization_id = $1"];
     const params: any[] = [orgId];
     const add = (clause: string, val: any) => { params.push(val); conditions.push(clause.replace("?", `$${params.length}`)); };
-    if (type && ACC_DOC_TYPES.includes(type as string)) add("d.doc_type = ?::acc_doc_type", type);
+    const selectedTypes = typeof type === "string"
+      ? type.split(",").filter(value => ACC_DOC_TYPES.includes(value))
+      : [];
+    if (selectedTypes.length > 0) {
+      const placeholders = selectedTypes.map(value => {
+        params.push(value);
+        return `$${params.length}::acc_doc_type`;
+      });
+      conditions.push(`d.doc_type IN (${placeholders.join(", ")})`);
+    }
     if (status && ACC_DOC_STATUSES_GET.includes(status as string)) add("d.status = ?::acc_doc_status", status);
     if (year && /^\d{4}$/.test(year as string)) add("EXTRACT(YEAR FROM d.doc_date) = ?", parseInt(year as string));
     if (search) add("(d.doc_number ILIKE ? OR d.counterparty_name ILIKE ? OR d.subject ILIKE ?)", `%${search}%`);
@@ -417,17 +510,28 @@ router.get("/documents", async (req: any, res) => {
       [...params, parseInt(lim as string) || 200],
     );
 
-    // Summary stats
-    const stats = await db.execute(sql`
-      SELECT 
-        COUNT(*) as total,
-        SUM(total_amount) as total_amount,
-        SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END) as paid,
-        SUM(CASE WHEN status = 'overdue' THEN total_amount - paid_amount ELSE 0 END) as overdue,
-        SUM(CASE WHEN status IN ('issued','sent') THEN total_amount - paid_amount ELSE 0 END) as pending
-      FROM accounting_documents
-      WHERE organization_id = ${orgId}
-    `);
+    // Summary stats use the same document types as the list so invoices do not
+    // inflate the "Договори та акти" totals.
+    const statConditions = ["organization_id = $1"];
+    const statParams: any[] = [orgId];
+    if (selectedTypes.length > 0) {
+      const placeholders = selectedTypes.map(value => {
+        statParams.push(value);
+        return `$${statParams.length}::acc_doc_type`;
+      });
+      statConditions.push(`doc_type IN (${placeholders.join(", ")})`);
+    }
+    const stats = await db_.query(
+      `SELECT
+         COUNT(*) as total,
+         SUM(total_amount) as total_amount,
+         SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END) as paid,
+         SUM(CASE WHEN status = 'overdue' THEN total_amount - paid_amount ELSE 0 END) as overdue,
+         SUM(CASE WHEN status IN ('issued','sent') THEN total_amount - paid_amount ELSE 0 END) as pending
+       FROM accounting_documents
+       WHERE ${statConditions.join(" AND ")}`,
+      statParams,
+    );
 
     res.json({ documents: docs.rows, stats: stats.rows[0] });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
