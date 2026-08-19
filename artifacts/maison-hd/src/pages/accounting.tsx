@@ -2524,13 +2524,27 @@ function getJwtOrgId(): number | null {
 
 function NewDocumentDialog() {
   const [open, setOpen] = useState(false);
-  const [vatRate, setVatRate] = useState<0 | 7 | 20>(20);
+  const [nextItemId, setNextItemId] = useState(2);
+  const [items, setItems] = useState<Array<{
+    id: number;
+    description: string;
+    unit: string;
+    quantity: string;
+    grossUnitPrice: string;
+    vatRate: 0 | 7 | 20;
+  }>>([{
+    id: 1,
+    description: "",
+    unit: "послуга",
+    quantity: "1",
+    grossUnitPrice: "",
+    vatRate: 20,
+  }]);
   const isSuperAdminWithoutOrg = open && !getJwtOrgId();
   const [form, setForm] = useState({
     docType: "invoice", docDate: format(new Date(), "yyyy-MM-dd"), dueDate: "",
     legalEntityId: "",
     counterpartyName: "", counterpartyEdrpou: "", subject: "", paymentTerms: "",
-    totalAmount: "",
   });
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -2570,6 +2584,7 @@ function NewDocumentDialog() {
       qc.invalidateQueries({ queryKey: ["booking-invoices"] });
       toast({ title: "Документ створено", description: data?.document?.docNumber || data?.docNumber || "" });
       setOpen(false);
+      resetDialog();
     },
     onError: (e: any) => {
       toast({ title: "Помилка збереження", description: e.message, variant: "destructive" });
@@ -2580,13 +2595,61 @@ function NewDocumentDialog() {
     setForm(f => ({ ...f, counterpartyName: cp.name, counterpartyEdrpou: cp.edrpou || "" }));
   };
 
-  // ПДВ — внутрішня складова (inclusive): адмін вводить загальну суму
-  const total    = parseFloat(form.totalAmount || "0");
-  const vat      = vatRate > 0 ? total * vatRate / (100 + vatRate) : 0;
-  const subtotal = total - vat;
+  const updateItem = (id: number, patch: Partial<(typeof items)[number]>) => {
+    setItems(current => current.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+  const addItem = () => {
+    setItems(current => [...current, {
+      id: nextItemId,
+      description: "",
+      unit: "послуга",
+      quantity: "1",
+      grossUnitPrice: "",
+      vatRate: 20,
+    }]);
+    setNextItemId(id => id + 1);
+  };
+  const removeItem = (id: number) => {
+    setItems(current => current.length > 1 ? current.filter(item => item.id !== id) : current);
+  };
+  const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+  const calculatedItems = items.map(item => {
+    const quantity = Number(item.quantity);
+    const grossUnitPrice = Number(item.grossUnitPrice);
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
+    const safeGrossUnitPrice = Number.isFinite(grossUnitPrice) && grossUnitPrice >= 0 ? grossUnitPrice : 0;
+    const total = roundMoney(safeQuantity * safeGrossUnitPrice);
+    const vatAmount = item.vatRate > 0
+      ? roundMoney(total - total / (1 + item.vatRate / 100))
+      : 0;
+    return { ...item, quantity: safeQuantity, grossUnitPrice: safeGrossUnitPrice, total, vatAmount };
+  });
+  const vatByRate = calculatedItems.reduce<Record<0 | 7 | 20, number>>((summary, item) => {
+    summary[item.vatRate] = roundMoney(summary[item.vatRate] + item.vatAmount);
+    return summary;
+  }, { 0: 0, 7: 0, 20: 0 });
+  const total = roundMoney(calculatedItems.reduce((sum, item) => sum + item.total, 0));
+  const vat = roundMoney(vatByRate[7] + vatByRate[20]);
+  const subtotal = roundMoney(total - vat);
+  const hasInvalidItem = items.some(item =>
+    !item.description.trim() ||
+    item.quantity === "" || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0 ||
+    item.grossUnitPrice === "" || !Number.isFinite(Number(item.grossUnitPrice)) || Number(item.grossUnitPrice) < 0
+  );
+  const resetDialog = () => {
+    setForm({
+      docType: "invoice", docDate: format(new Date(), "yyyy-MM-dd"), dueDate: "",
+      legalEntityId: "", counterpartyName: "", counterpartyEdrpou: "", subject: "", paymentTerms: "",
+    });
+    setItems([{ id: 1, description: "", unit: "послуга", quantity: "1", grossUnitPrice: "", vatRate: 20 }]);
+    setNextItemId(2);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      setOpen(nextOpen);
+      if (!nextOpen) resetDialog();
+    }}>
       <DialogTrigger asChild>
         <Button className="bg-blue-600 hover:bg-blue-700 text-white">
           <Plus className="h-4 w-4 mr-1" /> Новий документ
@@ -2684,48 +2747,121 @@ function NewDocumentDialog() {
             </div>
           </div>
 
-          {/* VAT rate selector */}
-          <div>
-            <Label className="mb-1.5 block">Ставка ПДВ</Label>
-            <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
-              {([
-                { rate: 0  as const, label: "Без ПДВ" },
-                { rate: 7  as const, label: "ПДВ 7%" },
-                { rate: 20 as const, label: "ПДВ 20%" },
-              ]).map(({ rate, label }) => (
-                <button
-                  key={rate}
-                  type="button"
-                  onClick={() => setVatRate(rate)}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                    vatRate === rate ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 sm:p-4">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <Label className="text-sm font-semibold">Послуги у рахунку</Label>
+                <p className="mt-1 text-xs text-gray-500">
+                  Сума за одиницю вказується з включеним ПДВ. Ставка обирається для кожної послуги окремо.
+                </p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={addItem}>
+                <Plus className="mr-1 h-4 w-4" /> Додати послугу
+              </Button>
             </div>
-          </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-3 sm:col-span-1">
-              <Label>Загальна сума, ₴</Label>
-              <Input type="number" min={0} step={0.01}
-                value={form.totalAmount}
-                onChange={e => setForm(f => ({ ...f, totalAmount: e.target.value }))}
-                placeholder="0.00" />
+            <div className="space-y-3">
+              {items.map((item, index) => {
+                const calculated = calculatedItems.find(entry => entry.id === item.id)!;
+                return (
+                  <div key={item.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500">Послуга {index + 1}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-gray-500 hover:text-red-600"
+                        onClick={() => removeItem(item.id)}
+                        disabled={items.length === 1}
+                      >
+                        <XCircle className="mr-1 h-4 w-4" /> Видалити
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+                      <div className="sm:col-span-5">
+                        <Label className="text-xs">Найменування</Label>
+                        <Input
+                          className="mt-1 h-9"
+                          value={item.description}
+                          onChange={e => updateItem(item.id, { description: e.target.value })}
+                          placeholder="Послуга тимчасового розміщення"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:col-span-3">
+                        <div>
+                          <Label className="text-xs">К-ть</Label>
+                          <Input
+                            className="mt-1 h-9"
+                            type="number"
+                            min="0.001"
+                            step="0.001"
+                            value={item.quantity}
+                            onChange={e => updateItem(item.id, { quantity: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Од.</Label>
+                          <Input
+                            className="mt-1 h-9"
+                            value={item.unit}
+                            onChange={e => updateItem(item.id, { unit: e.target.value })}
+                            placeholder="послуга"
+                          />
+                        </div>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className="text-xs">Ціна з ПДВ, ₴</Label>
+                        <Input
+                          className="mt-1 h-9"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.grossUnitPrice}
+                          onChange={e => updateItem(item.id, { grossUnitPrice: e.target.value })}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className="text-xs">Ставка ПДВ</Label>
+                        <Select
+                          value={String(item.vatRate)}
+                          onValueChange={value => updateItem(item.id, { vatRate: Number(value) as 0 | 7 | 20 })}
+                        >
+                          <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0">Без ПДВ</SelectItem>
+                            <SelectItem value="7">ПДВ 7%</SelectItem>
+                            <SelectItem value="20">ПДВ 20%</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex justify-end text-xs text-gray-500">
+                      Сума рядка: <span className="ml-1 font-semibold text-gray-800">{fmtNum(calculated.total)} ₴</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div>
-              <Label>в т.ч. ПДВ {vatRate > 0 ? `${vatRate}%` : ""}, ₴</Label>
-              <Input readOnly
-                value={form.totalAmount && vatRate > 0 ? vat.toFixed(2) : vatRate === 0 ? "Без ПДВ" : ""}
-                className="bg-gray-50 text-gray-500" />
-            </div>
-            <div>
-              <Label>База (без ПДВ), ₴</Label>
-              <Input readOnly
-                value={form.totalAmount ? subtotal.toFixed(2) : ""}
-                className="bg-gray-50 text-gray-500" />
+
+            <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg border border-gray-200 bg-white p-3 text-sm sm:grid-cols-4">
+              <div>
+                <div className="text-xs text-gray-500">Без ПДВ</div>
+                <div className="font-mono font-medium">{fmtNum(subtotal)} ₴</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">в т.ч. ПДВ 7%</div>
+                <div className="font-mono font-medium">{fmtNum(vatByRate[7])} ₴</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">в т.ч. ПДВ 20%</div>
+                <div className="font-mono font-medium">{fmtNum(vatByRate[20])} ₴</div>
+              </div>
+              <div className="border-t border-gray-100 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
+                <div className="text-xs text-gray-500">Разом до оплати</div>
+                <div className="font-mono text-base font-bold text-blue-700">{fmtNum(total)} ₴</div>
+              </div>
             </div>
           </div>
 
@@ -2743,14 +2879,22 @@ function NewDocumentDialog() {
 
           <div className="flex gap-2 pt-2">
             <Button variant="outline" onClick={() => setOpen(false)} className="flex-1">Скасувати</Button>
-            <Button disabled={mut.isPending || !form.docType || !form.docDate || isSuperAdminWithoutOrg}
+            <Button disabled={mut.isPending || !form.docType || !form.docDate || hasInvalidItem || isSuperAdminWithoutOrg}
               onClick={() => mut.mutate({
                 docType: form.docType, docDate: form.docDate, dueDate: form.dueDate || undefined,
                 legalEntityId: form.legalEntityId ? parseInt(form.legalEntityId) : undefined,
                 counterpartyName: form.counterpartyName, counterpartyEdrpou: form.counterpartyEdrpou,
                 subject: form.subject, paymentTerms: form.paymentTerms,
                 subtotal: subtotal, vatAmount: vat, totalAmount: total,
-                vatRate,
+                items: calculatedItems.map(item => ({
+                  description: item.description.trim(),
+                  unit: item.unit.trim() || "послуга",
+                  quantity: item.quantity,
+                  // API line-item prices are stored excluding VAT. The UI accepts
+                  // gross prices, so only the derived net value is sent to the API.
+                  unitPrice: (item.total - item.vatAmount) / item.quantity,
+                  vatRate: item.vatRate === 0 ? "exempt" : String(item.vatRate),
+                })),
                 status: "draft",
               })}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white">

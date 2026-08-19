@@ -1387,6 +1387,21 @@ function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): stri
       <td class="right"><b>${parseFloat(lineTotal).toFixed(2)}</b></td>
     </tr>`;
   }).join("");
+  const vatBreakdown = [7, 20].map((rate) => {
+    const amount = effectiveItems.reduce((sum, item) => {
+      const itemRate = Number(item.vat_rate ?? item.vatRate ?? 0);
+      if (itemRate !== rate) return sum;
+      const explicitVat = Number(item.vat_amount ?? item.vatAmount);
+      const lineTotal = Number(item.total_amount ?? item.total_price ?? item.totalPrice ?? item.amount ?? 0);
+      return sum + (Number.isFinite(explicitVat)
+        ? explicitVat
+        : lineTotal - lineTotal / (1 + rate / 100));
+    }, 0);
+    return amount > 0.004
+      ? `<tr><td class="label">ПДВ ${rate}%:</td><td class="right">${amount.toFixed(2)} ₴</td></tr>`
+      : "";
+  }).join("");
+  const hasVat = vatBreakdown.length > 0;
 
   return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
 <style>
@@ -1423,13 +1438,13 @@ function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): stri
   <b>Покупець:</b> ${escXml(cp?.name || doc?.counterparty_name || "—")} | ЄДРПОУ: ${escXml(cp?.edrpou || doc?.counterparty_edrpou || "—")}${cp?.iban ? `<br><b>IBAN покупця:</b> ${escXml(cp.iban)}` : ""}
 </div>
 <table>
-  <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна, ₴</th><th class="right">ПДВ</th><th class="right">Сума, ₴</th></tr></thead>
+  <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна без ПДВ, ₴</th><th class="right">ПДВ</th><th class="right">Сума, ₴</th></tr></thead>
   <tbody>${itemsHtml}</tbody>
 </table>
 <div style="overflow:hidden">
   <table class="totals">
     <tr><td class="label">Без ПДВ:</td><td class="right">${parseFloat(doc?.subtotal || 0).toFixed(2)} ₴</td></tr>
-    ${(() => { const vat = parseFloat(doc?.vat_amount || 0); const total = parseFloat(doc?.total_amount || 0); const base = total - vat; const rate = (vat > 0 && base > 0) ? Math.round(vat / base * 100) : 0; return rate > 0 ? `<tr><td class="label">ПДВ ${rate}%:</td><td class="right">${vat.toFixed(2)} ₴</td></tr>` : `<tr><td class="label">Без ПДВ / не обкладається:</td><td class="right">—</td></tr>`; })()}
+    ${hasVat ? vatBreakdown : `<tr><td class="label">Без ПДВ / не обкладається:</td><td class="right">—</td></tr>`}
     <tr><td class="label"><b>Разом до оплати:</b></td><td class="right"><b>${parseFloat(doc?.total_amount || 0).toFixed(2)} ₴</b></td></tr>
   </table>
 </div>
@@ -1474,6 +1489,20 @@ function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
       <td class="right"><b>${parseFloat(lineTotal).toFixed(2)}</b></td>
     </tr>`;
   }).join("");
+  const vatBreakdown = [7, 20].map((rate) => {
+    const amount = effectiveItems.reduce((sum, item) => {
+      const itemRate = Number(item.vat_rate ?? item.vatRate ?? 0);
+      if (itemRate !== rate) return sum;
+      const explicitVat = Number(item.vat_amount ?? item.vatAmount);
+      const lineTotal = Number(item.total_amount ?? item.total_price ?? item.totalPrice ?? item.amount ?? 0);
+      return sum + (Number.isFinite(explicitVat)
+        ? explicitVat
+        : lineTotal - lineTotal / (1 + rate / 100));
+    }, 0);
+    return amount > 0.004
+      ? `<tr><td>ПДВ ${rate}%:</td><td class="right">${amount.toFixed(2)} ₴</td></tr>`
+      : "";
+  }).join("");
 
   return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
 <style>
@@ -1502,7 +1531,7 @@ function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
 <div style="overflow:hidden">
   <table class="totals">
     <tr><td>Без ПДВ:</td><td class="right">${parseFloat(doc?.subtotal || 0).toFixed(2)} ₴</td></tr>
-    ${syntheticVatRate > 0 ? `<tr><td>ПДВ ${syntheticVatRate}%:</td><td class="right">${parseFloat(doc?.vat_amount || 0).toFixed(2)} ₴</td></tr>` : ""}
+    ${vatBreakdown}
     <tr><td><b>Разом:</b></td><td class="right"><b>${parseFloat(doc?.total_amount || 0).toFixed(2)} ₴</b></td></tr>
   </table>
 </div>
