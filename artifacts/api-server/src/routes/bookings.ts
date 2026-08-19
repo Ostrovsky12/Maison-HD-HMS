@@ -8,6 +8,7 @@ import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../li
 import { generateBookingQR } from "../lib/qr.js";
 import { logger } from "../lib/logger.js";
 import { notifyBookingCreated, notifyCheckIn } from "../lib/notify.js";
+import { calculateInvoiceTotals } from "../lib/invoice-totals.js";
 import { randomBytes } from "crypto";
 
 function genGuestCode(): string {
@@ -1692,12 +1693,20 @@ router.post("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (
       return res.status(400).json({ error: "organization_id is required — cannot create an invoice without a tenant" });
     }
 
-    const total = (items || []).reduce((s: number, it: any) => s + Number(it.amount), 0);
+    let lineTotals;
+    try {
+      lineTotals = calculateInvoiceTotals(items);
+    } catch (error: any) {
+      return res.status(400).json({ error: error.message });
+    }
 
     // Check if invoice already exists for this booking
     const existing = await db.select({ id: invoicesTable.id })
       .from(invoicesTable)
-      .where(eq(invoicesTable.bookingId, bookingId))
+      .where(and(
+        eq(invoicesTable.bookingId, bookingId),
+        eq(invoicesTable.organizationId, user.organizationId),
+      ))
       .limit(1);
 
     const payload: any = {
@@ -1709,19 +1718,24 @@ router.post("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (
       counterpartyEdrpou: buyer?.taxCode || null,
       buyerAddress: buyer?.address || null,
       buyerVatNumber: buyer?.vatNumber || null,
-      invoiceItems: items || [],
+      invoiceItems: lineTotals.items,
       sellerSnapshot: seller || null,
-      amount: total.toFixed(2),
+      amount: lineTotals.total.toFixed(2),
+      taxAmount: lineTotals.taxAmount.toFixed(2),
       status: "pending",
       dueDate: dueDate ? new Date(dueDate) : null,
       createdById: user.id,
+      notes: note || null,
       updatedAt: new Date(),
     };
 
     let saved;
     if (existing.length > 0) {
       const [upd] = await db.update(invoicesTable).set(payload)
-        .where(eq(invoicesTable.id, existing[0].id)).returning();
+        .where(and(
+          eq(invoicesTable.id, existing[0].id),
+          eq(invoicesTable.organizationId, user.organizationId),
+        )).returning();
       saved = upd;
     } else {
       const [ins] = await db.insert(invoicesTable).values(payload).returning();
@@ -1860,6 +1874,9 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
 
     const isSameDay = nights === 0 && booking.checkIn === booking.checkOut;
     const items: any[] = [];
+    const sellerIsVatPayer = seller?.isVatPayer !== false;
+    const accommodationVatRate = sellerIsVatPayer ? 7 : 0;
+    const serviceVatRate = sellerIsVatPayer ? 20 : 0;
     if (accommodationTotal > 0 || nights > 0) {
       const lineDetail = isSameDay
         ? `${booking.checkIn}${booking.checkinTime ? ` · ${booking.checkinTime}–${booking.checkoutTime || ""}` : ""}`
@@ -1872,6 +1889,7 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
         unit: lineUnit,
         price: pricePerNightPreDiscount,
         discount: accommodationDiscount > 0 ? accommodationDiscount : undefined,
+        vatRate: accommodationVatRate,
         amount: accommodationTotal,
       });
     }
@@ -1887,6 +1905,7 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
         qty,
         unit: a.unit || "шт",
         price,
+        vatRate: serviceVatRate,
         amount,
       });
     }
@@ -1903,6 +1922,7 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
         qty,
         unit: "шт",
         price: price || Math.round((amount / qty) * 100) / 100,
+        vatRate: serviceVatRate,
         amount,
       });
     }
@@ -1915,6 +1935,7 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
         qty: adults * nights,
         unit: "ос./ніч",
         price: touristTaxRate,
+        vatRate: 0,
         amount: touristTaxTotal,
       });
     }

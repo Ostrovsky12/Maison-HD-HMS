@@ -138,6 +138,9 @@ describe("Invoice tenant isolation (database-backed API)", () => {
     expect(createB.status).toBe(201);
     expect(createA.body.organizationId).toBe(organizationAId);
     expect(createB.body.organizationId).toBe(organizationBId);
+    expect(createA.body.amount).toBe("125.00");
+    expect(createA.body.taxAmount).toBe("20.83");
+    expect(createA.body.invoiceItems.map((item: any) => item.vatAmount)).toEqual([8.33, 12.5]);
 
     const invoicesForA = await request(app)
       .get("/api/invoices")

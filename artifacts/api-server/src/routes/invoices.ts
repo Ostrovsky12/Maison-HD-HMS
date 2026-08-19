@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { invoicesTable, bookingsTable, guestsTable, usersTable, channelConfigsTable, legalEntitiesTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql, isNull, or } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { calculateInvoiceTotals } from "../lib/invoice-totals.js";
 
 const router = Router();
 const PUBLIC_INVOICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -177,9 +178,21 @@ router.post("/", requireAuth, async (req, res) => {
       }
     }
 
-    const total = items
-      ? (items as any[]).reduce((s, it) => s + Number(it.amount), 0)
-      : Number(amount);
+    const hasItems = items !== undefined;
+    let lineTotals;
+    try {
+      lineTotals = hasItems ? calculateInvoiceTotals(items) : null;
+    } catch (error: any) {
+      return res.status(400).json({ error: error.message });
+    }
+    const total = lineTotals ? lineTotals.total : Number(amount);
+    if (!Number.isFinite(total) || total < 0) {
+      return res.status(400).json({ error: "Некоректна сума рахунку" });
+    }
+    const derivedTaxAmount = lineTotals ? lineTotals.taxAmount : Number(taxAmount || 0);
+    if (!Number.isFinite(derivedTaxAmount) || derivedTaxAmount < 0) {
+      return res.status(400).json({ error: "Некоректна сума ПДВ" });
+    }
 
     const num = invoiceNumber || `Р-${new Date().getFullYear()}-${String(bookingId || 0).padStart(4, "0")}`;
 
@@ -190,7 +203,7 @@ router.post("/", requireAuth, async (req, res) => {
       guestId: guestId || null,
       invoiceType: invoiceType || "accommodation",
       amount: total.toFixed(2),
-      taxAmount: String(taxAmount || 0),
+      taxAmount: derivedTaxAmount.toFixed(2),
       paidAmount: "0",
       currency: currency || "UAH",
       description,
@@ -201,7 +214,7 @@ router.post("/", requireAuth, async (req, res) => {
       counterpartyEdrpou: buyer?.taxCode || null,
       buyerAddress: buyer?.address || null,
       buyerVatNumber: buyer?.vatNumber || null,
-      invoiceItems: items || [],
+      invoiceItems: lineTotals?.items || [],
       sellerSnapshot: seller || null,
       status: "pending",
     }).returning();
@@ -268,9 +281,13 @@ router.put("/:invoiceId", requireAuth, async (req, res) => {
       }
     }
 
-    const total = items
-      ? (items as any[]).reduce((s: number, it: any) => s + Number(it.amount), 0)
-      : undefined;
+    let lineTotals;
+    try {
+      lineTotals = items !== undefined ? calculateInvoiceTotals(items) : null;
+    } catch (error: any) {
+      return res.status(400).json({ error: error.message });
+    }
+    const total = lineTotals?.total;
 
     // Scope write to organization for tenant callers
     const writeCondition = orgId
@@ -281,13 +298,14 @@ router.put("/:invoiceId", requireAuth, async (req, res) => {
       ...(invoiceType !== undefined && { invoiceType }),
       ...(status !== undefined && { status }),
       ...(total !== undefined && { amount: total.toFixed(2) }),
+      ...(lineTotals && { taxAmount: lineTotals.taxAmount.toFixed(2) }),
       ...(amount !== undefined && total === undefined && { amount: String(amount) }),
       ...(description !== undefined && { description }),
       ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
       ...(legalEntityId !== undefined && { legalEntityId }),
       ...(updBookingId !== undefined && { bookingId: updBookingId }),
       ...(buyer && { counterpartyName: buyer.name, counterpartyEdrpou: buyer.taxCode, buyerAddress: buyer.address, buyerVatNumber: buyer.vatNumber }),
-      ...(items && { invoiceItems: items }),
+      ...(lineTotals && { invoiceItems: lineTotals.items }),
       ...(seller && { sellerSnapshot: seller }),
       ...(notes !== undefined && { notes }),
       updatedAt: new Date(),

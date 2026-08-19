@@ -428,8 +428,16 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
   };
 
   const addItem = () => {
-    const defaultVat = items[0]?.vatRate ?? 0;
-    setItems(prev => [...prev, { description: "Додаткова послуга", detail: "", qty: 1, unit: "шт", price: 0, discount: 0, vatRate: defaultVat, amount: 0 }]);
+    setItems(prev => [...prev, {
+      description: "Додаткова послуга",
+      detail: "",
+      qty: 1,
+      unit: "послуга",
+      price: 0,
+      discount: 0,
+      vatRate: 20,
+      amount: 0,
+    }]);
   };
 
   const removeItem = (i: number) => {
@@ -527,12 +535,20 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
                 </button>
               </>
             ) : (
-              <button
-                onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                <Edit3 className="w-3.5 h-3.5" /> Редагувати
-              </button>
+              <>
+                <button
+                  onClick={() => { setEditing(true); addItem(); }}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Додати послугу
+                </button>
+                <button
+                  onClick={() => setEditing(true)}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  <Edit3 className="w-3.5 h-3.5" /> Редагувати
+                </button>
+              </>
             )}
             {savedInvoiceId && (
               <>
@@ -683,7 +699,12 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
           <div>
             {editing && (
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Позиції</span>
+                  <div>
+                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Позиції</span>
+                    <p className="text-[11px] text-gray-400 mt-1 normal-case font-normal">
+                      Суми в рядках вказуються з ПДВ; система виділить ПДВ у підсумку.
+                    </p>
+                  </div>
                 <div className="flex items-center gap-0.5 p-1 bg-gray-100 rounded-xl">
                   {([
                     { rate: 0,  label: "Без ПДВ" },
@@ -759,7 +780,16 @@ export function InvoiceModal({ data, bookingId, onClose, onReload }: InvoiceModa
                         <span className="text-gray-700">{it.qty}</span>
                       )}
                     </td>
-                    <td className="py-3 text-center text-gray-500 text-xs">{it.unit}</td>
+                    <td className="py-3 text-center text-gray-500 text-xs">
+                      {editing ? (
+                        <input
+                          value={it.unit}
+                          onChange={e => updateItem(i, "unit", e.target.value)}
+                          className="w-12 text-center border-b border-dashed border-indigo-300 bg-indigo-50/40 focus:outline-none text-xs"
+                          aria-label={`Одиниця виміру позиції ${i + 1}`}
+                        />
+                      ) : it.unit}
+                    </td>
                     <td className="py-3 text-right">
                       {editing ? (
                         <input
