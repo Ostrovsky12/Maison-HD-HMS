@@ -17,6 +17,7 @@ import {
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_PUB = BASE.replace("/maison-hd", "") + "/api/public";
+const API = BASE.replace("/maison-hd", "") + "/api";
 const apiFetch = (path: string, opts: RequestInit = {}) =>
   fetch(API_PUB + path, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
 
@@ -64,7 +65,8 @@ type Step = typeof STEPS[number]["key"];
 
 export default function BookPage() {
   const { toast } = useToast();
-  const slug = useMemo(() => new URLSearchParams(window.location.search).get("slug") || "", []);
+  const [slug, setSlug] = useState(() => new URLSearchParams(window.location.search).get("slug") || "");
+  const [resolvingHotel, setResolvingHotel] = useState(false);
   const [step, setStep] = useState<Step>("search");
   const [organization, setOrganization] = useState<any>(null);
   const [properties, setProperties] = useState<any[]>([]);
@@ -84,8 +86,42 @@ export default function BookPage() {
   const [payMethod, setPayMethod] = useState("arrival");
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
 
+  // Staff can open this page through the internal sidebar. Resolve the current
+  // tenant and turn that navigation into a shareable, tenant-scoped public URL.
+  // A public visitor without a slug never receives a fallback tenant.
   useEffect(() => {
-    const params = slug ? `?slug=${slug}` : "";
+    if (slug) return;
+    const token = localStorage.getItem("hms_token");
+    if (!token) return;
+
+    let cancelled = false;
+    setResolvingHotel(true);
+    fetch(`${API}/organizations/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async response => response.ok ? response.json() : null)
+      .then(org => {
+        const resolvedSlug = typeof org?.slug === "string" ? org.slug.trim() : "";
+        if (!cancelled && resolvedSlug) {
+          setSlug(resolvedSlug);
+          const params = new URLSearchParams(window.location.search);
+          params.set("slug", resolvedSlug);
+          window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setResolvingHotel(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  useEffect(() => {
+    if (!slug) {
+      setProperties([]);
+      setOrganization(null);
+      return;
+    }
+    const params = `?slug=${encodeURIComponent(slug)}`;
     apiFetch(`/properties${params}`)
       .then(r => r.json())
       .then(d => {
@@ -141,7 +177,8 @@ export default function BookPage() {
 
   const handleSearch = async () => {
     if (nightsCount < 1) { toast({ title: "Введіть коректні дати", variant: "destructive" }); return; }
-    if (!slug) { toast({ title: "Посилання бронювання не містить коду готелю", variant: "destructive" }); return; }
+    if (resolvingHotel) { toast({ title: "Визначаємо готель…", description: "Зачекайте кілька секунд." }); return; }
+    if (!slug) { toast({ title: "Відкрийте персональне посилання готелю", description: "Посилання для онлайн-бронювання має містити код готелю.", variant: "destructive" }); return; }
     setLoading(true);
     const p = new URLSearchParams({ slug, checkIn: search.checkIn, checkOut: search.checkOut, guests: String(search.adults) });
     if (search.propertyId) p.set("propertyId", search.propertyId);

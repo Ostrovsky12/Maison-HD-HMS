@@ -50,9 +50,13 @@ function verifyPublicDocumentToken(token: string): { documentId: number; organiz
 
 function getPublicDocumentBaseUrl(): string {
   const configuredOrigin = process.env.PUBLIC_APP_URL
-    || process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+    || process.env.PUBLIC_APP_ORIGIN
+    || process.env.FRONTEND_URL
+    || (process.env.NODE_ENV !== "production"
+      ? process.env.REPLIT_DOMAINS?.split(",")[0]?.trim()
+      : undefined);
   if (!configuredOrigin) {
-    throw new Error("PUBLIC_APP_URL or REPLIT_DOMAINS is required for public document links");
+    throw new Error("PUBLIC_APP_URL is required for public document links in production");
   }
   const parsed = new URL(configuredOrigin.includes("://") ? configuredOrigin : `https://${configuredOrigin}`);
   if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {

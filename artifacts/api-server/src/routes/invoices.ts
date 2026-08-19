@@ -47,10 +47,13 @@ function verifyPublicInvoiceToken(token: string): { invoiceId: number; organizat
 
 function getPublicInvoiceBaseUrl(): string {
   const configuredOrigin = process.env.PUBLIC_APP_URL
-    || process.env.REPLIT_DOMAINS?.split(",")[0]?.trim()
-    || process.env.API_BASE_URL;
+    || process.env.PUBLIC_APP_ORIGIN
+    || process.env.FRONTEND_URL
+    || (process.env.NODE_ENV !== "production"
+      ? process.env.REPLIT_DOMAINS?.split(",")[0]?.trim()
+      : undefined);
   if (!configuredOrigin) {
-    throw new Error("PUBLIC_APP_URL, REPLIT_DOMAINS, or API_BASE_URL is required for public invoice links");
+    throw new Error("PUBLIC_APP_URL is required for public invoice links in production");
   }
   const parsed = new URL(configuredOrigin.includes("://") ? configuredOrigin : `https://${configuredOrigin}`);
   if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {

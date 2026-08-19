@@ -508,9 +508,12 @@ router.post("/liqpay/:bookingId", async (req, res) => {
     );
     if (amount <= 0) return res.status(400).json({ error: "Сума до оплати = 0" });
 
-    const configuredBaseUrl = process.env.API_BASE_URL
-      || process.env.PUBLIC_APP_URL
-      || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");
+    const configuredBaseUrl = process.env.PUBLIC_APP_URL
+      || process.env.PUBLIC_APP_ORIGIN
+      || process.env.FRONTEND_URL
+      || (process.env.NODE_ENV !== "production" && process.env.REPLIT_DOMAINS
+        ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
+        : "");
     const baseUrl = configuredBaseUrl.replace(/\/$/, "");
     if (!baseUrl.startsWith("https://")) {
       return res.status(503).json({
