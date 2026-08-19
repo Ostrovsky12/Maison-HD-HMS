@@ -1664,6 +1664,10 @@ router.post("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (
       buyer, items, seller, bookingData,
     } = req.body;
 
+    if (!user.organizationId) {
+      return res.status(400).json({ error: "organization_id is required — cannot create an invoice without a tenant" });
+    }
+
     const total = (items || []).reduce((s: number, it: any) => s + Number(it.amount), 0);
 
     // Check if invoice already exists for this booking
@@ -1673,7 +1677,7 @@ router.post("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (
       .limit(1);
 
     const payload: any = {
-      organizationId: user.organizationId ?? null,
+      organizationId: user.organizationId,
       invoiceNumber,
       bookingId,
       legalEntityId: legalEntityId || null,

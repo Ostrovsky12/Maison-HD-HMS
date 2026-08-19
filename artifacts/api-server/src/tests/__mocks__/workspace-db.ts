@@ -8,6 +8,7 @@ const tableStub: any = {};
 
 export const db = {
   select: vi.fn(),
+  insert: vi.fn(),
   execute: vi.fn().mockResolvedValue({ rows: [] }),
 };
 

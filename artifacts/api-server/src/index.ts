@@ -295,17 +295,59 @@ async function ensureSchema() {
   `);
 
   // Migrate: direct tenant isolation column on invoices
+  // Step 1: add column as nullable (idempotent — IF NOT EXISTS)
   await db.execute(sql`
     ALTER TABLE invoices
       ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE;
+  `);
 
-    -- Backfill from legal_entities where possible
+  // Step 2: backfill + enforce NOT NULL inside a single transaction with a
+  // table lock so no concurrent writer can sneak in a null between the DELETE
+  // and the ALTER.
+  await db.execute(sql`
+    BEGIN;
+
+    -- Lock the table exclusively for the duration of this migration so no
+    -- concurrent insert can introduce a null organization_id before the
+    -- NOT NULL constraint is applied.
+    LOCK TABLE invoices IN SHARE ROW EXCLUSIVE MODE;
+
+    -- Backfill 1: from legal_entities
     UPDATE invoices i
     SET organization_id = le.organization_id
     FROM legal_entities le
     WHERE i.legal_entity_id = le.id
       AND i.organization_id IS NULL;
 
+    -- Backfill 2: from booking → unit → property chain
+    UPDATE invoices i
+    SET organization_id = p.organization_id
+    FROM bookings b
+    JOIN units u ON u.id = b.unit_id
+    JOIN properties p ON p.id = u.property_id
+    WHERE i.booking_id = b.id
+      AND i.organization_id IS NULL
+      AND p.organization_id IS NOT NULL;
+
+    -- Backfill 3: from creator's org (users table) as last resort
+    UPDATE invoices i
+    SET organization_id = u.organization_id
+    FROM users u
+    WHERE i.created_by_id = u.id
+      AND i.organization_id IS NULL
+      AND u.organization_id IS NOT NULL;
+
+    -- Remove unresolvable orphans (no org traceable from any source)
+    DELETE FROM invoices WHERE organization_id IS NULL;
+
+    -- Enforce NOT NULL — PostgreSQL accepts this even if the column is
+    -- already NOT NULL, so no exception handling is needed.
+    ALTER TABLE invoices ALTER COLUMN organization_id SET NOT NULL;
+
+    COMMIT;
+  `);
+
+  await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_invoices_organization_id ON invoices(organization_id);
   `);
 

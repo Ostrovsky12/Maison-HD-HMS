@@ -34,6 +34,7 @@ vi.mock("../lib/notify.js", () => ({
 import { db, pool } from "@workspace/db";
 import bookingsRouter from "../routes/bookings.js";
 import invoicesRouter from "../routes/invoices.js";
+import financeRouter from "../routes/finance.js";
 import { signToken } from "../lib/auth.js";
 
 // ── Minimal test app ──────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ const app = express();
 app.use(express.json());
 app.use("/api/bookings", bookingsRouter);
 app.use("/api/invoices", invoicesRouter);
+app.use("/api/finance", financeRouter);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -116,6 +118,7 @@ const INVOICE_B = {
 
 beforeEach(() => {
   vi.mocked(db.select).mockReset();
+  vi.mocked(db.insert).mockReset();
   vi.mocked(db.execute).mockReset();
   vi.mocked(pool.query).mockReset();
 });
@@ -521,5 +524,79 @@ describe("Tenant isolation — invoices", () => {
     expect(res.body).toHaveLength(1);
     expect(res.body[0].id).toBe(INVOICE_B.id);
     expect(res.body.some((inv: any) => inv.id === INVOICE_A.id)).toBe(false);
+  });
+});
+
+// ── Auto-generation endpoint guard tests ─────────────────────────────────────
+
+describe("Invoice auto-generation — tenant guard (organization_id required)", () => {
+  it("POST /api/bookings/:id/invoice with super_admin null-org → 400, no DB insert", async () => {
+    // super_admin bypasses requireBookingOwnership, so the org guard in the handler fires
+    const token = tokenFor(null, "super_admin");
+
+    const res = await request(app)
+      .post("/api/bookings/100/invoice")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ invoiceNumber: "INV-TEST", items: [], buyer: {}, seller: {} });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/organization_id/i);
+    expect(vi.mocked(db.insert)).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/finance/invoices/generate with null-org → 400 before any DB call", async () => {
+    const token = tokenFor(null, "owner");
+
+    const res = await request(app)
+      .post("/api/finance/invoices/generate")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ bookingId: 100, type: "accommodation" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/organization_id/i);
+    expect(vi.mocked(db.insert)).not.toHaveBeenCalled();
+    expect(vi.mocked(db.select)).not.toHaveBeenCalled();
+  });
+});
+
+// ── Invoice creation tenant guard tests ──────────────────────────────────────
+
+describe("Invoice creation — tenant guard (organization_id required)", () => {
+  it("POST /api/invoices with null organizationId → 400, no insert attempted", async () => {
+    // User has no org (super_admin acting without a tenant context)
+    const token = tokenFor(null, "super_admin");
+
+    const res = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ amount: 1000, currency: "UAH", invoiceType: "accommodation" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/organization_id/i);
+    // No DB insert should have been attempted
+    expect(vi.mocked(db.insert)).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/invoices with valid organizationId proceeds past the guard", async () => {
+    // The insert mock — db.insert is a function that returns a chain
+    const insertChain = {
+      values: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([{
+        id: 99, invoiceNumber: "INV-TEST", status: "pending",
+        amount: "1000.00", currency: "UAH",
+      }]),
+    };
+    vi.mocked(db.insert).mockReturnValueOnce(insertChain as any);
+
+    const token = tokenFor(1, "owner");
+
+    const res = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ amount: 1000, currency: "UAH", invoiceType: "accommodation" });
+
+    // Guard passed; response is 201 Created from the route
+    expect(res.status).toBe(201);
+    expect(vi.mocked(db.insert)).toHaveBeenCalledTimes(1);
   });
 });

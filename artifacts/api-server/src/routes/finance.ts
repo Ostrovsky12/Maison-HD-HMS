@@ -267,6 +267,7 @@ router.post("/invoices/generate", async (req: any, res) => {
     const userId: number = req.user?.id;
     const { bookingId, type = "accommodation" } = req.body;
     if (!bookingId) return res.status(400).json({ error: "bookingId обов'язковий" });
+    if (!orgId) return res.status(400).json({ error: "organization_id is required — cannot auto-generate an invoice without a tenant" });
 
     // Verify booking belongs to caller's org
     if (orgId) {
@@ -295,7 +296,7 @@ router.post("/invoices/generate", async (req: any, res) => {
     const vat = Math.round((total - subtotal) * 100) / 100;
 
     const [invoice] = await db.insert(invoicesTable).values({
-      organizationId: orgId ?? null,
+      organizationId: orgId,
       invoiceNumber, bookingId, guestId: booking.guestId ?? null,
       invoiceType: type as any, status: "pending",
       amount: total.toString(), taxAmount: vat.toString(),

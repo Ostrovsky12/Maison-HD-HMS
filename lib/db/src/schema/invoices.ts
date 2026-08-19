@@ -12,7 +12,7 @@ export const invoicePaymentMethodEnum = pgEnum("invoice_payment_method", ["cash"
 
 export const invoicesTable = pgTable("invoices", {
   id: serial("id").primaryKey(),
-  organizationId: integer("organization_id").references(() => organizationsTable.id, { onDelete: "cascade" }),
+  organizationId: integer("organization_id").notNull().references(() => organizationsTable.id, { onDelete: "cascade" }),
   invoiceNumber: text("invoice_number").notNull(),
   bookingId: integer("booking_id").references(() => bookingsTable.id),
   guestId: integer("guest_id").references(() => guestsTable.id),

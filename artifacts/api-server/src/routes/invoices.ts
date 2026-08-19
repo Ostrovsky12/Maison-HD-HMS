@@ -83,6 +83,12 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
+
+    // Guard: every invoice must belong to a tenant
+    if (!user.organizationId) {
+      return res.status(400).json({ error: "organization_id is required — cannot create an invoice without a tenant" });
+    }
+
     const {
       bookingId, guestId, invoiceType, amount, taxAmount, currency,
       description, dueDate, legalEntityId, buyer, items, seller, invoiceNumber,
@@ -95,7 +101,7 @@ router.post("/", requireAuth, async (req, res) => {
     const num = invoiceNumber || `Р-${new Date().getFullYear()}-${String(bookingId || 0).padStart(4, "0")}`;
 
     const [invoice] = await db.insert(invoicesTable).values({
-      organizationId: user.organizationId ?? null,
+      organizationId: user.organizationId,
       invoiceNumber: num,
       bookingId: bookingId || null,
       guestId: guestId || null,

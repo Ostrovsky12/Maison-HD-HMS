@@ -482,11 +482,11 @@ async function run() {
       INSERT INTO invoices
         (invoice_number,booking_id,guest_id,invoice_type,status,
          amount,tax_amount,paid_amount,currency,subtotal,
-         counterparty_name,legal_entity_id,created_at,updated_at)
-      VALUES ($1,$2,$3,'accommodation','pending',$4,$5,$4,'UAH',$6,'Гість',$7,now(),now())
+         counterparty_name,legal_entity_id,organization_id,created_at,updated_at)
+      VALUES ($1,$2,$3,'accommodation','pending',$4,$5,$4,'UAH',$6,'Гість',$7,$8,now(),now())
       ON CONFLICT DO NOTHING
     `, [`INV-2026-${String(invSeq++).padStart(4,"0")}`,bid,
-        guestIds[i%guestIds.length],total,vat,sub,leId]);
+        guestIds[i%guestIds.length],total,vat,sub,leId,orgId]);
   }
   console.log("  ✓ Folios + Invoices");
 
