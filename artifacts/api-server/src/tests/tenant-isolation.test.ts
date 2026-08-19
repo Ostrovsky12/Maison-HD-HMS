@@ -51,16 +51,20 @@ app.use("/api/finance", financeRouter);
  * Supports all chain methods the routes use (.from, .where, .leftJoin,
  * .innerJoin, .orderBy, .limit).
  */
-function makeChain(rows: any[] = []) {
+function makeChain(rows: any[] = [], onWhere?: (condition: any) => any[]) {
+  let resultRows = rows;
   const chain: any = {
     from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
+    where: vi.fn((condition: any) => {
+      if (onWhere) resultRows = onWhere(condition);
+      return chain;
+    }),
     leftJoin: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     then(resolve: (v: any) => any, reject: (e: any) => any) {
-      return Promise.resolve(rows).then(resolve, reject);
+      return Promise.resolve(resultRows).then(resolve, reject);
     },
   };
   return chain;
@@ -71,6 +75,20 @@ function tokenFor(organizationId: number | null, role = "owner") {
     userId: 99,
     email: "test@test.com",
     role,
+    organizationId,
+    propertyId: null,
+  });
+}
+
+function tokenForUser(
+  userId: number,
+  organizationId: number,
+  email: string,
+) {
+  return signToken({
+    userId,
+    email,
+    role: "owner",
     organizationId,
     propertyId: null,
   });
@@ -524,6 +542,90 @@ describe("Tenant isolation — invoices", () => {
     expect(res.body).toHaveLength(1);
     expect(res.body[0].id).toBe(INVOICE_B.id);
     expect(res.body.some((inv: any) => inv.id === INVOICE_A.id)).toBe(false);
+  });
+
+  it("creates invoices for two tenants, then blocks cross-tenant reads", async () => {
+    const storedInvoices: any[] = [];
+    let nextInvoiceId = 100;
+
+    vi.mocked(db.insert).mockImplementation(() => ({
+      values: vi.fn((values: any) => {
+        const invoice = {
+          ...values,
+          id: nextInvoiceId++,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        storedInvoices.push(invoice);
+        return {
+          returning: vi.fn().mockResolvedValue([invoice]),
+        };
+      }),
+    } as any));
+
+    // Execute the route's organization filter against the in-memory records
+    // instead of handing GET /api/invoices pre-filtered fixture rows.
+    vi.mocked(db.select).mockImplementation(() =>
+      makeChain(storedInvoices, (condition: any) => {
+        if (condition?.op === "and") {
+          const organizationCondition = condition.args.find(
+            (arg: any) => arg?.op === "eq",
+          );
+          const organizationId = organizationCondition?.args?.[1];
+          return storedInvoices.filter(
+            (invoice) => invoice.organizationId === organizationId,
+          );
+        }
+
+        const invoiceId = condition?.args?.[1];
+        return storedInvoices.filter((invoice) => invoice.id === invoiceId);
+      }),
+    );
+
+    const tenantAToken = tokenForUser(1001, 1, "tenant-a@example.test");
+    const tenantBToken = tokenForUser(1002, 2, "tenant-b@example.test");
+
+    const createA = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${tenantAToken}`)
+      .send({
+        invoiceNumber: "INV-TENANT-A",
+        amount: 125,
+        description: "Tenant A invoice",
+      });
+    const createB = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${tenantBToken}`)
+      .send({
+        invoiceNumber: "INV-TENANT-B",
+        amount: 250,
+        description: "Tenant B invoice",
+      });
+
+    expect(createA.status).toBe(201);
+    expect(createB.status).toBe(201);
+    expect(createA.body.organizationId).toBe(1);
+    expect(createB.body.organizationId).toBe(2);
+
+    const tenantAInvoices = await request(app)
+      .get("/api/invoices")
+      .set("Authorization", `Bearer ${tenantAToken}`);
+
+    expect(tenantAInvoices.status).toBe(200);
+    expect(tenantAInvoices.body).toHaveLength(1);
+    expect(tenantAInvoices.body[0].invoiceNumber).toBe("INV-TENANT-A");
+    expect(
+      tenantAInvoices.body.some(
+        (invoice: any) => invoice.id === createB.body.id,
+      ),
+    ).toBe(false);
+
+    const crossTenantInvoice = await request(app)
+      .get(`/api/invoices/${createB.body.id}`)
+      .set("Authorization", `Bearer ${tenantAToken}`);
+
+    expect(crossTenantInvoice.status).toBe(403);
+    expect(crossTenantInvoice.body).toEqual({ error: "Forbidden" });
   });
 });
 

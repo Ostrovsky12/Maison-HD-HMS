@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "seed:demo": "node_modules/.bin/tsx src/lib/demo-seed.ts"
   },
