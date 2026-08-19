@@ -1029,7 +1029,6 @@ function CreateActFromInvoiceDialog({
 
   const [vatMode, setVatMode] = useState<"with_vat" | "no_vat">("with_vat");
   const [adjustedAmount, setAdjustedAmount] = useState("");
-  const [subject, setSubject] = useState("");
   const [cpName, setCpName] = useState("");
   const [cpEdrpou, setCpEdrpou] = useState("");
   const [cpAddress, setCpAddress] = useState("");
@@ -1042,9 +1041,6 @@ function CreateActFromInvoiceDialog({
     setAdjustedAmount(invoice.amount || "");
     const vatAmt = parseFloat(invoice.vatAmount || invoice.taxAmount || "0");
     setVatMode(vatAmt > 0 ? "with_vat" : "no_vat");
-    const firstItem = invoice.invoiceItems?.[0];
-    const itemName = firstItem?.name || firstItem?.description || firstItem?.service || "";
-    setSubject(itemName || invoice.description || invoice.notes || "");
     setCpName(invoice.counterpartyName || "");
     setCpEdrpou(invoice.counterpartyEdrpou || "");
     setCpAddress(invoice.buyerAddress || "");
@@ -1073,6 +1069,25 @@ function CreateActFromInvoiceDialog({
   const invoiceVatAmount = parseFloat(invoice?.vatAmount || invoice?.taxAmount || "0");
   const vatAmt = Number.isFinite(invoiceVatAmount) ? invoiceVatAmount : 0;
   const subtotal = total - vatAmt;
+
+  // Per-rate VAT breakdown for the items table preview
+  const invoiceItemsArr: any[] = invoice?.invoiceItems || [];
+  const vatByRate: Record<number, number> = {};
+  for (const item of invoiceItemsArr) {
+    const rate = Number(item.vatRate ?? 0);
+    const lineTotal = Number(item.amount ?? item.totalPrice ?? 0);
+    const lineVat = rate > 0 ? lineTotal - lineTotal / (1 + rate / 100) : 0;
+    vatByRate[rate] = (vatByRate[rate] || 0) + lineVat;
+  }
+  const nonZeroVatRates = Object.entries(vatByRate)
+    .filter(([, v]) => v > 0.001)
+    .map(([k]) => Number(k))
+    .sort((a, b) => a - b);
+
+  // Derive subject from items for the backend call
+  const derivedSubject = invoiceItemsArr.length > 0
+    ? invoiceItemsArr.map(it => it.name || it.description || "Послуга").join("; ")
+    : (invoice?.description || invoice?.notes || "Послуги з проживання");
 
   const selectedLe = effectiveLegalEntities.find((le: any) => le.id === parseInt(legalEntityId));
 
@@ -1170,42 +1185,68 @@ function CreateActFromInvoiceDialog({
             </div>
           </div>
 
-          {/* Послуга та сума */}
+          {/* Перелік послуг (copied from invoice) */}
           <div className="rounded-xl border bg-gray-50 p-4 space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-gray-500">Послуга та сума</div>
-            <div>
-              <Label className="text-xs">Предмет / назва послуги</Label>
-              <Input className="mt-1 h-9" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Послуги з проживання" />
-            </div>
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-500">Перелік послуг</div>
 
-            <div className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3">
-              <div>
-                <div className="text-sm font-medium text-gray-800">З ПДВ (20%)</div>
-                <div className="text-xs text-gray-400">
-                  {vatMode === "with_vat" ? "Загальна сума включає ПДВ 20%" : "Без ПДВ / звільнено"}
+            {invoiceItemsArr.length > 0 ? (
+              <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide">
+                      <th className="text-left px-3 py-2">№</th>
+                      <th className="text-left px-3 py-2">Найменування</th>
+                      <th className="text-center px-2 py-2">Од.</th>
+                      <th className="text-right px-2 py-2">К-ть</th>
+                      <th className="text-right px-2 py-2">Ціна без ПДВ</th>
+                      <th className="text-right px-2 py-2">ПДВ</th>
+                      <th className="text-right px-3 py-2">Сума, ₴</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoiceItemsArr.map((item: any, idx: number) => (
+                      <tr key={idx} className="border-t border-gray-100">
+                        <td className="px-3 py-2 text-gray-400">{idx + 1}</td>
+                        <td className="px-3 py-2 text-gray-900">{item.name || item.description || "Послуга"}</td>
+                        <td className="px-2 py-2 text-center text-gray-500">{item.unit || "послуга"}</td>
+                        <td className="px-2 py-2 text-right text-gray-700">{Number(item.qty ?? item.quantity ?? 1).toFixed(2)}</td>
+                        <td className="px-2 py-2 text-right text-gray-700">{Number(item.price ?? item.unitPrice ?? 0).toFixed(2)}</td>
+                        <td className="px-2 py-2 text-right text-gray-500">{Number(item.vatRate ?? 0)}%</td>
+                        <td className="px-3 py-2 text-right font-semibold text-gray-900">{Number(item.amount ?? item.totalPrice ?? 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500 italic">
+                {invoice?.description || invoice?.notes || "Послуги з проживання"}
+              </div>
+            )}
+
+            <p className="text-xs text-gray-400">Акт копіює всі позиції та суму рахунку без змін.</p>
+
+            {/* Totals summary */}
+            <div className="bg-white border border-gray-200 rounded-lg p-3 text-sm">
+              <div className="flex justify-between text-gray-600 mb-1">
+                <span>Без ПДВ:</span>
+                <span className="font-mono">{subtotal.toFixed(2)} ₴</span>
+              </div>
+              {nonZeroVatRates.map(rate => (
+                <div key={rate} className="flex justify-between text-gray-600 mb-1">
+                  <span>ПДВ {rate}%:</span>
+                  <span className="font-mono">{(vatByRate[rate] || 0).toFixed(2)} ₴</span>
                 </div>
-              </div>
-              <Switch checked={vatMode === "with_vat"} disabled aria-label="ПДВ успадковується з рахунку" />
-            </div>
-
-            <div>
-              <Label className="text-xs">Загальна сума з рахунку (грн)</Label>
-              <Input className="mt-1 h-9 bg-gray-50" type="number" step="0.01" value={adjustedAmount} readOnly />
-              <p className="mt-1 text-xs text-gray-400">Акт копіює всі позиції та суму рахунку без змін.</p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 bg-white border border-gray-200 rounded-lg p-3 text-sm">
-              <div className="text-center">
-                <div className="text-xs text-gray-400 mb-1">Без ПДВ</div>
-                <div className="font-mono font-medium">{subtotal.toFixed(2)}</div>
-              </div>
-              <div className="text-center border-x border-gray-100">
-                <div className="text-xs text-gray-400 mb-1">ПДВ {vatMode === "with_vat" ? "20%" : "0%"}</div>
-                <div className="font-mono font-medium">{vatAmt.toFixed(2)}</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xs text-gray-400 mb-1">Разом</div>
-                <div className="font-mono font-bold text-indigo-700 text-base">{total.toFixed(2)}</div>
+              ))}
+              {nonZeroVatRates.length === 0 && (
+                <div className="flex justify-between text-gray-400 mb-1">
+                  <span>ПДВ:</span>
+                  <span className="font-mono">0.00 ₴</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-indigo-700 text-base border-t border-gray-100 pt-1 mt-1">
+                <span>Разом до сплати:</span>
+                <span className="font-mono">{total.toFixed(2)} ₴</span>
               </div>
             </div>
           </div>
@@ -1219,7 +1260,7 @@ function CreateActFromInvoiceDialog({
             onClick={() => mut.mutate({
               vatMode,
               adjustedAmount: total,
-              subject: subject || "Послуги з проживання",
+              subject: derivedSubject,
               invoiceSource: invoice.source || "booking_invoice",
               legalEntityIdOverride: legalEntityId ? parseInt(legalEntityId) : undefined,
               counterpartyOverride: { name: cpName || undefined, edrpou: cpEdrpou || undefined, address: cpAddress || undefined, vatNumber: cpVat || undefined },

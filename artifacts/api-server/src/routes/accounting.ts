@@ -1098,7 +1098,7 @@ router.get("/documents/:id/export/:format", async (req: any, res) => {
       <ОдВим>${item.unit}</ОдВим>
       <Кількість>${item.quantity}</Кількість>
       <Ціна>${item.unitPrice}</Ціна>
-      <СтавкаПДВ>${item.vatRate}%</СтавкаПДВ>
+      <СтавкаПДВ>${item.vatRate === "exempt" ? "0" : (item.vatRate || "0")}%</СтавкаПДВ>
       <СумаПДВ>${item.vatAmount}</СумаПДВ>
       <Сума>${item.totalPrice}</Сума>
     </Рядок>`).join("\n    ")}
@@ -1377,9 +1377,12 @@ function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): stri
     const lineTotal = it.total_amount ?? it.total_price ?? it.totalPrice ?? it.amount ?? 0;
     const itemVatAmount = it.vat_amount ?? it.vatAmount;
     const itemVatRate = it.vat_rate ?? it.vatRate ?? 0;
+    const vatRateNum = (itemVatRate === "exempt" || itemVatRate === 0 || itemVatRate === "0")
+      ? 0 : (parseFloat(String(itemVatRate)) || 0);
+    const vatRateDisplay = `${vatRateNum}%`;
     const vatCell = (itemVatAmount !== undefined && noItems)
       ? `${parseFloat(itemVatAmount).toFixed(2)} ₴`
-      : `${parseFloat(itemVatRate || 0)}%`;
+      : vatRateDisplay;
     return `
     <tr>
       <td class="num">${i + 1}</td>
