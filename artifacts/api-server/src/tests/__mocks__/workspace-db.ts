@@ -13,6 +13,7 @@ export const db = {
 };
 
 export const pool = {
+  connect: vi.fn(),
   query: vi.fn().mockResolvedValue({ rows: [] }),
   end: vi.fn(),
   $client: { query: vi.fn().mockResolvedValue({ rows: [] }) },

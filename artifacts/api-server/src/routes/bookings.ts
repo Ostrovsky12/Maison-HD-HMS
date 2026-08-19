@@ -322,6 +322,9 @@ router.post("/", requireAuth, async (req, res) => {
   // Uses FOR UPDATE lock on the unit row to prevent concurrent double-booking.
   const client = await pool.connect();
   let booking: any;
+  let guest: any = null;
+  let unit: any = null;
+  let guestAccessCode: string | null = null;
   try {
     await client.query("BEGIN");
 
@@ -363,7 +366,7 @@ router.post("/", requireAuth, async (req, res) => {
       `INSERT INTO bookings (
         unit_id, guest_id, organization_id, check_in, check_out,
         checkin_time, checkout_time, status, source,
-        rate_id, rate_name, adults, children_under6, children_over6,
+        rate_id, rate_name, adults, children_under_6, children_over_6,
         extra_beds, guests_count, with_pets,
         first_name, last_name, middle_name, phone,
         total_amount, paid_amount, payment_status, pay_on_arrival,
@@ -384,9 +387,47 @@ router.post("/", requireAuth, async (req, res) => {
         JSON.stringify(selectedAddons || {}), legalEntityId || null, notes || null, arrivalNote, draftExpiresAt,
       ],
     );
+    booking = inserted.rows[0];
+
+    // Every required write and response lookup stays in this transaction. That
+    // way a later database failure cannot leave a committed booking behind
+    // after this endpoint reports an error to the caller.
+    if (guestId && !isDraft) {
+      await client.query(
+        `UPDATE guests
+         SET booking_count = booking_count + 1,
+             ltv = ltv + $2,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [guestId, String(total)],
+      );
+    }
+
+    if (guestId) {
+      const guestResult = await client.query(
+        "SELECT first_name, last_name FROM guests WHERE id = $1 LIMIT 1",
+        [guestId],
+      );
+      guest = guestResult.rows[0] || null;
+    }
+
+    const unitResult = await client.query(
+      "SELECT name FROM units WHERE id = $1 LIMIT 1",
+      [unitId],
+    );
+    unit = unitResult.rows[0] || null;
+
+    guestAccessCode = booking.guest_access_code;
+    if (!isDraft && !guestAccessCode) {
+      guestAccessCode = genGuestCode();
+      await client.query(
+        "UPDATE bookings SET guest_access_code = $1, updated_at = NOW() WHERE id = $2",
+        [guestAccessCode, booking.id],
+      );
+      booking.guest_access_code = guestAccessCode;
+    }
 
     await client.query("COMMIT");
-    booking = inserted.rows[0];
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -394,21 +435,11 @@ router.post("/", requireAuth, async (req, res) => {
     client.release();
   }
 
-  if (guestId && !isDraft) {
-    await db.update(guestsTable).set({
-      bookingCount: sql`${guestsTable.bookingCount} + 1`,
-      ltv: sql`${guestsTable.ltv} + ${String(totalAmount || 0)}`,
-      updatedAt: new Date(),
-    }).where(eq(guestsTable.id, guestId));
-  }
-
-  const [g] = guestId ? await db.select().from(guestsTable).where(eq(guestsTable.id, guestId)).limit(1) : [null];
-  const [u] = await db.select().from(unitsTable).where(eq(unitsTable.id, unitId)).limit(1);
-
-  const guestName = g ? `${g.firstName} ${g.lastName}` : (lastName ? `${lastName} ${firstName || ""}`.trim() : "Гість");
+  const guestName = guest
+    ? `${guest.first_name} ${guest.last_name}`
+    : (lastName ? `${lastName} ${firstName || ""}`.trim() : "Гість");
 
   // Raw SQL returns snake_case — map to camelCase for API consistency
-  const bookingId2 = booking.id;
   const normalizedBooking = {
     id: booking.id,
     unitId: booking.unit_id,
@@ -433,17 +464,10 @@ router.post("/", requireAuth, async (req, res) => {
     createdAt: booking.created_at,
   };
 
-  // Auto-generate guest access code for confirmed/checked_in bookings
-  let guestAccessCode = normalizedBooking.guestAccessCode;
-  if (!isDraft && !guestAccessCode) {
-    guestAccessCode = genGuestCode();
-    await db.update(bookingsTable).set({ guestAccessCode, updatedAt: new Date() }).where(eq(bookingsTable.id, bookingId2));
-  }
-
   res.status(201).json({
     ...normalizedBooking,
     guestName,
-    unitName: u?.name || null,
+    unitName: unit?.name || null,
     guestAccessCode,
   });
 
@@ -452,10 +476,10 @@ router.post("/", requireAuth, async (req, res) => {
     notifyBookingCreated(user.organizationId, {
       id: normalizedBooking.id,
       guestName,
-      unitName: u?.name,
-      checkIn: booking.checkIn,
-      checkOut: booking.checkOut,
-      totalAmount: booking.totalAmount,
+      unitName: unit?.name,
+      checkIn: booking.check_in,
+      checkOut: booking.check_out,
+      totalAmount: booking.total_amount,
     }).catch(() => {});
   }
   } catch (e: any) {

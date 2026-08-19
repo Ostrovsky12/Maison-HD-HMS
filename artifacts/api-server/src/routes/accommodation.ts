@@ -158,7 +158,7 @@ router.post("/bookings", requireAuth, async (req: any, res) => {
     const basePrice = parseFloat(unit.rows[0]?.base_price || "0");
     const totalAmount = d.totalAmount || (basePrice * nights);
 
-    const [booking] = await db.execute<any>(sql`
+    const bookingResult = await db.execute<any>(sql`
       INSERT INTO bookings (unit_id, check_in, check_out, status, source, guests_count, adults,
         children_under_6, children_over_6, total_amount, paid_amount, first_name, last_name,
         phone, email, notes, checkin_time, checkout_time, booking_ref, payment_status)
@@ -174,7 +174,7 @@ router.post("/bookings", requireAuth, async (req: any, res) => {
         ${ref}, ${d.paymentStatus || 'unpaid'}::payment_status)
       RETURNING id, booking_ref
     `);
-    res.json({ booking: booking.rows[0] });
+    res.status(201).json({ booking: bookingResult.rows[0] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

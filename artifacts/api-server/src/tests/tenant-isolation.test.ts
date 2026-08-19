@@ -33,6 +33,7 @@ vi.mock("../lib/notify.js", () => ({
 // These imports resolve to the alias mocks defined in vitest.config.ts
 import { db, pool } from "@workspace/db";
 import bookingsRouter from "../routes/bookings.js";
+import accommodationRouter from "../routes/accommodation.js";
 import invoicesRouter from "../routes/invoices.js";
 import financeRouter from "../routes/finance.js";
 import { signToken } from "../lib/auth.js";
@@ -41,6 +42,7 @@ import { signToken } from "../lib/auth.js";
 const app = express();
 app.use(express.json());
 app.use("/api/bookings", bookingsRouter);
+app.use("/api/accommodation", accommodationRouter);
 app.use("/api/invoices", invoicesRouter);
 app.use("/api/finance", financeRouter);
 
@@ -117,6 +119,67 @@ const BOOKING_B = {
   unitName: "Room 201",
 };
 
+function makeBookingTransactionClient(
+  committedBookings: any[],
+  options: { failAccessCodeUpdate?: boolean; bookingId: number },
+) {
+  let pendingBooking: any = null;
+
+  const client = {
+    query: vi.fn(async (statement: string) => {
+      const query = statement.replace(/\s+/g, " ").trim();
+      if (query === "BEGIN") return { rows: [] };
+      if (query.startsWith("SELECT u.id FROM units")) return { rows: [{ id: 10 }] };
+      if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+      if (query.startsWith("SELECT id FROM bookings")) return { rows: [] };
+      if (query.startsWith("INSERT INTO bookings")) {
+        pendingBooking = {
+          id: options.bookingId,
+          unit_id: 10,
+          guest_id: null,
+          organization_id: 1,
+          check_in: "2026-05-01",
+          check_out: "2026-05-03",
+          checkin_time: "14:00",
+          checkout_time: "12:00",
+          status: "confirmed",
+          source: "direct",
+          total_amount: "1000.00",
+          paid_amount: "0.00",
+          payment_status: "unpaid",
+          guests_count: 2,
+          adults: 2,
+          first_name: "Anna",
+          last_name: "Test",
+          phone: null,
+          notes: null,
+          guest_access_code: null,
+          created_at: "2026-04-01T00:00:00.000Z",
+        };
+        return { rows: [pendingBooking] };
+      }
+      if (query.startsWith("SELECT name FROM units")) return { rows: [{ name: "Room 101" }] };
+      if (query.startsWith("UPDATE bookings SET guest_access_code")) {
+        if (options.failAccessCodeUpdate) throw new Error("guest access code update failed");
+        return { rows: [] };
+      }
+      if (query === "COMMIT") {
+        if (pendingBooking) committedBookings.push(pendingBooking);
+        pendingBooking = null;
+        return { rows: [] };
+      }
+      if (query === "ROLLBACK") {
+        pendingBooking = null;
+        return { rows: [] };
+      }
+      throw new Error(`Unexpected test query: ${query}`);
+    }),
+    release: vi.fn(),
+  };
+
+  return client;
+}
+
 const INVOICE_A = {
   id: 1, invoiceNumber: "INV-001", bookingId: 100, guestId: null,
   invoiceType: "standard", status: "paid", amount: "500.00", currency: "UAH",
@@ -138,6 +201,7 @@ beforeEach(() => {
   vi.mocked(db.select).mockReset();
   vi.mocked(db.insert).mockReset();
   vi.mocked(db.execute).mockReset();
+  vi.mocked(pool.connect).mockReset();
   vi.mocked(pool.query).mockReset();
 });
 
@@ -258,6 +322,77 @@ describe("Tenant isolation — POST /api/bookings (foreign unitId rejection)", (
 
     expect(res.status).toBe(403);
     expect(vi.mocked(db.select)).not.toHaveBeenCalled();
+  });
+});
+
+describe("Booking creation — atomic response handling", () => {
+  const payload = {
+    unitId: 10,
+    checkIn: "2026-05-01",
+    checkOut: "2026-05-03",
+    adults: 2,
+    childrenUnder6: 1,
+    childrenOver6: 1,
+    totalAmount: 1000,
+    lastName: "Test",
+  };
+
+  it("rolls back a post-insert failure so a retry commits only one booking", async () => {
+    const committedBookings: any[] = [];
+    const failedAttempt = makeBookingTransactionClient(committedBookings, {
+      failAccessCodeUpdate: true,
+      bookingId: 501,
+    });
+    const retry = makeBookingTransactionClient(committedBookings, { bookingId: 502 });
+
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeChain([{ id: 1 }]))
+      .mockReturnValueOnce(makeChain([{ id: 10 }]))
+      .mockReturnValueOnce(makeChain([{ id: 1 }]))
+      .mockReturnValueOnce(makeChain([{ id: 10 }]));
+    vi.mocked(pool.connect)
+      .mockResolvedValueOnce(failedAttempt as any)
+      .mockResolvedValueOnce(retry as any);
+
+    const firstResponse = await request(app)
+      .post("/api/bookings")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send(payload);
+
+    expect(firstResponse.status).toBe(500);
+    expect(committedBookings).toEqual([]);
+    expect(failedAttempt.query).toHaveBeenCalledWith("ROLLBACK");
+
+    const retryResponse = await request(app)
+      .post("/api/bookings")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send(payload);
+
+    expect(retryResponse.status).toBe(201);
+    expect(committedBookings).toHaveLength(1);
+    expect(committedBookings[0].id).toBe(502);
+    expect(retry.query.mock.calls.find(([query]) => String(query).includes("INSERT INTO bookings"))?.[0])
+      .toContain("children_under_6, children_over_6");
+  });
+
+  it("returns the persisted accommodation booking instead of reporting a server error", async () => {
+    vi.mocked(db.execute)
+      .mockResolvedValueOnce({ rows: [{ base_price: "500.00" }] } as any)
+      .mockResolvedValueOnce({ rows: [{ id: 601, booking_ref: "BK-TEST" }] } as any);
+
+    const response = await request(app)
+      .post("/api/accommodation/bookings")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({
+        ...payload,
+        guestsCount: 4,
+        paidAmount: 0,
+        paymentStatus: "unpaid",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual({ booking: { id: 601, booking_ref: "BK-TEST" } });
+    expect(vi.mocked(db.execute)).toHaveBeenCalledTimes(2);
   });
 });
 
