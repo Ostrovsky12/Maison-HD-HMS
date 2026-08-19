@@ -3,3 +3,4 @@
 - [Tenant deletion API](tenant-deletion-api.md) — DELETE /api/super-admin/tenants endpoint for wiping all orgs (cascade)
 - [F&B module migration](fb-migration.md) — all 52 HMS F&B pages copied to Maison HD with full routes and sidebar sections
 - [Security hardening](security-hardening.md) — full audit pass: rate limits, org scope, state machine, allowlists, helmet, .env.example
+- [Canonical public document links](public-document-links.md) — signed bearer links must use a configured HTTPS origin, never request Host headers

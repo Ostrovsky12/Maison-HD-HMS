@@ -35,6 +35,10 @@ app.use(
   }),
 );
 app.use(cors());
+// Migration source files are sent as base64 JSON. Keep the larger body limit
+// scoped to this authenticated upload route rather than expanding every API
+// endpoint's exposure to large request bodies.
+app.use("/api/acc-migration/projects/:id/files", express.json({ limit: "14mb" }));
 // 50mb was excessive and a DoS risk; images/files should use object storage.
 // Keep 2mb for large JSON payloads (bulk imports etc.) but reject oversized requests.
 app.use(express.json({ limit: "2mb" }));

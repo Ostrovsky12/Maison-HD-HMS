@@ -14,7 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -372,9 +372,10 @@ function BookingInvoicesTab() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [legalEntityId, setLegalEntityId] = useState("all");
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteKey, setDeleteKey] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actInvoice, setActInvoice] = useState<any>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -402,17 +403,15 @@ function BookingInvoicesTab() {
     staleTime: 30_000,
   });
 
-  const handleDelete = async (id: number) => {
-    // Guard: find the invoice in cached data and block delete if it's paid or signed
-    const inv = (invoices as any[])?.find((i: any) => i.id === id);
+  const handleDelete = async (inv: any) => {
     if (inv?.status === "paid" || inv?.status === "signed") {
       toast({ title: "Не можна видалити", description: "Оплачений або підписаний рахунок не можна видалити", variant: "destructive" });
-      setDeleteId(null);
+      setDeleteKey(null);
       return;
     }
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/${inv?.source === "accounting_document" ? "api/accounting/documents" : "api/invoices"}/${id}`, {
+      const res = await fetch(`${API_BASE}/${inv?.source === "accounting_document" ? "api/accounting/documents" : "api/invoices"}/${inv.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${tok()}` },
       });
@@ -422,7 +421,7 @@ function BookingInvoicesTab() {
         return;
       }
       toast({ title: "Рахунок видалено" });
-      setDeleteId(null);
+      setDeleteKey(null);
       refetch();
     } catch {
       toast({ title: "Помилка видалення", variant: "destructive" });
@@ -557,7 +556,11 @@ function BookingInvoicesTab() {
             </TableHeader>
             <TableBody>
               {(invoices || []).map((inv: any) => (
-                <TableRow key={`${inv.source}-${inv.id}`} className="hover:bg-gray-50/50">
+                <TableRow
+                  key={`${inv.source}-${inv.id}`}
+                  className="hover:bg-gray-50/50 cursor-pointer"
+                  onClick={() => setSelectedInvoice(inv)}
+                >
                   <TableCell className="pl-5 font-mono text-sm font-semibold text-indigo-700">{inv.invoiceNumber}</TableCell>
                   <TableCell className="text-sm text-gray-700 max-w-[200px] truncate">
                     {inv.counterpartyName || inv.guestName || "—"}
@@ -568,7 +571,7 @@ function BookingInvoicesTab() {
                     {fmtNum(inv.amount)} ₴
                   </TableCell>
                   <TableCell>{statusBadge(inv.status)}</TableCell>
-                  <TableCell className="pr-5">
+                  <TableCell className="pr-5" onClick={event => event.stopPropagation()}>
                     <div className="flex items-center gap-1 justify-end">
                       <button
                         onClick={() => handlePrint(inv)}
@@ -581,26 +584,24 @@ function BookingInvoicesTab() {
                           <rect x="6" y="14" width="12" height="8"/>
                         </svg>
                       </button>
-                      {inv.source !== "accounting_document" && (
-                        <button
-                          onClick={() => setActInvoice(inv)}
-                          title="Створити Акт виконаних робіт"
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-                        >
-                          <FileCheck className="w-4 h-4" />
-                        </button>
-                      )}
-                      {deleteId === inv.id ? (
+                      <button
+                        onClick={() => setActInvoice(inv)}
+                        title="Сформувати акт із рахунку"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                      >
+                        <FileCheck className="w-4 h-4" />
+                      </button>
+                      {deleteKey === `${inv.source}:${inv.id}` ? (
                         <div className="flex items-center gap-1">
                           <button
-                            onClick={() => handleDelete(inv.id)}
+                            onClick={() => handleDelete(inv)}
                             disabled={deleting}
                             className="h-7 px-2 text-xs text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
                           >
                             {deleting ? "..." : "Так"}
                           </button>
                           <button
-                            onClick={() => setDeleteId(null)}
+                            onClick={() => setDeleteKey(null)}
                             className="h-7 px-2 text-xs text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                           >
                             Ні
@@ -608,7 +609,7 @@ function BookingInvoicesTab() {
                         </div>
                       ) : (
                         <button
-                          onClick={() => setDeleteId(inv.id)}
+                          onClick={() => setDeleteKey(`${inv.source}:${inv.id}`)}
                           title="Видалити"
                           className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
                         >
@@ -631,10 +632,368 @@ function BookingInvoicesTab() {
           invoice={actInvoice}
           legalEntities={entities}
           onClose={() => setActInvoice(null)}
-          onCreated={() => { setActInvoice(null); queryClient.invalidateQueries({ queryKey: ["accounting"] }); }}
+          onCreated={() => {
+            setActInvoice(null);
+            queryClient.invalidateQueries({ queryKey: ["accounting"] });
+            queryClient.invalidateQueries({ queryKey: ["accounting", "documents"] });
+          }}
+        />
+      )}
+      {selectedInvoice && (
+        <InvoiceDetailDialog
+          invoice={selectedInvoice}
+          onClose={() => setSelectedInvoice(null)}
+          onCreateAct={(invoice: any) => {
+            setSelectedInvoice(null);
+            setActInvoice(invoice);
+          }}
+          onPrint={handlePrint}
         />
       )}
     </div>
+  );
+}
+
+// ─── INVOICE DETAIL DIALOG ────────────────────────────────────────────────────
+function InvoiceDetailDialog({ invoice, onClose, onCreateAct, onPrint }: any) {
+  const [showSend, setShowSend] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const token = localStorage.getItem("hms_token") || "";
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["accounting", "invoice-detail", invoice.source, invoice.id],
+    queryFn: async () => {
+      const isAccountingDocument = invoice.source === "accounting_document";
+      const response = await fetch(
+        `${API_BASE}/${isAccountingDocument ? "api/accounting/documents" : "api/invoices"}/${invoice.id}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Не вдалося завантажити рахунок");
+      }
+      const payload = await response.json();
+      if (!isAccountingDocument) return { ...invoice, ...payload, source: invoice.source };
+
+      const document = payload.document || {};
+      const counterparty = payload.counterparty || {};
+      const legalEntity = payload.legalEntity || {};
+      return {
+        ...invoice,
+        id: document.id,
+        source: "accounting_document",
+        invoiceNumber: document.docNumber,
+        createdAt: document.docDate,
+        dueDate: document.dueDate,
+        status: document.status,
+        amount: document.totalAmount,
+        taxAmount: document.vatAmount,
+        paidAmount: document.paidAmount,
+        currency: document.currency,
+        description: document.subject || document.description,
+        legalEntityId: document.legalEntityId,
+        counterpartyName: document.counterpartyName || counterparty.name,
+        counterpartyEdrpou: document.counterpartyEdrpou || counterparty.edrpou,
+        buyerAddress: counterparty.legalAddress,
+        buyerVatNumber: counterparty.vatNumber,
+        invoiceItems: (payload.items || []).map((item: any) => ({
+          name: item.description,
+          description: item.description,
+          qty: Number(item.quantity || 1),
+          unit: item.unit || "послуга",
+          price: Number(item.unitPrice || 0),
+          amount: Number(item.totalPrice || 0),
+          vatRate: item.vatRate === "exempt" ? 0 : Number(item.vatRate || 0),
+        })),
+        sellerSnapshot: legalEntity.id ? {
+          name: legalEntity.name,
+          edrpou: legalEntity.edrpou,
+          vatNumber: legalEntity.vatNumber,
+          address: legalEntity.legalAddress,
+          iban: legalEntity.iban,
+          bankName: legalEntity.bank,
+          mfo: legalEntity.mfo,
+          directorName: legalEntity.director,
+          accountantName: legalEntity.accountant,
+        } : null,
+      };
+    },
+    staleTime: 15_000,
+  });
+
+  const details = data || invoice;
+  const statusInfo = DOC_STATUS_LABELS[details.status] || DOC_STATUS_LABELS.draft;
+  const StatusIcon = statusInfo.icon;
+
+  const savePdf = () => {
+    toast({
+      title: "Збереження PDF",
+      description: "У вікні друку оберіть «Зберегти як PDF».",
+    });
+    onPrint(details);
+  };
+
+  return (
+    <>
+      <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex flex-wrap items-center gap-3">
+              <Receipt className="h-5 w-5 text-indigo-600" />
+              <span className="font-mono">{details.invoiceNumber}</span>
+              <Badge className={`${statusInfo.color} flex items-center gap-1`}>
+                <StatusIcon className="h-3 w-3" /> {statusInfo.label}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Деталі рахунку та дії друку, збереження, надсилання і формування акта.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-7 w-7 animate-spin text-indigo-600" />
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <p className="text-xs text-gray-500">Дата рахунку</p>
+                  <p className="text-sm font-medium">{fmtDate(details.createdAt)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Термін оплати</p>
+                  <p className="text-sm font-medium">{fmtDate(details.dueDate)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Сума</p>
+                  <p className="text-sm font-bold">{fmtNum(details.amount)} ₴</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Оплачено</p>
+                  <p className="text-sm font-medium text-emerald-700">{fmtNum(details.paidAmount)} ₴</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-gray-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Контрагент</p>
+                <p className="font-semibold text-gray-900">{details.counterpartyName || details.guestName || "—"}</p>
+                {details.counterpartyEdrpou && <p className="text-sm text-gray-500">ЄДРПОУ / ІПН: {details.counterpartyEdrpou}</p>}
+                {details.buyerAddress && <p className="text-sm text-gray-500">{details.buyerAddress}</p>}
+              </div>
+
+              {details.description && (
+                <div className="rounded-xl border bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Призначення</p>
+                  <p className="text-sm text-gray-800">{details.description}</p>
+                </div>
+              )}
+
+              {details.invoiceItems?.length > 0 && (
+                <div className="rounded-xl border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="text-xs">Послуга</TableHead>
+                        <TableHead className="text-xs text-right">Сума</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {details.invoiceItems.map((item: any, index: number) => (
+                        <TableRow key={`${item.description || item.name}-${index}`}>
+                          <TableCell className="text-sm">{item.description || item.name || "Послуга"}</TableCell>
+                          <TableCell className="text-sm text-right font-medium">
+                            {fmtNum(item.amount ?? item.totalPrice)} ₴
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2 pt-3 border-t">
+                <Button
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  onClick={() => onCreateAct(details)}
+                >
+                  <FileCheck className="h-4 w-4 mr-1" /> Сформувати акт
+                </Button>
+                <Button variant="outline" onClick={() => onPrint(details)}>
+                  <Printer className="h-4 w-4 mr-1" /> Друкувати
+                </Button>
+                <Button variant="outline" onClick={savePdf}>
+                  <Download className="h-4 w-4 mr-1" /> Зберегти PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-sky-300 text-sky-700 hover:bg-sky-50"
+                  onClick={() => setShowSend(true)}
+                >
+                  <Send className="h-4 w-4 mr-1" /> Надіслати
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {showSend && (
+        <AccountingDocumentSendDialog
+          item={{ ...details, documentType: "invoice" }}
+          onClose={() => setShowSend(false)}
+          onSent={() => {
+            qc.invalidateQueries({ queryKey: ["booking-invoices"] });
+            qc.invalidateQueries({ queryKey: ["accounting"] });
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── SEND INVOICE / ACT DIALOG ────────────────────────────────────────────────
+function AccountingDocumentSendDialog({ item, onClose, onSent }: any) {
+  const { toast } = useToast();
+  const [channel, setChannel] = useState<"telegram" | "link" | "sms">("telegram");
+  const [recipient, setRecipient] = useState("");
+  const [sending, setSending] = useState(false);
+  const [publicUrl, setPublicUrl] = useState("");
+  const documentType = item.documentType || item.doc_type || item.docType || "invoice";
+  const isAct = documentType === "act";
+  const documentLabel = isAct ? "акт" : "рахунок";
+  const number = item.doc_number || item.docNumber || item.invoiceNumber || "";
+  const total = Number(item.total_amount || item.totalAmount || item.amount || 0);
+  const counterparty = item.counterparty_name || item.counterpartyName || item.guestName || "";
+
+  const send = async () => {
+    if (channel !== "link" && !recipient.trim()) {
+      toast({ title: "Вкажіть отримувача", variant: "destructive" });
+      return;
+    }
+    setSending(true);
+    try {
+      const endpoint = item.source === "booking_invoice"
+        ? `${API_BASE}/api/invoices/${item.id}/send`
+        : `${API_BASE}/api/accounting/documents/${item.id}/send`;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("hms_token") || ""}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ channel, recipient: recipient.trim() }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || result.error || "Не вдалося надіслати документ");
+      const link = result.documentUrl || result.invoiceUrl || result.link || "";
+      setPublicUrl(link);
+      onSent?.();
+      toast({
+        title: channel === "telegram" ? "Документ надіслано" : "Посилання готове",
+        description: channel === "telegram"
+          ? `${isAct ? "Акт" : "Рахунок"} надіслано через Telegram.`
+          : "Скопіюйте посилання та надішліть отримувачу.",
+      });
+    } catch (error: any) {
+      toast({ title: "Помилка надсилання", description: error.message, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Надіслати {documentLabel}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Виберіть канал надсилання та отримувача бухгалтерського документа.
+          </DialogDescription>
+        </DialogHeader>
+
+        {publicUrl ? (
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-2 py-2">
+              <CheckCircle2 className="h-11 w-11 text-emerald-500" />
+              <p className="font-semibold">{channel === "telegram" ? "Документ надіслано" : "Посилання створено"}</p>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border bg-gray-50 p-3">
+              <Link2 className="h-4 w-4 text-gray-400 shrink-0" />
+              <span className="text-xs font-mono truncate flex-1">{publicUrl}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(publicUrl);
+                  toast({ title: "Посилання скопійовано" });
+                }}
+              >
+                <Copy className="h-3.5 w-3.5 mr-1" /> Копіювати
+              </Button>
+            </div>
+            <Button className="w-full" variant="outline" onClick={onClose}>Закрити</Button>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <div className="rounded-xl bg-gray-50 border p-3 text-sm">
+              <div className="font-semibold">{isAct ? "Акт" : "Рахунок"} № {number}</div>
+              {counterparty && <div className="text-gray-500">{counterparty}</div>}
+              <div className="text-gray-700 font-medium mt-1">{fmtNum(total)} ₴</div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: "telegram", label: "Telegram", icon: Send },
+                { value: "link", label: "Посилання", icon: Link2 },
+                { value: "sms", label: "SMS", icon: Globe },
+              ].map(({ value, label, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setChannel(value as typeof channel)}
+                  className={`rounded-xl border-2 p-3 text-xs font-semibold flex flex-col items-center gap-1.5 transition-colors ${
+                    channel === value
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-gray-200 text-gray-500 hover:border-gray-300"
+                  }`}
+                >
+                  <Icon className="h-5 w-5" /> {label}
+                </button>
+              ))}
+            </div>
+
+            {channel !== "link" && (
+              <div>
+                <Label>{channel === "telegram" ? "Telegram @username або chat ID" : "Номер телефону"}</Label>
+                <Input
+                  className="mt-1"
+                  value={recipient}
+                  onChange={event => setRecipient(event.target.value)}
+                  placeholder={channel === "telegram" ? "@username" : "+380XXXXXXXXX"}
+                />
+                {channel === "sms" && (
+                  <p className="text-xs text-amber-600 mt-1">SMS-шлюз ще не підключений — буде створено посилання для ручного надсилання.</p>
+                )}
+              </div>
+            )}
+
+            <div className="rounded-xl bg-blue-50 border border-blue-100 p-3 text-xs text-blue-800">
+              Отримувач зможе відкрити {documentLabel}, переглянути його та роздрукувати або зберегти як PDF.
+            </div>
+
+            <div className="flex gap-2">
+              <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={send} disabled={sending}>
+                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
+                {sending ? "Надсилання..." : channel === "link" ? "Створити посилання" : "Надіслати"}
+              </Button>
+              <Button variant="outline" onClick={onClose}>Скасувати</Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -707,8 +1066,9 @@ function CreateActFromInvoiceDialog({
   }, [effectiveLegalEntities.length]);
 
   const total = parseFloat(adjustedAmount || invoice?.amount || "0");
-  const subtotal = vatMode === "with_vat" ? total / 1.2 : total;
-  const vatAmt = vatMode === "with_vat" ? total - subtotal : 0;
+  const invoiceVatAmount = parseFloat(invoice?.vatAmount || invoice?.taxAmount || "0");
+  const vatAmt = Number.isFinite(invoiceVatAmount) ? invoiceVatAmount : 0;
+  const subtotal = total - vatAmt;
 
   const selectedLe = effectiveLegalEntities.find((le: any) => le.id === parseInt(legalEntityId));
 
@@ -744,6 +1104,9 @@ function CreateActFromInvoiceDialog({
             <FileCheck className="h-5 w-5 text-indigo-600" />
             Акт виконаних робіт — {invoice.invoiceNumber}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Перевірте реквізити, предмет і суму перед створенням акта.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -784,7 +1147,7 @@ function CreateActFromInvoiceDialog({
           <div className="rounded-xl border bg-gray-50 p-4 space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-gray-500">Замовник</div>
             <div>
-              <Label className="text-xs">Назва організації</Label>
+              <Label className="text-xs">Назва організації (необов'язково)</Label>
               <Input className="mt-1 h-9" value={cpName} onChange={e => setCpName(e.target.value)} placeholder="ТОВ «Назва компанії»" />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -818,12 +1181,13 @@ function CreateActFromInvoiceDialog({
                   {vatMode === "with_vat" ? "Загальна сума включає ПДВ 20%" : "Без ПДВ / звільнено"}
                 </div>
               </div>
-              <Switch checked={vatMode === "with_vat"} onCheckedChange={c => setVatMode(c ? "with_vat" : "no_vat")} />
+              <Switch checked={vatMode === "with_vat"} disabled aria-label="ПДВ успадковується з рахунку" />
             </div>
 
             <div>
-              <Label className="text-xs">Загальна сума (грн)</Label>
-              <Input className="mt-1 h-9" type="number" step="0.01" value={adjustedAmount} onChange={e => setAdjustedAmount(e.target.value)} />
+              <Label className="text-xs">Загальна сума з рахунку (грн)</Label>
+              <Input className="mt-1 h-9 bg-gray-50" type="number" step="0.01" value={adjustedAmount} readOnly />
+              <p className="mt-1 text-xs text-gray-400">Акт копіює всі позиції та суму рахунку без змін.</p>
             </div>
 
             <div className="grid grid-cols-3 gap-2 bg-white border border-gray-200 rounded-lg p-3 text-sm">
@@ -847,11 +1211,12 @@ function CreateActFromInvoiceDialog({
           <Button variant="outline" onClick={onClose}>Скасувати</Button>
           <Button
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
-            disabled={mut.isPending || !cpName}
+            disabled={mut.isPending}
             onClick={() => mut.mutate({
               vatMode,
               adjustedAmount: total,
               subject: subject || "Послуги з проживання",
+              invoiceSource: invoice.source || "booking_invoice",
               legalEntityIdOverride: legalEntityId ? parseInt(legalEntityId) : undefined,
               counterpartyOverride: { name: cpName || undefined, edrpou: cpEdrpou || undefined, address: cpAddress || undefined, vatNumber: cpVat || undefined },
             })}
@@ -1857,6 +2222,8 @@ function normItem(raw: any) {
 
 function DocDetailDialog({ doc, onClose, onRefresh }: any) {
   const qc = useQueryClient();
+  const { toast } = useToast();
+  const [showSend, setShowSend] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ["accounting", "doc-detail", doc.id],
     queryFn: async () => {
@@ -1875,6 +2242,52 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
   const typeInfo = DOC_TYPE_LABELS[d.doc_type] || DOC_TYPE_LABELS.other;
   const statusInfo = DOC_STATUS_LABELS[d.status] || DOC_STATUS_LABELS.draft;
   const StatusIcon = statusInfo.icon;
+
+  const openPrintableDocument = async (mode: "print" | "save") => {
+    try {
+      const format = d.doc_type === "act" ? "act-ua" : "invoice-ua";
+      const token = localStorage.getItem("hms_token");
+      const response = await fetch(`${API_BASE}/api/accounting/documents/${d.id}/export/${format}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Не вдалося сформувати документ");
+      }
+      const html = await response.text();
+      if (mode === "save") {
+        toast({
+          title: "Збереження PDF",
+          description: "У вікні друку оберіть «Зберегти як PDF».",
+        });
+      }
+      const printFrame = document.createElement("iframe");
+      printFrame.dataset.accountingPrint = "true";
+      printFrame.setAttribute("aria-hidden", "true");
+      printFrame.style.position = "fixed";
+      printFrame.style.width = "1px";
+      printFrame.style.height = "1px";
+      printFrame.style.opacity = "0";
+      printFrame.style.pointerEvents = "none";
+      printFrame.style.right = "0";
+      printFrame.style.bottom = "0";
+      printFrame.onload = () => {
+        const target = printFrame.contentWindow;
+        if (!target) {
+          printFrame.remove();
+          toast({ title: "Не вдалося відкрити друк", variant: "destructive" });
+          return;
+        }
+        target.focus();
+        target.print();
+        window.setTimeout(() => printFrame.remove(), 60_000);
+      };
+      printFrame.srcdoc = html;
+      document.body.appendChild(printFrame);
+    } catch (error: any) {
+      toast({ title: "Помилка документа", description: error.message, variant: "destructive" });
+    }
+  };
 
   const exportDoc = (format: "bas-xml" | "medoc-xml") => {
     const token = localStorage.getItem("hms_token");
@@ -1911,6 +2324,7 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
   });
 
   return (
+    <>
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -1921,6 +2335,9 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
               <StatusIcon className="h-3 w-3 mr-1" />{statusInfo.label}
             </Badge>
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Деталі бухгалтерського документа та доступні дії.
+          </DialogDescription>
         </DialogHeader>
 
         {isLoading ? (
@@ -2045,56 +2462,25 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
                   <CreditCard className="h-4 w-4 mr-1" /> Позначити оплаченим
                 </Button>
               )}
-              {/* Print / Save PDF / Send buttons — fetch HTML with Bearer token then open as blob */}
-              {(d.doc_type === "act" || d.doc_type === "invoice") && (() => {
-                const openHtml = async (autoPrint: boolean) => {
-                  const fmt = d.doc_type === "act" ? "act-ua" : "invoice-ua";
-                  const token = localStorage.getItem("hms_token");
-                  const r = await fetch(`${API_BASE}/api/accounting/documents/${d.id}/export/${fmt}`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                  });
-                  const html = await r.text();
-                  const blob = new Blob([html], { type: "text/html; charset=utf-8" });
-                  const url = URL.createObjectURL(blob);
-                  const win = window.open(url, "_blank");
-                  if (autoPrint) win?.addEventListener("load", () => { win.print(); URL.revokeObjectURL(url); });
-                };
-                return (<>
+              {(d.doc_type === "act" || d.doc_type === "invoice") && (
+                <>
                   <Button size="sm" variant="outline"
                     className="border-blue-300 text-blue-700 hover:bg-blue-50"
-                    onClick={() => openHtml(true)}>
+                    onClick={() => openPrintableDocument("print")}>
                     <Printer className="h-4 w-4 mr-1" /> Роздрукувати
                   </Button>
                   <Button size="sm" variant="outline"
                     className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                    onClick={() => openHtml(false)}
-                    title="Відкриє документ у новій вкладці → Ctrl+P → Зберегти як PDF">
+                    onClick={() => openPrintableDocument("save")}>
                     <Download className="h-4 w-4 mr-1" /> Зберегти PDF
                   </Button>
                   <Button size="sm" variant="outline"
                     className="border-sky-300 text-sky-700 hover:bg-sky-50"
-                    onClick={async () => {
-                      const fmt = d.doc_type === "act" ? "act-ua" : "invoice-ua";
-                      const token = localStorage.getItem("hms_token");
-                      const r = await fetch(`${API_BASE}/api/accounting/documents/${d.id}/export/${fmt}`, {
-                        headers: { Authorization: `Bearer ${token}` },
-                      });
-                      const html = await r.text();
-                      const blob = new Blob([html], { type: "text/html; charset=utf-8" });
-                      const url = URL.createObjectURL(blob);
-                      const cpName = d.counterparty_name || "";
-                      const docNum = d.doc_number || "";
-                      const total = d.total_amount ? parseFloat(d.total_amount).toLocaleString("uk-UA", { minimumFractionDigits: 2 }) : "";
-                      const subject = encodeURIComponent(`${d.doc_type === "act" ? "Акт" : "Рахунок"} ${docNum}`);
-                      const body = encodeURIComponent(`Доброго дня${cpName ? `, ${cpName}` : ""}!\n\nНадсилаємо ${d.doc_type === "act" ? "акт виконаних робіт" : "рахунок"} ${docNum} на суму ${total} ₴.\n\nДокумент відкрийте за посиланням нижче або зверніться до нас за додатковою інформацією.\n\nЗ повагою,\nMaison HD`);
-                      // Open document in new tab + prefill mailto
-                      window.open(url, "_blank");
-                      setTimeout(() => { window.location.href = `mailto:?subject=${subject}&body=${body}`; }, 500);
-                    }}>
-                    <Send className="h-4 w-4 mr-1" /> Надіслати рахунок
+                    onClick={() => setShowSend(true)}>
+                    <Send className="h-4 w-4 mr-1" /> Надіслати {d.doc_type === "act" ? "акт" : "рахунок"}
                   </Button>
-                </>);
-              })()}
+                </>
+              )}
               <Button size="sm" variant="outline" onClick={() => exportDoc("bas-xml")}>
                 <Download className="h-4 w-4 mr-1" /> Вивантажити в BAS
               </Button>
@@ -2109,6 +2495,17 @@ function DocDetailDialog({ doc, onClose, onRefresh }: any) {
         )}
       </DialogContent>
     </Dialog>
+    {showSend && (
+      <AccountingDocumentSendDialog
+        item={{ ...d, documentType: d.doc_type, source: "accounting_document" }}
+        onClose={() => setShowSend(false)}
+        onSent={() => {
+          qc.invalidateQueries({ queryKey: ["accounting"] });
+          onRefresh();
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -2192,7 +2589,12 @@ function NewDocumentDialog() {
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Створити документ</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>Створити документ</DialogTitle>
+          <DialogDescription className="sr-only">
+            Заповніть реквізити нового бухгалтерського документа.
+          </DialogDescription>
+        </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>

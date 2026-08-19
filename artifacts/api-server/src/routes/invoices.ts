@@ -1,11 +1,69 @@
 import { Router } from "express";
-import { randomUUID } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "@workspace/db";
 import { invoicesTable, bookingsTable, guestsTable, usersTable, channelConfigsTable, legalEntitiesTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql, isNull, or } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
+const PUBLIC_INVOICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function getPublicInvoiceSecret(): string {
+  const secret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET or JWT_SECRET is required for public invoice links");
+  return secret;
+}
+
+function createPublicInvoiceToken(invoiceId: number, organizationId: number): string {
+  const payload = Buffer.from(JSON.stringify({
+    invoiceId,
+    organizationId,
+    expiresAt: Date.now() + PUBLIC_INVOICE_TTL_MS,
+  })).toString("base64url");
+  const signature = createHmac("sha256", getPublicInvoiceSecret()).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyPublicInvoiceToken(token: string): { invoiceId: number; organizationId: number } | null {
+  try {
+    const [payload, signature, extra] = token.split(".");
+    if (!payload || !signature || extra) return null;
+    const expected = createHmac("sha256", getPublicInvoiceSecret()).update(payload).digest();
+    const actual = Buffer.from(signature, "base64url");
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (
+      !Number.isInteger(decoded.invoiceId) ||
+      !Number.isInteger(decoded.organizationId) ||
+      !Number.isFinite(decoded.expiresAt) ||
+      decoded.expiresAt < Date.now()
+    ) return null;
+    return { invoiceId: decoded.invoiceId, organizationId: decoded.organizationId };
+  } catch {
+    return null;
+  }
+}
+
+function getPublicInvoiceBaseUrl(): string {
+  const configuredOrigin = process.env.PUBLIC_APP_URL
+    || process.env.REPLIT_DOMAINS?.split(",")[0]?.trim()
+    || process.env.API_BASE_URL;
+  if (!configuredOrigin) {
+    throw new Error("PUBLIC_APP_URL, REPLIT_DOMAINS, or API_BASE_URL is required for public invoice links");
+  }
+  const parsed = new URL(configuredOrigin.includes("://") ? configuredOrigin : `https://${configuredOrigin}`);
+  if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+    throw new Error("Public invoice origin must use HTTPS");
+  }
+  return parsed.origin;
+}
+
+function escapeTelegramHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 // ─── List invoices with filters ─────────────────────────────────────────────
 router.get("/", requireAuth, async (req, res) => {
@@ -225,10 +283,19 @@ router.post("/:invoiceId/pay", requireAuth, async (req, res) => {
 // ─── Public invoice view (no auth) ───────────────────────────────────────────
 router.get("/public/:token", async (req, res) => {
   try {
-    const [invoice] = await db.execute<any>(
-      sql`SELECT * FROM invoices WHERE public_token = ${req.params.token} LIMIT 1`
-    ).then(r => r.rows);
+    const signedAccess = verifyPublicInvoiceToken(req.params.token);
+    const [invoice] = signedAccess
+      ? await db.execute<any>(
+          sql`SELECT * FROM invoices
+              WHERE id = ${signedAccess.invoiceId}
+                AND organization_id = ${signedAccess.organizationId}
+              LIMIT 1`
+        ).then(r => r.rows)
+      : await db.execute<any>(
+          sql`SELECT * FROM invoices WHERE public_token = ${req.params.token} LIMIT 1`
+        ).then(r => r.rows);
     if (!invoice) return res.status(404).json({ error: "Not found" });
+    res.setHeader("Cache-Control", "private, no-store");
     res.json({
       invoiceNumber: invoice.invoice_number,
       status: invoice.status,
@@ -258,18 +325,10 @@ router.post("/:invoiceId/public-link", requireAuth, async (req, res) => {
     const invoiceId = parseInt(req.params.invoiceId);
     const access = await assertInvoiceAccess(invoiceId, (req as any).user);
     if ("error" in access) return res.status(access.status).json({ error: access.error });
-    let invoice = access.invoice;
-
-    // Generate token if not exists
-    if (!invoice.public_token) {
-      const token = randomUUID();
-      await db.execute(sql`UPDATE invoices SET public_token = ${token} WHERE id = ${invoiceId}`);
-      invoice.public_token = token;
-    }
-
-    const siteUrl = process.env.API_BASE_URL || `https://${process.env.REPLIT_DEV_DOMAIN || req.headers.host}`;
-    const link = `${siteUrl}/invoice/${invoice.public_token}`;
-    res.json({ link, token: invoice.public_token });
+    const invoice = access.invoice;
+    const token = createPublicInvoiceToken(invoiceId, invoice.organizationId);
+    const link = `${getPublicInvoiceBaseUrl()}/invoice/${encodeURIComponent(token)}`;
+    res.json({ link, token });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -286,14 +345,8 @@ router.post("/:invoiceId/send", requireAuth, async (req, res) => {
     if ("error" in access) return res.status(access.status).json({ error: access.error });
     const invoice = access.invoice;
 
-    // ── Generate / reuse public token ────────────────────────────────────────
-    let publicToken = invoice.public_token as string | null;
-    if (!publicToken) {
-      publicToken = randomUUID();
-      await db.execute(sql`UPDATE invoices SET public_token = ${publicToken} WHERE id = ${invoiceId}`);
-    }
-    const siteUrl = process.env.API_BASE_URL || `https://${process.env.REPLIT_DEV_DOMAIN || req.headers.host}`;
-    const invoiceUrl = `${siteUrl}/invoice/${publicToken}`;
+    const publicToken = createPublicInvoiceToken(invoiceId, invoice.organizationId);
+    const invoiceUrl = `${getPublicInvoiceBaseUrl()}/invoice/${encodeURIComponent(publicToken)}`;
 
     if (channel === "telegram") {
       // Look up the org's Telegram bot token from channel_configs
@@ -315,9 +368,9 @@ router.post("/:invoiceId/send", requireAuth, async (req, res) => {
       const due = invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString("uk-UA") : null;
 
       const text = [
-        `🧾 <b>Рахунок № ${invoice.invoiceNumber}</b>`,
-        invoice.counterpartyName ? `👤 ${invoice.counterpartyName}` : null,
-        invoice.description ? `📋 ${invoice.description}` : null,
+        `🧾 <b>Рахунок № ${escapeTelegramHtml(invoice.invoiceNumber)}</b>`,
+        invoice.counterpartyName ? `👤 ${escapeTelegramHtml(invoice.counterpartyName)}` : null,
+        invoice.description ? `📋 ${escapeTelegramHtml(invoice.description)}` : null,
         ``,
         `💰 <b>До сплати: ${uah(invoice.amount)}</b>`,
         due ? `📅 Термін оплати: ${due}` : null,

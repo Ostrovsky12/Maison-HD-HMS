@@ -329,7 +329,7 @@ router.post("/projects/:id/files", requireAuth, async (req, res) => {
     const orgId = req.user!.organizationId;
     const { filename, file_type, content_base64 } = req.body;
     // Validate file type allowlist
-    const ALLOWED_FILE_TYPES = ["csv", "xlsx", "xls", "json"];
+    const ALLOWED_FILE_TYPES = ["csv", "xlsx", "xls", "xml", "json"];
     if (file_type && !ALLOWED_FILE_TYPES.includes(file_type)) {
       return res.status(400).json({ error: `Unsupported file type. Allowed: ${ALLOWED_FILE_TYPES.join(", ")}` });
     }

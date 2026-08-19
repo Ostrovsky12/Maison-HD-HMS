@@ -30,19 +30,29 @@ const mFetch = (url: string, opts: RequestInit = {}) =>
     },
   });
 
+const responseError = async (response: Response) => {
+  const text = await response.text();
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.error || parsed.message || text;
+  } catch {
+    return text || `Помилка сервера (${response.status})`;
+  }
+};
+
 const mGet = async (path: string) => {
   const r = await mFetch(`${API}/acc-migration${path}`);
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw new Error(await responseError(r));
   return r.json();
 };
 const mPost = async (path: string, body?: any) => {
   const r = await mFetch(`${API}/acc-migration${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw new Error(await responseError(r));
   return r.json();
 };
 const mPatch = async (path: string, body?: any) => {
   const r = await mFetch(`${API}/acc-migration${path}`, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw new Error(await responseError(r));
   return r.json();
 };
 
@@ -395,6 +405,15 @@ export default function MigrationCenterPage() {
 
   const handleFileUpload = useCallback(async () => {
     if (!uploadFile || !pid) return;
+    const MAX_FILE_BYTES = 10 * 1024 * 1024;
+    if (uploadFile.size > MAX_FILE_BYTES) {
+      toast({
+        title: "Файл завеликий",
+        description: "Завантажте файл розміром до 10 МБ.",
+        variant: "destructive",
+      });
+      return;
+    }
     setUploadLoading(true);
     try {
       const ext = uploadFile.name.split(".").pop()?.toLowerCase() || "csv";
@@ -657,7 +676,7 @@ export default function MigrationCenterPage() {
                       onDragOver={e => e.preventDefault()}
                       onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setUploadFile(f); }}
                     >
-                      <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.xml" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadFile(f); }} />
+                      <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.xml,.json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadFile(f); }} />
                       <Upload size={28} className={`mx-auto mb-3 ${uploadFile ? "text-indigo-500" : "text-gray-300"}`} />
                       {uploadFile ? (
                         <div>

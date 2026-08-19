@@ -1,13 +1,119 @@
 import { Router } from "express";
+import { createHmac, timingSafeEqual } from "crypto";
 import { db, pool } from "@workspace/db";
 import {
   counterpartiesTable, accountingDocumentsTable, documentItemsTable,
-  accountingIntegrationsTable, legalEntitiesTable, usersTable,
+  accountingIntegrationsTable, legalEntitiesTable, usersTable, channelConfigsTable,
 } from "@workspace/db";
 import { eq, and, desc, asc, ilike, or, sql, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
 const router = Router();
+
+const PUBLIC_DOCUMENT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function getPublicDocumentSecret(): string {
+  const secret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET or JWT_SECRET is required for public document links");
+  return secret;
+}
+
+function createPublicDocumentToken(documentId: number, organizationId: number): string {
+  const payload = Buffer.from(JSON.stringify({
+    documentId,
+    organizationId,
+    expiresAt: Date.now() + PUBLIC_DOCUMENT_TTL_MS,
+  })).toString("base64url");
+  const signature = createHmac("sha256", getPublicDocumentSecret()).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyPublicDocumentToken(token: string): { documentId: number; organizationId: number } | null {
+  try {
+    const [payload, signature, extra] = token.split(".");
+    if (!payload || !signature || extra) return null;
+    const expected = createHmac("sha256", getPublicDocumentSecret()).update(payload).digest();
+    const actual = Buffer.from(signature, "base64url");
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (
+      !Number.isInteger(decoded.documentId) ||
+      !Number.isInteger(decoded.organizationId) ||
+      !Number.isFinite(decoded.expiresAt) ||
+      decoded.expiresAt < Date.now()
+    ) return null;
+    return { documentId: decoded.documentId, organizationId: decoded.organizationId };
+  } catch {
+    return null;
+  }
+}
+
+function getPublicDocumentBaseUrl(): string {
+  const configuredOrigin = process.env.PUBLIC_APP_URL
+    || process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+  if (!configuredOrigin) {
+    throw new Error("PUBLIC_APP_URL or REPLIT_DOMAINS is required for public document links");
+  }
+  const parsed = new URL(configuredOrigin.includes("://") ? configuredOrigin : `https://${configuredOrigin}`);
+  if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+    throw new Error("Public document origin must use HTTPS");
+  }
+  return parsed.origin;
+}
+
+function escapeTelegramHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Public, signed document view. The HMAC token contains tenant and expiry data,
+// so no unauthenticated caller can enumerate documents by numeric id.
+router.get("/public/documents/:token", async (req, res) => {
+  try {
+    const access = verifyPublicDocumentToken(req.params.token);
+    if (!access) return res.status(404).send("Документ не знайдено або посилання прострочене");
+
+    const { rows: docs } = await pool.query(
+      `SELECT *
+       FROM accounting_documents
+       WHERE id = $1 AND organization_id = $2 AND doc_type IN ('act', 'invoice')
+       LIMIT 1`,
+      [access.documentId, access.organizationId],
+    );
+    const doc = docs[0];
+    if (!doc) return res.status(404).send("Документ не знайдено");
+
+    const [{ rows: items }, { rows: entities }, { rows: counterparties }] = await Promise.all([
+      pool.query(`SELECT * FROM document_items WHERE document_id = $1 ORDER BY sort_order, id`, [doc.id]),
+      doc.legal_entity_id
+        ? pool.query(`SELECT * FROM legal_entities WHERE id = $1 AND organization_id = $2 LIMIT 1`, [doc.legal_entity_id, access.organizationId])
+        : Promise.resolve({ rows: [] }),
+      doc.counterparty_id
+        ? pool.query(`SELECT * FROM counterparties WHERE id = $1 AND organization_id = $2 LIMIT 1`, [doc.counterparty_id, access.organizationId])
+        : Promise.resolve({ rows: [] }),
+    ]);
+
+    const generatedHtml = doc.doc_type === "act"
+      ? generateActHtml(doc, items, entities[0], counterparties[0])
+      : generateInvoiceHtml(doc, items, entities[0], counterparties[0]);
+    const html = generatedHtml
+      .replace("</style>", `
+        .public-document-actions{display:flex;gap:10px;justify-content:center;margin:0 0 20px}
+        .public-document-actions button{border:0;border-radius:8px;padding:10px 18px;background:#111827;color:white;font-weight:700;cursor:pointer}
+        @media print{.public-document-actions{display:none}}
+      </style>`)
+      .replace("<body>", `<body><div class="public-document-actions"><button onclick="window.print()">Друкувати / Зберегти PDF</button></div>`);
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(html);
+  } catch (err: any) {
+    res.status(500).send(err.message);
+  }
+});
+
 router.use(requireAuth);
 
 // ─── Document number generation ───────────────────────────────────────────────
@@ -272,36 +378,132 @@ router.get("/invoices", async (req: any, res) => {
 // ─── CREATE ACT FROM INVOICE ──────────────────────────────────────────────────
 router.post("/documents/from-invoice/:invoiceId", async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
+    const orgId = Number(req.user?.organizationId);
     const userId = req.user?.id;
     const invoiceId = parseInt(req.params.invoiceId);
     const db_ = db as any;
 
-    const invRow = await db_.$client.query(
-      `SELECT i.*, le.name as le_name, le.short_name as le_short_name, le.edrpou as le_edrpou,
-              le.ipn as le_ipn, le.vat_number as le_vat_number, le.is_vat_payer as le_is_vat_payer,
-              le.iban as le_iban, le.bank as le_bank, le.mfo as le_mfo,
-              le.director as le_director, le.accountant as le_accountant,
-              le.legal_address as le_address, le.type as le_type
-       FROM invoices i
-       LEFT JOIN legal_entities le ON le.id = i.legal_entity_id
-       WHERE i.id = $1
-         AND (le.organization_id = $2 OR i.legal_entity_id IS NULL)`,
-      [invoiceId, orgId]
-    );
+    if (!orgId) return res.status(403).json({ error: "Виберіть тенанта для формування акта" });
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      return res.status(400).json({ error: "Некоректний рахунок" });
+    }
+
+    const {
+      vatMode = "with_vat", adjustedAmount, subject,
+      counterpartyOverride, legalEntityIdOverride, invoiceSource = "booking_invoice",
+    } = req.body;
+
+    if (!["booking_invoice", "accounting_document"].includes(invoiceSource)) {
+      return res.status(400).json({ error: "Некоректне джерело рахунку" });
+    }
+
+    const invRow = invoiceSource === "accounting_document"
+      ? await db_.$client.query(
+          `SELECT
+             d.id,
+             d.id AS source_doc_id,
+             d.organization_id,
+             d.total_amount AS amount,
+             d.vat_amount AS tax_amount,
+             COALESCE(d.subject, d.description) AS description,
+             d.currency,
+             d.legal_entity_id,
+             d.counterparty_id,
+             d.counterparty_name,
+             d.counterparty_edrpou,
+             cp.legal_address AS buyer_address,
+             cp.vat_number AS buyer_vat_number,
+             d.booking_id
+           FROM accounting_documents d
+           LEFT JOIN counterparties cp
+             ON cp.id = d.counterparty_id AND cp.organization_id = d.organization_id
+           WHERE d.id = $1 AND d.organization_id = $2 AND d.doc_type = 'invoice'
+           LIMIT 1`,
+          [invoiceId, orgId],
+        )
+      : await db_.$client.query(
+          `SELECT i.*
+           FROM invoices i
+           WHERE i.id = $1 AND i.organization_id = $2
+           LIMIT 1`,
+          [invoiceId, orgId],
+        );
 
     if (!invRow.rows.length) return res.status(404).json({ error: "Рахунок не знайдено" });
     const inv = invRow.rows[0];
 
-    const {
-      vatMode = "with_vat", adjustedAmount, subject,
-      counterpartyOverride, legalEntityIdOverride,
-    } = req.body;
+    const sourceTotal = parseFloat(inv.amount || "0");
+    const requestedTotal = adjustedAmount === undefined || adjustedAmount === null || adjustedAmount === ""
+      ? sourceTotal
+      : parseFloat(adjustedAmount);
+    if (!Number.isFinite(sourceTotal) || sourceTotal <= 0) {
+      return res.status(400).json({ error: "Сума акта має бути більшою за нуль" });
+    }
+    if (!Number.isFinite(requestedTotal) || Math.abs(requestedTotal - sourceTotal) > 0.009) {
+      return res.status(400).json({
+        error: "Сума акта повинна відповідати сумі рахунку. Для іншої суми створіть окремий рахунок.",
+      });
+    }
 
-    const total = parseFloat(adjustedAmount || inv.amount || "0");
+    const sourceItems = invoiceSource === "accounting_document"
+      ? (await db_.$client.query(
+          `SELECT description, unit, quantity, unit_price, vat_rate, vat_amount, total_price
+           FROM document_items
+           WHERE document_id = $1
+           ORDER BY sort_order, id`,
+          [invoiceId],
+        )).rows
+      : (() => {
+          if (Array.isArray(inv.invoice_items)) return inv.invoice_items;
+          if (typeof inv.invoice_items === "string") {
+            try {
+              const parsed = JSON.parse(inv.invoice_items);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          }
+          return [];
+        })();
+
+    const normalizedItems = sourceItems.map((item: any, index: number) => {
+      const quantity = parseFloat(item.quantity ?? item.qty ?? "1") || 1;
+      const totalPrice = parseFloat(item.total_price ?? item.totalPrice ?? item.amount ?? "0") || 0;
+      const unitPrice = parseFloat(item.unit_price ?? item.unitPrice ?? item.price ?? String(totalPrice / quantity)) || 0;
+      const rawVatRate = String(item.vat_rate ?? item.vatRate ?? (vatMode === "with_vat" ? "20" : "exempt"));
+      const normalizedVatRate = ["20", "7", "0", "exempt"].includes(rawVatRate) ? rawVatRate : "exempt";
+      const numericVatRate = normalizedVatRate === "exempt" ? 0 : parseFloat(normalizedVatRate);
+      const explicitVat = parseFloat(item.vat_amount ?? item.vatAmount);
+      const itemVatAmount = Number.isFinite(explicitVat)
+        ? explicitVat
+        : numericVatRate > 0
+          ? totalPrice - totalPrice / (1 + numericVatRate / 100)
+          : 0;
+      return {
+        description: item.description || item.name || subject || inv.description || "Послуги з проживання",
+        unit: item.unit || "послуга",
+        quantity,
+        unitPrice,
+        vatRate: normalizedVatRate,
+        vatAmount: itemVatAmount,
+        totalPrice,
+        sortOrder: index,
+      };
+    }).filter((item: any) => item.totalPrice > 0);
+
+    const total = sourceTotal;
     let subtotal: number, vatAmount: number, totalAmount: number;
 
-    if (vatMode === "no_vat") {
+    if (normalizedItems.length > 0) {
+      totalAmount = normalizedItems.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
+      vatAmount = normalizedItems.reduce((sum: number, item: any) => sum + item.vatAmount, 0);
+      subtotal = totalAmount - vatAmount;
+      if (Math.abs(totalAmount - sourceTotal) > 0.02) {
+        return res.status(400).json({
+          error: "Сума позицій рахунку не відповідає загальній сумі. Виправте рахунок перед формуванням акта.",
+        });
+      }
+    } else if (vatMode === "no_vat") {
       subtotal = total; vatAmount = 0; totalAmount = total;
     } else {
       subtotal = total / 1.2; vatAmount = total - subtotal; totalAmount = total;
@@ -373,22 +575,34 @@ router.post("/documents/from-invoice/:invoiceId", async (req: any, res) => {
       vatAmount: vatAmount.toFixed(2),
       totalAmount: totalAmount.toFixed(2),
       bookingId: inv.booking_id || null,
+      parentDocId: invoiceSource === "accounting_document" ? inv.source_doc_id : null,
       createdById: userId,
     }).returning();
 
-    // Create single line item
-    const vatRateStr = vatMode === "no_vat" ? "exempt" : "20";
-    await db.insert(documentItemsTable).values({
-      documentId: doc.id,
-      sortOrder: 1,
-      description: subject || inv.description || "Послуги з проживання",
-      unit: "послуга",
-      quantity: "1",
-      unitPrice: subtotal.toFixed(2),
-      vatRate: vatRateStr as any,
-      vatAmount: vatAmount.toFixed(2),
-      totalPrice: totalAmount.toFixed(2),
-    });
+    const itemsToCreate = normalizedItems.length > 0
+      ? normalizedItems.map((item: any) => ({
+          documentId: doc.id,
+          sortOrder: item.sortOrder,
+          description: item.description,
+          unit: item.unit,
+          quantity: item.quantity.toFixed(3),
+          unitPrice: item.unitPrice.toFixed(2),
+          vatRate: item.vatRate as any,
+          vatAmount: item.vatAmount.toFixed(2),
+          totalPrice: item.totalPrice.toFixed(2),
+        }))
+      : [{
+          documentId: doc.id,
+          sortOrder: 0,
+          description: subject || inv.description || "Послуги з проживання",
+          unit: "послуга",
+          quantity: "1",
+          unitPrice: subtotal.toFixed(2),
+          vatRate: (vatMode === "no_vat" ? "exempt" : "20") as any,
+          vatAmount: vatAmount.toFixed(2),
+          totalPrice: totalAmount.toFixed(2),
+        }];
+    await db.insert(documentItemsTable).values(itemsToCreate);
 
     // Fetch full doc with items and legal entity
     const items = await db.select().from(documentItemsTable).where(eq(documentItemsTable.documentId, doc.id));
@@ -400,6 +614,104 @@ router.post("/documents/from-invoice/:invoiceId", async (req: any, res) => {
 
     res.json({ document: doc, items, legalEntity, invoiceRef: inv });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── SEND ACCOUNTING DOCUMENT ─────────────────────────────────────────────────
+router.post("/documents/:id/send", async (req: any, res) => {
+  try {
+    const orgId = Number(req.user?.organizationId);
+    const id = parseInt(req.params.id);
+    const channel = typeof req.body?.channel === "string" ? req.body.channel : "link";
+    const recipient = typeof req.body?.recipient === "string" ? req.body.recipient.trim() : "";
+
+    if (!orgId) return res.status(403).json({ error: "Виберіть тенанта для надсилання документа" });
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Некоректний документ" });
+    if (!["telegram", "sms", "link"].includes(channel)) {
+      return res.status(400).json({ error: "Некоректний канал надсилання" });
+    }
+    if (channel !== "link" && !recipient) {
+      return res.status(400).json({ error: "Вкажіть отримувача" });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT *
+       FROM accounting_documents
+       WHERE id = $1 AND organization_id = $2 AND doc_type IN ('act', 'invoice')
+       LIMIT 1`,
+      [id, orgId],
+    );
+    const document = rows[0];
+    if (!document) return res.status(404).json({ error: "Документ не знайдено" });
+
+    const publicToken = createPublicDocumentToken(id, orgId);
+    const documentUrl = `${getPublicDocumentBaseUrl()}/api/accounting/public/documents/${encodeURIComponent(publicToken)}`;
+    const documentLabel = document.doc_type === "act" ? "Акт" : "Рахунок";
+    const documentName = document.doc_type === "act" ? "акт надання послуг" : "рахунок";
+
+    if (channel === "telegram") {
+      const [cfg] = await db.select().from(channelConfigsTable)
+        .where(and(
+          eq(channelConfigsTable.organizationId, orgId),
+          eq(channelConfigsTable.channel, "telegram" as any),
+        ));
+      const botToken = cfg?.config?.bot_token as string | undefined;
+      if (!botToken) {
+        return res.status(400).json({
+          error: "telegram_not_configured",
+          message: "Telegram бот не налаштований. Перейдіть у Налаштування → Інбокс та підключіть бота.",
+        });
+      }
+
+      const total = Number(document.total_amount).toLocaleString("uk-UA", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      const text = [
+        `📄 <b>${documentLabel} № ${escapeTelegramHtml(document.doc_number)}</b>`,
+        document.counterparty_name ? `👤 ${escapeTelegramHtml(document.counterparty_name)}` : null,
+        document.subject ? `📋 ${escapeTelegramHtml(document.subject)}` : null,
+        "",
+        `💰 <b>Сума: ${total} ₴</b>`,
+        "",
+        `👉 <a href="${documentUrl}">Переглянути ${documentName}</a>`,
+      ].filter(line => line !== null).join("\n");
+
+      const tgResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: recipient,
+          text,
+          parse_mode: "HTML",
+          disable_web_page_preview: false,
+        }),
+      });
+      const tgData = await tgResponse.json() as any;
+      if (!tgResponse.ok) {
+        const message = tgData?.description || "Telegram API error";
+        return res.status(400).json({ error: "telegram_error", message });
+      }
+    }
+
+    await pool.query(
+      `UPDATE accounting_documents
+       SET status = CASE WHEN status IN ('draft', 'issued') THEN 'sent'::acc_doc_status ELSE status END,
+           updated_at = NOW()
+       WHERE id = $1 AND organization_id = $2`,
+      [id, orgId],
+    );
+
+    res.json({
+      success: true,
+      channel,
+      recipient,
+      documentUrl,
+      documentNumber: document.doc_number,
+      documentType: document.doc_type,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── COUNTERPARTIES ───────────────────────────────────────────────────────────
@@ -1057,18 +1369,22 @@ function generateInvoiceHtml(doc: any, items: any[], entity: any, cp: any): stri
     total_amount: parseFloat(doc?.total_amount || 0),
   }] : []) : items;
   const itemsHtml = effectiveItems.map((it, i) => {
-    const vatCell = (it.vat_amount !== undefined && noItems)
-      ? `${parseFloat(it.vat_amount).toFixed(2)} ₴`
-      : `${parseFloat(it.vat_rate || 0)}%`;
+    const unitPrice = it.unit_price ?? it.unitPrice ?? it.price ?? 0;
+    const lineTotal = it.total_amount ?? it.total_price ?? it.totalPrice ?? it.amount ?? 0;
+    const itemVatAmount = it.vat_amount ?? it.vatAmount;
+    const itemVatRate = it.vat_rate ?? it.vatRate ?? 0;
+    const vatCell = (itemVatAmount !== undefined && noItems)
+      ? `${parseFloat(itemVatAmount).toFixed(2)} ₴`
+      : `${parseFloat(itemVatRate || 0)}%`;
     return `
     <tr>
       <td class="num">${i + 1}</td>
       <td>${escXml(it.name || it.description || "Послуга")}</td>
-      <td class="center">${it.unit || "шт"}</td>
+      <td class="center">${escXml(it.unit || "шт")}</td>
       <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
-      <td class="right">${parseFloat(it.unit_price || 0).toFixed(2)}</td>
+      <td class="right">${parseFloat(unitPrice).toFixed(2)}</td>
       <td class="right">${vatCell}</td>
-      <td class="right"><b>${parseFloat(it.total_amount || 0).toFixed(2)}</b></td>
+      <td class="right"><b>${parseFloat(lineTotal).toFixed(2)}</b></td>
     </tr>`;
   }).join("");
 
@@ -1145,15 +1461,19 @@ function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
     total_amount: parseFloat(doc?.total_amount || 0),
   }] : []) : items;
 
-  const itemsHtml = effectiveItems.map((it, i) => `
+  const itemsHtml = effectiveItems.map((it, i) => {
+    const unitPrice = it.unit_price ?? it.unitPrice ?? it.price ?? 0;
+    const lineTotal = it.total_amount ?? it.total_price ?? it.totalPrice ?? it.amount ?? 0;
+    return `
     <tr>
       <td class="num">${i + 1}</td>
       <td>${escXml(it.name || it.description || "Послуга")}</td>
-      <td class="center">${it.unit || "послуга"}</td>
+      <td class="center">${escXml(it.unit || "послуга")}</td>
       <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
-      <td class="right">${parseFloat(it.unit_price || 0).toFixed(2)}</td>
-      <td class="right"><b>${parseFloat(it.total_amount || 0).toFixed(2)}</b></td>
-    </tr>`).join("");
+      <td class="right">${parseFloat(unitPrice).toFixed(2)}</td>
+      <td class="right"><b>${parseFloat(lineTotal).toFixed(2)}</b></td>
+    </tr>`;
+  }).join("");
 
   return `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
 <style>
