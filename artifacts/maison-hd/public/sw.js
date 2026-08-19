@@ -1,4 +1,4 @@
-const CACHE_NAME = "maison-hd-v4";
+const CACHE_NAME = "maison-hd-v5";
 const STATIC_ASSETS = ["/", "/manifest.json", "/waiter"];
 
 self.addEventListener("install", (event) => {
