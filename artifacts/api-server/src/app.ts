@@ -7,12 +7,22 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+const configuredOrigins = [
+  process.env.PUBLIC_APP_ORIGIN,
+  process.env.PUBLIC_APP_URL,
+  process.env.FRONTEND_URL,
+  ...(process.env.CORS_ALLOWED_ORIGINS || "").split(","),
+  process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN
+    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+    : undefined,
+]
+  .filter((origin): origin is string => Boolean(origin))
+  .map((origin) => origin.trim().replace(/\/$/, ""));
+
 // Security headers — applied before all other middleware
 app.use(helmet({
   // Allow framing for the same origin (needed for preview iframe)
   frameguard: { action: "sameorigin" },
-  // Content-Security-Policy — permissive for now to not break existing UI; tighten in future
-  contentSecurityPolicy: false,
 }));
 
 app.use(
@@ -34,7 +44,19 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(cors({
+  credentials: true,
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    const isLocalDevelopment = process.env.NODE_ENV !== "production"
+      && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalizedOrigin);
+    if (configuredOrigins.includes(normalizedOrigin) || isLocalDevelopment) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
+}));
 // Migration source files are sent as base64 JSON. Keep the larger body limit
 // scoped to this authenticated upload route rather than expanding every API
 // endpoint's exposure to large request bodies.

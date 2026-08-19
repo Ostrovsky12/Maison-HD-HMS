@@ -181,6 +181,21 @@ async function ensureSchema() {
       notes TEXT,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_id INTEGER;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS legal_entity_id INTEGER;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS net_amount NUMERIC(10, 2);
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(10, 2) DEFAULT 0;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UAH';
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_type VARCHAR(50) DEFAULT 'payment';
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS refund_of_id INTEGER;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS external_id TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS liqpay_order_id TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS liqpay_status TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_number TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS description TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS staff_id INTEGER;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
     CREATE TABLE IF NOT EXISTS calendar_holidays (
       id SERIAL PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,

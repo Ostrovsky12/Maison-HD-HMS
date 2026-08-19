@@ -5,7 +5,7 @@ import { uk } from "date-fns/locale";
 import {
   TrendingUp, CreditCard, ArrowRight, ArrowLeft, Users,
   CalendarCheck, BedDouble, Loader2, Sparkles, ChevronRight,
-  BarChart2, Clock, CheckCircle, AlertCircle, Home,
+  BarChart2, Clock, CheckCircle, AlertCircle, Home, RefreshCw,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
@@ -57,22 +57,27 @@ const STATUS_LABELS: Record<string, string> = {
   checked_out: "Виселено",
 };
 
-const API = import.meta.env.VITE_API_URL || "";
+const API = import.meta.env.VITE_API_URL || "/api";
 const tok = () => localStorage.getItem("hms_token") || "";
-const apiFetch = (url: string) => fetch(url, { headers: { Authorization: `Bearer ${tok()}` } });
+const apiFetch = async (url: string) => {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${tok()}` } });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+  return r.json();
+};
 
 export default function DashboardPage() {
-  const { data: analytics, isLoading: analyticsLoading } = useGetDashboardAnalytics({});
+  const { data: analytics, isLoading: analyticsLoading, error: analyticsError, refetch: refetchAnalytics } = useGetDashboardAnalytics({});
   const { data: user } = useGetMe();
   const today = format(new Date(), "yyyy-MM-dd");
   const { data: todayBookings } = useListBookings({ dateFrom: today, dateTo: today });
   const [, navigate] = useLocation();
   const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 
-  const { data: paymentSummary } = useQuery<{ count: number; totalDebt: number; payOnArrivalCount: number }>({
+  const { data: paymentSummary, error: paymentError, refetch: refetchPayment } = useQuery<{ count: number; totalDebt: number; payOnArrivalCount: number }>({
     queryKey: ["payment-summary"],
-    queryFn: () => apiFetch(`${API}/bookings/payment-summary`).then((r: Response) => r.ok ? r.json() : { count: 0, totalDebt: 0, payOnArrivalCount: 0 }),
+    queryFn: () => apiFetch(`${API}/bookings/payment-summary`),
     refetchInterval: 60000,
+    retry: 1,
   });
 
   if (analyticsLoading) {
@@ -88,16 +93,43 @@ export default function DashboardPage() {
     );
   }
 
+  if (analyticsError) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-full min-h-[50vh]">
+          <div className="text-center space-y-3">
+            <AlertCircle className="w-10 h-10 text-red-400 mx-auto" />
+            <p className="text-sm font-semibold text-gray-700">Не вдалося завантажити аналітику</p>
+            <p className="text-xs text-gray-400">{(analyticsError as Error)?.message || "Невідома помилка"}</p>
+            <button
+              onClick={() => refetchAnalytics()}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" /> Повторити
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
   const fmt = (n: number = 0) =>
     new Intl.NumberFormat("uk-UA", { style: "currency", currency: "UAH", maximumFractionDigits: 0 }).format(n);
 
+  const extendedAnalytics = analytics as (typeof analytics & {
+    totalGuests?: number;
+    revenueByMonth?: Array<{ month: string; revenue: number }>;
+    bookingsByDay?: Array<{ date: string; count: number }>;
+    activeBookings?: number;
+    avgStayLength?: number;
+  }) | undefined;
   const occupancy = Math.round(analytics?.occupancyRate || 0);
   const checkins = analytics?.checkedInToday || 0;
   const checkouts = analytics?.checkingOutToday || 0;
-  const totalGuests = analytics?.totalGuests || 0;
+  const totalGuests = extendedAnalytics?.totalGuests || 0;
   const revenue = analytics?.totalRevenue || 0;
-  const revenueData = analytics?.revenueByMonth || [];
-  const bookingsByDay = analytics?.bookingsByDay || [];
+  const revenueData = extendedAnalytics?.revenueByMonth || [];
+  const bookingsByDay = extendedAnalytics?.bookingsByDay || [];
   const bookingsArr: any[] = Array.isArray(todayBookings)
     ? todayBookings
     : (todayBookings as any)?.bookings || [];
@@ -169,7 +201,21 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Очікуємо оплат ── */}
-        {paymentSummary && paymentSummary.count > 0 && (
+        {paymentError ? (
+          <div className="flex items-center gap-4 bg-red-50 border border-red-200 rounded-2xl p-4">
+            <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-700">Не вдалося завантажити зведення оплат</p>
+              <p className="text-xs text-red-400">{(paymentError as Error)?.message || "Невідома помилка"}</p>
+            </div>
+            <button
+              onClick={() => refetchPayment()}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-red-200 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-50 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Повторити
+            </button>
+          </div>
+        ) : paymentSummary && paymentSummary.count > 0 && (
           <div
             className="flex items-center gap-4 bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-2xl p-4 cursor-pointer hover:shadow-md transition-shadow"
             onClick={() => navigate(`~${BASE}/bookings`)}
@@ -203,8 +249,8 @@ export default function DashboardPage() {
           {[
             { label: "Всього гостей", value: totalGuests, icon: Users, color: "text-violet-600", bg: "bg-violet-100" },
             { label: "Бронювань сьогодні", value: bookingsArr.length, icon: CalendarCheck, color: "text-rose-600", bg: "bg-rose-100" },
-            { label: "Активних резервацій", value: analytics?.activeBookings || 0, icon: CheckCircle, color: "text-teal-600", bg: "bg-teal-100" },
-            { label: "Середнє перебування", value: `${(analytics?.avgStayLength || 0).toFixed(1)} н`, icon: Clock, color: "text-orange-600", bg: "bg-orange-100" },
+            { label: "Активних резервацій", value: extendedAnalytics?.activeBookings || 0, icon: CheckCircle, color: "text-teal-600", bg: "bg-teal-100" },
+            { label: "Середнє перебування", value: `${(extendedAnalytics?.avgStayLength || 0).toFixed(1)} н`, icon: Clock, color: "text-orange-600", bg: "bg-orange-100" },
           ].map(s => (
             <div key={s.label} className="bg-white rounded-2xl border border-gray-200/80 p-4 flex items-center gap-3 shadow-sm">
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${s.bg} shrink-0`}>

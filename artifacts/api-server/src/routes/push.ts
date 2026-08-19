@@ -6,21 +6,30 @@ import { sql } from "drizzle-orm";
 
 const router = Router();
 
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || "mailto:admin@maisonhd.com",
-  process.env.VAPID_PUBLIC_KEY || "",
-  process.env.VAPID_PRIVATE_KEY || ""
-);
+const vapidConfigured = Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+if (vapidConfigured) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || "mailto:admin@maisonhd.com",
+    process.env.VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!,
+  );
+}
 
 // ─── Get VAPID public key ──────────────────────────────────────────────────────
 router.get("/vapid-key", (req, res) => {
-  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || "" });
+  if (!vapidConfigured) {
+    return res.json({ publicKey: null, configured: false });
+  }
+  return res.json({ publicKey: process.env.VAPID_PUBLIC_KEY, configured: true });
 });
 
 // ─── Subscribe ─────────────────────────────────────────────────────────────────
 router.post("/subscribe", requireAuth, async (req: any, res) => {
   try {
-    const userId = req.user.id;
+    if (!vapidConfigured) {
+      return res.status(503).json({ error: "push_notifications_not_configured" });
+    }
+    const userId = req.user.userId;
     const orgId = req.user.organizationId;
     const { endpoint, keys } = req.body;
     if (!endpoint || !keys?.p256dh || !keys?.auth) {
@@ -31,23 +40,23 @@ router.post("/subscribe", requireAuth, async (req: any, res) => {
       VALUES (${userId}, ${orgId}, ${endpoint}, ${keys.p256dh}, ${keys.auth})
       ON CONFLICT (user_id, endpoint) DO UPDATE SET p256dh = ${keys.p256dh}, auth = ${keys.auth}
     `);
-    res.json({ ok: true });
+    return res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
 // ─── Unsubscribe ───────────────────────────────────────────────────────────────
 router.post("/unsubscribe", requireAuth, async (req: any, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const { endpoint } = req.body;
     await db.execute(sql`
       DELETE FROM push_subscriptions WHERE user_id = ${userId} AND endpoint = ${endpoint}
     `);
-    res.json({ ok: true });
+    return res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 

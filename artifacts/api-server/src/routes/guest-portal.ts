@@ -55,6 +55,55 @@ async function notifyOrgStaff(
   } catch { /* fire-and-forget */ }
 }
 
+// ── Helper: resolve the organization that owns a booking (via unit→property) ─
+async function getBookingOrgId(bookingId: number): Promise<number | null> {
+  const [row] = await db
+    .select({ orgId: propertiesTable.organizationId })
+    .from(bookingsTable)
+    .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
+    .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+    .where(eq(bookingsTable.id, bookingId))
+    .limit(1);
+  return row?.orgId ?? null;
+}
+
+// ── Helper: assert caller has an organizationId; return 403 if not ────────────
+function requireOrgId(orgId: number | null | undefined, res: any): orgId is number {
+  if (!orgId) {
+    res.status(403).json({ error: "Forbidden", message: "organizationId is required" });
+    return false;
+  }
+  return true;
+}
+
+// ── Helper: parse and validate a numeric id param, return 400 on failure ─────
+function parseId(val: string, res: any): number | null {
+  const n = parseInt(val, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return null;
+  }
+  return n;
+}
+
+// ── Helper: assert booking belongs to caller's org, return 403/404 if not ────
+async function assertBookingBelongsToOrg(
+  bookingId: number,
+  orgId: number,
+  res: any,
+): Promise<boolean> {
+  const ownerOrgId = await getBookingOrgId(bookingId);
+  if (ownerOrgId === null) {
+    res.status(404).json({ error: "Бронювання не знайдено" });
+    return false;
+  }
+  if (ownerOrgId !== orgId) {
+    res.status(403).json({ error: "Forbidden" });
+    return false;
+  }
+  return true;
+}
+
 const router = Router();
 
 function generateAccessCode(): string {
@@ -62,9 +111,18 @@ function generateAccessCode(): string {
 }
 
 // ── Staff: Generate/get guest access link ─────────────────────────────────
-router.post("/generate/:bookingId", requireAuth, async (req, res) => {
+router.post("/generate/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId));
     if (!booking) return res.status(404).json({ error: "Бронювання не знайдено" });
 
@@ -83,7 +141,16 @@ router.post("/generate/:bookingId", requireAuth, async (req, res) => {
 // ── Staff: Send communication log entry ──────────────────────────────────
 router.post("/communicate/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const { type, channel, subject, content } = req.body;
     await db.insert(guestCommunicationLogTable).values({
       bookingId, type, channel: channel || "portal", subject, content,
@@ -97,7 +164,16 @@ router.post("/communicate/:bookingId", requireAuth, async (req: any, res) => {
 // ── Staff: Send message to guest ──────────────────────────────────────────
 router.post("/message/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const { message } = req.body;
     const senderName = req.user?.name || req.user?.email || "Адміністратор";
     await db.insert(guestPortalMessagesTable).values({
@@ -112,8 +188,16 @@ router.post("/message/:bookingId", requireAuth, async (req: any, res) => {
 // ── Staff: Send review request ─────────────────────────────────────────────
 router.post("/review-request/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
-    const orgId = req.user?.organizationId;
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const [booking] = await db.select({
       guestEmail: bookingsTable.email,
       firstName: bookingsTable.firstName,
@@ -122,11 +206,17 @@ router.post("/review-request/:bookingId", requireAuth, async (req: any, res) => 
     }).from(bookingsTable).where(eq(bookingsTable.id, bookingId));
     if (!booking) return res.status(404).json({ error: "Не знайдено" });
 
+    // Resolve effective orgId for the insert (super_admin path resolves from booking)
+    const effectiveOrgId = isSuperAdmin
+      ? await getBookingOrgId(bookingId)
+      : orgId!;
+    if (effectiveOrgId === null) return res.status(404).json({ error: "Не знайдено" });
+
     const existing = await db.select().from(guestReviewsTable)
       .where(and(eq(guestReviewsTable.bookingId, bookingId)));
     if (existing.length === 0) {
       await db.insert(guestReviewsTable).values({
-        organizationId: orgId, bookingId,
+        organizationId: effectiveOrgId, bookingId,
         guestEmail: booking.guestEmail,
         guestName: [booking.firstName, booking.lastName].filter(Boolean).join(" "),
         accessCode: booking.guestAccessCode,
@@ -150,7 +240,16 @@ router.post("/review-request/:bookingId", requireAuth, async (req: any, res) => 
 // ── Staff: Get messages for a booking ─────────────────────────────────────
 router.get("/messages/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const msgs = await db.select().from(guestPortalMessagesTable)
       .where(eq(guestPortalMessagesTable.bookingId, bookingId))
       .orderBy(asc(guestPortalMessagesTable.createdAt));
@@ -163,7 +262,16 @@ router.get("/messages/:bookingId", requireAuth, async (req: any, res) => {
 // ── Staff: Get checkin form data for a booking ─────────────────────────────
 router.get("/checkin-data/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const [booking] = await db.select({
       checkinFormSubmitted: bookingsTable.checkinFormSubmitted,
       checkinFormData: bookingsTable.checkinFormData,
@@ -179,10 +287,15 @@ router.get("/checkin-data/:bookingId", requireAuth, async (req: any, res) => {
 // ── Staff: Mark message as read ─────────────────────────────────────────────
 router.patch("/messages/:id/read", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const msgId = parseInt(req.params.id);
-    // Scope read-mark to org: only mark messages whose booking belongs to the caller's org
-    if (orgId) {
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    const msgId = parseId(req.params.id, res);
+    if (msgId === null) return;
+
+    if (!isSuperAdmin) {
+      // Non-super-admin must have an organizationId and can only mark messages
+      // for bookings that belong to their organization.
+      if (!requireOrgId(orgId, res)) return;
       await db.execute(sql`
         UPDATE guest_portal_messages SET is_read = true
         WHERE id = ${msgId}
@@ -206,36 +319,69 @@ router.patch("/messages/:id/read", requireAuth, async (req: any, res) => {
 // ── Staff: Portal threads for Inbox (all bookings with messages) ───────────
 router.get("/portal-threads", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const rows = await db.execute(sql`
-      SELECT
-        b.id                                                        AS booking_id,
-        b.booking_ref,
-        b.guest_access_code,
-        b.check_in,
-        b.check_out,
-        b.status                                                    AS booking_status,
-        COALESCE(b.first_name || ' ' || b.last_name, 'Гість')      AS guest_name,
-        b.phone,
-        u.name                                                      AS unit_name,
-        COUNT(m.id)                                                 AS total_messages,
-        COUNT(CASE WHEN m.direction='guest_to_hotel' AND m.is_read=false THEN 1 END) AS unread_count,
-        MAX(m.created_at)                                           AS last_message_at,
-        (SELECT m2.message FROM guest_portal_messages m2
-          WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
-                                                                    AS last_message,
-        (SELECT m2.direction FROM guest_portal_messages m2
-          WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
-                                                                    AS last_direction
-      FROM bookings b
-      JOIN units u ON u.id = b.unit_id
-      JOIN properties p ON p.id = u.property_id
-      JOIN guest_portal_messages m ON m.booking_id = b.id
-      WHERE p.organization_id = ${orgId}
-      GROUP BY b.id, b.booking_ref, b.guest_access_code, b.check_in, b.check_out,
-               b.status, b.first_name, b.last_name, b.phone, u.name
-      ORDER BY last_message_at DESC
-    `);
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    const rows = isSuperAdmin
+      ? await db.execute(sql`
+          SELECT
+            b.id                                                        AS booking_id,
+            b.booking_ref,
+            b.guest_access_code,
+            b.check_in,
+            b.check_out,
+            b.status                                                    AS booking_status,
+            COALESCE(b.first_name || ' ' || b.last_name, 'Гість')      AS guest_name,
+            b.phone,
+            u.name                                                      AS unit_name,
+            COUNT(m.id)                                                 AS total_messages,
+            COUNT(CASE WHEN m.direction='guest_to_hotel' AND m.is_read=false THEN 1 END) AS unread_count,
+            MAX(m.created_at)                                           AS last_message_at,
+            (SELECT m2.message FROM guest_portal_messages m2
+              WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
+                                                                        AS last_message,
+            (SELECT m2.direction FROM guest_portal_messages m2
+              WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
+                                                                        AS last_direction
+          FROM bookings b
+          JOIN units u ON u.id = b.unit_id
+          JOIN properties p ON p.id = u.property_id
+          JOIN guest_portal_messages m ON m.booking_id = b.id
+          GROUP BY b.id, b.booking_ref, b.guest_access_code, b.check_in, b.check_out,
+                   b.status, b.first_name, b.last_name, b.phone, u.name
+          ORDER BY last_message_at DESC
+        `)
+      : await db.execute(sql`
+          SELECT
+            b.id                                                        AS booking_id,
+            b.booking_ref,
+            b.guest_access_code,
+            b.check_in,
+            b.check_out,
+            b.status                                                    AS booking_status,
+            COALESCE(b.first_name || ' ' || b.last_name, 'Гість')      AS guest_name,
+            b.phone,
+            u.name                                                      AS unit_name,
+            COUNT(m.id)                                                 AS total_messages,
+            COUNT(CASE WHEN m.direction='guest_to_hotel' AND m.is_read=false THEN 1 END) AS unread_count,
+            MAX(m.created_at)                                           AS last_message_at,
+            (SELECT m2.message FROM guest_portal_messages m2
+              WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
+                                                                        AS last_message,
+            (SELECT m2.direction FROM guest_portal_messages m2
+              WHERE m2.booking_id = b.id ORDER BY m2.created_at DESC LIMIT 1)
+                                                                        AS last_direction
+          FROM bookings b
+          JOIN units u ON u.id = b.unit_id
+          JOIN properties p ON p.id = u.property_id
+          JOIN guest_portal_messages m ON m.booking_id = b.id
+          WHERE p.organization_id = ${orgId}
+          GROUP BY b.id, b.booking_ref, b.guest_access_code, b.check_in, b.check_out,
+                   b.status, b.first_name, b.last_name, b.phone, u.name
+          ORDER BY last_message_at DESC
+        `);
     res.json(rows.rows);
   } catch (err: any) {
     console.error(err);
@@ -246,7 +392,16 @@ router.get("/portal-threads", requireAuth, async (req: any, res) => {
 // ── Staff: Mark all portal messages for a booking as read ──────────────────
 router.patch("/portal-threads/:bookingId/read-all", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     await db.update(guestPortalMessagesTable).set({ isRead: true })
       .where(and(
         eq(guestPortalMessagesTable.bookingId, bookingId),
@@ -261,10 +416,16 @@ router.patch("/portal-threads/:bookingId/read-all", requireAuth, async (req: any
 // ── Staff: Loyalty overview ────────────────────────────────────────────────
 router.get("/loyalty-overview", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const accounts = await db.select().from(guestLoyaltyTable)
-      .where(eq(guestLoyaltyTable.organizationId, orgId))
-      .orderBy(desc(guestLoyaltyTable.totalPoints));
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    const accounts = isSuperAdmin
+      ? await db.select().from(guestLoyaltyTable).orderBy(desc(guestLoyaltyTable.totalPoints))
+      : await db.select().from(guestLoyaltyTable)
+          .where(eq(guestLoyaltyTable.organizationId, orgId!))
+          .orderBy(desc(guestLoyaltyTable.totalPoints));
     res.json({ accounts });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -274,10 +435,16 @@ router.get("/loyalty-overview", requireAuth, async (req: any, res) => {
 // ── Staff: All reviews ─────────────────────────────────────────────────────
 router.get("/reviews", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const reviews = await db.select().from(guestReviewsTable)
-      .where(eq(guestReviewsTable.organizationId, orgId))
-      .orderBy(desc(guestReviewsTable.createdAt));
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    const reviews = isSuperAdmin
+      ? await db.select().from(guestReviewsTable).orderBy(desc(guestReviewsTable.createdAt))
+      : await db.select().from(guestReviewsTable)
+          .where(eq(guestReviewsTable.organizationId, orgId!))
+          .orderBy(desc(guestReviewsTable.createdAt));
     res.json({ reviews });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -286,16 +453,19 @@ router.get("/reviews", requireAuth, async (req: any, res) => {
 
 router.patch("/reviews/:id", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const id = parseInt(req.params.id);
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    const id = parseId(req.params.id, res);
+    if (id === null) return;
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
     const { isPublished, staffResponse } = req.body;
-    // Validate review belongs to caller's org before updating
-    if (orgId) {
-      const [rev] = await db.select({ orgId: guestReviewsTable.organizationId })
-        .from(guestReviewsTable).where(eq(guestReviewsTable.id, id)).limit(1);
-      if (!rev) return res.status(404).json({ error: "Review not found" });
-      if (rev.orgId !== orgId) return res.status(403).json({ error: "Forbidden" });
-    }
+    const [rev] = await db.select({ revOrgId: guestReviewsTable.organizationId })
+      .from(guestReviewsTable).where(eq(guestReviewsTable.id, id)).limit(1);
+    if (!rev) return res.status(404).json({ error: "Review not found" });
+    if (!isSuperAdmin && rev.revOrgId !== orgId) return res.status(403).json({ error: "Forbidden" });
+
     const updated = await db.update(guestReviewsTable)
       .set({ isPublished: isPublished ?? undefined, staffResponse: staffResponse ?? undefined })
       .where(eq(guestReviewsTable.id, id)).returning();
@@ -308,10 +478,16 @@ router.patch("/reviews/:id", requireAuth, async (req: any, res) => {
 // ── Staff: Special offers CRUD ─────────────────────────────────────────────
 router.get("/offers", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const offers = await db.select().from(guestSpecialOffersTable)
-      .where(eq(guestSpecialOffersTable.organizationId, orgId))
-      .orderBy(desc(guestSpecialOffersTable.createdAt));
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    const offers = isSuperAdmin
+      ? await db.select().from(guestSpecialOffersTable).orderBy(desc(guestSpecialOffersTable.createdAt))
+      : await db.select().from(guestSpecialOffersTable)
+          .where(eq(guestSpecialOffersTable.organizationId, orgId!))
+          .orderBy(desc(guestSpecialOffersTable.createdAt));
     res.json({ offers });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -320,10 +496,20 @@ router.get("/offers", requireAuth, async (req: any, res) => {
 
 router.post("/offers", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    // Super-admin must supply organizationId in the body; regular staff use their own.
+    const effectiveOrgId: number | null = isSuperAdmin
+      ? (req.body.organizationId ? parseInt(req.body.organizationId) : null)
+      : orgId!;
+    if (!effectiveOrgId) return res.status(400).json({ error: "organizationId is required" });
+
     const { title, description, promoCode, discountPct, discountFixed, validFrom, validUntil, targetAudience, minNights, usageLimit } = req.body;
     const [offer] = await db.insert(guestSpecialOffersTable).values({
-      organizationId: orgId, title, description, promoCode,
+      organizationId: effectiveOrgId, title, description, promoCode,
       discountPct: discountPct || null, discountFixed: discountFixed?.toString() || null,
       validFrom: validFrom || null, validUntil: validUntil || null,
       targetAudience: targetAudience || "all", minNights: minNights || null,
@@ -337,13 +523,24 @@ router.post("/offers", requireAuth, async (req: any, res) => {
 
 router.patch("/offers/:id", requireAuth, async (req: any, res) => {
   try {
-    const id = parseInt(req.params.id);
-    const orgId = req.user?.organizationId;
+    const id = parseId(req.params.id, res);
+    if (id === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    // Verify ownership before updating
+    const [existing] = await db.select({ offOrgId: guestSpecialOffersTable.organizationId })
+      .from(guestSpecialOffersTable).where(eq(guestSpecialOffersTable.id, id)).limit(1);
+    if (!existing) return res.status(404).json({ error: "Offer not found" });
+    if (!isSuperAdmin && existing.offOrgId !== orgId) return res.status(403).json({ error: "Forbidden" });
+
     const { status, title, description, discountPct, validUntil } = req.body;
     const updated = await db.update(guestSpecialOffersTable)
       .set({ status: status ?? undefined, title: title ?? undefined, description: description ?? undefined,
         discountPct: discountPct ?? undefined, validUntil: validUntil ?? undefined })
-      .where(and(eq(guestSpecialOffersTable.id, id), eq(guestSpecialOffersTable.organizationId, orgId)))
+      .where(eq(guestSpecialOffersTable.id, id))
       .returning();
     res.json({ offer: updated[0] });
   } catch (err: any) {
@@ -353,13 +550,20 @@ router.patch("/offers/:id", requireAuth, async (req: any, res) => {
 
 router.delete("/offers/:id", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const id = parseInt(req.params.id);
-    // Scope to org — only delete offers that belong to the caller's organization
-    await db.delete(guestSpecialOffersTable)
-      .where(orgId
-        ? and(eq(guestSpecialOffersTable.id, id), eq(guestSpecialOffersTable.organizationId, orgId))
-        : eq(guestSpecialOffersTable.id, id));
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    const id = parseId(req.params.id, res);
+    if (id === null) return;
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    // Verify ownership before deleting
+    const [existing] = await db.select({ offOrgId: guestSpecialOffersTable.organizationId })
+      .from(guestSpecialOffersTable).where(eq(guestSpecialOffersTable.id, id)).limit(1);
+    if (!existing) return res.status(404).json({ error: "Offer not found" });
+    if (!isSuperAdmin && existing.offOrgId !== orgId) return res.status(403).json({ error: "Forbidden" });
+
+    await db.delete(guestSpecialOffersTable).where(eq(guestSpecialOffersTable.id, id));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -367,9 +571,18 @@ router.delete("/offers/:id", requireAuth, async (req: any, res) => {
 });
 
 // ── Staff: Guest communications history ────────────────────────────────────
-router.get("/communications/:bookingId", requireAuth, async (req, res) => {
+router.get("/communications/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const logs = await db.select().from(guestCommunicationLogTable)
       .where(eq(guestCommunicationLogTable.bookingId, bookingId))
       .orderBy(desc(guestCommunicationLogTable.sentAt));
@@ -385,7 +598,11 @@ router.get("/communications/:bookingId", requireAuth, async (req, res) => {
 // ── Guest Experience Summary (for dashboard) ───────────────────────────────
 router.get("/summary", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
     const [loyaltyCount, reviewCount, avgRating, offersCount, unreadMessages] = await Promise.all([
       db.execute(sql`SELECT COUNT(*) as cnt, SUM(points) as total_pts FROM guest_loyalty WHERE organization_id = ${orgId}`),
       db.execute(sql`SELECT COUNT(*) as cnt, AVG(overall_rating)::numeric(3,1) as avg FROM guest_reviews WHERE organization_id = ${orgId} AND submitted_at IS NOT NULL`),
@@ -410,9 +627,15 @@ router.get("/summary", requireAuth, async (req: any, res) => {
 // ── Admin: List online checkin submissions ────────────────────────────────
 router.get("/checkins", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const propIds = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, orgId));
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    const propIds = isSuperAdmin
+      ? await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      : await db.select({ id: propertiesTable.id }).from(propertiesTable)
+          .where(eq(propertiesTable.organizationId, orgId!));
     const pIds = propIds.map(p => p.id);
     if (pIds.length === 0) return res.json([]);
 
@@ -420,6 +643,8 @@ router.get("/checkins", requireAuth, async (req: any, res) => {
       .from(unitsTable).where(inArray(unitsTable.propertyId, pIds));
     const uIds = unitRows.map(u => u.id);
     const unitMap = Object.fromEntries(unitRows.map(u => [u.id, u.name]));
+
+    if (uIds.length === 0) return res.json([]);
 
     const rows = await db.select({
       id: bookingsTable.id,
@@ -455,9 +680,15 @@ router.get("/checkins", requireAuth, async (req: any, res) => {
 // ── Admin: Get pending service orders count ───────────────────────────────
 router.get("/service-orders/count", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
-    const propIds = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, orgId));
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    const propIds = isSuperAdmin
+      ? await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      : await db.select({ id: propertiesTable.id }).from(propertiesTable)
+          .where(eq(propertiesTable.organizationId, orgId!));
     const pIds = propIds.map(p => p.id);
     if (pIds.length === 0) return res.json({ pending: 0 });
 
@@ -487,10 +718,23 @@ router.get("/service-orders/count", requireAuth, async (req: any, res) => {
 // ── Admin: Add service order for a booking (staff-side) ────────────────────
 router.post("/service-orders", requireAuth, async (req: any, res) => {
   try {
-    const { bookingId, serviceName, serviceType, quantity, requestedTime, guestNotes, price, totalPrice } = req.body;
-    if (!bookingId || !serviceName) return res.status(400).json({ error: "bookingId and serviceName required" });
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    const { bookingId: rawBookingId, serviceName, serviceType, quantity, requestedTime, guestNotes, price, totalPrice } = req.body;
+    if (!rawBookingId || !serviceName) return res.status(400).json({ error: "bookingId and serviceName required" });
+
+    const bookingId = parseInt(rawBookingId);
+    if (!Number.isFinite(bookingId) || bookingId <= 0) return res.status(400).json({ error: "Invalid bookingId" });
+
+    if (!isSuperAdmin) {
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const [order] = await db.insert(guestServiceOrdersTable).values({
-      bookingId: parseInt(bookingId),
+      bookingId,
       serviceName,
       serviceType: serviceType || "service",
       quantity: quantity || 1,
@@ -509,12 +753,18 @@ router.post("/service-orders", requireAuth, async (req: any, res) => {
 // ── Admin: List service orders for organization ─────────────────────────────
 router.get("/service-orders", requireAuth, async (req: any, res) => {
   try {
-    const orgId = req.user?.organizationId;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
     const { status, limit: lim } = req.query;
     const limitN = parseInt(lim as string) || 100;
 
-    const propIds = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, orgId));
+    const propIds = isSuperAdmin
+      ? await db.select({ id: propertiesTable.id }).from(propertiesTable)
+      : await db.select({ id: propertiesTable.id }).from(propertiesTable)
+          .where(eq(propertiesTable.organizationId, orgId!));
     const pIds = propIds.map(p => p.id);
     if (pIds.length === 0) return res.json([]);
 
@@ -561,8 +811,23 @@ router.get("/service-orders", requireAuth, async (req: any, res) => {
 // ── Admin: Update service order status ──────────────────────────────────────
 router.patch("/service-orders/:id", requireAuth, async (req: any, res) => {
   try {
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    const id = parseId(req.params.id, res);
+    if (id === null) return;
+
+    if (!isSuperAdmin && !requireOrgId(orgId, res)) return;
+
+    // Resolve the booking that owns this order and verify org ownership
+    if (!isSuperAdmin) {
+      const [orderRow] = await db.select({ bookingId: guestServiceOrdersTable.bookingId })
+        .from(guestServiceOrdersTable).where(eq(guestServiceOrdersTable.id, id)).limit(1);
+      if (!orderRow) return res.status(404).json({ error: "Order not found" });
+      if (orderRow.bookingId === null) return res.status(404).json({ error: "Order has no booking" });
+      if (!(await assertBookingBelongsToOrg(orderRow.bookingId, orgId!, res))) return;
+    }
+
     const { status, staffNote } = req.body;
-    const id = parseInt(req.params.id);
     const update: any = { updatedAt: new Date() };
     if (status) update.status = status;
     if (staffNote !== undefined) update.staffNote = staffNote;
@@ -926,10 +1191,18 @@ router.post("/:code/payment-notify", async (req, res) => {
 // POST /api/guest/payment-confirm/:bookingId — staff confirms guest payment (auth required)
 router.post("/payment-confirm/:bookingId", requireAuth, async (req: any, res) => {
   try {
-    const bookingId = parseInt(req.params.bookingId);
-    const orgId = req.user?.organizationId;
+    const bookingId = parseId(req.params.bookingId, res);
+    if (bookingId === null) return;
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    if (!isSuperAdmin) {
+      if (!requireOrgId(orgId, res)) return;
+      if (!(await assertBookingBelongsToOrg(bookingId, orgId!, res))) return;
+    }
+
     const [booking] = await db.select().from(bookingsTable)
-      .where(and(eq(bookingsTable.id, bookingId)));
+      .where(eq(bookingsTable.id, bookingId));
     if (!booking) return res.status(404).json({ error: "Бронювання не знайдено" });
 
     const total = parseFloat(booking.totalAmount || "0");
@@ -1025,8 +1298,9 @@ router.post("/:code/review", async (req, res) => {
     } else {
       const [unit] = await db.select({ propertyId: unitsTable.propertyId }).from(unitsTable).innerJoin(bookingsTable, eq(bookingsTable.unitId, unitsTable.id)).where(eq(bookingsTable.id, booking.id));
       const [prop] = unit ? await db.select({ orgId: propertiesTable.organizationId }).from(propertiesTable).where(eq(propertiesTable.id, unit.propertyId)) : [null];
+      if (!prop?.orgId) return res.status(404).json({ error: "Організацію не знайдено" });
       await db.insert(guestReviewsTable).values({
-        organizationId: prop?.orgId || 1, bookingId: booking.id, guestName, guestEmail: booking.email,
+        organizationId: prop.orgId, bookingId: booking.id, guestName, guestEmail: booking.email,
         accessCode: code, overallRating, cleanlinessRating, serviceRating, locationRating, valueRating,
         reviewText, npsScore, wouldReturn, recommendToFriend, submittedAt: new Date(),
       });

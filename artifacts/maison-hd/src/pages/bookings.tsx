@@ -6,7 +6,7 @@ import { BookingPanel } from "@/components/booking/booking-panel";
 import {
   Search, Plus, CalendarCheck, ArrowRight, ArrowLeft, Loader2,
   CreditCard, Clock, BedDouble, Building2, CalendarRange, X,
-  LogIn, LogOut, Home, SlidersHorizontal,
+  LogIn, LogOut, Home, SlidersHorizontal, AlertCircle, RefreshCw,
 } from "lucide-react";
 import {
   useListBookings, useDeleteBooking,
@@ -243,7 +243,7 @@ export default function BookingsPage() {
   if (dateFrom)   apiParams.dateFrom = dateFrom;
   if (dateTo)     apiParams.dateTo = dateTo;
 
-  const { data: bookings, isLoading } = useListBookings(apiParams);
+  const { data: bookings, isLoading, error: bookingsError, refetch: refetchBookings } = useListBookings(apiParams);
   const { data: properties } = useListProperties({});
 
   const [pendingActionId, setPendingActionId] = useState<number | null>(null);
@@ -289,17 +289,21 @@ export default function BookingsPage() {
     });
   };
   const handleCancel = (id: number) => {
-    if (!window.confirm("Скасувати бронювання?")) return;
+    if (pendingActionId) return;
+    setPendingActionId(id);
     cancelM.mutate({ bookingId: id, data: {} }, {
-      onSuccess: () => { invalidate(); toast({ title: "Бронювання скасовано", variant: "destructive" }); },
-      onError:   (e: any) => toast({ title: e?.message || "Помилка", variant: "destructive" }),
+      onSuccess: () => { invalidate(); toast({ title: "✓ Бронювання скасовано" }); },
+      onError:   (e: any) => toast({ title: cleanError(e), variant: "destructive" }),
+      onSettled: () => setPendingActionId(null),
     });
   };
   const handleDelete = (id: number) => {
-    if (!window.confirm("Видалити бронювання?")) return;
+    if (pendingActionId) return;
+    setPendingActionId(id);
     deleteM.mutate({ bookingId: id }, {
-      onSuccess: () => { invalidate(); toast({ title: "Видалено" }); },
-      onError:   () => toast({ title: "Помилка", variant: "destructive" }),
+      onSuccess: () => { invalidate(); toast({ title: "✓ Видалено" }); },
+      onError:   (e: any) => toast({ title: cleanError(e), variant: "destructive" }),
+      onSettled: () => setPendingActionId(null),
     });
   };
 
@@ -510,6 +514,18 @@ export default function BookingsPage() {
           {isLoading ? (
             <div className="flex items-center justify-center h-48">
               <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+            </div>
+          ) : bookingsError ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-3">
+              <AlertCircle className="w-10 h-10 text-red-300" />
+              <p className="text-sm font-semibold text-gray-600">Не вдалося завантажити бронювання</p>
+              <p className="text-xs text-gray-400">{(bookingsError as Error)?.message || "Невідома помилка"}</p>
+              <button
+                onClick={() => refetchBookings()}
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" /> Повторити
+              </button>
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-2">

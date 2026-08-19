@@ -2,10 +2,11 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { Request, Response, NextFunction } from "express";
 
-const JWT_SECRET = process.env.JWT_SECRET || "hms-secret-key-change-in-production";
-if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
-  console.warn("[security] JWT_SECRET is missing or too short — set a strong random secret in production");
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
+if (!JWT_SECRET || Buffer.byteLength(JWT_SECRET, "utf8") < 32) {
+  throw new Error("JWT_SECRET or SESSION_SECRET must be configured with at least 32 bytes");
 }
+const jwtSecret: string = JWT_SECRET;
 
 export interface JwtPayload {
   userId: number;
@@ -16,11 +17,11 @@ export interface JwtPayload {
 }
 
 export function signToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+  return jwt.sign(payload, jwtSecret, { expiresIn: 7 * 24 * 60 * 60 });
 }
 
 export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  return jwt.verify(token, jwtSecret) as unknown as JwtPayload;
 }
 
 export async function hashPassword(password: string): Promise<string> {

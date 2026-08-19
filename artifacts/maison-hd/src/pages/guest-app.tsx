@@ -52,6 +52,7 @@ export default function GuestAppPage() {
   const [screen, setScreen] = useState<Screen>("lookup");
   const [booking, setBooking] = useState<GuestBooking | null>(null);
   const [lookupCode, setLookupCode] = useState("");
+  const [lookupAccessCode, setLookupAccessCode] = useState("");
   const [looking, setLooking] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [cart, setCart] = useState<Record<number, number>>({});
@@ -66,17 +67,19 @@ export default function GuestAppPage() {
     fetch(BASE.replace("/maison-hd", "") + path, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
 
   const lookup = async () => {
-    if (!lookupCode.trim()) return;
+    if (!lookupCode.trim() || !lookupAccessCode.trim()) return;
     setLooking(true);
     try {
-      const r = await apiFetch(`/api/public/bookings/${lookupCode.trim().toUpperCase()}`);
+      const ref = encodeURIComponent(lookupCode.trim().toUpperCase());
+      const accessCode = encodeURIComponent(lookupAccessCode.trim().toUpperCase());
+      const r = await apiFetch(`/api/public/bookings/${ref}?guestAccessCode=${accessCode}`);
       const d = await r.json();
       if (r.ok && d.booking) {
         setBooking({
           id: d.booking.id, firstName: d.booking.firstName, lastName: d.booking.lastName,
           checkIn: d.booking.checkIn, checkOut: d.booking.checkOut,
           unitName: d.booking.unitName || "Номер", propertyName: d.booking.propertyName || "Dogoda Resort",
-          guestAccessCode: lookupCode.trim(), status: d.booking.status,
+          guestAccessCode: lookupAccessCode.trim().toUpperCase(), status: d.booking.status,
         });
         setScreen("home");
       } else { toast({ title: "Бронювання не знайдено", description: "Перевірте номер бронювання", variant: "destructive" }); }
@@ -128,7 +131,15 @@ export default function GuestAppPage() {
                 onKeyDown={e => e.key === "Enter" && lookup()} />
               <p className={`text-xs mt-1.5 ${isDark ? "text-gray-400" : "text-gray-500"}`}>Знайдіть номер у підтвердженні бронювання</p>
             </div>
-            <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={lookup} disabled={looking}>
+            <div>
+              <Label className="text-sm font-medium">Код доступу</Label>
+              <Input className="mt-1.5 text-center text-lg font-mono tracking-wider uppercase"
+                placeholder="A1B2C3D4E5"
+                value={lookupAccessCode}
+                onChange={e => setLookupAccessCode(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === "Enter" && lookup()} />
+            </div>
+            <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={lookup} disabled={looking || !lookupCode.trim() || !lookupAccessCode.trim()}>
               {looking ? "Пошук…" : "Увійти до порталу"}
             </Button>
           </CardContent>

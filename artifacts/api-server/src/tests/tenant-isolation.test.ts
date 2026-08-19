@@ -377,8 +377,23 @@ describe("Booking creation — atomic response handling", () => {
 
   it("returns the persisted accommodation booking instead of reporting a server error", async () => {
     vi.mocked(db.execute)
-      .mockResolvedValueOnce({ rows: [{ base_price: "500.00" }] } as any)
-      .mockResolvedValueOnce({ rows: [{ id: 601, booking_ref: "BK-TEST" }] } as any);
+      .mockResolvedValueOnce({ rows: [{ base_price: "500.00" }] } as any);
+
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "COMMIT" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT pg_advisory_xact_lock")) return { rows: [] };
+        if (query.startsWith("SELECT 1 FROM bookings")) return { rows: [] };
+        if (query.startsWith("SELECT 1 FROM accommodation_blocks")) return { rows: [] };
+        if (query.startsWith("INSERT INTO bookings")) {
+          return { rows: [{ id: 601, booking_ref: "BK-TEST" }] };
+        }
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
 
     const response = await request(app)
       .post("/api/accommodation/bookings")
@@ -392,7 +407,9 @@ describe("Booking creation — atomic response handling", () => {
 
     expect(response.status).toBe(201);
     expect(response.body).toEqual({ booking: { id: 601, booking_ref: "BK-TEST" } });
-    expect(vi.mocked(db.execute)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(db.execute)).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledWith("SELECT pg_advisory_xact_lock(90421, $1)", [10]);
+    expect(client.release).toHaveBeenCalledOnce();
   });
 });
 
@@ -646,6 +663,62 @@ describe("Tenant isolation — /:bookingId routes (null-org non-admin)", () => {
 
     expect(res.status).toBe(403);
     expect(vi.mocked(db.select)).not.toHaveBeenCalled();
+  });
+});
+
+// ── Cashbox isolation tests ───────────────────────────────────────────────────
+
+describe("Tenant isolation — finance cashbox mutations", () => {
+  it("rejects invalid cash movements before touching the database", async () => {
+    const res = await request(app)
+      .post("/api/finance/cashbox/99/cash-movement")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ type: "withdraw-all", amount: -500 });
+
+    expect(res.status).toBe(400);
+    expect(vi.mocked(pool.query)).not.toHaveBeenCalled();
+  });
+
+  it("cannot mutate another tenant's cashbox by guessing its ID", async () => {
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [] } as any);
+
+    const res = await request(app)
+      .post("/api/finance/cashbox/99/cash-movement")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ type: "in", amount: 250 });
+
+    expect(res.status).toBe(404);
+    expect(vi.mocked(pool.query)).toHaveBeenCalledWith(
+      expect.stringContaining("organization_id = $3"),
+      [250, 99, 1],
+    );
+  });
+
+  it("cannot close another tenant's cashbox by guessing its ID", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, params?: any[]) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT opening_balance")) {
+          expect(params).toEqual([99, 1]);
+          expect(query).toContain("organization_id = $2");
+          return { rows: [] };
+        }
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const res = await request(app)
+      .post("/api/finance/cashbox/99/close")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ closingBalance: 100 });
+
+    expect(res.status).toBe(404);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(client.release).toHaveBeenCalledOnce();
+    expect(client.query.mock.calls.some(([query]) => String(query).includes("UPDATE cashbox_sessions"))).toBe(false);
   });
 });
 

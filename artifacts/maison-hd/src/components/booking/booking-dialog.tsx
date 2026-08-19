@@ -1215,6 +1215,10 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
     },
   });
 
+  const selectedRate = ratesData?.find((r: any) => r.id === form.rateId);
+  const selectedUnit = unitsData?.find((u: any) => u.id === form.unitId);
+  const selectedProperty = propertiesData?.find((p: any) => p.id === (selectedUnit?.propertyId || selectedUnit?.property_id));
+
   const { data: pricingPreview } = useQuery<any>({
     queryKey: ["pricing-preview", form.unitId, form.checkIn, form.checkOut],
     // SPA same-day (nights=0) also needs pricing preview for base price
@@ -1241,9 +1245,6 @@ export function BookingDialog({ open, onClose, unitId, unitName, checkIn: initCh
   });
 
   // Compute total — use rate price as fallback when unit has no base_price
-  const selectedRate = ratesData?.find((r: any) => r.id === form.rateId);
-  const selectedUnit = unitsData?.find((u: any) => u.id === form.unitId);
-  const selectedProperty = propertiesData?.find((p: any) => p.id === (selectedUnit?.propertyId || selectedUnit?.property_id));
   const touristTaxRate = Number(selectedProperty?.tourist_tax_rate || 0);
 
   // Auto-fill check-in/check-out times from property settings (not in edit mode)

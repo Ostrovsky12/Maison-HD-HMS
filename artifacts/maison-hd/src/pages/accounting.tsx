@@ -51,6 +51,7 @@ function useAccounting(path: string) {
       const r = await fetch(`${API_BASE}/api/accounting/${path}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
       return r.json();
     },
     staleTime: 30_000,
@@ -65,6 +66,7 @@ function useAccLedger(path: string, options?: { enabled?: boolean }) {
       const r = await fetch(`${API_BASE}/api/acc/${path}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
       return r.json();
     },
     staleTime: 30_000,
@@ -83,17 +85,19 @@ const accFetch = async (path: string, options: RequestInit = {}) => {
       ...options.headers,
     },
   });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "API Error");
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
   return r.json();
 };
 
 // → Старий модуль обліку документів (/api/accounting/*)
-const acctFetch = (path: string, opts?: RequestInit) => {
+const acctFetch = async (path: string, opts?: RequestInit) => {
   const token = localStorage.getItem("hms_token");
-  return fetch(`${API_BASE}/api/accounting/${path}`, {
+  const r = await fetch(`${API_BASE}/api/accounting/${path}`, {
     ...opts,
     headers: { Authorization: `Bearer ${token ?? ""}`, "Content-Type": "application/json", ...(opts?.headers ?? {}) },
-  }).then(r => r.json());
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+  return r.json();
 };
 
 // ─── Formatters ───────────────────────────────────────────────────────────────

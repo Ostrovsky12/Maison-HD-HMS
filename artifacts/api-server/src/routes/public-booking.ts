@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { randomBytes } from "crypto";
 import rateLimit from "express-rate-limit";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import {
   propertiesTable, unitsTable, bookingsTable, organizationsTable,
   fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable,
   ratesTable, channelRateSettingsTable,
 } from "@workspace/db";
-import { eq, and, or, gte, lte, ne, inArray, notInArray, sql, asc } from "drizzle-orm";
+import { eq, and, or, gte, lte, lt, gt, ne, inArray, notInArray, sql, asc } from "drizzle-orm";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
 import { fireBookingEvent } from "../lib/automation-runner.js";
@@ -39,6 +39,30 @@ const menuScrapeLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Занадто багато запитів." },
 });
+
+const PUBLIC_PACKAGES: Record<string, { perStay?: number; perNight?: number }> = {
+  romance: { perStay: 2400 },
+  family: { perNight: 400 },
+  wellness: { perNight: 800 },
+  business: { perStay: 1200 },
+};
+
+const PUBLIC_ADDONS: Record<string, { perStay?: number; perNight?: number; perPersonPerNight?: number }> = {
+  breakfast: { perPersonPerNight: 320 },
+  spa: { perNight: 450 },
+  transfer: { perStay: 900 },
+  pet: { perNight: 200 },
+  parking: { perNight: 150 },
+  early_ci: { perStay: 350 },
+  late_co: { perStay: 350 },
+  baby_bed: { perStay: 0 },
+};
+
+const PUBLIC_PROMOS: Record<string, { percent?: number; fixed?: number }> = {
+  WELCOME10: { percent: 10 },
+  DOGODA20: { percent: 20 },
+  SUMMER500: { fixed: 500 },
+};
 
 // ─── GET /properties — slug is required to prevent exposing all tenants ───────
 router.get("/properties", async (req, res) => {
@@ -83,41 +107,59 @@ router.get("/properties", async (req, res) => {
       checkOutTime: "12:00",
     } : null;
 
-    res.json({ properties: props, organization });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.json({ properties: props, organization });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
-// ─── GET /availability — search available rooms ───────────────────────────────
+// ─── GET /availability — slug required; propertyId must belong to that slug ──
 router.get("/availability", async (req, res) => {
   try {
     const { slug, propertyId, checkIn, checkOut, guests = "1" } = req.query as any;
-    if (!checkIn || !checkOut) return res.status(400).json({ error: "checkIn and checkOut required" });
 
-    // Resolve org/property scope
+    // slug is mandatory for tenant isolation
+    if (!slug) return res.status(400).json({ error: "slug query parameter is required" });
+    if (!checkIn || !checkOut) return res.status(400).json({ error: "checkIn and checkOut required" });
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+    if (!Number.isFinite(checkInDate.getTime()) || !Number.isFinite(checkOutDate.getTime()) || checkInDate >= checkOutDate) {
+      return res.status(400).json({ error: "Invalid date range" });
+    }
+
+    // Resolve org from slug
+    const orgs = await db.select({ id: organizationsTable.id })
+      .from(organizationsTable).where(eq(organizationsTable.slug, slug));
+    if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
+    const orgId = orgs[0].id;
+
+    // Resolve property IDs — always scoped to the org
     let propIds: number[] = [];
     if (propertyId) {
-      propIds = [parseInt(propertyId)];
-    } else if (slug) {
-      const orgs = await db.select({ id: organizationsTable.id })
-        .from(organizationsTable).where(eq(organizationsTable.slug, slug));
-      if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
+      const parsedPropertyId = parseInt(propertyId, 10);
+      if (!Number.isFinite(parsedPropertyId) || parsedPropertyId <= 0) {
+        return res.status(400).json({ error: "Invalid propertyId" });
+      }
+      // Verify the requested propertyId belongs to this org
+      const props = await db.select({ id: propertiesTable.id })
+        .from(propertiesTable)
+        .where(and(eq(propertiesTable.id, parsedPropertyId), eq(propertiesTable.organizationId, orgId)));
+      if (!props.length) return res.status(404).json({ error: "Property not found for this organization" });
+      propIds = props.map(p => p.id);
+    } else {
       const orgProps = await db.select({ id: propertiesTable.id })
-        .from(propertiesTable).where(eq(propertiesTable.organizationId, orgs[0].id));
+        .from(propertiesTable).where(eq(propertiesTable.organizationId, orgId));
       propIds = orgProps.map(p => p.id);
     }
     if (propIds.length === 0) return res.json({ units: [], nights: 0, checkIn, checkOut, guests });
 
-    // Find booked unit IDs during this period
+    // Half-open interval overlap: booking [checkIn, checkOut) overlaps search [checkIn, checkOut)
+    // when: booking.checkIn < search.checkOut AND booking.checkOut > search.checkIn
     const bookedRows = await db.select({ unitId: bookingsTable.unitId }).from(bookingsTable)
       .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
       .where(and(
         inArray(unitsTable.propertyId, propIds),
         ne(bookingsTable.status, "cancelled" as any),
-        or(
-          and(gte(bookingsTable.checkIn, checkIn), lte(bookingsTable.checkIn, checkOut)),
-          and(gte(bookingsTable.checkOut, checkIn), lte(bookingsTable.checkOut, checkOut)),
-          and(lte(bookingsTable.checkIn, checkIn), gte(bookingsTable.checkOut, checkOut)),
-        ),
+        lt(bookingsTable.checkIn, checkOut),
+        gt(bookingsTable.checkOut, checkIn),
       ));
     const bookedIds: number[] = bookedRows.map(r => r.unitId).filter(Boolean) as number[];
 
@@ -161,16 +203,27 @@ router.get("/availability", async (req, res) => {
       totalPrice: parseFloat(String(u.basePrice || 0)) * nights,
     }));
 
-    res.json({ units: result, nights, checkIn, checkOut, guests, totalUnits: result.length });
-  } catch (e: any) { console.error("AVAILABILITY ERROR:", e); res.status(500).json({ error: e.message }); }
+    return res.json({ units: result, nights, checkIn, checkOut, guests, totalUnits: result.length });
+  } catch (e: any) { console.error("AVAILABILITY ERROR:", e); return res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /bookings — create booking (no auth, rate-limited) ─────────────────
+// slug is required; unitId must belong to a property in that org
 router.post("/bookings", bookingCreateLimiter, async (req, res) => {
   try {
-    const { unitId, checkIn, checkOut, firstName, lastName, email, phone, guestsCount, specialRequests, adults, children } = req.body;
+    const {
+      slug, unitId, checkIn, checkOut, firstName, lastName, email, phone,
+      guestsCount, specialRequests, adults, children, packageId, addonIds, promoCode,
+    } = req.body;
+    if (!slug) {
+      return res.status(400).json({ error: "slug is required" });
+    }
     if (!unitId || !checkIn || !checkOut || !firstName || !lastName) {
       return res.status(400).json({ error: "Заповніть всі обов'язкові поля" });
+    }
+    const parsedUnitId = parseInt(String(unitId), 10);
+    if (!Number.isFinite(parsedUnitId) || parsedUnitId <= 0) {
+      return res.status(400).json({ error: "Некоректний unitId" });
     }
     // Validate dates: must be valid ISO dates, checkIn must be < checkOut
     const ciDate = new Date(checkIn);
@@ -187,24 +240,21 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       return res.status(400).json({ error: "Дата заїзду не може бути в минулому" });
     }
 
-    // Check availability
-    const conflicts = await db.select({ id: bookingsTable.id }).from(bookingsTable)
-      .where(and(
-        eq(bookingsTable.unitId, parseInt(unitId)),
-        ne(bookingsTable.status, "cancelled" as any),
-        or(
-          and(gte(bookingsTable.checkIn, checkIn), lte(bookingsTable.checkIn, checkOut)),
-          and(gte(bookingsTable.checkOut, checkIn), lte(bookingsTable.checkOut, checkOut)),
-          and(lte(bookingsTable.checkIn, checkIn), gte(bookingsTable.checkOut, checkOut)),
-        ),
-      ));
-    if (conflicts.length > 0) return res.status(409).json({ error: "Номер вже заброньований на ці дати" });
+    // Verify org exists by slug
+    const [org] = await db.select({ id: organizationsTable.id })
+      .from(organizationsTable).where(eq(organizationsTable.slug, slug));
+    if (!org) return res.status(404).json({ error: "Organization not found" });
 
-    // Get unit info — also validate status is active (not maintenance/inactive)
+    // Get unit info — and verify it belongs to a property in this org
     const [unit] = await db.select({
       id: unitsTable.id, basePrice: unitsTable.basePrice, propertyId: unitsTable.propertyId,
       name: unitsTable.name, status: unitsTable.status,
-    }).from(unitsTable).where(eq(unitsTable.id, parseInt(unitId)));
+    }).from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(and(
+        eq(unitsTable.id, parsedUnitId),
+        eq(propertiesTable.organizationId, org.id),
+      ));
     if (!unit) return res.status(404).json({ error: "Юніт не знайдено" });
     if (unit.status && !["active", "available"].includes(unit.status as string)) {
       return res.status(409).json({ error: "Номер недоступний для бронювання" });
@@ -214,36 +264,135 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       .from(propertiesTable).where(eq(propertiesTable.id, unit.propertyId));
 
     const nights = Math.max(1, Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000));
-    const totalAmount = parseFloat(String(unit.basePrice || 0)) * nights;
+    const totalAdults = parseInt(String(adults || guestsCount || 1), 10);
+    const totalChildren = parseInt(String(children || 0), 10);
+    if (!Number.isFinite(totalAdults) || totalAdults < 1 || totalAdults > 20
+      || !Number.isFinite(totalChildren) || totalChildren < 0 || totalChildren > 20) {
+      return res.status(400).json({ error: "Некоректна кількість гостей" });
+    }
+    const totalGuests = parseInt(String(guestsCount || totalAdults + totalChildren), 10);
+
+    let nightlyRate = parseFloat(String(unit.basePrice || 0));
+    const [channelSetting] = await db.select().from(channelRateSettingsTable)
+      .where(and(
+        eq(channelRateSettingsTable.propertyId, unit.propertyId),
+        eq(channelRateSettingsTable.channel, "online"),
+        eq(channelRateSettingsTable.isActive, true),
+      ));
+    if (channelSetting?.rateId) {
+      const [rate] = await db.select().from(ratesTable)
+        .where(and(eq(ratesTable.id, channelSetting.rateId), eq(ratesTable.isStopSale, false)));
+      const rateIsValid = rate
+        && (!rate.dateFrom || checkIn >= rate.dateFrom)
+        && (!rate.dateTo || checkOut <= rate.dateTo);
+      if (rateIsValid) {
+        nightlyRate = Number((rate.unitPrices as any)?.[String(parsedUnitId)] ?? rate.pricePerNight);
+      }
+    }
+    if (!Number.isFinite(nightlyRate) || nightlyRate < 0) {
+      return res.status(409).json({ error: "Для номера не налаштовано коректний тариф" });
+    }
+
+    const normalizedAddonIds = Array.isArray(addonIds)
+      ? Array.from(new Set(addonIds.map((id: unknown) => String(id))))
+      : [];
+    if (normalizedAddonIds.some((id) => !PUBLIC_ADDONS[id])) {
+      return res.status(400).json({ error: "Невідома додаткова послуга" });
+    }
+    if (packageId && !PUBLIC_PACKAGES[String(packageId)]) {
+      return res.status(400).json({ error: "Невідомий пакет" });
+    }
+
+    const packagePrice = packageId
+      ? (PUBLIC_PACKAGES[String(packageId)].perStay || 0)
+        + (PUBLIC_PACKAGES[String(packageId)].perNight || 0) * nights
+      : 0;
+    const addonsPrice = normalizedAddonIds.reduce((sum, id) => {
+      const addon = PUBLIC_ADDONS[id];
+      return sum
+        + (addon.perStay || 0)
+        + (addon.perNight || 0) * nights
+        + (addon.perPersonPerNight || 0) * nights * totalGuests;
+    }, 0);
+    const subtotal = nightlyRate * nights + packagePrice + addonsPrice;
+    const normalizedPromoCode = promoCode ? String(promoCode).trim().toUpperCase() : "";
+    if (normalizedPromoCode && !PUBLIC_PROMOS[normalizedPromoCode]) {
+      return res.status(400).json({ error: "Промокод не знайдено або застарів" });
+    }
+    const promo = normalizedPromoCode ? PUBLIC_PROMOS[normalizedPromoCode] : null;
+    const discount = promo
+      ? (promo.percent ? subtotal * promo.percent / 100 : promo.fixed || 0)
+      : 0;
+    const totalAmount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
 
     const refNum = Math.floor(100000 + Math.random() * 900000);
     const bookingRef = `BK-${refNum}`;
     const guestAccessCode = randomBytes(5).toString("hex").toUpperCase();
-    const totalGuests = parseInt(String(guestsCount || adults || 1));
 
-    const totalAdults = parseInt(String(adults || guestsCount || 1));
-    const totalChildren = parseInt(String(children || 0));
+    const client = await pool.connect();
+    let booking: any;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(90421, $1)", [parsedUnitId]);
 
-    const [booking] = await db.insert(bookingsTable).values({
-      unitId: parseInt(unitId),
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email?.trim() || null,
-      phone: phone?.trim() || null,
-      guestsCount: totalGuests,
-      adults: totalAdults,
-      childrenUnder6: Math.ceil(totalChildren / 2),
-      childrenOver6: Math.floor(totalChildren / 2),
-      checkIn, checkOut,
-      status: "pending" as any,
-      paymentStatus: "unpaid" as any,
-      totalAmount: String(totalAmount),
-      paidAmount: "0",
-      notes: specialRequests || null,
-      bookingRef,
-      guestAccessCode,
-      source: "direct" as any,
-    } as any).returning();
+      const conflict = await client.query(
+        `SELECT id FROM bookings
+          WHERE unit_id = $1
+            AND status::text <> 'cancelled'
+            AND check_in < $3::date
+            AND check_out > $2::date
+          LIMIT 1`,
+        [parsedUnitId, checkIn, checkOut],
+      );
+      if (conflict.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "Номер вже заброньований на ці дати" });
+      }
+
+      const blockConflict = await client.query(
+        `SELECT id FROM accommodation_blocks
+          WHERE organization_id = $1
+            AND is_active = true
+            AND $2 = ANY(ARRAY(SELECT jsonb_array_elements_text(unit_ids))::int[])
+            AND start_date < $4::date
+            AND end_date > $3::date
+          LIMIT 1`,
+        [org.id, parsedUnitId, checkIn, checkOut],
+      );
+      if (blockConflict.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "Номер заблокований на вибрані дати" });
+      }
+
+      const inserted = await client.query(
+        `INSERT INTO bookings (
+           organization_id, unit_id, first_name, last_name, email, phone,
+           guests_count, adults, children_under_6, children_over_6,
+           check_in, check_out, status, payment_status, total_amount, paid_amount,
+           notes, booking_ref, guest_access_code, source, created_at, updated_at
+         )
+         VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+           $11::date, $12::date, 'pending', 'unpaid', $13, 0,
+           $14, $15, $16, 'direct', NOW(), NOW()
+         )
+         RETURNING *`,
+        [
+          org.id, parsedUnitId, firstName.trim(), lastName.trim(),
+          email?.trim() || null, phone?.trim() || null,
+          totalGuests, totalAdults, Math.ceil(totalChildren / 2), Math.floor(totalChildren / 2),
+          checkIn, checkOut, totalAmount.toFixed(2), specialRequests || null,
+          bookingRef, guestAccessCode,
+        ],
+      );
+      booking = inserted.rows[0];
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
 
     // Fire automation event + notifications (non-blocking)
     if ((booking as any).id) {
@@ -261,10 +410,10 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       if (unitWithProp?.orgId) {
         const orgId = unitWithProp.orgId;
 
-        // Fire automation engine
+        // Fire automation engine (non-blocking)
         fireBookingEvent("booking_created", orgId, (booking as any).id).catch(() => {});
 
-        // Notify admin (email + telegram + SMS)
+        // Notify admin (email + telegram + SMS) (non-blocking)
         notifyBookingCreated(orgId, {
           id: (booking as any).id,
           guestName: `${firstName} ${lastName}`,
@@ -273,7 +422,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
           totalAmount: Math.round(totalAmount),
         }).catch(() => {});
 
-        // Guest confirmation email
+        // Guest confirmation email (non-blocking)
         if (email) {
           sendGuestConfirmationEmail(orgId, email, {
             bookingRef,
@@ -289,7 +438,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
           }).catch(() => {});
         }
 
-        // Guest confirmation SMS
+        // Guest confirmation SMS (non-blocking)
         if (phone) {
           sendGuestConfirmationSms(orgId, phone, {
             bookingRef,
@@ -301,7 +450,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       }
     }
 
-    res.json({
+    return res.json({
       booking: {
         id: booking.id,
         bookingRef: (booking as any).bookingRef || bookingRef,
@@ -313,7 +462,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         status: "pending",
       },
     });
-  } catch (e: any) { console.error("POST BOOKING ERROR:", e.message, e.stack); res.status(500).json({ error: e.message }); }
+  } catch (e: any) { console.error("POST BOOKING ERROR:", e.message, e.stack); return res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /liqpay/:bookingId — generate payment form (public, guestAccessCode required) ──
@@ -347,7 +496,7 @@ router.post("/liqpay/:bookingId", async (req, res) => {
     if (!result) return res.status(404).json({ error: "Бронювання не знайдено" });
 
     // Validate guest access code — prevents anyone with a bookingId from generating payment forms
-    if (result.guestAccessCode && guestAccessCode !== result.guestAccessCode) {
+    if (!result.guestAccessCode || !guestAccessCode || guestAccessCode !== result.guestAccessCode) {
       return res.status(403).json({ error: "Forbidden", message: "Невірний код доступу" });
     }
 
@@ -359,7 +508,17 @@ router.post("/liqpay/:bookingId", async (req, res) => {
     );
     if (amount <= 0) return res.status(400).json({ error: "Сума до оплати = 0" });
 
-    const baseUrl = process.env.API_BASE_URL || `https://${process.env.REPLIT_DEV_DOMAIN || "localhost"}`;
+    const configuredBaseUrl = process.env.API_BASE_URL
+      || process.env.PUBLIC_APP_URL
+      || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");
+    const baseUrl = configuredBaseUrl.replace(/\/$/, "");
+    if (!baseUrl.startsWith("https://")) {
+      return res.status(503).json({
+        error: "liqpay_callback_origin_not_configured",
+        message: "Онлайн-оплата тимчасово недоступна.",
+      });
+    }
+    // order_id format: "booking_<id>" — parsed in callback with exact regex
     const { data, signature } = generateLiqPayForm({
       action: "pay",
       amount,
@@ -369,11 +528,13 @@ router.post("/liqpay/:bookingId", async (req, res) => {
       serverUrl: `${baseUrl}/api/public/liqpay/callback`,
     });
 
-    res.json({ data, signature, amount });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.json({ data, signature, amount });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /liqpay/callback — LiqPay server callback (public) ─────────────────
+// Hardened: exact order_id format, positive finite amount, amount <= outstanding,
+// idempotent (deduplicates by liqpay_order_id in payments table), atomic update.
 router.post("/liqpay/callback", async (req, res) => {
   try {
     const { data, signature } = req.body;
@@ -384,26 +545,107 @@ router.post("/liqpay/callback", async (req, res) => {
     const parsed = parseLiqPayData(data);
     if (!parsed?.order_id) return res.status(400).json({ error: "no_order_id" });
 
-    const bookingId = parseInt(parsed.order_id.toString().replace("booking_", "").replace(/\D/g, ""));
+    // Exact format: "booking_<digits>" — no other patterns accepted
+    const orderIdMatch = /^booking_(\d+)$/.exec(String(parsed.order_id));
+    if (!orderIdMatch) return res.status(400).json({ error: "invalid_order_id" });
+    const bookingId = parseInt(orderIdMatch[1], 10);
     if (!bookingId) return res.status(400).json({ error: "invalid_order_id" });
 
-    if (parsed.status === "success" || parsed.status === "sandbox") {
-      const paid = parseFloat(parsed.amount?.toString() || "0");
-      const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
-      if (booking) {
-        const total = parseFloat(booking.totalAmount?.toString() || "0");
-        const prevPaid = parseFloat(booking.paidAmount?.toString() || "0");
-        const newPaid = prevPaid + paid;
-        await db.update(bookingsTable).set({
-          paidAmount: newPaid.toFixed(2),
-          paymentStatus: newPaid >= total - 0.01 ? "paid" as any : "partial" as any,
-          updatedAt: new Date(),
-        }).where(eq(bookingsTable.id, bookingId));
-      }
+    // Only process successful payments
+    if (parsed.status !== "success" && parsed.status !== "sandbox") {
+      return res.json({ ok: true });
     }
 
-    res.json({ ok: true });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    // Validate amount: must be a positive, finite number
+    const paid = parseFloat(parsed.amount?.toString() || "0");
+    if (!isFinite(paid) || paid <= 0) {
+      return res.status(400).json({ error: "invalid_amount" });
+    }
+
+    const liqpayOrderId = String(parsed.order_id);
+    if (String(parsed.currency || "UAH") !== "UAH") {
+      return res.status(400).json({ error: "invalid_currency" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [liqpayOrderId]);
+
+      const existing = await client.query(
+        "SELECT id FROM payments WHERE liqpay_order_id = $1 LIMIT 1",
+        [liqpayOrderId],
+      );
+      if (existing.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return res.json({ ok: true });
+      }
+
+      const bookingResult = await client.query(
+        `SELECT id, total_amount, paid_amount
+           FROM bookings
+          WHERE id = $1
+          FOR UPDATE`,
+        [bookingId],
+      );
+      const booking = bookingResult.rows[0];
+      if (!booking) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "booking_not_found" });
+      }
+
+      const total = parseFloat(booking.total_amount || "0");
+      const prevPaid = parseFloat(booking.paid_amount || "0");
+      const outstanding = Math.max(0, total - prevPaid);
+      if (Math.abs(paid - outstanding) > 0.01) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "amount_mismatch" });
+      }
+
+      const paymentResult = await client.query(
+        `INSERT INTO payments (
+           booking_id, amount, net_amount, fee_amount, currency, method, status,
+           payment_type, liqpay_order_id, liqpay_status, external_id,
+           description, processed_at, created_at, updated_at
+         )
+         VALUES ($1, $2, $2, 0, 'UAH', 'liqpay', 'completed', 'payment',
+                 $3, $4, $5, $6, NOW(), NOW(), NOW())
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+        [
+          bookingId,
+          paid.toFixed(2),
+          liqpayOrderId,
+          String(parsed.status),
+          parsed.payment_id ? String(parsed.payment_id) : null,
+          `LiqPay callback for booking ${bookingId}`,
+        ],
+      );
+      if (paymentResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.json({ ok: true });
+      }
+
+      const newPaid = prevPaid + paid;
+      await client.query(
+        `UPDATE bookings
+            SET paid_amount = $1,
+                payment_status = CASE WHEN $1 >= total_amount - 0.01 THEN 'paid' ELSE 'partial' END,
+                updated_at = NOW()
+          WHERE id = $2`,
+        [newPaid.toFixed(2), bookingId],
+      );
+
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return res.json({ ok: true });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
 // ─── GET /menu/:orgSlug — public F&B menu for QR ordering ────────────────────
@@ -427,8 +669,8 @@ router.get("/menu/:orgSlug", menuScrapeLimiter, async (req, res) => {
       items: items.filter(i => i.categoryId === cat.id),
     }));
 
-    res.json({ org: { id: orgId, name: orgs[0].name, slug: orgs[0].slug }, categories: catMap });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.json({ org: { id: orgId, name: orgs[0].name, slug: orgs[0].slug }, categories: catMap });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
 // ─── GET /table/:orgSlug/:tableId — get table info ───────────────────────────
@@ -443,8 +685,8 @@ router.get("/table/:orgSlug/:tableId", async (req, res) => {
       .where(and(eq(fbTablesTable.organizationId, orgId), eq(fbTablesTable.id, parseInt(tableId)), eq(fbTablesTable.isActive, true)));
     if (!tables.length) return res.status(404).json({ error: "Table not found" });
 
-    res.json({ table: tables[0], org: { name: orgs[0].name } });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.json({ table: tables[0], org: { name: orgs[0].name } });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /menu-order — place QR order from guest ────────────────────────────
@@ -518,19 +760,28 @@ router.post("/menu-order", async (req, res) => {
       }
     }
 
-    res.status(201).json({ orderId: order.id, orderNumber: order.id, total: totalAmount });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.status(201).json({ orderId: order.id, orderNumber: order.id, total: totalAmount });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
-// ─── GET /bookings/:ref — get by reference ────────────────────────────────────
+// ─── GET /bookings/:ref — get by reference + guestAccessCode (required) ───────
+// guestAccessCode is mandatory — never expose PII based on bookingRef alone.
 router.get("/bookings/:ref", async (req, res) => {
   try {
+    const { guestAccessCode } = req.query as any;
+    if (!guestAccessCode) {
+      return res.status(400).json({ error: "guestAccessCode query parameter is required" });
+    }
+
+    // Fetch only non-PII fields plus guestAccessCode for verification
     const results = await db.select({
       id: bookingsTable.id,
       firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
       email: bookingsTable.email, phone: bookingsTable.phone,
       checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
       status: bookingsTable.status, totalAmount: bookingsTable.totalAmount,
+      paymentStatus: bookingsTable.paymentStatus,
+      guestAccessCode: bookingsTable.guestAccessCode,
       unitName: unitsTable.name,
       propertyName: propertiesTable.name, propertyAddress: propertiesTable.address,
     }).from(bookingsTable)
@@ -540,8 +791,18 @@ router.get("/bookings/:ref", async (req, res) => {
       .limit(1);
 
     if (!results.length) return res.status(404).json({ error: "Бронювання не знайдено" });
-    res.json({ booking: results[0] });
-  } catch (e: any) { console.error("GET BOOKING ERROR:", e.message); res.status(500).json({ error: e.message }); }
+
+    const booking = results[0];
+
+    // Verify guest access code before returning any PII
+    if (!booking.guestAccessCode || guestAccessCode !== booking.guestAccessCode) {
+      return res.status(403).json({ error: "Forbidden", message: "Невірний код доступу" });
+    }
+
+    // Strip guestAccessCode from the response
+    const { guestAccessCode: _omit, ...safeBooking } = booking;
+    return res.json({ booking: safeBooking });
+  } catch (e: any) { console.error("GET BOOKING ERROR:", e.message); return res.status(500).json({ error: e.message }); }
 });
 
 // ─── GET /rates — active rate for a property & channel (public, no auth) ──────
@@ -549,13 +810,36 @@ router.get("/bookings/:ref", async (req, res) => {
 // If no channel config, returns null. The booking form applies price from this rate.
 router.get("/rates", async (req, res) => {
   try {
-    const { propertyId, unitId, checkIn, checkOut, channel = "online" } = req.query as any;
-    if (!propertyId) return res.status(400).json({ error: "propertyId required" });
+    const { slug, propertyId, unitId, checkIn, checkOut, channel = "online" } = req.query as any;
+    if (!slug || !propertyId) return res.status(400).json({ error: "slug and propertyId required" });
+    const parsedPropertyId = parseInt(propertyId, 10);
+    if (!Number.isFinite(parsedPropertyId) || parsedPropertyId <= 0) {
+      return res.status(400).json({ error: "Invalid propertyId" });
+    }
+
+    const [property] = await db.select({ id: propertiesTable.id })
+      .from(propertiesTable)
+      .innerJoin(organizationsTable, eq(propertiesTable.organizationId, organizationsTable.id))
+      .where(and(
+        eq(propertiesTable.id, parsedPropertyId),
+        eq(organizationsTable.slug, slug),
+      ));
+    if (!property) return res.status(404).json({ error: "Property not found for this organization" });
+
+    if (unitId) {
+      const parsedUnitId = parseInt(unitId, 10);
+      if (!Number.isFinite(parsedUnitId) || parsedUnitId <= 0) {
+        return res.status(400).json({ error: "Invalid unitId" });
+      }
+      const [unit] = await db.select({ id: unitsTable.id }).from(unitsTable)
+        .where(and(eq(unitsTable.id, parsedUnitId), eq(unitsTable.propertyId, parsedPropertyId)));
+      if (!unit) return res.status(404).json({ error: "Unit not found for this property" });
+    }
 
     // Look up channel rate setting for this property & channel
     const [setting] = await db.select().from(channelRateSettingsTable)
       .where(and(
-        eq(channelRateSettingsTable.propertyId, parseInt(propertyId)),
+        eq(channelRateSettingsTable.propertyId, parsedPropertyId),
         eq(channelRateSettingsTable.channel, channel),
         eq(channelRateSettingsTable.isActive, true),
       ));
@@ -585,7 +869,7 @@ router.get("/rates", async (req, res) => {
       ? Number((rate.unitPrices as any)[String(unitId)])
       : Number(rate.pricePerNight);
 
-    res.json({
+    return res.json({
       id: rate.id,
       name: rate.name,
       pricePerNight: Number(rate.pricePerNight),
@@ -596,7 +880,7 @@ router.get("/rates", async (req, res) => {
       unitPrices: rate.unitPrices || null,
       unitPrice,
     });
-  } catch (e: any) { console.error("GET PUBLIC RATES ERROR:", e.message); res.status(500).json({ error: e.message }); }
+  } catch (e: any) { console.error("GET PUBLIC RATES ERROR:", e.message); return res.status(500).json({ error: e.message }); }
 });
 
 // ─── GET /ai-waiter/guest/:orgSlug/:phone — get guest session ─────────────────
@@ -612,8 +896,8 @@ router.get("/ai-waiter/guest/:orgSlug/:phone", async (req, res) => {
       [orgs[0].id, phone]
     );
     if (!r.rows.length) return res.json({ guest: null });
-    res.json({ guest: r.rows[0] });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.json({ guest: r.rows[0] });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /ai-waiter/chat — AI waiter for QR ordering (rate-limited) ─────────
@@ -815,10 +1099,10 @@ ${menuCtx}
       }
     }
 
-    res.json({ reply: reply || "Слухаю вас!", actions });
+    return res.json({ reply: reply || "Слухаю вас!", actions });
   } catch (e: any) {
     console.error("AI WAITER ERROR:", e.message);
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 

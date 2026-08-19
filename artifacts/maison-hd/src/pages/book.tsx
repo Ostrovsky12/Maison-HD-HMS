@@ -99,11 +99,12 @@ export default function BookPage() {
     if (!selectedUnit) { setChannelRate(null); return; }
     const propertyId = selectedUnit.propertyId || selectedUnit.property_id;
     if (!propertyId) return;
-    apiFetch(`/rates?propertyId=${propertyId}&unitId=${selectedUnit.id}&checkIn=${search.checkIn}&checkOut=${search.checkOut}&channel=online`)
+    if (!slug) return;
+    apiFetch(`/rates?slug=${encodeURIComponent(slug)}&propertyId=${propertyId}&unitId=${selectedUnit.id}&checkIn=${search.checkIn}&checkOut=${search.checkOut}&channel=online`)
       .then(r => r.json())
       .then((data: any) => setChannelRate(data || null))
       .catch(() => setChannelRate(null));
-  }, [selectedUnit]);
+  }, [selectedUnit, slug, search.checkIn, search.checkOut]);
 
   const nightsCount = calcNights(search.checkIn, search.checkOut);
   const pkg = PACKAGES.find(p => p.id === selectedPackage);
@@ -129,8 +130,8 @@ export default function BookPage() {
 
   const packagePrice = useMemo(() => {
     if (!pkg) return 0;
-    if ("pricePerStay" in pkg) return pkg.pricePerStay;
-    return (pkg as any).pricePerNight * nightsCount;
+    if ("pricePerStay" in pkg) return Number(pkg.pricePerStay || 0);
+    return Number((pkg as any).pricePerNight || 0) * nightsCount;
   }, [pkg, nightsCount]);
 
   const subtotal = basePrice + addonsTotal + packagePrice;
@@ -140,10 +141,10 @@ export default function BookPage() {
 
   const handleSearch = async () => {
     if (nightsCount < 1) { toast({ title: "Введіть коректні дати", variant: "destructive" }); return; }
+    if (!slug) { toast({ title: "Посилання бронювання не містить коду готелю", variant: "destructive" }); return; }
     setLoading(true);
-    const p = new URLSearchParams({ checkIn: search.checkIn, checkOut: search.checkOut, guests: String(search.adults) });
+    const p = new URLSearchParams({ slug, checkIn: search.checkIn, checkOut: search.checkOut, guests: String(search.adults) });
     if (search.propertyId) p.set("propertyId", search.propertyId);
-    else if (slug) p.set("slug", slug);
     const r = await apiFetch(`/availability?${p}`);
     const d = await r.json();
     setResults(d.units || []);
@@ -165,7 +166,7 @@ export default function BookPage() {
   };
 
   const handleConfirm = async () => {
-    if (!form.firstName || !form.email || !form.agreeTerms) { toast({ title: "Заповніть всі обов'язкові поля", variant: "destructive" }); return; }
+    if (!form.firstName || !form.lastName || !form.email || !form.agreeTerms) { toast({ title: "Заповніть всі обов'язкові поля", variant: "destructive" }); return; }
     setLoading(true);
     const extras = [
       form.specialRequests,
@@ -174,10 +175,13 @@ export default function BookPage() {
       appliedPromo ? `Промокод: ${appliedPromo.code}` : "",
     ].filter(Boolean).join("; ");
     const r = await apiFetch("/bookings", { method: "POST", body: JSON.stringify({
+      slug,
       unitId: selectedUnit.id, firstName: form.firstName, lastName: form.lastName,
       email: form.email, phone: form.phone, checkIn: search.checkIn, checkOut: search.checkOut,
       adults: search.adults, children: search.children, specialRequests: extras,
-      totalAmount: total, paidAmount: 0,
+      packageId: selectedPackage,
+      addonIds: Array.from(selectedAddons),
+      promoCode: appliedPromo?.code || null,
     }) });
     const d = await r.json();
     if (!r.ok) { setLoading(false); toast({ title: d.error || "Помилка бронювання", variant: "destructive" }); return; }
@@ -186,9 +190,13 @@ export default function BookPage() {
     const bookingId = bk.id;
     const bookingRef = bk.bookingRef || bk.booking_ref || "—";
     const guestAccessCode = bk.guestAccessCode || bk.guest_access_code || null;
+    const confirmedTotal = Number(bk.totalAmount ?? bk.total_amount ?? total);
 
     if (payMethod === "online" && bookingId) {
-      const lqr = await apiFetch(`/liqpay/${bookingId}`, { method: "POST" });
+      const lqr = await apiFetch(`/liqpay/${bookingId}`, {
+        method: "POST",
+        body: JSON.stringify({ guestAccessCode }),
+      });
       const lqd = await lqr.json();
       if (lqr.ok && lqd.data && lqd.signature) {
         const form_ = document.createElement("form");
@@ -208,7 +216,7 @@ export default function BookPage() {
     }
 
     setLoading(false);
-    setConfirmed({ bookingRef, guestAccessCode, ...form, ...search, nights: nightsCount, total, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName || organization?.name, payMethod });
+    setConfirmed({ bookingRef, guestAccessCode, ...form, ...search, nights: nightsCount, total: confirmedTotal, unitName: selectedUnit.name, propertyName: selectedUnit.propertyName || organization?.name, payMethod });
     setStep("confirm" as any);
   };
 
@@ -498,7 +506,9 @@ export default function BookPage() {
               <Section title="Пакети та спецпропозиції">
                 <div className="divide-y divide-gray-100">
                   {PACKAGES.map(p => {
-                    const pp = "pricePerStay" in p ? p.pricePerStay : (p as any).pricePerNight * nightsCount;
+                    const pp = "pricePerStay" in p
+                      ? Number(p.pricePerStay || 0)
+                      : Number((p as any).pricePerNight || 0) * nightsCount;
                     const sel = selectedPackage === p.id;
                     return (
                       <label key={p.id} className={`flex items-start gap-3 p-4 cursor-pointer hover:bg-gray-50 transition ${sel ? "bg-blue-50" : ""}`}>

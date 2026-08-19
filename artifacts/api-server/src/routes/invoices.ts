@@ -126,14 +126,14 @@ router.get("/", requireAuth, async (req, res) => {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(invoicesTable.createdAt));
 
-    res.json(invoices.map(inv => ({
+    return res.json(invoices.map(inv => ({
       ...inv,
       guestName: inv.guestFirstName
         ? `${inv.guestFirstName} ${inv.guestLastName || ""}`.trim()
         : inv.counterpartyName || null,
     })));
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
@@ -142,7 +142,7 @@ router.post("/", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
 
-    // Guard: every invoice must belong to a tenant
+    // Guard: every invoice must belong to a tenant (super_admin without org is rejected too)
     if (!user.organizationId) {
       return res.status(400).json({ error: "organization_id is required — cannot create an invoice without a tenant" });
     }
@@ -151,6 +151,31 @@ router.post("/", requireAuth, async (req, res) => {
       bookingId, guestId, invoiceType, amount, taxAmount, currency,
       description, dueDate, legalEntityId, buyer, items, seller, invoiceNumber,
     } = req.body;
+
+    const orgId = user.organizationId;
+
+    // Validate related booking belongs to caller's org
+    if (bookingId) {
+      const bCheck = await db.execute(sql`
+        SELECT b.id FROM bookings b
+        JOIN units u ON u.id = b.unit_id
+        JOIN properties p ON p.id = u.property_id
+        WHERE b.id = ${bookingId} AND p.organization_id = ${orgId} LIMIT 1
+      `);
+      if (!bCheck.rows.length) {
+        return res.status(403).json({ error: "Forbidden", message: "Бронювання не належить вашій організації" });
+      }
+    }
+
+    // Validate related legal entity belongs to caller's org
+    if (legalEntityId) {
+      const leCheck = await db.execute(sql`
+        SELECT id FROM legal_entities WHERE id = ${legalEntityId} AND organization_id = ${orgId} LIMIT 1
+      `);
+      if (!leCheck.rows.length) {
+        return res.status(403).json({ error: "Forbidden", message: "Юридична особа не належить вашій організації" });
+      }
+    }
 
     const total = items
       ? (items as any[]).reduce((s, it) => s + Number(it.amount), 0)
@@ -181,9 +206,9 @@ router.post("/", requireAuth, async (req, res) => {
       status: "pending",
     }).returning();
 
-    res.status(201).json(invoice);
+    return res.status(201).json(invoice);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
@@ -201,26 +226,56 @@ async function assertInvoiceAccess(invoiceId: number, user: any): Promise<{ invo
 // ─── Get single invoice ──────────────────────────────────────────────────────
 router.get("/:invoiceId", requireAuth, async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.invoiceId);
+    const invoiceId = parseInt(String(req.params.invoiceId), 10);
     const result = await assertInvoiceAccess(invoiceId, (req as any).user);
     if ("error" in result) return res.status(result.status).json({ error: result.error });
-    res.json(result.invoice);
+    return res.json(result.invoice);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
 // ─── Update invoice ──────────────────────────────────────────────────────────
 router.put("/:invoiceId", requireAuth, async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.invoiceId);
-    const access = await assertInvoiceAccess(invoiceId, (req as any).user);
+    const user = (req as any).user;
+    const invoiceId = parseInt(String(req.params.invoiceId), 10);
+    const access = await assertInvoiceAccess(invoiceId, user);
     if ("error" in access) return res.status(access.status).json({ error: access.error });
-    const { invoiceType, status, amount, description, dueDate, buyer, items, seller, legalEntityId, notes } = req.body;
+    const { invoiceType, status, amount, description, dueDate, buyer, items, seller, legalEntityId, bookingId: updBookingId, notes } = req.body;
+
+    // Validate related IDs belong to caller's org if provided
+    const orgId = user.organizationId;
+    if (orgId) {
+      if (updBookingId) {
+        const bCheck = await db.execute(sql`
+          SELECT b.id FROM bookings b
+          JOIN units u ON u.id = b.unit_id
+          JOIN properties p ON p.id = u.property_id
+          WHERE b.id = ${updBookingId} AND p.organization_id = ${orgId} LIMIT 1
+        `);
+        if (!bCheck.rows.length) {
+          return res.status(403).json({ error: "Forbidden", message: "Бронювання не належить вашій організації" });
+        }
+      }
+      if (legalEntityId) {
+        const leCheck = await db.execute(sql`
+          SELECT id FROM legal_entities WHERE id = ${legalEntityId} AND organization_id = ${orgId} LIMIT 1
+        `);
+        if (!leCheck.rows.length) {
+          return res.status(403).json({ error: "Forbidden", message: "Юридична особа не належить вашій організації" });
+        }
+      }
+    }
 
     const total = items
       ? (items as any[]).reduce((s: number, it: any) => s + Number(it.amount), 0)
       : undefined;
+
+    // Scope write to organization for tenant callers
+    const writeCondition = orgId
+      ? and(eq(invoicesTable.id, invoiceId), eq(invoicesTable.organizationId, orgId))
+      : eq(invoicesTable.id, invoiceId);
 
     const [invoice] = await db.update(invoicesTable).set({
       ...(invoiceType !== undefined && { invoiceType }),
@@ -230,73 +285,93 @@ router.put("/:invoiceId", requireAuth, async (req, res) => {
       ...(description !== undefined && { description }),
       ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
       ...(legalEntityId !== undefined && { legalEntityId }),
+      ...(updBookingId !== undefined && { bookingId: updBookingId }),
       ...(buyer && { counterpartyName: buyer.name, counterpartyEdrpou: buyer.taxCode, buyerAddress: buyer.address, buyerVatNumber: buyer.vatNumber }),
       ...(items && { invoiceItems: items }),
       ...(seller && { sellerSnapshot: seller }),
       ...(notes !== undefined && { notes }),
       updatedAt: new Date(),
-    }).where(eq(invoicesTable.id, invoiceId)).returning();
+    }).where(writeCondition).returning();
 
     if (!invoice) return res.status(404).json({ error: "Not found" });
-    res.json(invoice);
+    return res.json(invoice);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
 // ─── Delete invoice ──────────────────────────────────────────────────────────
 router.delete("/:invoiceId", requireAuth, async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.invoiceId);
-    const access = await assertInvoiceAccess(invoiceId, (req as any).user);
+    const user = (req as any).user;
+    const invoiceId = parseInt(String(req.params.invoiceId), 10);
+    const access = await assertInvoiceAccess(invoiceId, user);
     if ("error" in access) return res.status(access.status).json({ error: access.error });
-    await db.delete(invoicesTable).where(eq(invoicesTable.id, invoiceId));
-    res.json({ success: true });
+    // Scope delete predicate to organization for tenant callers
+    const orgId = user.organizationId;
+    const deleteCondition = orgId
+      ? and(eq(invoicesTable.id, invoiceId), eq(invoicesTable.organizationId, orgId))
+      : eq(invoicesTable.id, invoiceId);
+    await db.delete(invoicesTable).where(deleteCondition);
+    return res.json({ success: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
 // ─── Pay invoice ─────────────────────────────────────────────────────────────
 router.post("/:invoiceId/pay", requireAuth, async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.invoiceId);
-    const access = await assertInvoiceAccess(invoiceId, (req as any).user);
+    const user = (req as any).user;
+    const invoiceId = parseInt(String(req.params.invoiceId), 10);
+    const access = await assertInvoiceAccess(invoiceId, user);
     if ("error" in access) return res.status(access.status).json({ error: access.error });
     const existing = access.invoice;
     const { paymentMethod, paidAmount } = req.body;
 
+    // Overflow protection: paidAmount must not exceed invoice amount
+    const invoiceAmount = parseFloat(existing.amount || "0");
+    const paid = parseFloat(String(paidAmount ?? existing.amount));
+    if (!Number.isFinite(paid) || paid < 0 || paid > invoiceAmount) {
+      return res.status(400).json({ error: `paidAmount must be between 0 and ${invoiceAmount}` });
+    }
+
+    // Scope update to organization for tenant callers
+    const orgId = user.organizationId;
+    const payCondition = orgId
+      ? and(eq(invoicesTable.id, invoiceId), eq(invoicesTable.organizationId, orgId))
+      : eq(invoicesTable.id, invoiceId);
+
     const [invoice] = await db.update(invoicesTable).set({
       status: "paid",
       paymentMethod,
-      paidAmount: String(paidAmount ?? existing.amount),
+      paidAmount: paid.toFixed(2),
       paidAt: new Date(),
       updatedAt: new Date(),
-    }).where(eq(invoicesTable.id, invoiceId)).returning();
+    }).where(payCondition).returning();
 
-    res.json(invoice);
+    return res.json(invoice);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
 // ─── Public invoice view (no auth) ───────────────────────────────────────────
 router.get("/public/:token", async (req, res) => {
   try {
+    // Only accept expiring tenant-bound signed tokens — no legacy public_token fallback
     const signedAccess = verifyPublicInvoiceToken(req.params.token);
-    const [invoice] = signedAccess
-      ? await db.execute<any>(
-          sql`SELECT * FROM invoices
-              WHERE id = ${signedAccess.invoiceId}
-                AND organization_id = ${signedAccess.organizationId}
-              LIMIT 1`
-        ).then(r => r.rows)
-      : await db.execute<any>(
-          sql`SELECT * FROM invoices WHERE public_token = ${req.params.token} LIMIT 1`
-        ).then(r => r.rows);
+    if (!signedAccess) return res.status(401).json({ error: "Invalid or expired token" });
+
+    const [invoice] = await db.execute<any>(
+      sql`SELECT * FROM invoices
+          WHERE id = ${signedAccess.invoiceId}
+            AND organization_id = ${signedAccess.organizationId}
+          LIMIT 1`
+    ).then(r => r.rows);
     if (!invoice) return res.status(404).json({ error: "Not found" });
     res.setHeader("Cache-Control", "private, no-store");
-    res.json({
+    return res.json({
       invoiceNumber: invoice.invoice_number,
       status: invoice.status,
       amount: invoice.amount,
@@ -315,22 +390,22 @@ router.get("/public/:token", async (req, res) => {
       createdAt: invoice.created_at,
     });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
 // ─── Generate / return public link for an invoice ─────────────────────────────
 router.post("/:invoiceId/public-link", requireAuth, async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.invoiceId);
+    const invoiceId = parseInt(String(req.params.invoiceId), 10);
     const access = await assertInvoiceAccess(invoiceId, (req as any).user);
     if ("error" in access) return res.status(access.status).json({ error: access.error });
     const invoice = access.invoice;
     const token = createPublicInvoiceToken(invoiceId, invoice.organizationId);
     const link = `${getPublicInvoiceBaseUrl()}/invoice/${encodeURIComponent(token)}`;
-    res.json({ link, token });
+    return res.json({ link, token });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
@@ -338,7 +413,7 @@ router.post("/:invoiceId/public-link", requireAuth, async (req, res) => {
 router.post("/:invoiceId/send", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
-    const invoiceId = parseInt(req.params.invoiceId);
+    const invoiceId = parseInt(String(req.params.invoiceId), 10);
     const { channel, recipient } = req.body; // channel: telegram|sms|link
 
     const access = await assertInvoiceAccess(invoiceId, user);
@@ -396,15 +471,25 @@ router.post("/:invoiceId/send", requireAuth, async (req, res) => {
         return res.status(400).json({ error: "telegram_error", message: desc });
       }
 
-      await db.execute(sql`UPDATE invoices SET status = 'pending', updated_at = NOW() WHERE id = ${invoiceId}`);
+      const orgId = user.organizationId;
+      if (orgId) {
+        await db.execute(sql`UPDATE invoices SET status = 'pending', updated_at = NOW() WHERE id = ${invoiceId} AND organization_id = ${orgId}`);
+      } else {
+        await db.execute(sql`UPDATE invoices SET status = 'pending', updated_at = NOW() WHERE id = ${invoiceId}`);
+      }
       return res.json({ success: true, channel: "telegram", recipient: chatId, invoiceUrl });
     }
 
     // link / sms: just return the public link
-    await db.execute(sql`UPDATE invoices SET status = 'pending', updated_at = NOW() WHERE id = ${invoiceId}`);
-    res.json({ success: true, channel, recipient, invoiceUrl, invoiceNumber: invoice.invoiceNumber });
+    const orgId2 = user.organizationId;
+    if (orgId2) {
+      await db.execute(sql`UPDATE invoices SET status = 'pending', updated_at = NOW() WHERE id = ${invoiceId} AND organization_id = ${orgId2}`);
+    } else {
+      await db.execute(sql`UPDATE invoices SET status = 'pending', updated_at = NOW() WHERE id = ${invoiceId}`);
+    }
+    return res.json({ success: true, channel, recipient, invoiceUrl, invoiceNumber: invoice.invoiceNumber });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 

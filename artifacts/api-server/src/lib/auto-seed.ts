@@ -10,10 +10,39 @@ import {
 } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import { logger } from "./logger.js";
 
 async function hp(password: string) {
   return bcrypt.hash(password, 10);
+}
+
+const MIN_PASSWORD_LENGTH = 12;
+
+/**
+ * Returns the password from the given env var if present and long enough,
+ * otherwise generates a cryptographically random one-time password.
+ * The generated password is NEVER logged; recovery must go through admin
+ * password-reset flows.
+ */
+function resolveSeedPassword(envVarName: string): string {
+  const fromEnv = process.env[envVarName];
+  if (fromEnv && fromEnv.length >= MIN_PASSWORD_LENGTH) {
+    return fromEnv;
+  }
+  if (fromEnv && fromEnv.length < MIN_PASSWORD_LENGTH) {
+    logger.warn(
+      { envVar: envVarName },
+      "Seed password env var is too short — generating a random one-time password instead.",
+    );
+  } else {
+    logger.info(
+      { envVar: envVarName },
+      "No seed password env var set — generating a random one-time password (reset via admin flow).",
+    );
+  }
+  // 24 random bytes -> 32-char base64url one-time password, never logged.
+  return randomBytes(24).toString("base64url");
 }
 
 export async function autoSeedIfEmpty() {
@@ -29,8 +58,15 @@ export async function autoSeedIfEmpty() {
     logger.info("Empty database detected — running initial seed...");
 
     // ─── Super Admin (no org) ─────────────────────────────────────────────────
+    // The initial super admin password MUST come from SUPER_ADMIN_PASSWORD.
+    // Never create a predictable/default admin on an empty database.
     const saEmail = process.env.SUPER_ADMIN_EMAIL || "owner@maisonhd.com";
-    const saPassword = process.env.SUPER_ADMIN_PASSWORD || "Maison2026!";
+    const saPassword = process.env.SUPER_ADMIN_PASSWORD;
+    if (!saPassword || saPassword.length < MIN_PASSWORD_LENGTH) {
+      throw new Error(
+        `Refusing to seed an empty database: SUPER_ADMIN_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      );
+    }
     await db.insert(usersTable).values({
       email: saEmail,
       name: "Super Admin",
@@ -52,14 +88,14 @@ export async function autoSeedIfEmpty() {
       {
         email: "admin@dogoda.com.ua",
         name: "Дмитро Головко",
-        passwordHash: await hp("Dogoda2026!"),
+        passwordHash: await hp(resolveSeedPassword("SEED_DOGODA_OWNER_PASSWORD")),
         role: "owner",
         organizationId: dogodaOrg.id,
       },
       {
         email: "reception@dogoda.com.ua",
         name: "Рецепція ДОГОДА",
-        passwordHash: await hp("reception123"),
+        passwordHash: await hp(resolveSeedPassword("SEED_DOGODA_RECEPTION_PASSWORD")),
         role: "reception",
         organizationId: dogodaOrg.id,
       },
@@ -209,7 +245,7 @@ export async function autoSeedIfEmpty() {
       {
         email: "owner@maisonhd.com",
         name: "Maison HD Owner",
-        passwordHash: await hp("Owner2026!"),
+        passwordHash: await hp(resolveSeedPassword("SEED_MAISON_OWNER_PASSWORD")),
         role: "owner",
         organizationId: maisonOrg.id,
       },
@@ -233,14 +269,13 @@ export async function autoSeedIfEmpty() {
     );
 
     logger.info(
-      "Auto-seed complete.\n" +
-      `  SuperAdmin: ${process.env.SUPER_ADMIN_EMAIL || "owner@maisonhd.com"} / [SUPER_ADMIN_PASSWORD env]\n` +
-      "  ДОГОДА owner: admin@dogoda.com.ua / Dogoda2026!\n" +
-      "  ДОГОДА reception: reception@dogoda.com.ua / reception123\n" +
-      "  Maison HD owner: owner@maisonhd.com / Owner2026!"
+      "Auto-seed complete. Seeded accounts: super admin, ДОГОДА owner/reception, Maison HD owner. " +
+      "Passwords are set from env vars or generated as one-time secrets and are not logged — " +
+      "use the admin password-reset flow to obtain access.",
     );
   } catch (err) {
     logger.error({ err }, "Auto-seed failed");
+    throw err;
   }
 }
 
@@ -259,16 +294,16 @@ export async function seedOrg39LegalEntities() {
     const cnt = parseInt(rows[0]?.cnt || "0");
     if (cnt > 0) return; // already seeded
 
+    // Seed only non-secret entity metadata. Provider credentials (LiqPay keys,
+    // etc.) are intentionally left unset and must be configured via admin flows.
     await (db as any).$client.query(`
       INSERT INTO legal_entities (
         organization_id, name, type, edrpou, iban, bank, mfo, address,
-        liqpay_public_key, liqpay_private_key,
         is_default, is_active, category_ids, handles_alcohol, prro_enabled
       ) VALUES (
         39, 'ТОВ Догода Резортс', 'tov', '43053129',
         'UA063052990000026000030109963', 'АТ КБ «ПриватБанк»', '305299',
         'Україна, 08620, Київська обл., Фастівський р-н, село Дзвінкове, вул.Березова, будинок 4',
-        'i9532877227', 'jjSyrioPr7klmZT8FOdoZYZrmzNjDNzsXZ9p3w6q',
         false, true, '[]', false, false
       )
     `);
@@ -309,11 +344,16 @@ export async function syncSuperAdmin() {
       .limit(1);
 
     if (!existing) {
-      logger.warn("No super_admin found — creating one");
+      if (!saPassword || saPassword.length < MIN_PASSWORD_LENGTH) {
+        throw new Error(
+          `Cannot create the missing super admin: SUPER_ADMIN_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+        );
+      }
+      logger.warn("No super_admin found — creating one from SUPER_ADMIN_PASSWORD env");
       await db.insert(usersTable).values({
         email: saEmail,
         name: "Super Admin",
-        passwordHash: await hp(saPassword || "Maison2026!"),
+        passwordHash: await hp(saPassword),
         role: "super_admin",
         organizationId: null,
       });
@@ -340,5 +380,6 @@ export async function syncSuperAdmin() {
     }
   } catch (err) {
     logger.error({ err }, "syncSuperAdmin failed");
+    throw err;
   }
 }
