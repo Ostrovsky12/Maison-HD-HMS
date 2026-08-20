@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { propertiesTable, unitsTable } from "@workspace/db/schema";
+import { organizationsTable, propertiesTable, unitsTable } from "@workspace/db/schema";
 import { eq, and, count, asc, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 
@@ -25,10 +25,26 @@ router.get("/", requireAuth, async (req, res) => {
 
 router.post("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
-  const orgId = user.organizationId;
+  const requestedOrgId = Number(req.body.organizationId);
+  const orgId = user.role === "super_admin" && Number.isInteger(requestedOrgId) && requestedOrgId > 0
+    ? requestedOrgId
+    : user.organizationId;
   if (!orgId) {
-    res.status(400).json({ error: "Bad Request", message: "No organization" });
+    res.status(400).json({
+      error: "Оберіть організацію для нової групи",
+      message: "Super Admin має вказати, до якого готелю належить група.",
+    });
     return;
+  }
+  if (user.role === "super_admin") {
+    const [organization] = await db.select({ id: organizationsTable.id })
+      .from(organizationsTable)
+      .where(eq(organizationsTable.id, orgId))
+      .limit(1);
+    if (!organization) {
+      res.status(404).json({ error: "Організацію не знайдено" });
+      return;
+    }
   }
   const { name, type, address, description, sortOrder } = req.body;
   // Get max sort_order for this org

@@ -927,7 +927,11 @@ export default function ChessPage() {
 
       {/* ─── GROUPS PANEL ───────────────────────────────────────────────── */}
       {showGroups && (
-        <GroupsPanel onClose={() => setShowGroups(false)} onSaved={() => loadData(true)} />
+        <GroupsPanel
+          preferredPropertyId={filterProp === "all" ? undefined : Number(filterProp)}
+          onClose={() => setShowGroups(false)}
+          onSaved={() => loadData(true)}
+        />
       )}
     </AppLayout>
   );
@@ -1091,11 +1095,16 @@ function ActionBtn({ icon: Icon, label, onClick, color }: any) {
 }
 
 // ─── Groups Panel ─────────────────────────────────────────────────────────────
-function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function GroupsPanel({ preferredPropertyId, onClose, onSaved }: {
+  preferredPropertyId?: number;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { toast } = useToast();
 
-  type Grp = { id: number; name: string; sort_order: number; unitCount: number; tourist_tax_rate: number };
+  type Grp = { id: number; name: string; sort_order: number; unitCount: number; tourist_tax_rate: number; organization_id?: number };
   type UnitRow = { id: number; name: string; category: string; propertyId: number; sort_order: number };
+  type Organization = { id: number; name: string };
 
   const [groups, setGroups] = useState<Grp[]>([]);
   const [units, setUnits] = useState<UnitRow[]>([]);
@@ -1108,21 +1117,43 @@ function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   const [editTaxVal, setEditTaxVal] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [addingGroup, setAddingGroup] = useState(false);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
 
   const load = async () => {
     setLoading(true);
-    const [gRes, uRes] = await Promise.all([
+    const [gRes, uRes, orgRes] = await Promise.all([
       apiFetch("/properties"),
       apiFetch("/units"),
+      apiFetch("/organizations"),
     ]);
     if (gRes.ok) {
       const g: Grp[] = await gRes.json();
       setGroups(g.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
       setExpanded(new Set(g.map(x => x.id)));
+      setSelectedOrganizationId(current => {
+        if (current) return current;
+        const preferred = preferredPropertyId
+          ? g.find(property => property.id === preferredPropertyId)?.organization_id
+          : undefined;
+        const organizationIds = [...new Set(g.map(property => property.organization_id).filter(Boolean))];
+        const inferredOrgId = preferred || (organizationIds.length === 1 ? organizationIds[0] : undefined);
+        return inferredOrgId ? String(inferredOrgId) : "";
+      });
     }
     if (uRes.ok) {
       const u = await uRes.json();
       setUnits(u.map((x: any) => ({ id: x.id, name: x.name, category: x.category || "", propertyId: x.propertyId || x.property_id, sort_order: x.sort_order ?? 0 })));
+    }
+    if (orgRes.ok) {
+      const orgs = await orgRes.json();
+      const availableOrganizations = Array.isArray(orgs)
+        ? orgs.map((org: any) => ({ id: org.id, name: org.name }))
+        : [];
+      setOrganizations(availableOrganizations);
+      setSelectedOrganizationId(current =>
+        current || (availableOrganizations.length === 1 ? String(availableOrganizations[0].id) : "")
+      );
     }
     setLoading(false);
   };
@@ -1162,9 +1193,18 @@ function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   const createGroup = async () => {
     if (!newGroupName.trim()) return;
     setSaving(true);
-    const r = await apiFetch("/properties", { method: "POST", body: JSON.stringify({ name: newGroupName.trim(), type: "house" }) });
+    const payload: Record<string, unknown> = { name: newGroupName.trim(), type: "house" };
+    if (selectedOrganizationId) payload.organizationId = Number(selectedOrganizationId);
+    const r = await apiFetch("/properties", { method: "POST", body: JSON.stringify(payload) });
     if (r.ok) { toast({ title: "Групу створено ✓" }); setNewGroupName(""); setAddingGroup(false); await load(); onSaved(); }
-    else toast({ title: "Помилка", variant: "destructive" });
+    else {
+      const error = await r.json().catch(() => ({}));
+      toast({
+        title: "Не вдалося створити групу",
+        description: error.error || error.message || "Спробуйте ще раз.",
+        variant: "destructive",
+      });
+    }
     setSaving(false);
   };
 
@@ -1237,14 +1277,26 @@ function GroupsPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
         {/* Add group */}
         <div className="px-4 py-2.5 border-b border-gray-100">
           {addingGroup ? (
-            <div className="flex gap-2 items-center">
-              <input autoFocus value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") createGroup(); if (e.key === "Escape") setAddingGroup(false); }}
-                placeholder="Назва нової групи…" className="flex-1 text-sm border rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-300" />
-              <button onClick={createGroup} disabled={saving || !newGroupName.trim()} className="px-3 py-1.5 bg-violet-600 text-white text-xs rounded-lg hover:bg-violet-700 disabled:opacity-50">
-                {saving ? "…" : "Додати"}
-              </button>
-              <button onClick={() => setAddingGroup(false)} className="px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg">✕</button>
+            <div className="space-y-2">
+              {organizations.length > 0 && (
+                <select
+                  value={selectedOrganizationId}
+                  onChange={e => setSelectedOrganizationId(e.target.value)}
+                  className="w-full text-sm border rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                >
+                  <option value="">— Оберіть готель / організацію —</option>
+                  {organizations.map(org => <option key={org.id} value={String(org.id)}>{org.name}</option>)}
+                </select>
+              )}
+              <div className="flex gap-2 items-center">
+                <input autoFocus value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") createGroup(); if (e.key === "Escape") setAddingGroup(false); }}
+                  placeholder="Назва нової групи…" className="flex-1 text-sm border rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-300" />
+                <button onClick={createGroup} disabled={saving || !newGroupName.trim() || (organizations.length > 0 && !selectedOrganizationId)} className="px-3 py-1.5 bg-violet-600 text-white text-xs rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                  {saving ? "…" : "Додати"}
+                </button>
+                <button onClick={() => setAddingGroup(false)} className="px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg">✕</button>
+              </div>
             </div>
           ) : (
             <button onClick={() => setAddingGroup(true)} className="flex items-center gap-1.5 text-xs text-violet-600 hover:text-violet-800 font-medium py-0.5">
