@@ -51,11 +51,42 @@ const TREND_ICON: Record<string, any> = {
   stable: <Minus className="w-3 h-3 text-gray-400" />,
 };
 
-const CATEGORIES = ["general", "procedures", "faq", "policies", "services", "emergencies", "local-info"];
-const CATEGORY_UK: Record<string, string> = {
-  general: "Загальне", procedures: "Процедури", faq: "FAQ",
-  policies: "Правила", services: "Послуги", emergencies: "Надзвичайні ситуації", "local-info": "Місцева інформація",
-};
+type ArticleStatus = "draft" | "published" | "archived";
+
+interface KnowledgeArticle {
+  id: number;
+  title: string;
+  content: string;
+  category: string;
+  tags: string;
+  status: ArticleStatus;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  publishedAt?: string | null;
+  updatedAt: string;
+}
+
+interface ConciergeSettings {
+  mode: "manual" | "faq_auto";
+  enabled: boolean;
+}
+
+interface KnowledgePreviewSource {
+  id: number;
+  title: string;
+  category: string;
+  updatedAt: string;
+}
+
+const KNOWLEDGE_CATEGORIES = [
+  { id: "faq", label: "FAQ & General" },
+  { id: "accommodation", label: "Accommodation" },
+  { id: "rates", label: "Rates & Billing" },
+  { id: "policies", label: "Policies & Rules" },
+  { id: "services", label: "Services & Amenities" },
+  { id: "checkin", label: "Check-in & Check-out" },
+  { id: "scripts", label: "Staff Scripts" },
+];
 
 export default function AiHubPage() {
   const [activeTab, setActiveTab] = useState("shell");
@@ -325,7 +356,7 @@ function AiShellTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
               className="flex-1 px-3 py-2 rounded-lg border border-violet-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
             />
             <button
-              onClick={quickAsk}
+              onClick={() => quickAsk(undefined)}
               disabled={copilotLoading || !copilotInput.trim()}
               className="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors"
             >
@@ -1066,166 +1097,464 @@ function OwnerInsightsTab() {
 
 // ─── 7. AI Knowledge Base ─────────────────────────────────────────────────────
 function KnowledgeBaseTab() {
-  const [articles, setArticles] = useState<any[]>([]);
+  const [articles, setArticles] = useState<KnowledgeArticle[]>([]);
+  const [settings, setSettings] = useState<ConciergeSettings>({ mode: "manual", enabled: false });
   const [loading, setLoading] = useState(false);
+  const [updatingSettings, setUpdatingSettings] = useState(false);
+
+  // Filters & Search
+  const [filterCategory, setFilterCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchAnswer, setSearchAnswer] = useState("");
-  const [searching, setSearching] = useState(false);
+
+  // Preview AI
+  const [previewQuestion, setPreviewQuestion] = useState("");
+  const [previewAnswer, setPreviewAnswer] = useState("");
+  const [previewSources, setPreviewSources] = useState<KnowledgePreviewSource[]>([]);
+  const [previewing, setPreviewing] = useState(false);
+
+  // Form State
   const [showForm, setShowForm] = useState(false);
-  const [editArticle, setEditArticle] = useState<any>(null);
-  const [form, setForm] = useState({ title: "", content: "", category: "general", tags: "" });
+  const [editArticle, setEditArticle] = useState<KnowledgeArticle | null>(null);
+  const [form, setForm] = useState<Partial<KnowledgeArticle>>({
+    title: "",
+    content: "",
+    category: "faq",
+    tags: "",
+  });
+  const [saving, setSaving] = useState(false);
+
   const { toast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiFetch("/knowledge");
+      if (!res.ok) throw new Error("Failed to load");
       const data = await res.json();
       setArticles(data.articles || []);
+      if (data.settings) setSettings(data.settings);
     } catch {
-      toast({ title: "Помилка", description: "Не вдалося завантажити", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to load knowledge base", variant: "destructive" });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => { load(); }, [load]);
 
-  const save = async () => {
+  const toggleSettings = async (updates: Partial<ConciergeSettings>) => {
+    setUpdatingSettings(true);
+    const newSettings = { ...settings, ...updates };
+    setSettings(newSettings); // optimistic update
+    try {
+      const res = await apiFetch("/knowledge/settings", {
+        method: "PATCH",
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      toast({ title: "Settings updated" });
+    } catch {
+      toast({ title: "Error", description: "Failed to update settings", variant: "destructive" });
+      load(); // revert on fail
+    } finally {
+      setUpdatingSettings(false);
+    }
+  };
+
+  const saveArticle = async () => {
+    if (!form.title || !form.content) return;
+    setSaving(true);
     try {
       const method = editArticle ? "PUT" : "POST";
       const path = editArticle ? `/knowledge/${editArticle.id}` : "/knowledge";
-      await apiFetch(path, { method, body: JSON.stringify(form) });
-      toast({ title: "Збережено!" });
-      setShowForm(false); setEditArticle(null); setForm({ title: "", content: "", category: "general", tags: "" });
+      const res = await apiFetch(path, {
+        method,
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      toast({ title: "Article saved" });
+      setShowForm(false);
       load();
     } catch {
-      toast({ title: "Помилка", variant: "destructive" });
-    }
-  };
-
-  const del = async (id: number) => {
-    if (!confirm("Видалити статтю?")) return;
-    await apiFetch(`/knowledge/${id}`, { method: "DELETE" });
-    load();
-  };
-
-  const search = async () => {
-    if (!searchQuery.trim()) return;
-    setSearching(true); setSearchAnswer("");
-    try {
-      const res = await apiFetch("/knowledge/search", { method: "POST", body: JSON.stringify({ query: searchQuery }) });
-      const data = await res.json();
-      setSearchAnswer(data.answer || "Відповідь не знайдена");
-    } catch {
-      setSearchAnswer("Помилка пошуку");
+      toast({ title: "Error", description: "Failed to save article", variant: "destructive" });
     } finally {
-      setSearching(false);
+      setSaving(false);
     }
   };
 
-  const startEdit = (a: any) => {
-    setEditArticle(a); setForm({ title: a.title, content: a.content, category: a.category, tags: a.tags || "" });
-    setShowForm(true);
+  const updateStatus = async (id: number, action: "publish" | "archive") => {
+    try {
+      const res = await apiFetch(`/knowledge/${id}/${action}`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: action === "publish" ? "Published" : "Archived" });
+      load();
+    } catch {
+      toast({ title: "Error", description: "Action failed", variant: "destructive" });
+    }
+  };
+
+  const deleteArticle = async (id: number) => {
+    if (!confirm("Delete this article? This action cannot be undone.")) return;
+    try {
+      const res = await apiFetch(`/knowledge/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete");
+      toast({ title: "Deleted" });
+      load();
+    } catch {
+      toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
+    }
+  };
+
+  const testPreview = async () => {
+    if (!previewQuestion.trim()) return;
+    setPreviewing(true);
+    setPreviewAnswer("");
+    setPreviewSources([]);
+    try {
+      const res = await apiFetch("/knowledge/preview", {
+        method: "POST",
+        body: JSON.stringify({ question: previewQuestion }),
+      });
+      if (!res.ok) throw new Error("Preview failed");
+      const data = await res.json();
+      setPreviewAnswer(data.answer || "No answer found.");
+      setPreviewSources(data.sources || []);
+    } catch {
+      toast({ title: "Error", description: "Failed to get an answer", variant: "destructive" });
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const filteredArticles = articles.filter(a => {
+    const matchesCategory = filterCategory === "all" || a.category === filterCategory;
+    const matchesSearch = a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (a.tags && a.tags.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesCategory && matchesSearch;
+  });
+
+  const getStatusBadge = (status: ArticleStatus) => {
+    switch (status) {
+      case "published": return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Published</Badge>;
+      case "draft": return <Badge className="bg-amber-100 text-amber-700 border-amber-200">Draft</Badge>;
+      case "archived": return <Badge className="bg-gray-100 text-gray-700 border-gray-200">Archived</Badge>;
+      default: return <Badge variant="outline">{status}</Badge>;
+    }
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <div className="flex-1 flex gap-2">
-          <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && search()} placeholder="Запитайте AI по базі знань..." />
-          <Button onClick={search} disabled={searching} className="bg-violet-600 hover:bg-violet-700">
-            {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-          </Button>
-        </div>
-        <Button onClick={() => { setShowForm(true); setEditArticle(null); setForm({ title: "", content: "", category: "general", tags: "" }); }}>
-          <Plus className="w-4 h-4 mr-1" /> Стаття
-        </Button>
-      </div>
-
-      {searchAnswer && (
-        <Card className="border-violet-200 bg-violet-50">
-          <CardContent className="pt-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Brain className="w-4 h-4 text-violet-500" />
-              <span className="text-xs font-medium text-violet-700">AI відповідь</span>
+    <div className="flex flex-col lg:flex-row gap-6">
+      {/* Sidebar */}
+      <div className="w-full lg:w-64 shrink-0 space-y-6">
+        {/* Settings */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm font-bold text-gray-900 flex items-center gap-2">
+              <Bot className="w-4 h-4 text-violet-600" />
+              AI Concierge Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-700">Status</span>
+              <div className="flex bg-gray-100 rounded-lg p-0.5">
+                <button
+                  disabled={updatingSettings}
+                  onClick={() => toggleSettings({ enabled: true })}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${settings.enabled ? "bg-white text-violet-700 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}
+                >
+                  Active
+                </button>
+                <button
+                  disabled={updatingSettings}
+                  onClick={() => toggleSettings({ enabled: false })}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${!settings.enabled ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}
+                >
+                  Paused
+                </button>
+              </div>
             </div>
-            <p className="text-sm text-gray-700 whitespace-pre-wrap">{searchAnswer}</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-gray-700">Operation Mode</Label>
+              <Select value={settings.mode} onValueChange={(v: "manual" | "faq_auto") => toggleSettings({ mode: v })} disabled={updatingSettings}>
+                <SelectTrigger className="h-8 text-xs bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">Manual Approval</SelectItem>
+                  <SelectItem value="faq_auto">Auto-Reply FAQ</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </CardContent>
         </Card>
-      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {loading ? [...Array(3)].map((_, i) => <Card key={i} className="animate-pulse h-36" />) :
-          articles.map(a => (
-            <Card key={a.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="pt-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <Badge variant="outline" className="text-xs shrink-0">{CATEGORY_UK[a.category] || a.category}</Badge>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEdit(a)}><Edit2 className="w-3 h-3" /></Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => del(a.id)}><Trash2 className="w-3 h-3" /></Button>
-                  </div>
-                </div>
-                <p className="font-medium text-sm">{a.title}</p>
-                <p className="text-xs text-gray-500 line-clamp-3">{a.content}</p>
-                {a.tags && (
-                  <div className="flex flex-wrap gap-1">
-                    {a.tags.split(",").map((t: string) => (
-                      <span key={t} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                        <Tag className="w-2.5 h-2.5" />{t.trim()}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+        {/* Categories */}
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3 px-1">Categories</h3>
+          <div className="space-y-0.5">
+            <button
+              onClick={() => setFilterCategory("all")}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${filterCategory === "all" ? "bg-violet-50 text-violet-700 font-medium" : "text-gray-600 hover:bg-gray-50"}`}
+            >
+              <span>All Articles</span>
+              <span className="text-xs text-gray-400">{articles.length}</span>
+            </button>
+            {KNOWLEDGE_CATEGORIES.map(cat => {
+              const count = articles.filter(a => a.category === cat.id).length;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setFilterCategory(cat.id)}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${filterCategory === cat.id ? "bg-violet-50 text-violet-700 font-medium" : "text-gray-600 hover:bg-gray-50"}`}
+                >
+                  <span>{cat.label}</span>
+                  {count > 0 && <span className="text-xs text-gray-400">{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      {!loading && articles.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-32 text-gray-400">
-          <BookOpen className="w-8 h-8 mb-2 opacity-40" />
-          <p className="text-sm">База знань порожня. Додайте першу статтю!</p>
+      {/* Main Content */}
+      <div className="flex-1 space-y-6 min-w-0">
+        {/* Test Concierge */}
+        <Card className="border-violet-100 shadow-sm bg-gradient-to-br from-violet-50/50 to-indigo-50/50 overflow-hidden">
+          <div className="p-1.5 bg-violet-600/5 text-violet-700 text-xs font-semibold px-4 flex items-center gap-2 border-b border-violet-100">
+            <Sparkles className="w-3.5 h-3.5" />
+            Test AI Concierge
+          </div>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-violet-300" />
+                <Input
+                  value={previewQuestion}
+                  onChange={e => setPreviewQuestion(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && testPreview()}
+                  placeholder="Ask a mock guest question to see how the AI responds based on published articles..."
+                  className="pl-9 border-violet-200 bg-white shadow-sm focus-visible:ring-violet-400"
+                />
+              </div>
+              <Button onClick={testPreview} disabled={previewing || !previewQuestion.trim()} className="bg-violet-600 hover:bg-violet-700 text-white shadow-sm">
+                {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Test Answer"}
+              </Button>
+            </div>
+
+            {previewAnswer && (
+              <div className="bg-white rounded-xl p-4 border border-violet-100 shadow-sm animate-fade-in">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-violet-100 rounded-lg shrink-0">
+                    <Bot className="w-4 h-4 text-violet-600" />
+                  </div>
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{previewAnswer}</div>
+                    {previewSources.length > 0 && (
+                      <div className="pt-2 mt-2 border-t border-gray-100 flex flex-wrap gap-1.5">
+                        <span className="text-xs text-gray-400 font-medium mr-1 flex items-center gap-1">
+                          <BookOpen className="w-3 h-3" /> Sources:
+                        </span>
+                        {previewSources.map((src) => (
+                          <Badge key={src.id} variant="secondary" className="text-[10px] bg-gray-50 text-gray-500 font-normal">
+                            {src.title}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Articles List */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+          <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search articles..."
+                className="pl-9 h-9 text-sm bg-gray-50 border-transparent focus-visible:bg-white"
+              />
+            </div>
+            <Button
+              onClick={() => {
+                setEditArticle(null);
+                setForm({ title: "", content: "", category: filterCategory === "all" ? "faq" : filterCategory, tags: "" });
+                setShowForm(true);
+              }}
+              className="h-9 bg-gray-900 hover:bg-black text-white shrink-0"
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              New Article
+            </Button>
+          </div>
+
+          <div className="overflow-x-auto">
+            {loading ? (
+              <div className="p-8 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-gray-300" />
+              </div>
+            ) : filteredArticles.length === 0 ? (
+              <div className="p-12 text-center text-gray-400 space-y-3">
+                <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                  <BookOpen className="w-5 h-5 text-gray-300" />
+                </div>
+                <p className="text-sm font-medium text-gray-600">No articles found</p>
+                <p className="text-xs">Try adjusting your filters or create a new article.</p>
+              </div>
+            ) : (
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-50/50 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Article</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Category</th>
+                    <th className="px-4 py-3 font-medium hidden md:table-cell">Last Updated</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredArticles.map(article => (
+                    <tr key={article.id} className="hover:bg-gray-50/50 transition-colors group">
+                      <td className="px-4 py-3 min-w-[240px]">
+                        <div className="font-semibold text-gray-900 mb-0.5">{article.title}</div>
+                        {article.tags && (
+                          <div className="flex flex-wrap gap-1">
+                            {article.tags.split(",").map(t => t.trim()).filter(Boolean).map(t => (
+                              <span key={t} className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-sm">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {getStatusBadge(article.status)}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {KNOWLEDGE_CATEGORIES.find(c => c.id === article.category)?.label || article.category}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs hidden md:table-cell">
+                        {new Date(article.updatedAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {article.status === "draft" && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => updateStatus(article.id, "publish")} title="Publish">
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                          {article.status === "published" && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-600 hover:text-amber-700 hover:bg-amber-50" onClick={() => updateStatus(article.id, "archive")} title="Archive">
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-600 hover:text-gray-900 hover:bg-gray-100" onClick={() => {
+                            setEditArticle(article);
+                            setForm({
+                              title: article.title,
+                              content: article.content,
+                              category: article.category,
+                              tags: article.tags || "",
+                            });
+                            setShowForm(true);
+                          }} title="Edit">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          {(article.status === "draft" || article.status === "archived") && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => deleteArticle(article.id)} title="Delete">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
-      )}
+      </div>
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{editArticle ? "Редагувати статтю" : "Нова стаття"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Заголовок</Label>
-                <Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Назва статті" />
+        <DialogContent className="max-w-2xl gap-0 p-0 overflow-hidden border-0 shadow-2xl">
+          <div className="bg-gray-50 border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+            <DialogTitle className="text-base font-semibold text-gray-900">
+              {editArticle ? "Edit Article" : "New Knowledge Article"}
+            </DialogTitle>
+            <div className="flex gap-2">
+              {editArticle?.status && getStatusBadge(editArticle.status)}
+            </div>
+          </div>
+
+          <div className="p-6 space-y-5 bg-white">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Title</Label>
+                <Input
+                  value={form.title}
+                  onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="e.g. WiFi Password and Instructions"
+                  className="bg-gray-50 border-transparent focus-visible:bg-white h-10"
+                />
               </div>
-              <div className="space-y-1.5">
-                <Label>Категорія</Label>
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Category</Label>
                 <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="bg-gray-50 border-transparent focus-visible:bg-white h-10">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map(c => <SelectItem key={c} value={c}>{CATEGORY_UK[c] || c}</SelectItem>)}
+                    {KNOWLEDGE_CATEGORIES.map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Зміст</Label>
-              <Textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} placeholder="Детальний опис, процедура, відповідь на питання..." rows={6} />
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Content</Label>
+              <Textarea
+                value={form.content}
+                onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+                placeholder="Detailed instructions, policies, or scripts..."
+                rows={8}
+                className="bg-gray-50 border-transparent focus-visible:bg-white resize-none text-sm leading-relaxed p-3"
+              />
             </div>
-            <div className="space-y-1.5">
-              <Label>Теги (через кому)</Label>
-              <Input value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} placeholder="check-in, процедура, ключі..." />
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-gray-700 uppercase tracking-wide flex justify-between">
+                <span>Tags</span>
+                <span className="text-gray-400 font-normal normal-case">Comma-separated</span>
+              </Label>
+              <Input
+                value={form.tags}
+                onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+                placeholder="wifi, internet, connectivity"
+                className="bg-gray-50 border-transparent focus-visible:bg-white h-10 text-sm"
+              />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowForm(false)}>Скасувати</Button>
-            <Button onClick={save} disabled={!form.title || !form.content} className="bg-violet-600 hover:bg-violet-700">
-              <Save className="w-4 h-4 mr-1" /> Зберегти
-            </Button>
-          </DialogFooter>
+
+          <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
+            {editArticle ? (
+              <p className="text-xs text-gray-400">Last updated: {new Date(editArticle.updatedAt).toLocaleString()}</p>
+            ) : <div />}
+            <div className="flex gap-3">
+              <Button variant="ghost" onClick={() => setShowForm(false)} className="text-gray-600 hover:text-gray-900">
+                Cancel
+              </Button>
+              <Button onClick={saveArticle} disabled={!form.title || !form.content || saving} className="bg-gray-900 hover:bg-black text-white shadow-sm min-w-[100px]">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save Article"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

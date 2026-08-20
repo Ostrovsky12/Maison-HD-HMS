@@ -10,7 +10,7 @@ import {
   Plus, X, User, Calendar, MoreVertical, Loader2, Bot, Paperclip,
   ArrowLeft, ChevronDown, StickyNote, Tag, UserCheck, TrendingUp,
   Building2, Hash, Inbox, Target, ChevronRight, Edit3, Check,
-  DollarSign, Star, Zap, Bell, BellOff, FileText, Eye,
+  DollarSign, Star, Zap, Bell, BellOff, FileText, Eye, BookOpen,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { uk } from "date-fns/locale";
@@ -107,6 +107,11 @@ interface Lead {
 
 interface CannedReply { id: number; title: string; content: string; category: string; shortcut: string | null; use_count: number; }
 interface StaffMember { id: number; name: string; role: string; }
+interface AiKnowledgeSource { id: number; title: string; category: string; updatedAt: string; }
+interface BookingIntake {
+  detected: boolean; checkIn: string | null; checkOut: string | null;
+  adults: number | null; children: number | null; needsManagerReview: boolean;
+}
 
 const SOURCE_LABELS: Record<string, string> = {
   phone: "Телефон", telegram: "Telegram", instagram: "Instagram", website: "Сайт",
@@ -167,6 +172,9 @@ export default function InboxPage() {
   const [replyText, setReplyText] = useState("");
   const [isInternal, setIsInternal] = useState(false);
   const [aiDraft, setAiDraft] = useState("");
+  const [aiSources, setAiSources] = useState<AiKnowledgeSource[]>([]);
+  const [aiHandoffSuggested, setAiHandoffSuggested] = useState(false);
+  const [bookingIntake, setBookingIntake] = useState<BookingIntake | null>(null);
   const [showCanned, setShowCanned] = useState(false);
   const [cannedSearch, setCannedSearch] = useState("");
 
@@ -515,6 +523,9 @@ export default function InboxPage() {
     setSelectedConv(conv);
     setMsgsLoading(true);
     setAiDraft("");
+    setAiSources([]);
+    setAiHandoffSuggested(false);
+    setBookingIntake(null);
     setIsInternal(false);
     setReplyText("");
     setShowMobileDetail(true);
@@ -565,10 +576,20 @@ export default function InboxPage() {
     if (!selectedConv) return;
     setAiLoading(true);
     setAiDraft("");
+    setAiSources([]);
+    setAiHandoffSuggested(false);
+    setBookingIntake(null);
     try {
       const r = await apiFetch(`${API}/inbox/conversations/${selectedConv.id}/ai-suggest`, { method: "POST" });
       const d = await r.json();
-      if (d.suggestion) setAiDraft(d.suggestion);
+      if (d.suggestion) {
+        setAiDraft(d.suggestion);
+        setAiSources(Array.isArray(d.sources) ? d.sources : []);
+        setAiHandoffSuggested(Boolean(d.handoffSuggested));
+        setBookingIntake(d.bookingIntake || null);
+      } else {
+        toast({ title: "AI Concierge", description: d.error || "Не вдалося створити чернетку", variant: "destructive" });
+      }
     } finally {
       setAiLoading(false);
     }
@@ -1220,12 +1241,36 @@ export default function InboxPage() {
                   <button onClick={() => setAiDraft("")} className="ml-auto text-violet-300 hover:text-violet-500"><X className="w-3.5 h-3.5" /></button>
                 </div>
                 <p className="text-xs text-violet-700 whitespace-pre-wrap line-clamp-3">{aiDraft}</p>
+                {aiSources.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-violet-100">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">Підтверджені джерела</p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {aiSources.map(source => (
+                        <span key={source.id} className="inline-flex items-center gap-1 rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-violet-700 border border-violet-100">
+                          <BookOpen className="w-2.5 h-2.5" />{source.title}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {aiHandoffSuggested && (
+                  <div className="mt-2 flex items-center gap-1.5 text-[10px] font-medium text-amber-700">
+                    <AlertCircle className="w-3 h-3" /> Підтверджених знань недостатньо — уточніть у менеджера.
+                  </div>
+                )}
+                {bookingIntake?.detected && (
+                  <div className="mt-2 rounded-lg bg-white/80 px-2 py-1.5 text-[10px] text-violet-700">
+                    Запит на проживання: {bookingIntake.checkIn && bookingIntake.checkOut ? `${bookingIntake.checkIn} — ${bookingIntake.checkOut}` : "потрібно уточнити дати"}
+                    {bookingIntake.adults ? ` · ${bookingIntake.adults} дорослих` : ""}{bookingIntake.children ? ` · ${bookingIntake.children} дітей` : ""}
+                    <span className="ml-1 font-semibold">Потребує перевірки менеджером.</span>
+                  </div>
+                )}
                 <div className="flex gap-2 mt-2">
                   <Button size="sm" className="h-6 text-xs px-3 bg-violet-600 hover:bg-violet-700"
-                    onClick={() => { setReplyText(aiDraft); setAiDraft(""); setTimeout(() => replyRef.current?.focus(), 100); }}>
+                    onClick={() => { setReplyText(aiDraft); setAiDraft(""); setAiSources([]); setAiHandoffSuggested(false); setBookingIntake(null); setTimeout(() => replyRef.current?.focus(), 100); }}>
                     Використати
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-violet-500" onClick={() => setAiDraft("")}>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-violet-500" onClick={() => { setAiDraft(""); setAiSources([]); setAiHandoffSuggested(false); setBookingIntake(null); }}>
                     Відхилити
                   </Button>
                 </div>

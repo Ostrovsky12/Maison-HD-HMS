@@ -22,5 +22,8 @@ export const invoicesTable = stub;
 export const legalEntitiesTable = stub;
 export const usersTable = stub;
 export const channelConfigsTable = stub;
+export const aiKnowledgeArticlesTable = stub;
+export const aiConciergeSettingsTable = stub;
+export const aiConciergeAuditLogsTable = stub;
 // Proxy catches any other table that a transitively-loaded route might need
 export const _proxy = new Proxy(stub, { get: () => stub });

@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import {
   conversationsTable, messagesTable, channelConfigsTable,
   bookingsTable, guestsTable, unitsTable, propertiesTable,
+  aiKnowledgeArticlesTable, aiConciergeSettingsTable, aiConciergeAuditLogsTable,
 } from "@workspace/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
@@ -10,6 +11,44 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 
 const router = Router();
 router.use(requireAuth);
+router.use((req: any, res, next) => {
+  if (!Number.isInteger(req.user?.organizationId)) {
+    res.status(400).json({
+      error: "Оберіть організацію перед роботою з Comm Hub.",
+      code: "ORGANIZATION_CONTEXT_REQUIRED",
+    });
+    return;
+  }
+  next();
+});
+
+function rankedKnowledgeArticles(articles: any[], text: string) {
+  const terms = [...new Set(text.toLowerCase().match(/[а-яіїєa-z0-9]{3,}/gi) || [])].slice(0, 16);
+  return articles
+    .map((article) => {
+      const haystack = `${article.title} ${article.tags || ""} ${article.content}`.toLowerCase();
+      return { article, score: terms.filter((term) => haystack.includes(term)).length };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || b.article.updatedAt.getTime() - a.article.updatedAt.getTime())
+    .slice(0, 4)
+    .map(({ article }) => article);
+}
+
+function bookingIntakeFromMessage(message: string) {
+  const dateRange = message.match(/\b(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)\s*(?:[-–]|до)\s*(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/i);
+  const adults = message.match(/(\d+)\s*(?:доросл\w*|гост\w*)/i)?.[1] ?? null;
+  const children = message.match(/(\d+)\s*(?:дит\w*)/i)?.[1] ?? null;
+  const bookingIntent = /(брон|вільн|заїзд|проживан|будин|номер)/i.test(message);
+  return {
+    detected: bookingIntent,
+    checkIn: dateRange?.[1] ?? null,
+    checkOut: dateRange?.[2] ?? null,
+    adults: adults ? Number(adults) : null,
+    children: children ? Number(children) : null,
+    needsManagerReview: bookingIntent,
+  };
+}
 
 // ── Demo data seed ─────────────────────────────────────────────────────────
 const DEMO_CONVERSATIONS = [
@@ -225,8 +264,8 @@ router.get("/conversations/:id", async (req: any, res) => {
         FROM bookings b
         JOIN units u ON u.id = b.unit_id
         JOIN properties p ON p.id = u.property_id
-        WHERE b.id = $1
-      `, [conv.booking_id]);
+        WHERE b.id = $1 AND p.organization_id = $2
+      `, [conv.booking_id, orgId]);
       booking = bR.rows[0] || null;
     }
 
@@ -404,6 +443,14 @@ router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
+    const [conciergeSettings] = await db.select()
+      .from(aiConciergeSettingsTable)
+      .where(eq(aiConciergeSettingsTable.organizationId, orgId))
+      .limit(1);
+    if (conciergeSettings && !conciergeSettings.enabled) {
+      res.status(409).json({ error: "AI Concierge вимкнено для цієї організації." });
+      return;
+    }
 
     // Fetch conversation
     const convR = await (db as any).$client.query(
@@ -424,6 +471,20 @@ router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
     const lastInbound = [...messages].reverse().find((m: any) => m.direction === "inbound");
     if (!lastInbound?.content) return res.status(400).json({ error: "Немає вхідних повідомлень" });
 
+    const publishedArticles = await db.select()
+      .from(aiKnowledgeArticlesTable)
+      .where(and(
+        eq(aiKnowledgeArticlesTable.organizationId, orgId),
+        eq(aiKnowledgeArticlesTable.status, "published"),
+        sql`(${aiKnowledgeArticlesTable.effectiveFrom} IS NULL OR ${aiKnowledgeArticlesTable.effectiveFrom} <= CURRENT_DATE)`,
+        sql`(${aiKnowledgeArticlesTable.effectiveUntil} IS NULL OR ${aiKnowledgeArticlesTable.effectiveUntil} >= CURRENT_DATE)`,
+      ))
+      .orderBy(desc(aiKnowledgeArticlesTable.updatedAt));
+    const knowledgeSources = rankedKnowledgeArticles(publishedArticles, lastInbound.content);
+    const knowledgeContext = knowledgeSources.length
+      ? knowledgeSources.map((article) => `Джерело #${article.id}: ${article.title}\n${article.content}`).join("\n\n")
+      : "Підтверджених джерел для цього питання не знайдено.";
+
     // Fetch org name for context
     const orgR = await (db as any).$client.query(
       `SELECT name FROM organizations WHERE id = $1`, [orgId]);
@@ -436,9 +497,10 @@ router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
         SELECT b.check_in, b.check_out, b.status, b.total_amount, b.payment_status,
                u.name as unit_name
         FROM bookings b
-        LEFT JOIN units u ON u.id = b.unit_id
-        WHERE b.id = $1
-      `, [conv.booking_id]);
+        INNER JOIN units u ON u.id = b.unit_id
+        INNER JOIN properties p ON p.id = u.property_id
+        WHERE b.id = $1 AND p.organization_id = $2
+      `, [conv.booking_id, orgId]);
       if (bkR.rows[0]) {
         const bk = bkR.rows[0];
         bookingContext = `\nПов'язане бронювання: ${bk.unit_name}, заїзд ${bk.check_in} → виїзд ${bk.check_out}, статус: ${bk.status}, сума: ${bk.total_amount} UAH (оплата: ${bk.payment_status}).`;
@@ -475,7 +537,12 @@ router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
 6. Можна використовувати 1-2 емодзі. Не перевантажуй текст.
 7. Відповідь має бути готова до відправки — ресепшеніст лише перевіряє і може підкоригувати.
 8. Максимум 4-5 речень або 4-5 коротких рядків. Не пиши довгих полотен тексту.
-9. НЕ додавай фраз "Чернетка:", "AI:", "Пропонована відповідь:" — одразу текст відповіді.`;
+9. НЕ додавай фраз "Чернетка:", "AI:", "Пропонована відповідь:" — одразу текст відповіді.
+10. Використовуй конкретні правила, тарифи й умови ЛИШЕ з підтверджених джерел нижче. Не вигадуй деталі.
+11. Якщо підтверджених знань немає або їх недостатньо, чесно повідом, що уточниш інформацію в менеджера. Не обіцяй бронювання, оплату або точну наявність.
+
+Підтверджені джерела:
+${knowledgeContext}`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
@@ -489,9 +556,49 @@ router.post("/conversations/:id/ai-suggest", async (req: any, res) => {
     const suggestion = completion.choices[0]?.message?.content?.trim() || "";
     if (!suggestion) return res.status(500).json({ error: "AI не повернув відповідь" });
 
-    res.json({ suggestion });
+    const sources = knowledgeSources.map(({ id, title, category, updatedAt }) => ({ id, title, category, updatedAt }));
+    const bookingIntake = bookingIntakeFromMessage(lastInbound.content);
+    const handoffSuggested = knowledgeSources.length === 0;
+    const mode = conciergeSettings?.mode ?? "manual";
+    const autoReplyEligible = mode === "faq_auto"
+      && !bookingIntake.detected
+      && knowledgeSources.length > 0
+      && knowledgeSources.every((article) => article.category === "faq");
+
+    if (handoffSuggested) {
+      await (db as any).$client.query(`
+        UPDATE conversations
+        SET status = CASE WHEN status = 'resolved' THEN status ELSE 'pending' END,
+            updated_at = NOW()
+        WHERE id = $1 AND organization_id = $2
+      `, [id, orgId]);
+    }
+
+    await db.insert(aiConciergeAuditLogsTable).values({
+      organizationId: orgId,
+      conversationId: id,
+      actorUserId: req.user.userId,
+      action: "inbox_reply_suggested",
+      outcome: handoffSuggested ? "handoff_queued" : autoReplyEligible ? "faq_auto_candidate" : "grounded_review",
+      sources: sources.map((source) => source.id),
+      details: {
+        mode,
+        autoReplyEligible,
+        bookingIntake,
+      },
+    });
+
+    res.json({
+      suggestion,
+      sources,
+      handoffSuggested,
+      bookingIntake,
+      mode,
+      autoReplyEligible,
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    req.log?.error({ err }, "Unable to generate grounded inbox suggestion");
+    res.status(500).json({ error: "Не вдалося сформувати AI-підказку." });
   }
 });
 
@@ -501,6 +608,20 @@ router.patch("/conversations/:id", async (req: any, res) => {
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
     const { status, bookingId, leadId, tags, assignedToId, subject, estimatedValue } = req.body;
+
+    if (bookingId !== undefined && bookingId !== null) {
+      const ownership = await (db as any).$client.query(`
+        SELECT b.id
+        FROM bookings b
+        INNER JOIN units u ON u.id = b.unit_id
+        INNER JOIN properties p ON p.id = u.property_id
+        WHERE b.id = $1 AND p.organization_id = $2
+      `, [bookingId, orgId]);
+      if (!ownership.rows[0]) {
+        res.status(403).json({ error: "Це бронювання не належить поточній організації." });
+        return;
+      }
+    }
 
     const sets: string[] = ["updated_at = NOW()"];
     const vals: any[] = [id, orgId];
@@ -575,6 +696,17 @@ router.post("/conversations/:id/link-booking/:bookingId", async (req: any, res) 
     const orgId = req.user.organizationId;
     const id = parseInt(req.params.id);
     const bookingId = parseInt(req.params.bookingId);
+    const ownership = await (db as any).$client.query(`
+      SELECT b.id
+      FROM bookings b
+      INNER JOIN units u ON u.id = b.unit_id
+      INNER JOIN properties p ON p.id = u.property_id
+      WHERE b.id = $1 AND p.organization_id = $2
+    `, [bookingId, orgId]);
+    if (!ownership.rows[0]) {
+      res.status(403).json({ error: "Це бронювання не належить поточній організації." });
+      return;
+    }
 
     const r = await (db as any).$client.query(`
       UPDATE conversations SET booking_id = $1, updated_at = NOW()

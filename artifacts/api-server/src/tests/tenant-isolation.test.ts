@@ -36,6 +36,8 @@ import bookingsRouter from "../routes/bookings.js";
 import accommodationRouter from "../routes/accommodation.js";
 import invoicesRouter from "../routes/invoices.js";
 import financeRouter from "../routes/finance.js";
+import aiRouter from "../routes/ai.js";
+import inboxRouter from "../routes/inbox.js";
 import { signToken } from "../lib/auth.js";
 
 // ── Minimal test app ──────────────────────────────────────────────────────────
@@ -45,6 +47,8 @@ app.use("/api/bookings", bookingsRouter);
 app.use("/api/accommodation", accommodationRouter);
 app.use("/api/invoices", invoicesRouter);
 app.use("/api/finance", financeRouter);
+app.use("/api/ai", aiRouter);
+app.use("/api/inbox", inboxRouter);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -201,6 +205,7 @@ beforeEach(() => {
   vi.mocked(db.select).mockReset();
   vi.mocked(db.insert).mockReset();
   vi.mocked(db.execute).mockReset();
+  vi.mocked((db as any).$client.query).mockReset();
   vi.mocked(pool.connect).mockReset();
   vi.mocked(pool.query).mockReset();
 });
@@ -1013,5 +1018,50 @@ describe("Invoice creation — tenant guard (organization_id required)", () => {
     // Guard passed; response is 201 Created from the route
     expect(res.status).toBe(201);
     expect(vi.mocked(db.insert)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Knowledge Hub and Comm Hub — explicit tenant context", () => {
+  it("rejects a super admin without a selected organization before querying knowledge", async () => {
+    const token = tokenFor(null, "super_admin");
+
+    const res = await request(app)
+      .get("/api/ai/knowledge")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("ORGANIZATION_CONTEXT_REQUIRED");
+    expect(vi.mocked(db.select)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a super admin without a selected organization before loading Comm Hub", async () => {
+    const token = tokenFor(null, "super_admin");
+
+    const res = await request(app)
+      .get("/api/inbox/stats")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("ORGANIZATION_CONTEXT_REQUIRED");
+    expect(vi.mocked(db.select)).not.toHaveBeenCalled();
+  });
+});
+
+describe("Comm Hub booking linkage — tenant isolation", () => {
+  it("rejects linking a foreign booking before changing a conversation", async () => {
+    const query = vi.mocked((db as any).$client.query);
+    query.mockResolvedValueOnce({ rows: [] });
+    const token = tokenFor(1, "owner");
+
+    const res = await request(app)
+      .patch("/api/inbox/conversations/10")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ bookingId: 200 });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/не належить/i);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toContain("p.organization_id = $2");
+    expect(query.mock.calls[0][1]).toEqual([200, 1]);
   });
 });

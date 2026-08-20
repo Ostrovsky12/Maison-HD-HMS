@@ -3,14 +3,101 @@ import { db } from "@workspace/db";
 import {
   conversationsTable, messagesTable,
   guestsTable, bookingsTable,
-  aiKnowledgeArticlesTable,
+  aiKnowledgeArticlesTable, aiConciergeSettingsTable, aiConciergeAuditLogsTable,
 } from "@workspace/db";
-import { eq, desc, and, sql } from "drizzle-orm";
-import { requireAuth } from "../lib/auth.js";
+import { eq, desc, and, sql, ne } from "drizzle-orm";
+import { requireAuth, requireRole } from "../lib/auth.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
+
+function requireOrganizationContext(req: any, res: any): number | null {
+  const orgId = getOrg(req);
+  if (!Number.isInteger(orgId)) {
+    res.status(400).json({
+      error: "Оберіть організацію перед роботою з базою знань або AI Concierge.",
+      code: "ORGANIZATION_CONTEXT_REQUIRED",
+    });
+    return null;
+  }
+  return orgId;
+}
+
+function articleId(value: unknown): number | null {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function articleInput(body: any): { data?: Record<string, unknown>; error?: string } {
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  const content = typeof body?.content === "string" ? body.content.trim() : "";
+  const category = typeof body?.category === "string" ? body.category.trim() : "general";
+  const allowedCategories = new Set(["general", "faq", "accommodation", "rates", "policies", "services", "checkin", "scripts"]);
+  const tags = Array.isArray(body?.tags)
+    ? body.tags.filter((tag: unknown) => typeof tag === "string").map((tag: string) => tag.trim()).filter(Boolean).join(", ")
+    : typeof body?.tags === "string" ? body.tags.trim() : null;
+  const validDate = (value: unknown) => value === null || value === undefined || value === "" || /^\d{4}-\d{2}-\d{2}$/.test(String(value));
+
+  if (!title || title.length > 180) return { error: "Назва має містити від 1 до 180 символів." };
+  if (!content || content.length > 20_000) return { error: "Текст має містити від 1 до 20 000 символів." };
+  if (!allowedCategories.has(category)) return { error: "Непідтримувана категорія статті." };
+  if (!validDate(body?.effectiveFrom) || !validDate(body?.effectiveUntil)) return { error: "Дата дії має бути у форматі YYYY-MM-DD." };
+  if (body?.effectiveFrom && body?.effectiveUntil && body.effectiveFrom > body.effectiveUntil) {
+    return { error: "Дата завершення не може бути раніше дати початку." };
+  }
+  return {
+    data: {
+      title,
+      content,
+      category,
+      tags,
+      effectiveFrom: body?.effectiveFrom || null,
+      effectiveUntil: body?.effectiveUntil || null,
+    },
+  };
+}
+
+async function conciergeSettings(organizationId: number) {
+  const [stored] = await db
+    .select()
+    .from(aiConciergeSettingsTable)
+    .where(eq(aiConciergeSettingsTable.organizationId, organizationId))
+    .limit(1);
+  return stored ?? { enabled: true, mode: "manual" as const };
+}
+
+function rankArticles(articles: any[], question: string) {
+  const keywords = [...new Set(question.toLowerCase().match(/[а-яіїєa-z0-9]{3,}/gi) || [])].slice(0, 16);
+  return articles
+    .map((article) => {
+      const searchable = `${article.title} ${article.tags || ""} ${article.content}`.toLowerCase();
+      const matches = keywords.filter((keyword) => searchable.includes(keyword)).length;
+      return { article, score: matches + (article.title.toLowerCase().includes(question.toLowerCase()) ? 3 : 0) };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || b.article.updatedAt.getTime() - a.article.updatedAt.getTime())
+    .slice(0, 4)
+    .map(({ article }) => article);
+}
+
+async function writeConciergeAudit(input: {
+  organizationId: number;
+  actorUserId?: number;
+  action: string;
+  outcome: string;
+  sources?: unknown;
+  details?: unknown;
+}) {
+  await db.insert(aiConciergeAuditLogsTable).values({
+    organizationId: input.organizationId,
+    actorUserId: input.actorUserId ?? null,
+    action: input.action,
+    outcome: input.outcome,
+    sources: input.sources ?? null,
+    details: input.details ?? null,
+  });
+}
 
 function extractJSON(raw: string, arrayMode = false): any {
   const stripped = raw.replace(/```(?:json)?\n?/g, "").replace(/```/g, "").trim();
@@ -354,96 +441,264 @@ router.get("/owner-insights", requireAuth, async (req: any, res) => {
   }
 });
 
-// ─── 6. AI knowledge base CRUD ───────────────────────────────────────────────
-router.get("/knowledge", requireAuth, async (req: any, res) => {
+// ─── 6. Tenant Knowledge Hub and Concierge controls ───────────────────────────
+router.get("/knowledge", requireAuth, async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  if (!orgId) return;
   try {
-    const orgId = getOrg(req);
-    const articles = await db
-      .select()
-      .from(aiKnowledgeArticlesTable)
-      .where(eq(aiKnowledgeArticlesTable.organizationId, orgId))
-      .orderBy(desc(aiKnowledgeArticlesTable.updatedAt));
-    res.json({ articles });
+    const [articles, settings] = await Promise.all([
+      db.select()
+        .from(aiKnowledgeArticlesTable)
+        .where(eq(aiKnowledgeArticlesTable.organizationId, orgId))
+        .orderBy(desc(aiKnowledgeArticlesTable.updatedAt)),
+      conciergeSettings(orgId),
+    ]);
+    res.json({ articles, settings });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    req.log?.error({ err }, "Unable to load knowledge hub");
+    res.status(500).json({ error: "Не вдалося завантажити базу знань." });
   }
 });
 
-router.post("/knowledge", requireAuth, async (req: any, res) => {
+router.post("/knowledge", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  if (!orgId) return;
+  const parsed = articleInput(req.body);
+  if (!parsed.data) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
   try {
-    const orgId = getOrg(req);
-    const { title, content, category, tags } = req.body;
-    const [article] = await db
-      .insert(aiKnowledgeArticlesTable)
-      .values({ organizationId: orgId, title, content, category: category || "general", tags })
+    const [article] = await db.insert(aiKnowledgeArticlesTable).values({
+      ...parsed.data,
+      organizationId: orgId,
+      createdById: req.user.userId,
+      status: "draft",
+    }).returning();
+    await writeConciergeAudit({
+      organizationId: orgId, actorUserId: req.user.userId, action: "knowledge_created",
+      outcome: "draft", details: { articleId: article.id },
+    });
+    res.status(201).json({ article });
+  } catch (err: any) {
+    req.log?.error({ err }, "Unable to create knowledge article");
+    res.status(500).json({ error: "Не вдалося створити статтю." });
+  }
+});
+
+router.put("/knowledge/:id", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  const id = articleId(req.params.id);
+  if (!orgId || !id) {
+    if (orgId && !id) res.status(400).json({ error: "Некоректний ідентифікатор статті." });
+    return;
+  }
+  const parsed = articleInput(req.body);
+  if (!parsed.data) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  try {
+    const [article] = await db.update(aiKnowledgeArticlesTable)
+      .set({ ...parsed.data, updatedAt: new Date() })
+      .where(and(eq(aiKnowledgeArticlesTable.id, id), eq(aiKnowledgeArticlesTable.organizationId, orgId)))
       .returning();
+    if (!article) {
+      res.status(404).json({ error: "Статтю не знайдено." });
+      return;
+    }
+    await writeConciergeAudit({
+      organizationId: orgId, actorUserId: req.user.userId, action: "knowledge_updated",
+      outcome: article.status, details: { articleId: article.id },
+    });
     res.json({ article });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    req.log?.error({ err }, "Unable to update knowledge article");
+    res.status(500).json({ error: "Не вдалося оновити статтю." });
   }
 });
 
-router.put("/knowledge/:id", requireAuth, async (req: any, res) => {
+router.post("/knowledge/:id/publish", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  const id = articleId(req.params.id);
+  if (!orgId || !id) {
+    if (orgId && !id) res.status(400).json({ error: "Некоректний ідентифікатор статті." });
+    return;
+  }
   try {
-    const orgId = getOrg(req);
-    const { title, content, category, tags } = req.body;
-    const [article] = await db
-      .update(aiKnowledgeArticlesTable)
-      .set({ title, content, category, tags, updatedAt: new Date() })
-      .where(and(eq(aiKnowledgeArticlesTable.id, parseInt(req.params.id)), eq(aiKnowledgeArticlesTable.organizationId, orgId)))
+    const [article] = await db.update(aiKnowledgeArticlesTable)
+      .set({ status: "published", publishedAt: new Date(), archivedAt: null, updatedAt: new Date() })
+      .where(and(eq(aiKnowledgeArticlesTable.id, id), eq(aiKnowledgeArticlesTable.organizationId, orgId)))
       .returning();
+    if (!article) {
+      res.status(404).json({ error: "Статтю не знайдено." });
+      return;
+    }
+    await writeConciergeAudit({
+      organizationId: orgId, actorUserId: req.user.userId, action: "knowledge_published",
+      outcome: "published", details: { articleId: article.id },
+    });
     res.json({ article });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    req.log?.error({ err }, "Unable to publish knowledge article");
+    res.status(500).json({ error: "Не вдалося опублікувати статтю." });
   }
 });
 
-router.delete("/knowledge/:id", requireAuth, async (req: any, res) => {
+router.post("/knowledge/:id/archive", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  const id = articleId(req.params.id);
+  if (!orgId || !id) {
+    if (orgId && !id) res.status(400).json({ error: "Некоректний ідентифікатор статті." });
+    return;
+  }
   try {
-    const orgId = getOrg(req);
-    await db
-      .delete(aiKnowledgeArticlesTable)
-      .where(and(eq(aiKnowledgeArticlesTable.id, parseInt(req.params.id)), eq(aiKnowledgeArticlesTable.organizationId, orgId)));
+    const [article] = await db.update(aiKnowledgeArticlesTable)
+      .set({ status: "archived", archivedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(aiKnowledgeArticlesTable.id, id), eq(aiKnowledgeArticlesTable.organizationId, orgId)))
+      .returning();
+    if (!article) {
+      res.status(404).json({ error: "Статтю не знайдено." });
+      return;
+    }
+    await writeConciergeAudit({
+      organizationId: orgId, actorUserId: req.user.userId, action: "knowledge_archived",
+      outcome: "archived", details: { articleId: article.id },
+    });
+    res.json({ article });
+  } catch (err: any) {
+    req.log?.error({ err }, "Unable to archive knowledge article");
+    res.status(500).json({ error: "Не вдалося архівувати статтю." });
+  }
+});
+
+router.delete("/knowledge/:id", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  const id = articleId(req.params.id);
+  if (!orgId || !id) {
+    if (orgId && !id) res.status(400).json({ error: "Некоректний ідентифікатор статті." });
+    return;
+  }
+  try {
+    const [deleted] = await db.delete(aiKnowledgeArticlesTable)
+      .where(and(
+        eq(aiKnowledgeArticlesTable.id, id),
+        eq(aiKnowledgeArticlesTable.organizationId, orgId),
+        ne(aiKnowledgeArticlesTable.status, "published"),
+      ))
+      .returning({ id: aiKnowledgeArticlesTable.id });
+    if (!deleted) {
+      res.status(409).json({ error: "Опубліковані статті потрібно спочатку архівувати." });
+      return;
+    }
+    await writeConciergeAudit({
+      organizationId: orgId, actorUserId: req.user.userId, action: "knowledge_deleted",
+      outcome: "deleted", details: { articleId: id },
+    });
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    req.log?.error({ err }, "Unable to delete knowledge article");
+    res.status(500).json({ error: "Не вдалося видалити статтю." });
   }
 });
 
-router.post("/knowledge/search", requireAuth, async (req: any, res) => {
+router.patch("/knowledge/settings", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  if (!orgId) return;
+  const mode = req.body?.mode;
+  const enabled = req.body?.enabled;
+  if ((mode !== undefined && !["manual", "faq_auto"].includes(mode)) || (enabled !== undefined && typeof enabled !== "boolean")) {
+    res.status(400).json({ error: "Некоректні налаштування AI Concierge." });
+    return;
+  }
   try {
-    const orgId = getOrg(req);
-    const { query } = req.body;
+    const current = await conciergeSettings(orgId);
+    const [settings] = await db.insert(aiConciergeSettingsTable).values({
+      organizationId: orgId,
+      mode: mode ?? current.mode,
+      enabled: enabled ?? current.enabled,
+      updatedById: req.user.userId,
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: aiConciergeSettingsTable.organizationId,
+      set: {
+        mode: mode ?? current.mode,
+        enabled: enabled ?? current.enabled,
+        updatedById: req.user.userId,
+        updatedAt: new Date(),
+      },
+    }).returning();
+    await writeConciergeAudit({
+      organizationId: orgId, actorUserId: req.user.userId, action: "concierge_settings_changed",
+      outcome: settings.mode, details: { enabled: settings.enabled },
+    });
+    res.json({ settings });
+  } catch (err: any) {
+    req.log?.error({ err }, "Unable to update concierge settings");
+    res.status(500).json({ error: "Не вдалося зберегти налаштування." });
+  }
+});
 
-    const articles = await db
-      .select()
+router.post("/knowledge/preview", requireAuth, async (req: any, res): Promise<void> => {
+  const orgId = requireOrganizationContext(req, res);
+  const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
+  if (!orgId) return;
+  if (!question || question.length > 1_000) {
+    res.status(400).json({ error: "Введіть питання до 1 000 символів." });
+    return;
+  }
+  try {
+    const published = await db.select()
       .from(aiKnowledgeArticlesTable)
-      .where(eq(aiKnowledgeArticlesTable.organizationId, orgId));
-
-    const articlesContext = articles.map((a: any) => `[${a.category}] ${a.title}: ${a.content}`).join("\n\n");
-
+      .where(and(
+        eq(aiKnowledgeArticlesTable.organizationId, orgId),
+        eq(aiKnowledgeArticlesTable.status, "published"),
+        sql`(${aiKnowledgeArticlesTable.effectiveFrom} IS NULL OR ${aiKnowledgeArticlesTable.effectiveFrom} <= CURRENT_DATE)`,
+        sql`(${aiKnowledgeArticlesTable.effectiveUntil} IS NULL OR ${aiKnowledgeArticlesTable.effectiveUntil} >= CURRENT_DATE)`,
+      ))
+      .orderBy(desc(aiKnowledgeArticlesTable.updatedAt));
+    const sources = rankArticles(published, question);
+    if (!sources.length) {
+      await writeConciergeAudit({
+        organizationId: orgId, actorUserId: req.user.userId, action: "knowledge_preview",
+        outcome: "handoff", sources: [], details: { question },
+      });
+      res.json({
+        answer: "У базі знань немає підтвердженої інформації для точної відповіді. Уточніть деталі або передайте запит менеджеру.",
+        sources: [],
+        handoffSuggested: true,
+      });
+      return;
+    }
+    const sourceContext = sources.map((article) =>
+      `Джерело #${article.id} — ${article.title} (${article.category}):\n${article.content}`,
+    ).join("\n\n");
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
-      max_completion_tokens: 1024,
+      max_completion_tokens: 600,
       messages: [
         {
           role: "system",
           content: `${HOTEL_SYSTEM_CONTEXT}
-Ти — AI-пошук по базі знань готелю. Знайди відповідь на питання, використовуючи надані статті.
-Якщо відповідь є в базі знань — дай точну відповідь з посиланням на статтю.
-Якщо не знайдено — скажи про це чесно.`,
+Ти відповідаєш лише на основі наданих підтверджених джерел. Не вигадуй умов, цін, наявності чи політик.
+Якщо джерел недостатньо, прямо скажи, що потрібно уточнення менеджера. Відповідай коротко українською мовою.`,
         },
-        {
-          role: "user",
-          content: `База знань:\n${articlesContext}\n\nПитання: ${query}`,
-        },
+        { role: "user", content: `Питання: ${question}\n\nПідтверджені джерела:\n${sourceContext}` },
       ],
     });
-
-    const answer = completion.choices[0]?.message?.content || "";
-    res.json({ answer, articlesSearched: articles.length });
+    const answer = completion.choices[0]?.message?.content?.trim() || "Потрібно уточнення менеджера.";
+    await writeConciergeAudit({
+      organizationId: orgId, actorUserId: req.user.userId, action: "knowledge_preview",
+      outcome: "grounded", sources: sources.map((source) => source.id), details: { question },
+    });
+    res.json({
+      answer,
+      sources: sources.map(({ id, title, category, updatedAt }) => ({ id, title, category, updatedAt })),
+      handoffSuggested: false,
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    req.log?.error({ err }, "Unable to preview grounded response");
+    res.status(500).json({ error: "Не вдалося сформувати відповідь на основі знань." });
   }
 });
 
