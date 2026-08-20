@@ -401,6 +401,11 @@ async function ensureSchema() {
   `);
   await db.execute(sql`
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS with_pets BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS group_booking_id VARCHAR(36);
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS group_name TEXT;
+    CREATE INDEX IF NOT EXISTS idx_bookings_org_group_booking
+      ON bookings (organization_id, group_booking_id)
+      WHERE group_booking_id IS NOT NULL;
   `);
   await db.execute(sql`
     ALTER TABLE organizations ADD COLUMN IF NOT EXISTS guest_guide_url TEXT;

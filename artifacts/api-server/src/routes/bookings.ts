@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, pool } from "@workspace/db";
-import { bookingsTable, guestsTable, unitsTable, propertiesTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable, housekeepingTasksTable, guestServiceOrdersTable } from "@workspace/db/schema";
+import { bookingsTable, guestsTable, unitsTable, propertiesTable, organizationsTable, bookingAddonsTable, addonsTable, paymentsTable, notificationsTable, ratesTable, housekeepingTasksTable, guestServiceOrdersTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, inArray, desc, sql, or, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { validateTransition, canCancel, type BookingStatus } from "../lib/bookingStateMachine.js";
@@ -489,15 +489,120 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+async function resolveGroupOrganization(user: any, requestedOrganizationId: unknown) {
+  const requestedId = Number(requestedOrganizationId);
+  const hasRequestedId = Number.isInteger(requestedId) && requestedId > 0;
+
+  if (user.organizationId) {
+    if (hasRequestedId && requestedId !== user.organizationId) {
+      return { error: "You cannot create a booking in another organization", status: 403 } as const;
+    }
+    return { organizationId: user.organizationId } as const;
+  }
+
+  if (user.role !== "super_admin") {
+    return { error: "Organization context missing from token", status: 403 } as const;
+  }
+  if (!hasRequestedId) {
+    return { error: "Select an organization before creating a group booking", status: 400 } as const;
+  }
+
+  const [organization] = await db.select({ id: organizationsTable.id })
+    .from(organizationsTable)
+    .where(eq(organizationsTable.id, requestedId))
+    .limit(1);
+  if (!organization) {
+    return { error: "Organization not found", status: 404 } as const;
+  }
+  return { organizationId: organization.id } as const;
+}
+
+// GET /api/bookings/group-availability — availability for the group booking wizard
+router.get("/group-availability", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const { checkIn, checkOut, organizationId } = req.query as Record<string, string | undefined>;
+  if (!checkIn || !checkOut) {
+    res.status(400).json({ error: "checkIn and checkOut are required" });
+    return;
+  }
+
+  const checkInDate = new Date(checkIn);
+  const checkOutDate = new Date(checkOut);
+  if (!Number.isFinite(checkInDate.getTime()) || !Number.isFinite(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
+    res.status(400).json({ error: "checkOut must be after checkIn" });
+    return;
+  }
+
+  const orgResult = await resolveGroupOrganization(user, organizationId);
+  if (!("organizationId" in orgResult)) {
+    res.status(orgResult.status).json({ error: orgResult.error });
+    return;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT
+       u.id,
+       u.name,
+       u.category,
+       p.id AS property_id,
+       p.name AS property_name,
+       p.type AS property_type,
+       COALESCE(NULLIF(u.max_capacity, 0), u.capacity, 1) AS capacity,
+       COALESCE(u.base_price, 0) AS base_price,
+       NOT EXISTS (
+         SELECT 1 FROM bookings b
+         WHERE b.unit_id = u.id
+           AND b.status IN ('pending', 'confirmed', 'checked_in')
+           AND b.check_in < $3::date
+           AND b.check_out > $2::date
+       ) AND NOT EXISTS (
+         SELECT 1 FROM accommodation_blocks ab
+         WHERE ab.organization_id = $1
+           AND ab.is_active = true
+           AND u.id = ANY(ARRAY(SELECT jsonb_array_elements_text(ab.unit_ids))::int[])
+           AND ab.start_date < $3::date
+           AND ab.end_date > $2::date
+       ) AS is_available
+     FROM units u
+     JOIN properties p ON p.id = u.property_id
+     WHERE p.organization_id = $1
+       AND p.type NOT IN ('spa', 'pool')
+       AND u.status = 'active'
+       AND COALESCE(u.is_hidden, false) = false
+     ORDER BY p.name, u.name`,
+    [orgResult.organizationId, checkIn, checkOut],
+  );
+
+  const nights = Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000);
+  res.json({
+    organizationId: orgResult.organizationId,
+    checkIn,
+    checkOut,
+    nights,
+    units: rows.map((unit: any) => ({
+      id: unit.id,
+      name: unit.name,
+      category: unit.category,
+      propertyId: unit.property_id,
+      propertyName: unit.property_name,
+      propertyType: unit.property_type,
+      capacity: Number(unit.capacity),
+      basePrice: Number(unit.base_price),
+      isAvailable: Boolean(unit.is_available),
+    })),
+  });
+});
+
 // POST /api/bookings/group — create multiple units as one group booking
 router.post("/group", requireAuth, async (req, res) => {
   const user = (req as any).user;
 
-  // Non-super-admin with no org cannot create bookings
-  if (!user.organizationId && user.role !== "super_admin") {
-    res.status(403).json({ error: "Forbidden", message: "Access denied" });
+  const orgResult = await resolveGroupOrganization(user, req.body.organizationId);
+  if (!("organizationId" in orgResult)) {
+    res.status(orgResult.status).json({ error: orgResult.error });
     return;
   }
+  const organizationId = orgResult.organizationId;
 
   const {
     units, // array of { unitId, adults, childrenUnder6, childrenOver6, extraBeds }
@@ -506,7 +611,7 @@ router.post("/group", requireAuth, async (req, res) => {
     firstName, lastName, middleName, phone,
     discountId, discountValue, discountType,
     selectedAddons, legalEntityId, notes,
-    payOnArrival, partialAmount,
+    payOnArrival, partialAmount, groupName, totalGuests,
   } = req.body;
 
   if (!Array.isArray(units) || units.length === 0) {
@@ -514,34 +619,107 @@ router.post("/group", requireAuth, async (req, res) => {
     return;
   }
 
-  // Validate all supplied unit IDs belong to the caller's org (pre-transaction check)
-  if (user.organizationId) {
-    const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
-      .where(eq(propertiesTable.organizationId, user.organizationId));
-    const authorisedPropIds = orgProps.map((p: any) => p.id);
-    if (authorisedPropIds.length === 0) {
-      res.status(403).json({ error: "Forbidden", message: "No properties in your organization" });
+  if (!checkIn || !checkOut) {
+    res.status(400).json({ error: "checkIn and checkOut are required" });
+    return;
+  }
+  const groupCheckIn = new Date(checkIn);
+  const groupCheckOut = new Date(checkOut);
+  if (!Number.isFinite(groupCheckIn.getTime()) || !Number.isFinite(groupCheckOut.getTime()) || groupCheckOut <= groupCheckIn) {
+    res.status(400).json({ error: "checkOut must be after checkIn" });
+    return;
+  }
+
+  const requestedUnitIds = units.map((unit: any) => Number(unit.unitId));
+  if (requestedUnitIds.some(unitId => !Number.isInteger(unitId) || unitId <= 0)) {
+    res.status(400).json({ error: "Every group unit must have a valid unitId" });
+    return;
+  }
+  if (new Set(requestedUnitIds).size !== requestedUnitIds.length) {
+    res.status(400).json({ error: "A unit can only be selected once in a group booking" });
+    return;
+  }
+  if (units.some((unit: any) => !Number.isFinite(Number(unit.totalAmount || 0)) || Number(unit.totalAmount || 0) < 0)) {
+    res.status(400).json({ error: "Every group unit must have a non-negative totalAmount" });
+    return;
+  }
+
+  const normalizedGroupName = typeof groupName === "string" ? groupName.trim() : "";
+  const isNamedGroup = normalizedGroupName.length > 0;
+  if (groupName !== undefined && !normalizedGroupName) {
+    res.status(400).json({ error: "groupName cannot be empty" });
+    return;
+  }
+
+  const allocationsByUnitId = new Map<number, {
+    adults: number;
+    childrenUnder6: number;
+    childrenOver6: number;
+    extraBeds: number;
+  }>();
+  for (const unit of units) {
+    const allocation = {
+      adults: unit.adults === undefined || unit.adults === null
+        ? (isNamedGroup ? 0 : 1)
+        : Number(unit.adults),
+      childrenUnder6: unit.childrenUnder6 === undefined || unit.childrenUnder6 === null ? 0 : Number(unit.childrenUnder6),
+      childrenOver6: unit.childrenOver6 === undefined || unit.childrenOver6 === null ? 0 : Number(unit.childrenOver6),
+      extraBeds: unit.extraBeds === undefined || unit.extraBeds === null ? 0 : Number(unit.extraBeds),
+    };
+    if (!Object.values(allocation).every(Number.isInteger) || Object.values(allocation).some(value => value < 0)) {
+      res.status(400).json({ error: "Guest counts and extra beds must be non-negative whole numbers" });
       return;
     }
-    const requestedUnitIds = units.map((u: any) => u.unitId).filter(Boolean);
-    if (requestedUnitIds.length > 0) {
-      const validUnits = await db.select({ id: unitsTable.id }).from(unitsTable)
-        .where(and(inArray(unitsTable.id, requestedUnitIds), inArray(unitsTable.propertyId, authorisedPropIds)));
-      if (validUnits.length !== requestedUnitIds.length) {
-        res.status(403).json({ error: "Forbidden", message: "One or more units do not belong to your organization" });
-        return;
-      }
+    allocationsByUnitId.set(Number(unit.unitId), allocation);
+  }
+
+  // Validate all supplied unit IDs belong to the caller's org (pre-transaction check)
+  const orgProps = await db.select({ id: propertiesTable.id }).from(propertiesTable)
+    .where(eq(propertiesTable.organizationId, organizationId));
+  const authorisedPropIds = orgProps.map((p: any) => p.id);
+  if (authorisedPropIds.length === 0) {
+    res.status(403).json({ error: "Forbidden", message: "No properties in your organization" });
+    return;
+  }
+  const validUnits = await db.select({
+    id: unitsTable.id,
+    capacity: unitsTable.capacity,
+    maxCapacity: unitsTable.maxCapacity,
+  }).from(unitsTable)
+    .where(and(inArray(unitsTable.id, requestedUnitIds), inArray(unitsTable.propertyId, authorisedPropIds)));
+  if (validUnits.length !== requestedUnitIds.length) {
+    res.status(403).json({ error: "Forbidden", message: "One or more units do not belong to your organization" });
+    return;
+  }
+
+  if (isNamedGroup) {
+    const declaredGuests = Number(totalGuests);
+    if (!Number.isInteger(declaredGuests) || declaredGuests < 1) {
+      res.status(400).json({ error: "totalGuests must be a positive whole number" });
+      return;
+    }
+    const capacities = new Map(validUnits.map(unit => [unit.id, Number(unit.maxCapacity || unit.capacity || 1)]));
+    const allocatedGuests = units.reduce((sum: number, unit: any) => {
+      const allocation = allocationsByUnitId.get(Number(unit.unitId));
+      if (!allocation) return Number.NaN;
+      const assigned = allocation.adults + allocation.childrenUnder6 + allocation.childrenOver6;
+      if (assigned > (capacities.get(Number(unit.unitId)) || 0)) return Number.NaN;
+      return sum + assigned;
+    }, 0);
+    if (!Number.isFinite(allocatedGuests) || allocatedGuests !== declaredGuests) {
+      res.status(400).json({ error: "Guest allocation must match the group size and unit capacities" });
+      return;
     }
   }
 
 
   let { guestId } = req.body;
 
-  // Validate supplied guestId belongs to the caller's org (prevents cross-tenant guest PII leak)
-  if (guestId && user.organizationId) {
+  // Validate supplied guestId belongs to the resolved organization (including Super Admin selection).
+  if (guestId) {
     const [guestCheck] = await db.select({ id: guestsTable.id })
       .from(guestsTable)
-      .where(and(eq(guestsTable.id, guestId), eq(guestsTable.organizationId, user.organizationId)))
+      .where(and(eq(guestsTable.id, guestId), eq(guestsTable.organizationId, organizationId)))
       .limit(1);
     if (!guestCheck) {
       res.status(403).json({ error: "Forbidden", message: "Guest does not belong to your organization" });
@@ -553,13 +731,13 @@ router.post("/group", requireAuth, async (req, res) => {
   if (!guestId && (phone || firstName)) {
     if (phone) {
       const existing = await db.select().from(guestsTable)
-        .where(and(eq(guestsTable.phone, phone), eq(guestsTable.organizationId, user.organizationId || 0)))
+        .where(and(eq(guestsTable.phone, phone), eq(guestsTable.organizationId, organizationId)))
         .limit(1);
       if (existing.length > 0) guestId = existing[0].id;
     }
     if (!guestId && firstName) {
       const [newGuest] = await db.insert(guestsTable).values({
-        organizationId: user.organizationId || 0,
+        organizationId,
         firstName: firstName || "Гість",
         lastName: lastName || "",
         middleName: middleName || null,
@@ -592,19 +770,18 @@ router.post("/group", requireAuth, async (req, res) => {
 
     for (const unit of units) {
       const unitId = unit.unitId;
+      const allocation = allocationsByUnitId.get(Number(unitId))!;
 
       // Verify unit belongs to caller's org
-      if (user.organizationId) {
-        const orgCheck = await client.query(
-          `SELECT u.id FROM units u JOIN properties p ON p.id = u.property_id
-           WHERE u.id = $1 AND p.organization_id = $2 LIMIT 1`,
-          [unitId, user.organizationId],
-        );
-        if (!orgCheck.rows.length) {
-          await client.query("ROLLBACK");
-          res.status(403).json({ error: "Forbidden", message: `Unit ${unitId} not in your organization` });
-          return;
-        }
+      const orgCheck = await client.query(
+        `SELECT u.id FROM units u JOIN properties p ON p.id = u.property_id
+         WHERE u.id = $1 AND p.organization_id = $2 LIMIT 1`,
+        [unitId, organizationId],
+      );
+      if (!orgCheck.rows.length) {
+        await client.query("ROLLBACK");
+        res.status(403).json({ error: "Forbidden", message: `Unit ${unitId} not in your organization` });
+        return;
       }
 
       // Lock unit row to prevent concurrent double-booking
@@ -624,7 +801,7 @@ router.post("/group", requireAuth, async (req, res) => {
         }
       }
 
-      const guestsCount = (unit.adults || 1) + (unit.childrenUnder6 || 0) + (unit.childrenOver6 || 0);
+      const guestsCount = allocation.adults + allocation.childrenUnder6 + allocation.childrenOver6;
       const unitTotal = Number(unit.totalAmount || 0);
       const ins = await client.query(
         `INSERT INTO bookings (
@@ -634,20 +811,20 @@ router.post("/group", requireAuth, async (req, res) => {
           extra_beds, guests_count, first_name, last_name, middle_name, phone,
           total_amount, paid_amount, payment_status, pay_on_arrival,
           discount_id, discount_value, discount_type, selected_addons,
-          legal_entity_id, notes, internal_notes, group_booking_id, draft_expires_at
+          legal_entity_id, notes, internal_notes, group_booking_id, group_name, draft_expires_at
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-          $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
+          $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34
         ) RETURNING *`,
         [
-          unitId, guestId || null, user.organizationId || null, checkIn, checkOut,
+          unitId, guestId || null, organizationId, checkIn, checkOut,
           checkinTime || "14:00", checkoutTime || "12:00", bookingStatus, source || "direct",
-          rateId || null, rateName || null, unit.adults || 1, unit.childrenUnder6 || 0, unit.childrenOver6 || 0,
-          unit.extraBeds || 0, guestsCount, firstName || null, lastName || null, middleName || null, phone || null,
+          rateId || null, rateName || null, allocation.adults, allocation.childrenUnder6, allocation.childrenOver6,
+          allocation.extraBeds, guestsCount, firstName || null, lastName || null, middleName || null, phone || null,
           String(unitTotal), initialPaid, initialPaymentStatus, isPayOnArrival,
           discountId || null, discountValue ? String(discountValue) : null, discountType || null,
           JSON.stringify(selectedAddons || {}), legalEntityId || null, notes || null,
-          isPayOnArrival ? "Оплата при заїзді" : null, groupBookingId, draftExpiresAt,
+          isPayOnArrival ? "Оплата при заїзді" : null, groupBookingId, normalizedGroupName || null, draftExpiresAt,
         ],
       );
       const booking = ins.rows[0];
@@ -695,7 +872,7 @@ router.post("/group", requireAuth, async (req, res) => {
     }).where(eq(guestsTable.id, guestId));
   }
 
-  res.status(201).json({ groupBookingId, bookings: created, totalAmount: totalAllUnits });
+  res.status(201).json({ groupBookingId, groupName: normalizedGroupName || null, bookings: created, totalAmount: totalAllUnits });
 });
 
 // GET /api/bookings/calendar?startDate=&days=&propertyId= — chessboard data
@@ -849,6 +1026,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
     checkinTime: bookingsTable.checkinTime,
     checkoutTime: bookingsTable.checkoutTime,
     paymentLink: bookingsTable.paymentLink,
+    groupName: bookingsTable.groupName,
   }).from(bookingsTable).where(
     and(
       inArray(bookingsTable.unitId, unitIds),
@@ -879,7 +1057,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
     return {
       id: b.id,
       unitId: b.unitId,
-      guestName: guestFromMap || guestFromBooking || "Гість",
+      guestName: b.groupName || guestFromMap || guestFromBooking || "Гість",
       checkIn: b.checkIn,
       checkOut: b.checkOut,
       status: b.status,

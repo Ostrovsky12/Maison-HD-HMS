@@ -102,6 +102,7 @@ export const bookingsTable = pgTable("bookings", {
 
   // Group booking (multiple units in one reservation)
   groupBookingId: varchar("group_booking_id", { length: 36 }),
+  groupName: text("group_name"),
 
   // Draft
   draftExpiresAt: timestamp("draft_expires_at"),

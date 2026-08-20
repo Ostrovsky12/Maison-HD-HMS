@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BookingDialog } from "@/components/booking/booking-dialog";
+import { GroupBookingWizard } from "@/components/booking/group-booking-wizard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, subDays, parseISO, differenceInDays, startOfWeek, endOfWeek } from "date-fns";
@@ -126,6 +127,7 @@ export default function ChessPage() {
 
   // ── Dialogs ──
   const [newBk, setNewBk] = useState<{ open: boolean; unitId?: number; checkIn?: string; checkOut?: string }>({ open: false });
+  const [groupBooking, setGroupBooking] = useState(false);
   const [detailBk, setDetailBk] = useState<any>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
@@ -443,6 +445,9 @@ export default function ChessPage() {
             {/* Add booking */}
             <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700" onClick={() => setNewBk({ open: true })}>
               <Plus className="h-3.5 w-3.5 mr-1" /> Бронювання
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs border-violet-200 text-violet-700 hover:bg-violet-50" onClick={() => setGroupBooking(true)}>
+              <Users className="h-3.5 w-3.5 mr-1" /> Групове
             </Button>
           </div>
 
@@ -901,6 +906,13 @@ export default function ChessPage() {
         checkOut={newBk.checkOut}
         onClose={() => setNewBk({ open: false })}
         onSuccess={() => { setNewBk({ open: false }); loadData(true); toast({ title: "Бронювання створено ✓" }); }}
+      />
+      <GroupBookingWizard
+        open={groupBooking}
+        checkIn={startDate}
+        checkOut={ds(addDays(dp(startDate), 1))}
+        onClose={() => setGroupBooking(false)}
+        onSuccess={() => { setGroupBooking(false); loadData(true); }}
       />
 
       {/* Date picker */}

@@ -440,6 +440,111 @@ describe("Tenant isolation — POST /api/bookings/group (foreign unitId rejectio
     expect(res.status).toBe(403);
     expect(vi.mocked(db.select)).not.toHaveBeenCalled();
   });
+
+  it("tenant user cannot override organizationId for a group booking", async () => {
+    const res = await request(app)
+      .post("/api/bookings/group")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({
+        organizationId: 2,
+        units: [{ unitId: 10, adults: 1, totalAmount: 100 }],
+        checkIn: "2026-02-01", checkOut: "2026-02-03",
+      });
+
+    expect(res.status).toBe(403);
+    expect(vi.mocked(db.select)).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate unit IDs before any database query", async () => {
+    const res = await request(app)
+      .post("/api/bookings/group")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({
+        units: [
+          { unitId: 10, adults: 1, totalAmount: 100 },
+          { unitId: 10, adults: 1, totalAmount: 100 },
+        ],
+        checkIn: "2026-02-01", checkOut: "2026-02-03",
+      });
+
+    expect(res.status).toBe(400);
+    expect(vi.mocked(db.select)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a named group when guests exceed the selected unit capacity", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeChain([{ id: 1 }]))
+      .mockReturnValueOnce(makeChain([{ id: 10, capacity: 2, maxCapacity: null }]));
+
+    const res = await request(app)
+      .post("/api/bookings/group")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({
+        groupName: "Велика група",
+        totalGuests: 3,
+        units: [{ unitId: 10, adults: 3, totalAmount: 300 }],
+        checkIn: "2026-02-01", checkOut: "2026-02-03",
+      });
+
+    expect(res.status).toBe(400);
+    expect(vi.mocked(pool.connect)).not.toHaveBeenCalled();
+  });
+
+  it("Super Admin cannot attach a guest from another selected organization", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeChain([{ id: 2 }])) // selected organization exists
+      .mockReturnValueOnce(makeChain([{ id: 2 }])) // selected organization's properties
+      .mockReturnValueOnce(makeChain([{ id: 10, capacity: 2, maxCapacity: null }]))
+      .mockReturnValueOnce(makeChain([])); // guest does not belong to organization 2
+
+    const res = await request(app)
+      .post("/api/bookings/group")
+      .set("Authorization", `Bearer ${tokenFor(null, "super_admin")}`)
+      .send({
+        organizationId: 2,
+        guestId: 500,
+        units: [{ unitId: 10, adults: 1, totalAmount: 300 }],
+        checkIn: "2026-02-01", checkOut: "2026-02-03",
+      });
+
+    expect(res.status).toBe(403);
+    expect(vi.mocked(pool.connect)).not.toHaveBeenCalled();
+  });
+
+  it("preserves a child-only allocation without adding an adult", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeChain([{ id: 1 }]))
+      .mockReturnValueOnce(makeChain([{ id: 10, capacity: 2, maxCapacity: null }]));
+
+    const client = {
+      query: vi.fn(async (query: string) => {
+        if (query === "BEGIN" || query === "COMMIT") return { rows: [] };
+        if (query.includes("JOIN properties")) return { rows: [{ id: 10 }] };
+        if (query.includes("FOR UPDATE") || query.includes("SELECT id FROM bookings")) return { rows: [] };
+        if (query.includes("INSERT INTO bookings")) return { rows: [{ id: 801, guest_access_code: "guest-code" }] };
+        if (query.includes("SELECT name FROM units")) return { rows: [{ name: "Кімната 10" }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const res = await request(app)
+      .post("/api/bookings/group")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({
+        groupName: "Дитяча група",
+        totalGuests: 1,
+        units: [{ unitId: 10, adults: 0, childrenUnder6: 1, childrenOver6: 0, totalAmount: 300 }],
+        checkIn: "2026-02-01", checkOut: "2026-02-03",
+      });
+
+    expect(res.status).toBe(201);
+    const insertArgs = client.query.mock.calls.find(([query]) => query.includes("INSERT INTO bookings"))?.[1];
+    expect(insertArgs[11]).toBe(0);
+    expect(insertArgs[12]).toBe(1);
+    expect(insertArgs[15]).toBe(1);
+  });
 });
 
 // ── guestId cross-tenant injection tests ─────────────────────────────────────

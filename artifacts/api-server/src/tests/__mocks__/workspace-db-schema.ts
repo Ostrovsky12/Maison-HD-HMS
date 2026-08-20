@@ -10,6 +10,7 @@ export const bookingsTable = stub;
 export const guestsTable = stub;
 export const unitsTable = stub;
 export const propertiesTable = stub;
+export const organizationsTable = stub;
 export const bookingAddonsTable = stub;
 export const addonsTable = stub;
 export const paymentsTable = stub;
