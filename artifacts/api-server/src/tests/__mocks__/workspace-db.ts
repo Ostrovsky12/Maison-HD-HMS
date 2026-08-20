@@ -10,6 +10,7 @@ const clientQuery = vi.fn().mockResolvedValue({ rows: [] });
 export const db = {
   select: vi.fn(),
   insert: vi.fn(),
+  update: vi.fn(),
   execute: vi.fn().mockResolvedValue({ rows: [] }),
   $client: { query: clientQuery },
 };

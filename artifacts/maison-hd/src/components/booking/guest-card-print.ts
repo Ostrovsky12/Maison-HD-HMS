@@ -15,11 +15,17 @@ const DEFAULT_RULES = [
   "Адміністрація не несе відповідальності за речі, залишені без нагляду на території комплексу.",
 ];
 
-export function openGuestCard(b: any, orgRules?: string | null) {
-  const fullName =
-    [b.lastName, b.firstName, b.middleName].filter(Boolean).join(" ") ||
-    b.guestName ||
+export function guestCardFullName(booking: any) {
+  const currentGuestProfileName = typeof booking.guestName === "string" ? booking.guestName.trim() : "";
+  return currentGuestProfileName ||
+    [booking.lastName, booking.firstName, booking.middleName].filter(Boolean).join(" ") ||
     "—";
+}
+
+export function openGuestCard(b: any, orgRules?: string | null) {
+  // guestName is resolved from the current guest profile by the bookings API.
+  // Snapshot fields on a booking can be stale after a guest profile is updated.
+  const fullName = guestCardFullName(b);
 
   const totalGuests =
     b.guestsCount ??

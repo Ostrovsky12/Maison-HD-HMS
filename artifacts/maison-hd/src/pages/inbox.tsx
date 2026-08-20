@@ -293,6 +293,51 @@ export default function InboxPage() {
     } finally { setChannelSetupLoading(""); }
   }
 
+  // ── Secure a legacy Telegram webhook without showing its token ─────────────
+  async function secureTelegramWebhook() {
+    setChannelSetupLoading("telegram-secure");
+    try {
+      const r = await apiFetch(`${API}/inbox/channels/telegram/secure-webhook`, { method: "POST" });
+      const d = await r.json();
+      if (d.success) {
+        toast({ title: "✅ Захист Telegram оновлено", description: "Webhook тепер приймає лише підписані запити Telegram." });
+        loadChannels();
+      } else {
+        toast({ title: "Помилка", description: d.error || "Не вдалося оновити захист Telegram", variant: "destructive" });
+      }
+    } finally { setChannelSetupLoading(""); }
+  }
+
+  // ── Enable Telegram Business connected bot ────────────────────────────────
+  async function setupTelegramBusiness() {
+    setChannelSetupLoading("telegram-business");
+    try {
+      const r = await apiFetch(`${API}/inbox/channels/telegram/business/setup`, { method: "POST" });
+      const d = await r.json();
+      if (d.success) {
+        toast({ title: "✅ Telegram Business увімкнено", description: `Підключіть @${d.botUsername} у Telegram Business` });
+        loadChannels();
+      } else {
+        toast({ title: "Помилка", description: d.error || "Не вдалося увімкнути Telegram Business", variant: "destructive" });
+      }
+    } finally { setChannelSetupLoading(""); }
+  }
+
+  // ── Stop Telegram Business message processing ─────────────────────────────
+  async function disconnectTelegramBusiness() {
+    setChannelSetupLoading("telegram-business-disconnect");
+    try {
+      const r = await apiFetch(`${API}/inbox/channels/telegram/business/setup`, { method: "DELETE" });
+      if (r.ok) {
+        toast({ title: "Telegram Business відключено" });
+        loadChannels();
+      } else {
+        const d = await r.json().catch(() => ({}));
+        toast({ title: "Помилка", description: d.error || "Не вдалося відключити Telegram Business", variant: "destructive" });
+      }
+    } finally { setChannelSetupLoading(""); }
+  }
+
   // ── Connect Instagram ────────────────────────────────────────────────────
   async function setupInstagram() {
     if (!igAccessToken.trim() || !igPageId.trim()) return;
@@ -1631,7 +1676,7 @@ export default function InboxPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div>
                 <h2 className="font-bold text-gray-900 text-base">Підключення каналів</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Telegram та Instagram для Unified Inbox</p>
+                <p className="text-xs text-gray-400 mt-0.5">Telegram Business, Telegram Bot та Instagram для Unified Inbox</p>
               </div>
               <button onClick={() => setShowChannelSettings(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
                 <X className="w-4 h-4" />
@@ -1662,6 +1707,15 @@ export default function InboxPage() {
                 <div className="px-4 py-4 space-y-3">
                   {channels.find(c => c.channel === "telegram")?.isEnabled ? (
                     <div className="space-y-2">
+                      {channels.find(c => c.channel === "telegram")?.config?.needs_secure_webhook === "true" && (
+                        <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-xs text-amber-800 space-y-2">
+                          <p>Потрібно оновити захист webhook. Це не змінює бота та не вимагає повторно вводити токен.</p>
+                          <Button size="sm" className="h-8 w-full bg-amber-600 hover:bg-amber-700"
+                            onClick={secureTelegramWebhook} disabled={channelSetupLoading === "telegram-secure"}>
+                            {channelSetupLoading === "telegram-secure" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Оновити захист Telegram"}
+                          </Button>
+                        </div>
+                      )}
                       <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-600">
                         <p className="font-medium mb-0.5">Webhook URL:</p>
                         <p className="font-mono text-[10px] break-all">{channels.find(c => c.channel === "telegram")?.webhookUrl}</p>
@@ -1691,6 +1745,62 @@ export default function InboxPage() {
                           {channelSetupLoading === "telegram" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Підключити"}
                         </Button>
                       </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── TELEGRAM BUSINESS ───────────────────────────────────────── */}
+              <div className="rounded-xl border border-gray-100 overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <Building2 className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm text-indigo-900">Telegram Business</p>
+                    <p className="text-[11px] text-indigo-600">
+                      {channels.find(c => c.channel === "telegram_business")?.isEnabled
+                        ? `✓ Підключено — ${channels.find(c => c.channel === "telegram_business")?.config?.business_connection_count || 0} business-акаунт(ів)`
+                        : channels.find(c => c.channel === "telegram")?.isEnabled
+                          ? "Готово до підключення у вашому Telegram"
+                          : "Спочатку підключіть Telegram Bot"}
+                    </p>
+                  </div>
+                  {channels.find(c => c.channel === "telegram_business")?.isEnabled && (
+                    <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-semibold">ACTIVE</span>
+                  )}
+                </div>
+
+                <div className="px-4 py-4 space-y-3">
+                  {!channels.find(c => c.channel === "telegram")?.isEnabled ? (
+                    <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-xs text-amber-800">
+                      Спершу підключіть Telegram Bot вище. Він стане офіційним Connected Business Bot для вашого звичайного Telegram Business акаунта.
+                    </div>
+                  ) : channels.find(c => c.channel === "telegram_business")?.isEnabled ? (
+                    <div className="space-y-3">
+                      <div className="bg-indigo-50 rounded-lg px-3 py-2 text-xs text-indigo-800">
+                        <p className="font-medium mb-1">Підключення активне</p>
+                        <p>У Telegram відкрийте <strong>Налаштування → Telegram Business → Чат-боти</strong>, оберіть цього бота та визначте чати, до яких він має доступ. Коди входу, пароль і 2FA ніколи не потрібні.</p>
+                      </div>
+                      <Button variant="outline" size="sm" className="w-full h-8 text-red-500 border-red-200 hover:bg-red-50"
+                        onClick={disconnectTelegramBusiness} disabled={channelSetupLoading === "telegram-business-disconnect"}>
+                        {channelSetupLoading === "telegram-business-disconnect" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Відключити Telegram Business"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <ol className="text-xs text-gray-600 space-y-1 pl-4 list-decimal">
+                        <li>Натисніть «Увімкнути Telegram Business» нижче</li>
+                        <li>У своєму Telegram відкрийте <strong>Налаштування → Telegram Business → Чат-боти</strong></li>
+                        <li>Оберіть підключеного бота та дозволені чати</li>
+                      </ol>
+                      <div className="bg-gray-50 rounded-lg px-3 py-2 text-[11px] text-gray-500">
+                        Гості продовжать писати на ваш звичайний Telegram Business акаунт, а повідомлення з вибраних чатів з’являться в Inbox.
+                      </div>
+                      <Button size="sm" className="w-full h-9 bg-indigo-600 hover:bg-indigo-700"
+                        onClick={setupTelegramBusiness} disabled={channelSetupLoading === "telegram-business"}>
+                        {channelSetupLoading === "telegram-business" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Увімкнути Telegram Business"}
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -1761,7 +1871,7 @@ export default function InboxPage() {
               {/* ── INFO ─────────────────────────────────────────────────────── */}
               <div className="bg-indigo-50 rounded-xl px-4 py-3 text-xs text-indigo-700">
                 <p className="font-semibold mb-1">Як це працює:</p>
-                <p>Гість пише у ваш Telegram-бот або Instagram DM → повідомлення з'являється тут в Inbox → ви відповідаєте з панелі → відповідь іде гостю назад у той самий канал.</p>
+                <p>Гість пише у ваш Telegram-бот, Telegram Business або Instagram DM → повідомлення з'являється тут в Inbox → ви відповідаєте з панелі → відповідь іде гостю назад у той самий канал.</p>
               </div>
 
             </div>

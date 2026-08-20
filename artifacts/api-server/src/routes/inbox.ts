@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { randomBytes } from "node:crypto";
 import { db } from "@workspace/db";
 import {
   conversationsTable, messagesTable, channelConfigsTable,
@@ -8,6 +9,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { logger } from "../lib/logger.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -21,6 +23,48 @@ router.use((req: any, res, next) => {
   }
   next();
 });
+
+const TELEGRAM_ALLOWED_UPDATES = [
+  "message",
+  "edited_message",
+  "business_connection",
+  "business_message",
+  "edited_business_message",
+  "deleted_business_messages",
+];
+
+function telegramWebhookUrl(orgId: number) {
+  const baseUrl = process.env.PUBLIC_API_URL
+    || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : null);
+  if (!baseUrl) throw new Error("PUBLIC_API_URL не налаштований");
+  return `${baseUrl.replace(/\/$/, "")}/api/inbox/webhooks/telegram/${orgId}`;
+}
+
+async function registerTelegramWebhook(botToken: string, webhookUrl: string, secretToken: string) {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url: webhookUrl,
+      secret_token: secretToken,
+      allowed_updates: TELEGRAM_ALLOWED_UPDATES,
+      drop_pending_updates: true,
+    }),
+  });
+  const result = await response.json() as any;
+  if (!result.ok) throw new Error(`Webhook error: ${result.description || response.status}`);
+}
+
+function businessConnections(config: Record<string, unknown> | undefined) {
+  const raw = config?.business_connections;
+  if (typeof raw !== "string") return {} as Record<string, { isEnabled?: boolean; canReply?: boolean }>;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 function rankedKnowledgeArticles(articles: any[], text: string) {
   const terms = [...new Set(text.toLowerCase().match(/[а-яіїєa-z0-9]{3,}/gi) || [])].slice(0, 16);
@@ -286,7 +330,23 @@ router.get("/conversations/:id", async (req: any, res) => {
 
     res.json({
       conversation: {
-        ...conv,
+        id: conv.id,
+        channel: conv.channel,
+        guestName: conv.guest_name,
+        guestPhone: conv.guest_phone,
+        guestEmail: conv.guest_email,
+        guestAvatarUrl: conv.guest_avatar_url,
+        guestId: conv.guest_id,
+        bookingId: conv.booking_id,
+        status: conv.status,
+        assignedToId: conv.assigned_to_id,
+        subject: conv.subject,
+        lastMessageAt: conv.last_message_at,
+        lastMessagePreview: conv.last_message_preview,
+        tags: conv.tags || [],
+        aiSummary: conv.ai_summary,
+        createdAt: conv.created_at,
+        updatedAt: conv.updated_at,
         unreadCount: 0,
         assignedToName: conv.assigned_to_name,
       },
@@ -323,7 +383,7 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
     if (!content?.trim()) return res.status(400).json({ error: "Порожнє повідомлення" });
 
     const convR = await (db as any).$client.query(
-      `SELECT id, channel, external_id FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
+      `SELECT id, channel, external_id, metadata FROM conversations WHERE id = $1 AND organization_id = $2`, [id, orgId]);
     if (!convR.rows[0]) return res.status(404).json({ error: "Not found" });
     const conv = convR.rows[0];
 
@@ -340,8 +400,8 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
 
     // ── Dispatch to actual channel ──────────────────────────────────────────
     if (conv.channel === "telegram" && conv.external_id) {
-      dispatchTelegram(orgId, conv.external_id, content.trim()).catch(e =>
-        console.error("[reply/telegram] dispatch error:", e)
+      dispatchTelegram(orgId, conv.external_id, content.trim(), conv.metadata).catch(error =>
+        logger.error({ err: error, organizationId: orgId, conversationId: id }, "Telegram reply dispatch failed"),
       );
     } else if (conv.channel === "instagram" && conv.external_id) {
       dispatchInstagram(orgId, conv.external_id, content.trim()).catch(e =>
@@ -365,22 +425,50 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
 });
 
 // ── Channel dispatch helpers ─────────────────────────────────────────────────
-async function dispatchTelegram(orgId: number, chatId: string, text: string) {
+async function dispatchTelegram(
+  orgId: number,
+  chatId: string,
+  text: string,
+  metadata: Record<string, unknown> | null,
+) {
   const [cfg] = await db.select().from(channelConfigsTable)
     .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
   const token = cfg?.config?.bot_token;
   if (!token) throw new Error("No Telegram bot token configured");
 
+  const isBusinessMessage = metadata?.telegram_delivery === "business";
+  const businessConnectionId = metadata?.telegram_business_connection_id;
+  const businessChatId = metadata?.telegram_chat_id;
+  const payload: Record<string, unknown> = {
+    chat_id: isBusinessMessage ? businessChatId : chatId,
+    text,
+    parse_mode: "HTML",
+  };
+  if (isBusinessMessage) {
+    if (
+      !cfg?.config?.business_enabled
+      || typeof businessConnectionId !== "string"
+      || typeof businessChatId !== "string"
+    ) {
+      throw new Error("Telegram Business connection is unavailable");
+    }
+    const connection = businessConnections(cfg.config as Record<string, unknown>)[businessConnectionId];
+    if (!connection?.isEnabled || !connection?.canReply) {
+      throw new Error("Telegram Business connection cannot reply");
+    }
+    payload.business_connection_id = businessConnectionId;
+  }
+
   const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+    body: JSON.stringify(payload),
   });
   if (!r.ok) {
     const e = await r.json() as any;
     throw new Error(`Telegram API error: ${e.description || r.status}`);
   }
-  console.log(`[reply/telegram] sent to chat_id=${chatId}`);
+  logger.info({ organizationId: orgId, delivery: isBusinessMessage ? "business" : "bot" }, "Telegram reply sent");
 }
 
 async function dispatchInstagram(orgId: number, recipientId: string, text: string) {
@@ -901,19 +989,39 @@ router.get("/channels", async (req: any, res) => {
     const configs = await db.select().from(channelConfigsTable)
       .where(eq(channelConfigsTable.organizationId, orgId));
     const channels = ["telegram", "instagram", "website", "email", "phone", "whatsapp", "viber"];
-    res.json(channels.map(ch => {
+    const response = channels.map(ch => {
       const config = configs.find(c => c.channel === ch);
+      const rawConfig = (config?.config || {}) as Record<string, string>;
       // Mask sensitive fields in response
-      const safeConfig = { ...(config?.config || {}) };
+      const safeConfig = { ...rawConfig };
       if (safeConfig.bot_token) safeConfig.bot_token = safeConfig.bot_token.slice(0, 10) + "...";
       if (safeConfig.access_token) safeConfig.access_token = safeConfig.access_token.slice(0, 10) + "...";
+      delete safeConfig.webhook_secret;
+      delete safeConfig.business_connections;
+      if (ch === "telegram") {
+        safeConfig.needs_secure_webhook = String(Boolean(config?.isEnabled && !rawConfig.webhook_secret));
+      }
       return {
         channel: ch,
         isEnabled: config?.isEnabled || ch === "website",
         config: safeConfig,
         webhookUrl: config?.webhookUrl || null,
       };
-    }));
+    });
+    const telegramConfig: any = configs.find(c => c.channel === "telegram" as any);
+    const telegramSettings = (telegramConfig?.config || {}) as Record<string, unknown>;
+    response.push({
+      channel: "telegram_business",
+      isEnabled: Boolean(telegramConfig?.isEnabled && telegramSettings.business_enabled === "true"),
+      config: {
+        bot_username: telegramSettings.bot_username,
+        business_connection_count: String(Object.values(businessConnections(telegramSettings))
+          .filter((connection) => connection?.isEnabled).length),
+        needs_bot_setup: String(!telegramConfig?.isEnabled),
+      },
+      webhookUrl: null,
+    });
+    res.json(response);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -934,30 +1042,21 @@ router.post("/channels/telegram/setup", async (req: any, res) => {
     const botName = me.result.username;
     const botId = me.result.id;
 
-    // Build webhook URL
-    const baseUrl = process.env.PUBLIC_API_URL
-      || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : null);
-    if (!baseUrl) return res.status(500).json({ error: "PUBLIC_API_URL не налаштований" });
-    const webhookUrl = `${baseUrl}/api/inbox/webhooks/telegram/${orgId}`;
-
-    // Register webhook at Telegram
-    const whR = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: webhookUrl,
-        allowed_updates: ["message", "edited_message"],
-        drop_pending_updates: true,
-      }),
-    });
-    const whData = await whR.json() as any;
-    if (!whData.ok) return res.status(400).json({ error: `Webhook error: ${whData.description}` });
-
     // Upsert channel config
     const existing = await db.select().from(channelConfigsTable)
       .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
 
-    const configData = { bot_token: botToken, bot_username: botName, bot_id: String(botId) };
+    const existingConfig = (existing[0]?.config || {}) as Record<string, string>;
+    const webhookUrl = telegramWebhookUrl(orgId);
+    const webhookSecret = existingConfig.webhook_secret || randomBytes(32).toString("base64url");
+    await registerTelegramWebhook(botToken, webhookUrl, webhookSecret);
+    const configData = {
+      ...existingConfig,
+      bot_token: botToken,
+      bot_username: botName,
+      bot_id: String(botId),
+      webhook_secret: webhookSecret,
+    };
     if (existing.length) {
       await db.update(channelConfigsTable).set({
         config: configData, isEnabled: true, webhookUrl, updatedAt: new Date(),
@@ -973,6 +1072,90 @@ router.post("/channels/telegram/setup", async (req: any, res) => {
   } catch (err: any) {
     console.error("[telegram/setup]", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Telegram: secure an existing legacy webhook without re-entering a token ──
+router.post("/channels/telegram/secure-webhook", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const [cfg] = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
+    const config = (cfg?.config || {}) as Record<string, string>;
+    if (!cfg?.isEnabled || !config.bot_token) {
+      res.status(409).json({ error: "Telegram Bot не підключено." });
+      return;
+    }
+
+    const webhookUrl = telegramWebhookUrl(orgId);
+    const webhookSecret = randomBytes(32).toString("base64url");
+    await registerTelegramWebhook(config.bot_token, webhookUrl, webhookSecret);
+    await db.update(channelConfigsTable).set({
+      config: { ...config, webhook_secret: webhookSecret },
+      webhookUrl,
+      updatedAt: new Date(),
+    }).where(eq(channelConfigsTable.id, cfg.id));
+    res.json({ success: true });
+  } catch (err: any) {
+    logger.error({ err }, "Telegram webhook security update failed");
+    res.status(500).json({ error: err.message || "Не вдалося оновити захист Telegram" });
+  }
+});
+
+// ── Telegram Business: enable a connected business bot ───────────────────────
+router.post("/channels/telegram/business/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const [cfg] = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
+    const config = (cfg?.config || {}) as Record<string, string>;
+    if (!cfg?.isEnabled || !config.bot_token || !config.bot_username) {
+      res.status(409).json({ error: "Спочатку підключіть Telegram Bot для цього закладу." });
+      return;
+    }
+
+    const webhookUrl = telegramWebhookUrl(orgId);
+    const webhookSecret = config.webhook_secret || randomBytes(32).toString("base64url");
+    await registerTelegramWebhook(config.bot_token, webhookUrl, webhookSecret);
+    await db.update(channelConfigsTable).set({
+      config: {
+        ...config,
+        webhook_secret: webhookSecret,
+        business_enabled: "true",
+        business_connections: config.business_connections || "{}",
+      },
+      isEnabled: true,
+      webhookUrl,
+      updatedAt: new Date(),
+    }).where(eq(channelConfigsTable.id, cfg.id));
+
+    res.json({ success: true, botUsername: config.bot_username });
+  } catch (err: any) {
+    logger.error({ err }, "Telegram Business setup failed");
+    res.status(500).json({ error: err.message || "Не вдалося увімкнути Telegram Business" });
+  }
+});
+
+// ── Telegram Business: stop processing business account messages ─────────────
+router.delete("/channels/telegram/business/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const [cfg] = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "telegram" as any)));
+    if (cfg) {
+      await db.update(channelConfigsTable).set({
+        config: {
+          ...(cfg.config || {}),
+          business_enabled: "false",
+          business_connections: "{}",
+        },
+        updatedAt: new Date(),
+      }).where(eq(channelConfigsTable.id, cfg.id));
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    logger.error({ err }, "Telegram Business disconnect failed");
+    res.status(500).json({ error: err.message || "Не вдалося відключити Telegram Business" });
   }
 });
 
