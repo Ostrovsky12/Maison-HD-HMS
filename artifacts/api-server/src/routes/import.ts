@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../lib/auth.js";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import {
   guestsTable, bookingsTable, unitsTable, organizationsTable,
 } from "@workspace/db/schema";
@@ -150,18 +150,61 @@ router.post("/data", requireAuth, async (req, res) => {
         const guestsCount = Number(row.guests_count || row.guests || row.pax || 1);
         const source = (row.source || row.channel || "direct").toLowerCase().replace(/[^a-z]/g, "_");
 
-        await db.insert(bookingsTable).values({
-          unitId,
-          guestId,
-          checkIn,
-          checkOut,
-          status,
-          paymentStatus: Number(paidAmount) >= Number(totalAmount) && Number(totalAmount) > 0 ? "paid" : Number(paidAmount) > 0 ? "partial" : "unpaid",
-          source: source.slice(0, 50) as any,
-          guestsCount,
-          totalAmount,
-          paidAmount,
-        }).onConflictDoNothing();
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          if (["pending", "confirmed", "checked_in"].includes(status)) {
+            const lockedUnit = await client.query("SELECT id FROM units WHERE id = $1 FOR UPDATE", [unitId]);
+            if (!lockedUnit.rows.length) {
+              await client.query("ROLLBACK");
+              stats.skipped++;
+              continue;
+            }
+
+            const overlap = await client.query(
+              `SELECT id FROM bookings
+               WHERE unit_id = $1
+                 AND status IN ('pending', 'confirmed', 'checked_in')
+                 AND check_in < $3::date
+                 AND check_out > $2::date
+               LIMIT 1`,
+              [unitId, checkIn, checkOut],
+            );
+            const block = await client.query(
+              `SELECT id FROM accommodation_blocks
+               WHERE is_active = true
+                 AND $1 = ANY(ARRAY(SELECT jsonb_array_elements_text(unit_ids))::int[])
+                 AND start_date < $3::date
+                 AND end_date > $2::date
+               LIMIT 1`,
+              [unitId, checkIn, checkOut],
+            );
+            if (overlap.rows.length || block.rows.length) {
+              await client.query("ROLLBACK");
+              stats.skipped++;
+              continue;
+            }
+          }
+
+          await client.query(
+            `INSERT INTO bookings (
+               unit_id, guest_id, organization_id, check_in, check_out, status,
+               payment_status, source, guests_count, total_amount, paid_amount
+             ) VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11)
+             ON CONFLICT DO NOTHING`,
+            [
+              unitId, guestId, organizationId, checkIn, checkOut, status,
+              Number(paidAmount) >= Number(totalAmount) && Number(totalAmount) > 0 ? "paid" : Number(paidAmount) > 0 ? "partial" : "unpaid",
+              source.slice(0, 50), guestsCount, totalAmount, paidAmount,
+            ],
+          );
+          await client.query("COMMIT");
+        } catch (rowErr) {
+          await client.query("ROLLBACK");
+          throw rowErr;
+        } finally {
+          client.release();
+        }
 
         stats.bookings++;
       } catch (rowErr) {

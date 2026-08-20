@@ -36,6 +36,7 @@ import bookingsRouter from "../routes/bookings.js";
 import accommodationRouter from "../routes/accommodation.js";
 import invoicesRouter from "../routes/invoices.js";
 import financeRouter from "../routes/finance.js";
+import consoleRouter from "../routes/console.js";
 import aiRouter from "../routes/ai.js";
 import inboxRouter from "../routes/inbox.js";
 import { signToken } from "../lib/auth.js";
@@ -47,6 +48,7 @@ app.use("/api/bookings", bookingsRouter);
 app.use("/api/accommodation", accommodationRouter);
 app.use("/api/invoices", invoicesRouter);
 app.use("/api/finance", financeRouter);
+app.use("/api/console", consoleRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/inbox", inboxRouter);
 
@@ -136,6 +138,7 @@ function makeBookingTransactionClient(
       if (query.startsWith("SELECT u.id FROM units")) return { rows: [{ id: 10 }] };
       if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
       if (query.startsWith("SELECT id FROM bookings")) return { rows: [] };
+        if (query.startsWith("SELECT id FROM accommodation_blocks")) return { rows: [] };
       if (query.startsWith("INSERT INTO bookings")) {
         pendingBooking = {
           id: options.bookingId,
@@ -388,7 +391,7 @@ describe("Booking creation — atomic response handling", () => {
       query: vi.fn(async (statement: string) => {
         const query = statement.replace(/\s+/g, " ").trim();
         if (query === "BEGIN" || query === "COMMIT" || query === "ROLLBACK") return { rows: [] };
-        if (query.startsWith("SELECT pg_advisory_xact_lock")) return { rows: [] };
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
         if (query.startsWith("SELECT 1 FROM bookings")) return { rows: [] };
         if (query.startsWith("SELECT 1 FROM accommodation_blocks")) return { rows: [] };
         if (query.startsWith("INSERT INTO bookings")) {
@@ -413,8 +416,204 @@ describe("Booking creation — atomic response handling", () => {
     expect(response.status).toBe(201);
     expect(response.body).toEqual({ booking: { id: 601, booking_ref: "BK-TEST" } });
     expect(vi.mocked(db.execute)).toHaveBeenCalledTimes(1);
-    expect(client.query).toHaveBeenCalledWith("SELECT pg_advisory_xact_lock(90421, $1)", [10]);
+    expect(client.query).toHaveBeenCalledWith("SELECT id FROM units WHERE id = $1 FOR UPDATE", [10]);
     expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a manual booking that overlaps an active accommodation block", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeChain([{ id: 1 }]))
+      .mockReturnValueOnce(makeChain([{ id: 10 }]));
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT u.id FROM units")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM bookings")) return { rows: [] };
+        if (query.startsWith("SELECT id FROM accommodation_blocks")) return { rows: [{ id: 77 }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const response = await request(app)
+      .post("/api/bookings")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send(payload);
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toMatch(/заблокований/i);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+  });
+});
+
+describe("Booking updates — availability guard", () => {
+  it("rejects moving a booking onto dates already occupied by another active stay", async () => {
+    vi.mocked(db.select).mockReturnValueOnce(makeChain([{ propOrgId: 1 }]));
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT id, unit_id, check_in")) {
+          return { rows: [{ id: 100, unit_id: 10, check_in: "2026-05-01", check_out: "2026-05-03", status: "confirmed" }] };
+        }
+        if (query.startsWith("SELECT u.id FROM units")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM bookings") && query.includes("id <>")) return { rows: [{ id: 101 }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const response = await request(app)
+      .put("/api/bookings/100")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ checkIn: "2026-05-02", checkOut: "2026-05-05" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toMatch(/зайнятий/i);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+  });
+
+  it("rejects activating an overlapping draft booking", async () => {
+    vi.mocked(db.select).mockReturnValueOnce(makeChain([{ propOrgId: 1 }]));
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT id, unit_id, check_in, check_out, status FROM bookings")) {
+          return { rows: [{ id: 100, unit_id: 10, check_in: "2026-05-01", check_out: "2026-05-03", status: "draft" }] };
+        }
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM bookings")) return { rows: [{ id: 101 }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const response = await request(app)
+      .patch("/api/bookings/100/status")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ status: "confirmed" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toMatch(/зайнятий/i);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+  });
+});
+
+describe("Group bookings — availability guard", () => {
+  it("rejects a group reservation when one selected unit is blocked", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeChain([{ id: 1 }]))
+      .mockReturnValueOnce(makeChain([{ id: 10, capacity: 2, maxCapacity: 2 }]));
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT u.id FROM units")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM bookings")) return { rows: [] };
+        if (query.startsWith("SELECT id FROM accommodation_blocks")) return { rows: [{ id: 88 }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const response = await request(app)
+      .post("/api/bookings/group")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({
+        units: [{ unitId: 10, adults: 1, totalAmount: 1000 }],
+        checkIn: "2026-05-01",
+        checkOut: "2026-05-03",
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toMatch(/заблокований/i);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+  });
+});
+
+describe("Console booking writers — availability guard", () => {
+  it("rejects a quick booking on an actively blocked unit", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT u.id, u.base_price, u.name")) return { rows: [{ id: 10, base_price: "500", name: "Room 10" }] };
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM bookings")) return { rows: [] };
+        if (query.startsWith("SELECT id FROM accommodation_blocks")) return { rows: [{ id: 77 }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const response = await request(app)
+      .post("/api/console/quick-booking")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ unitId: 10, checkIn: "2026-05-01", checkOut: "2026-05-03" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toMatch(/заблокований/i);
+  });
+
+  it("rejects a Console status activation that overlaps an active stay", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT b.id, b.unit_id")) {
+          return { rows: [{ id: 100, unit_id: 10, check_in: "2026-05-01", check_out: "2026-05-03", status: "draft" }] };
+        }
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM bookings")) return { rows: [{ id: 101 }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const response = await request(app)
+      .patch("/api/console/booking/100/status")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ status: "confirmed" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toMatch(/зайнятий/i);
+  });
+});
+
+describe("Accommodation blocks — booking conflict guard", () => {
+  it("rejects a new block that would overlap an active booking", async () => {
+    vi.mocked(db.execute).mockResolvedValueOnce({ rows: [{ matched: 1 }] } as any);
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        const query = statement.replace(/\s+/g, " ").trim();
+        if (query === "BEGIN" || query === "ROLLBACK") return { rows: [] };
+        if (query.startsWith("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.startsWith("SELECT id FROM bookings")) return { rows: [{ id: 100 }] };
+        throw new Error(`Unexpected test query: ${query}`);
+      }),
+      release: vi.fn(),
+    };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as any);
+
+    const response = await request(app)
+      .post("/api/accommodation/blocks")
+      .set("Authorization", `Bearer ${tokenFor(1)}`)
+      .send({ title: "Maintenance", unitIds: [10], startDate: "2026-05-01", endDate: "2026-05-03" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toMatch(/активним бронюванням/i);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
   });
 });
 
@@ -523,9 +722,10 @@ describe("Tenant isolation — POST /api/bookings/group (foreign unitId rejectio
 
     const client = {
       query: vi.fn(async (query: string) => {
-        if (query === "BEGIN" || query === "COMMIT") return { rows: [] };
+        if (query === "BEGIN" || query === "COMMIT" || query === "ROLLBACK") return { rows: [] };
         if (query.includes("JOIN properties")) return { rows: [{ id: 10 }] };
-        if (query.includes("FOR UPDATE") || query.includes("SELECT id FROM bookings")) return { rows: [] };
+        if (query.includes("SELECT id FROM units WHERE id")) return { rows: [{ id: 10 }] };
+        if (query.includes("SELECT id FROM bookings") || query.includes("SELECT id FROM accommodation_blocks")) return { rows: [] };
         if (query.includes("INSERT INTO bookings")) return { rows: [{ id: 801, guest_access_code: "guest-code" }] };
         if (query.includes("SELECT name FROM units")) return { rows: [{ name: "Кімната 10" }] };
         throw new Error(`Unexpected test query: ${query}`);

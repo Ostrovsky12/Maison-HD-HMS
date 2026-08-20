@@ -9,6 +9,7 @@ import { generateBookingQR } from "../lib/qr.js";
 import { logger } from "../lib/logger.js";
 import { notifyBookingCreated, notifyCheckIn } from "../lib/notify.js";
 import { calculateInvoiceTotals } from "../lib/invoice-totals.js";
+import { lockAndAssertUnitAvailability } from "../lib/accommodation-availability.js";
 import { randomBytes } from "crypto";
 
 function genGuestCode(): string {
@@ -343,24 +344,13 @@ router.post("/", requireAuth, async (req, res) => {
       }
     }
 
-    // Lock the unit row to serialize concurrent booking attempts
-    await client.query("SELECT id FROM units WHERE id = $1 FOR UPDATE", [unitId]);
-
-    // Check for overlapping active bookings [checkIn, checkOut)
-    const overlapResult = await client.query(
-      `SELECT id FROM bookings
-       WHERE unit_id = $1
-         AND status IN ('pending','confirmed','checked_in')
-         AND check_in  < $3
-         AND check_out > $2
-       LIMIT 1`,
-      [unitId, checkIn, checkOut],
-    );
-
-    if (overlapResult.rows.length > 0 && !isDraft) {
-      await client.query("ROLLBACK");
-      res.status(409).json({ error: "Conflict", message: "Номер вже зайнятий на ці дати" });
-      return;
+    if (!isDraft) {
+      const availability = await lockAndAssertUnitAvailability(client, unitId, checkIn, checkOut);
+      if (!availability.ok) {
+        await client.query("ROLLBACK");
+        res.status(availability.status).json({ error: "Conflict", message: availability.message });
+        return;
+      }
     }
 
     const inserted = await client.query(
@@ -784,19 +774,11 @@ router.post("/group", requireAuth, async (req, res) => {
         return;
       }
 
-      // Lock unit row to prevent concurrent double-booking
-      await client.query("SELECT id FROM units WHERE id = $1 FOR UPDATE", [unitId]);
-
-      // Check overlap for non-draft bookings
       if (!isDraft) {
-        const overlap = await client.query(
-          `SELECT id FROM bookings WHERE unit_id = $1 AND status IN ('pending','confirmed','checked_in')
-           AND check_in < $3 AND check_out > $2 LIMIT 1`,
-          [unitId, checkIn, checkOut],
-        );
-        if (overlap.rows.length) {
+        const availability = await lockAndAssertUnitAvailability(client, unitId, checkIn, checkOut);
+        if (!availability.ok) {
           await client.query("ROLLBACK");
-          res.status(409).json({ error: "Conflict", message: `Номер ${unitId} вже зайнятий на ці дати` });
+          res.status(availability.status).json({ error: "Conflict", message: availability.message });
           return;
         }
       }
@@ -1330,7 +1312,7 @@ router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
   const bookingId = parseInt(req.params.bookingId);
   const user = (req as any).user;
   const {
-    checkIn, checkOut, status, paymentStatus, source, totalAmount, notes,
+    unitId, checkIn, checkOut, status, paymentStatus, source, totalAmount, notes,
     checkinTime, checkoutTime, rateId, rateName,
     adults, childrenUnder6, childrenOver6, extraBeds,
     firstName, lastName, middleName, phone,
@@ -1339,88 +1321,148 @@ router.put("/:bookingId", requireAuth, requireBookingOwnership, async (req, res)
     payOnArrival, partialAmount, withPets,
   } = req.body;
 
-  // Validate dates if supplied — checkIn must be before checkOut
-  if (checkIn !== undefined || checkOut !== undefined) {
-    const ci = new Date(checkIn ?? ""); const co = new Date(checkOut ?? "");
-    // If both are present, validate order
-    if (checkIn && checkOut) {
-      if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
-        res.status(400).json({ error: "Validation", message: "Invalid date format" }); return;
-      }
-      if (ci >= co) {
-        res.status(400).json({ error: "Validation", message: "checkOut must be after checkIn" }); return;
-      }
-    } else if (checkIn && isNaN(ci.getTime())) {
-      res.status(400).json({ error: "Validation", message: "Invalid checkIn date" }); return;
-    } else if (checkOut && isNaN(co.getTime())) {
-      res.status(400).json({ error: "Validation", message: "Invalid checkOut date" }); return;
-    }
-  }
-
-  // Validate status transition if status is being changed
-  if (status !== undefined) {
-    const [current] = await db.select({ status: bookingsTable.status }).from(bookingsTable)
-      .where(eq(bookingsTable.id, bookingId)).limit(1);
-    if (current && current.status !== status) {
-      const check = validateTransition(current.status as BookingStatus, status as BookingStatus, user.role);
-      if (!check.ok) {
-        res.status(check.httpStatus ?? 422).json({ error: check.error });
-        return;
-      }
-    }
-  }
-
   const guestsCount = (adults ?? undefined) !== undefined
     ? (adults || 1) + (childrenUnder6 || 0) + (childrenOver6 || 0)
     : undefined;
 
-  const isDraft = status === "draft";
-  const draftExpiresAt = isDraft ? new Date(Date.now() + 6 * 60 * 60 * 1000) : undefined;
-
-  const [booking] = await db.update(bookingsTable).set({
-    ...(checkIn !== undefined && { checkIn }),
-    ...(checkOut !== undefined && { checkOut }),
-    ...(checkinTime !== undefined && { checkinTime }),
-    ...(checkoutTime !== undefined && { checkoutTime }),
-    ...(status !== undefined && { status }),
-    ...(paymentStatus !== undefined && { paymentStatus }),
-    ...(source !== undefined && { source }),
-    ...(rateId !== undefined && { rateId }),
-    ...(rateName !== undefined && { rateName }),
-    ...(adults !== undefined && { adults }),
-    ...(childrenUnder6 !== undefined && { childrenUnder6 }),
-    ...(childrenOver6 !== undefined && { childrenOver6 }),
-    ...(extraBeds !== undefined && { extraBeds }),
-    ...(guestsCount !== undefined && { guestsCount }),
-    ...(firstName !== undefined && { firstName }),
-    ...(lastName !== undefined && { lastName }),
-    ...(middleName !== undefined && { middleName }),
-    ...(phone !== undefined && { phone }),
-    // totalAmount: validate it's a non-negative finite number; NaN/negative/non-finite rejected with 400
-    ...(totalAmount !== undefined && (() => {
-      const n = Number(totalAmount);
-      if (!Number.isFinite(n) || n < 0) {
-        res.status(400).json({ error: "Validation", message: "totalAmount must be a non-negative number" });
-        return null; // signal to caller
-      }
-      return { totalAmount: n.toFixed(2) };
-    })() || {}),
-    ...(discountId !== undefined && { discountId }),
-    ...(discountValue !== undefined && { discountValue: String(discountValue) }),
-    ...(discountType !== undefined && { discountType }),
-    ...(selectedAddons !== undefined && { selectedAddons }),
-    ...(legalEntityId !== undefined && { legalEntityId }),
-    ...(notes !== undefined && { notes }),
-    ...(payOnArrival !== undefined && { payOnArrival: Boolean(payOnArrival) }),
-    ...(withPets !== undefined && { withPets: Boolean(withPets) }),
-    ...(draftExpiresAt && { draftExpiresAt }),
-    updatedAt: new Date(),
-  }).where(eq(bookingsTable.id, bookingId)).returning();
-  if (!booking) {
-    res.status(404).json({ error: "Not Found", message: "Booking not found" });
-    return;
+  let normalizedTotalAmount: string | undefined;
+  if (totalAmount !== undefined) {
+    const amount = Number(totalAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      res.status(400).json({ error: "Validation", message: "totalAmount must be a non-negative number" });
+      return;
+    }
+    normalizedTotalAmount = amount.toFixed(2);
   }
-  res.json({ ...booking, totalAmount: Number(booking.totalAmount), paidAmount: Number(booking.paidAmount) });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const currentResult = await client.query(
+      `SELECT id, unit_id, check_in, check_out, status
+       FROM bookings WHERE id = $1 FOR UPDATE`,
+      [bookingId],
+    );
+    const current = currentResult.rows[0];
+    if (!current) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Not Found", message: "Booking not found" });
+      return;
+    }
+
+    const targetUnitId = unitId !== undefined ? Number(unitId) : current.unit_id;
+    const targetCheckIn = checkIn ?? current.check_in;
+    const targetCheckOut = checkOut ?? current.check_out;
+    const targetStatus = status ?? current.status;
+    const targetCheckInDate = new Date(targetCheckIn);
+    const targetCheckOutDate = new Date(targetCheckOut);
+    if (!Number.isInteger(targetUnitId) || targetUnitId <= 0
+      || !Number.isFinite(targetCheckInDate.getTime())
+      || !Number.isFinite(targetCheckOutDate.getTime())
+      || targetCheckInDate >= targetCheckOutDate) {
+      await client.query("ROLLBACK");
+      res.status(400).json({ error: "Validation", message: "checkOut must be after checkIn and unitId must be valid" });
+      return;
+    }
+
+    if (status !== undefined && current.status !== status) {
+      const transition = validateTransition(current.status as BookingStatus, status as BookingStatus, user.role);
+      if (!transition.ok) {
+        await client.query("ROLLBACK");
+        res.status(transition.httpStatus ?? 422).json({ error: transition.error });
+        return;
+      }
+    }
+
+    const unitOwnership = await client.query(
+      `SELECT u.id FROM units u
+       JOIN properties p ON p.id = u.property_id
+       WHERE u.id = $1 AND ($2::int IS NULL OR p.organization_id = $2)
+       LIMIT 1`,
+      [targetUnitId, user.organizationId ?? null],
+    );
+    if (!unitOwnership.rows.length) {
+      await client.query("ROLLBACK");
+      res.status(403).json({ error: "Forbidden", message: "Unit does not belong to your organization" });
+      return;
+    }
+
+    const isActiveStay = ["pending", "confirmed", "checked_in"].includes(targetStatus);
+    if (isActiveStay) {
+      const availability = await lockAndAssertUnitAvailability(
+        client,
+        targetUnitId,
+        targetCheckIn,
+        targetCheckOut,
+        bookingId,
+      );
+      if (!availability.ok) {
+        await client.query("ROLLBACK");
+        res.status(availability.status).json({ error: "Conflict", message: availability.message });
+        return;
+      }
+    }
+
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    const set = (column: string, value: unknown) => {
+      values.push(value);
+      sets.push(`${column} = $${values.length}`);
+    };
+    if (unitId !== undefined) set("unit_id", targetUnitId);
+    if (checkIn !== undefined) set("check_in", checkIn);
+    if (checkOut !== undefined) set("check_out", checkOut);
+    if (checkinTime !== undefined) set("checkin_time", checkinTime);
+    if (checkoutTime !== undefined) set("checkout_time", checkoutTime);
+    if (status !== undefined) set("status", status);
+    if (paymentStatus !== undefined) set("payment_status", paymentStatus);
+    if (source !== undefined) set("source", source);
+    if (rateId !== undefined) set("rate_id", rateId);
+    if (rateName !== undefined) set("rate_name", rateName);
+    if (adults !== undefined) set("adults", adults);
+    if (childrenUnder6 !== undefined) set("children_under_6", childrenUnder6);
+    if (childrenOver6 !== undefined) set("children_over_6", childrenOver6);
+    if (extraBeds !== undefined) set("extra_beds", extraBeds);
+    if (guestsCount !== undefined) set("guests_count", guestsCount);
+    if (firstName !== undefined) set("first_name", firstName);
+    if (lastName !== undefined) set("last_name", lastName);
+    if (middleName !== undefined) set("middle_name", middleName);
+    if (phone !== undefined) set("phone", phone);
+    if (normalizedTotalAmount !== undefined) set("total_amount", normalizedTotalAmount);
+    if (discountId !== undefined) set("discount_id", discountId);
+    if (discountValue !== undefined) set("discount_value", discountValue === null ? null : String(discountValue));
+    if (discountType !== undefined) set("discount_type", discountType);
+    if (selectedAddons !== undefined) set("selected_addons", JSON.stringify(selectedAddons));
+    if (legalEntityId !== undefined) set("legal_entity_id", legalEntityId);
+    if (notes !== undefined) set("notes", notes);
+    if (payOnArrival !== undefined) set("pay_on_arrival", Boolean(payOnArrival));
+    if (withPets !== undefined) set("with_pets", Boolean(withPets));
+    if (status === "draft") set("draft_expires_at", new Date(Date.now() + 6 * 60 * 60 * 1000));
+    set("updated_at", new Date());
+
+    values.push(bookingId);
+    const updated = await client.query(
+      `UPDATE bookings SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING *`,
+      values,
+    );
+    await client.query("COMMIT");
+
+    const booking = updated.rows[0];
+    res.json({
+      ...booking,
+      unitId: booking.unit_id,
+      checkIn: booking.check_in,
+      checkOut: booking.check_out,
+      paymentStatus: booking.payment_status,
+      totalAmount: Number(booking.total_amount),
+      paidAmount: Number(booking.paid_amount),
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 router.delete("/:bookingId", requireAuth, requireBookingOwnership, async (req, res) => {
@@ -1449,35 +1491,118 @@ router.patch("/:bookingId/status", requireAuth, requireBookingOwnership, async (
   const { status: newStatus } = req.body;
   const user = (req as any).user;
 
-  const [current] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
-  if (!current) { res.status(404).json({ error: "Not Found", message: "Booking not found" }); return; }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const currentResult = await client.query(
+      `SELECT id, unit_id, check_in, check_out, status
+       FROM bookings WHERE id = $1 FOR UPDATE`,
+      [bookingId],
+    );
+    const current = currentResult.rows[0];
+    if (!current) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Not Found", message: "Booking not found" });
+      return;
+    }
 
-  const check = validateTransition(current.status as BookingStatus, newStatus as BookingStatus, user.role);
-  if (!check.ok) { res.status(check.httpStatus ?? 422).json({ error: check.error }); return; }
+    const check = validateTransition(current.status as BookingStatus, newStatus as BookingStatus, user.role);
+    if (!check.ok) {
+      await client.query("ROLLBACK");
+      res.status(check.httpStatus ?? 422).json({ error: check.error });
+      return;
+    }
 
-  const [booking] = await db.update(bookingsTable)
-    .set({ status: newStatus, updatedAt: new Date() })
-    .where(eq(bookingsTable.id, bookingId)).returning();
-  res.json({ ...booking, totalAmount: Number(booking.totalAmount), paidAmount: Number(booking.paidAmount) });
+    if (["pending", "confirmed", "checked_in"].includes(newStatus)) {
+      const availability = await lockAndAssertUnitAvailability(
+        client,
+        current.unit_id,
+        current.check_in,
+        current.check_out,
+        bookingId,
+      );
+      if (!availability.ok) {
+        await client.query("ROLLBACK");
+        res.status(availability.status).json({ error: "Conflict", message: availability.message });
+        return;
+      }
+    }
+
+    const updated = await client.query(
+      "UPDATE bookings SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+      [newStatus, bookingId],
+    );
+    await client.query("COMMIT");
+    const booking = updated.rows[0];
+    res.json({ ...booking, totalAmount: Number(booking.total_amount), paidAmount: Number(booking.paid_amount) });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 // POST /api/bookings/:bookingId/checkin — check in a guest
 router.post("/:bookingId/checkin", requireAuth, requireBookingOwnership, async (req, res) => {
   const bookingId = parseInt(req.params.bookingId);
   const user = (req as any).user;
-  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
-  if (!booking) {
-    res.status(404).json({ error: "Not Found", message: "Booking not found" });
-    return;
+  const client = await pool.connect();
+  let booking: any;
+  let updated: any;
+  try {
+    await client.query("BEGIN");
+    const currentResult = await client.query(
+      `SELECT id, unit_id, guest_id, check_in, check_out, status
+       FROM bookings WHERE id = $1 FOR UPDATE`,
+      [bookingId],
+    );
+    const current = currentResult.rows[0];
+    if (!current) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Not Found", message: "Booking not found" });
+      return;
+    }
+
+    const check = validateTransition(current.status as BookingStatus, "checked_in", user.role);
+    if (!check.ok) {
+      await client.query("ROLLBACK");
+      res.status(check.httpStatus ?? 422).json({ error: check.error });
+      return;
+    }
+
+    const availability = await lockAndAssertUnitAvailability(
+      client,
+      current.unit_id,
+      current.check_in,
+      current.check_out,
+      bookingId,
+    );
+    if (!availability.ok) {
+      await client.query("ROLLBACK");
+      res.status(availability.status).json({ error: "Conflict", message: availability.message });
+      return;
+    }
+
+    const updatedResult = await client.query(
+      "UPDATE bookings SET status = 'checked_in', updated_at = NOW() WHERE id = $1 RETURNING *",
+      [bookingId],
+    );
+    await client.query("COMMIT");
+    booking = {
+      ...current,
+      guestId: current.guest_id,
+      unitId: current.unit_id,
+      checkIn: current.check_in,
+      checkOut: current.check_out,
+    };
+    updated = updatedResult.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-
-  const check = validateTransition(booking.status as BookingStatus, "checked_in", user.role);
-  if (!check.ok) { res.status(check.httpStatus ?? 422).json({ error: check.error }); return; }
-
-  const [updated] = await db.update(bookingsTable)
-    .set({ status: "checked_in", updatedAt: new Date() })
-    .where(eq(bookingsTable.id, bookingId))
-    .returning();
 
   const [guest] = await db.select().from(guestsTable).where(eq(guestsTable.id, booking.guestId)).limit(1);
   const [unit] = await db.select().from(unitsTable).where(eq(unitsTable.id, booking.unitId)).limit(1);
@@ -1492,7 +1617,7 @@ router.post("/:bookingId/checkin", requireAuth, requireBookingOwnership, async (
     priority: "normal",
   }).catch(() => {});
 
-  res.json({ ...updated, totalAmount: Number(updated.totalAmount), paidAmount: Number(updated.paidAmount) });
+  res.json({ ...updated, totalAmount: Number(updated.total_amount), paidAmount: Number(updated.paid_amount) });
 
   // Fire-and-forget external notification
   if (user.organizationId) {

@@ -168,6 +168,14 @@ router.get("/availability", async (req, res) => {
       inArray(unitsTable.propertyId, propIds),
       ne(unitsTable.status, "maintenance" as any),
       ne(unitsTable.status, "inactive" as any),
+      sql`NOT EXISTS (
+        SELECT 1 FROM accommodation_blocks ab
+        WHERE ab.organization_id = ${orgId}
+          AND ab.is_active = true
+          AND ${unitsTable.id} = ANY(ARRAY(SELECT jsonb_array_elements_text(ab.unit_ids))::int[])
+          AND ab.start_date < ${checkOut}::date
+          AND ab.end_date > ${checkIn}::date
+      )`,
     ];
     if (bookedIds.length > 0) whereConds.push(notInArray(unitsTable.id, bookedIds));
     if (parseInt(guests) > 1) whereConds.push(gte(unitsTable.capacity, parseInt(guests)));
@@ -328,12 +336,21 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
     const refNum = Math.floor(100000 + Math.random() * 900000);
     const bookingRef = `BK-${refNum}`;
     const guestAccessCode = randomBytes(5).toString("hex").toUpperCase();
+    const normalizedEmail = typeof email === "string" && email.trim() ? email.trim().toLowerCase() : null;
+    const normalizedPhone = typeof phone === "string" && phone.trim() ? phone.trim() : null;
 
     const client = await pool.connect();
     let booking: any;
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(90421, $1)", [parsedUnitId]);
+      const lockedUnit = await client.query(
+        "SELECT id FROM units WHERE id = $1 FOR UPDATE",
+        [parsedUnitId],
+      );
+      if (!lockedUnit.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Юніт не знайдено" });
+      }
 
       const conflict = await client.query(
         `SELECT id FROM bookings
@@ -364,22 +381,64 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         return res.status(409).json({ error: "Номер заблокований на вибрані дати" });
       }
 
+      const contactLocks = [
+        normalizedPhone ? `guest-phone:${org.id}:${normalizedPhone}` : null,
+        normalizedEmail ? `guest-email:${org.id}:${normalizedEmail}` : null,
+      ].filter((value): value is string => Boolean(value)).sort();
+      for (const contactLock of contactLocks) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [contactLock]);
+      }
+
+      const existingGuests = await client.query(
+        `SELECT id, phone, lower(email) AS email
+         FROM guests
+         WHERE organization_id = $1
+           AND (($2::text IS NOT NULL AND phone = $2)
+             OR ($3::text IS NOT NULL AND lower(email) = lower($3)))
+         ORDER BY id
+         FOR UPDATE`,
+        [org.id, normalizedPhone, normalizedEmail],
+      );
+      const matchedGuestIds = new Set<number>(
+        existingGuests.rows
+          .filter((guest: any) => (normalizedPhone && guest.phone === normalizedPhone)
+            || (normalizedEmail && guest.email === normalizedEmail))
+          .map((guest: any) => Number(guest.id)),
+      );
+      if (matchedGuestIds.size > 1) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: "Контактні дані відповідають різним профілям гостей. Перевірте телефон та email.",
+          code: "GUEST_IDENTITY_CONFLICT",
+        });
+      }
+      let guestId = [...matchedGuestIds][0];
+      if (!guestId) {
+        const createdGuest = await client.query(
+          `INSERT INTO guests (organization_id, first_name, last_name, email, phone, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+           RETURNING id`,
+          [org.id, firstName.trim(), lastName.trim(), normalizedEmail, normalizedPhone],
+        );
+        guestId = createdGuest.rows[0].id;
+      }
+
       const inserted = await client.query(
         `INSERT INTO bookings (
-           organization_id, unit_id, first_name, last_name, email, phone,
+           organization_id, unit_id, guest_id, first_name, last_name, email, phone,
            guests_count, adults, children_under_6, children_over_6,
            check_in, check_out, status, payment_status, total_amount, paid_amount,
            notes, booking_ref, guest_access_code, source, created_at, updated_at
          )
          VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-           $11::date, $12::date, 'pending', 'unpaid', $13, 0,
-           $14, $15, $16, 'direct', NOW(), NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+            $12::date, $13::date, 'pending', 'unpaid', $14, 0,
+            $15, $16, $17, 'direct', NOW(), NOW()
          )
          RETURNING *`,
         [
-          org.id, parsedUnitId, firstName.trim(), lastName.trim(),
-          email?.trim() || null, phone?.trim() || null,
+          org.id, parsedUnitId, guestId, firstName.trim(), lastName.trim(),
+          normalizedEmail, normalizedPhone,
           totalGuests, totalAdults, Math.ceil(totalChildren / 2), Math.floor(totalChildren / 2),
           checkIn, checkOut, totalAmount.toFixed(2), specialRequests || null,
           bookingRef, guestAccessCode,

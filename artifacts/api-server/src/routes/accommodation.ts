@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, pool } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { lockUnitsAndAssertNoActiveBookings } from "../lib/accommodation-availability.js";
 
 const router = Router();
 
@@ -210,7 +211,11 @@ router.post("/bookings", requireAuth, async (req: any, res) => {
     let booking: any;
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(90421, $1)", [unitId]);
+      const lockedUnit = await client.query("SELECT id FROM units WHERE id = $1 FOR UPDATE", [unitId]);
+      if (!lockedUnit.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Unit not found" });
+      }
 
       const conflict = await client.query(
         `SELECT 1 FROM bookings
@@ -541,14 +546,28 @@ router.post("/blocks", requireAuth, async (req: any, res) => {
       }
     }
 
-    const result = await db.execute<any>(sql`
-      INSERT INTO accommodation_blocks (organization_id, title, block_type, unit_ids, start_date, end_date, reason, notes)
-      VALUES (${orgId}, ${d.title}, ${d.blockType||'other'}::accommodation_block_type,
-        ${JSON.stringify(unitIds)}::jsonb, ${d.startDate}::date, ${d.endDate}::date,
-        ${d.reason||null}, ${d.notes||null})
-      RETURNING id
-    `);
-    return res.json({ block: result.rows[0] });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const availability = await lockUnitsAndAssertNoActiveBookings(client, unitIds, d.startDate, d.endDate);
+      if (!availability.ok) {
+        await client.query("ROLLBACK");
+        return res.status(availability.status).json({ error: availability.message });
+      }
+      const result = await client.query(
+        `INSERT INTO accommodation_blocks (organization_id, title, block_type, unit_ids, start_date, end_date, reason, notes)
+         VALUES ($1, $2, $3::accommodation_block_type, $4::jsonb, $5::date, $6::date, $7, $8)
+         RETURNING id`,
+        [orgId, d.title, d.blockType || "other", JSON.stringify(unitIds), d.startDate, d.endDate, d.reason || null, d.notes || null],
+      );
+      await client.query("COMMIT");
+      return res.json({ block: result.rows[0] });
+    } catch (e: any) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
   } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
