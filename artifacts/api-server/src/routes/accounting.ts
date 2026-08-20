@@ -1466,7 +1466,7 @@ ${doc?.payment_terms ? `<p>Умови оплати: ${escXml(doc.payment_terms)}
 </body></html>`;
 }
 
-function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
+export function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
   // If no line items — use subject as the single row (same as invoice logic)
   const noItems = items.length === 0;
   const syntheticVatRate = (() => {
@@ -1480,12 +1480,17 @@ function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
     unit: "послуга",
     quantity: 1,
     unit_price: parseFloat(doc?.subtotal || doc?.total_amount || 0),
+    vat_rate: syntheticVatRate,
+    vat_amount: parseFloat(doc?.vat_amount || 0),
     total_amount: parseFloat(doc?.total_amount || 0),
   }] : []) : items;
 
   const itemsHtml = effectiveItems.map((it, i) => {
     const unitPrice = it.unit_price ?? it.unitPrice ?? it.price ?? 0;
     const lineTotal = it.total_amount ?? it.total_price ?? it.totalPrice ?? it.amount ?? 0;
+    const itemVatRate = it.vat_rate ?? it.vatRate ?? 0;
+    const vatRateNum = (itemVatRate === "exempt" || itemVatRate === 0 || itemVatRate === "0")
+      ? 0 : (parseFloat(String(itemVatRate)) || 0);
     return `
     <tr>
       <td class="num">${i + 1}</td>
@@ -1493,12 +1498,14 @@ function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
       <td class="center">${escXml(it.unit || "послуга")}</td>
       <td class="right">${parseFloat(it.quantity || 1).toFixed(2)}</td>
       <td class="right">${parseFloat(unitPrice).toFixed(2)}</td>
+      <td class="right">${vatRateNum}%</td>
       <td class="right"><b>${parseFloat(lineTotal).toFixed(2)}</b></td>
     </tr>`;
   }).join("");
   const vatBreakdown = [7, 20].map((rate) => {
     const amount = effectiveItems.reduce((sum, item) => {
-      const itemRate = Number(item.vat_rate ?? item.vatRate ?? 0);
+      const rawItemRate = item.vat_rate ?? item.vatRate ?? 0;
+      const itemRate = rawItemRate === "exempt" ? 0 : (parseFloat(String(rawItemRate)) || 0);
       if (itemRate !== rate) return sum;
       const explicitVat = Number(item.vat_amount ?? item.vatAmount);
       const lineTotal = Number(item.total_amount ?? item.total_price ?? item.totalPrice ?? item.amount ?? 0);
@@ -1532,7 +1539,7 @@ function generateActHtml(doc: any, items: any[], entity: any, cp: any): string {
 </div>
 <p>Виконавець надав, а Замовник прийняв наступні послуги:</p>
 <table>
-  <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна, ₴</th><th class="right">Сума, ₴</th></tr></thead>
+  <thead><tr><th class="num">№</th><th>Найменування</th><th>Од.</th><th class="right">К-ть</th><th class="right">Ціна без ПДВ, ₴</th><th class="right">ПДВ%</th><th class="right">Сума, ₴</th></tr></thead>
   <tbody>${itemsHtml}</tbody>
 </table>
 <div style="overflow:hidden">
