@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { calculateInvoiceTotals } from "../lib/invoice-totals.js";
 
+const actVatTotalsModule = new URL(
+  "../../../maison-hd/src/lib/act-vat-totals.ts",
+  import.meta.url,
+).href;
+
 describe("calculateInvoiceTotals", () => {
   it("keeps multiple gross lines and derives VAT separately for 7%, 20%, and exempt services", () => {
     const result = calculateInvoiceTotals([
@@ -20,5 +25,23 @@ describe("calculateInvoiceTotals", () => {
     expect(() => calculateInvoiceTotals([
       { description: "Послуга", qty: 1, price: 100, vatRate: 14 },
     ])).toThrow("Ставка ПДВ");
+  });
+
+  it("uses separately rounded stored item VAT in the Act preview totals", async () => {
+    const invoiceItems = [
+      { description: "Послуга 1", totalPrice: 0.03, vatRate: 20, vatAmount: 0.01 },
+      { description: "Послуга 2", totalPrice: 0.03, vatRate: 20, vatAmount: 0.01 },
+    ];
+
+    const { calculateActVatByRate } = await import(actVatTotalsModule);
+    const vatByRate = calculateActVatByRate(invoiceItems);
+    const vatDerivedFromGross = invoiceItems.reduce(
+      (sum, item) => sum + (item.totalPrice - item.totalPrice / (1 + item.vatRate / 100)),
+      0,
+    );
+
+    expect(vatByRate[20]).toBe(0.02);
+    expect(vatDerivedFromGross).toBeCloseTo(0.01, 10);
+    expect(vatByRate[20]).not.toBeCloseTo(vatDerivedFromGross, 2);
   });
 });

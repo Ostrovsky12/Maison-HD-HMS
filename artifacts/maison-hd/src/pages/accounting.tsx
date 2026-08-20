@@ -39,6 +39,7 @@ import {
   ShieldAlert, CircleAlert, ShieldX, ArrowUpDown, Printer,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { calculateActVatByRate } from "@/lib/act-vat-totals";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
@@ -1074,16 +1075,7 @@ function CreateActFromInvoiceDialog({
 
   // Per-rate VAT breakdown for the items table preview
   const invoiceItemsArr: any[] = invoice?.invoiceItems || [];
-  const vatByRate: Record<number, number> = {};
-  for (const item of invoiceItemsArr) {
-    const rate = Number(item.vatRate ?? 0);
-    const hasStoredVatAmount = item.hasStoredVatAmount ?? item.vatAmount != null;
-    const lineTotal = Number(item.amount ?? item.totalPrice ?? 0);
-    const lineVat = hasStoredVatAmount
-      ? Number(item.vatAmount)
-      : rate > 0 ? lineTotal - lineTotal / (1 + rate / 100) : 0;
-    vatByRate[rate] = (vatByRate[rate] || 0) + lineVat;
-  }
+  const vatByRate = calculateActVatByRate(invoiceItemsArr);
   const nonZeroVatRates = Object.entries(vatByRate)
     .filter(([, v]) => v > 0.001)
     .map(([k]) => Number(k))
