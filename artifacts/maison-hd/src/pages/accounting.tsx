@@ -708,6 +708,8 @@ function InvoiceDetailDialog({ invoice, onClose, onCreateAct, onPrint }: any) {
           unit: item.unit || "послуга",
           price: Number(item.unitPrice || 0),
           amount: Number(item.totalPrice || 0),
+          vatAmount: Number(item.vatAmount || 0),
+          hasStoredVatAmount: item.vatAmount != null,
           vatRate: item.vatRate === "exempt" ? 0 : Number(item.vatRate || 0),
         })),
         sellerSnapshot: legalEntity.id ? {
@@ -1075,8 +1077,11 @@ function CreateActFromInvoiceDialog({
   const vatByRate: Record<number, number> = {};
   for (const item of invoiceItemsArr) {
     const rate = Number(item.vatRate ?? 0);
+    const hasStoredVatAmount = item.hasStoredVatAmount ?? item.vatAmount != null;
     const lineTotal = Number(item.amount ?? item.totalPrice ?? 0);
-    const lineVat = rate > 0 ? lineTotal - lineTotal / (1 + rate / 100) : 0;
+    const lineVat = hasStoredVatAmount
+      ? Number(item.vatAmount)
+      : rate > 0 ? lineTotal - lineTotal / (1 + rate / 100) : 0;
     vatByRate[rate] = (vatByRate[rate] || 0) + lineVat;
   }
   const nonZeroVatRates = Object.entries(vatByRate)
