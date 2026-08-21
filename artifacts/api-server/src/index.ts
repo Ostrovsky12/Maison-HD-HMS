@@ -833,6 +833,12 @@ async function ensureSchema() {
   } catch (auditErr: any) {
     logger.warn({ msg: auditErr?.message }, "audit_logs schema warning (non-fatal, continuing)");
   }
+
+  // Add booking_id to housekeeping_tasks for booking-scoped staff tasks
+  await db.execute(sql`
+    ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS booking_id INTEGER REFERENCES bookings(id) ON DELETE SET NULL;
+    ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS task_type_text VARCHAR(100);
+  `);
 }
 
 async function bootstrap() {

@@ -513,6 +513,7 @@ function TabGuest({ b }: { b: any }) {
 function TabPayments({ b }: { b: any }) {
   const { toast } = useToast();
   const [payments, setPayments] = useState<any[]>([]);
+  const [serviceOrders, setServiceOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Payment link state — initialize from DB if already generated
@@ -526,15 +527,25 @@ function TabPayments({ b }: { b: any }) {
 
   useEffect(() => {
     setLoading(true);
-    apiFetch(`${API}/payments?booking_id=${b.id}`)
-      .then(r => r.ok ? r.json() : [])
-      .then(d => setPayments(Array.isArray(d) ? d : []))
-      .catch(() => setPayments([]))
-      .finally(() => setLoading(false));
+    Promise.all([
+      apiFetch(`${API}/payments?booking_id=${b.id}`)
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []),
+      apiFetch(`${API}/guest/service-orders?status=all&limit=100`)
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []),
+    ]).then(([pData, oData]) => {
+      setPayments(Array.isArray(pData) ? pData : []);
+      setServiceOrders(Array.isArray(oData) ? oData.filter((o: any) => o.bookingId === b.id) : []);
+    }).finally(() => setLoading(false));
   }, [b.id]);
 
   const paid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-  const balance = (b.totalAmount || 0) - paid;
+  const servicesTotal = serviceOrders
+    .filter(o => o.status !== "cancelled")
+    .reduce((s, o) => s + Number(o.totalPrice || o.price || 0), 0);
+  const grandTotal = (b.totalAmount || 0) + servicesTotal;
+  const balance = grandTotal - paid;
 
   const METHOD_LABEL: Record<string, string> = {
     cash: "Готівка", card: "Картка", liqpay: "LiqPay", wayforpay: "WayForPay", bank: "Банк", other: "Інше",
@@ -593,10 +604,34 @@ function TabPayments({ b }: { b: any }) {
     <div className="space-y-4">
       {/* Balance summary */}
       <div className="grid grid-cols-3 gap-2.5">
-        <Tile label="Сума"     value={uah(b.totalAmount || 0)} color="text-gray-800" />
+        <Tile label="Сума"     value={uah(grandTotal)} color="text-gray-800" />
         <Tile label="Оплачено" value={uah(paid)} color="text-emerald-600" />
         <Tile label="Залишок"  value={uah(Math.max(0, balance))} color={balance > 0 ? "text-red-600" : "text-gray-400"} />
       </div>
+
+      {/* Service orders breakdown */}
+      {(b.totalAmount > 0 || servicesTotal > 0) && (
+        <div className="rounded-2xl border border-gray-100 overflow-hidden text-sm">
+          {b.totalAmount > 0 && (
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50">
+              <span className="text-gray-500">Проживання</span>
+              <span className="font-semibold text-gray-800">{uah(b.totalAmount)}</span>
+            </div>
+          )}
+          {serviceOrders.filter(o => o.status !== "cancelled").map((o: any) => (
+            <div key={o.id} className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50 last:border-0">
+              <span className="text-gray-500 truncate mr-2">{o.serviceName}</span>
+              <span className="font-semibold text-indigo-700 shrink-0">{uah(Number(o.totalPrice || o.price || 0))}</span>
+            </div>
+          ))}
+          {servicesTotal > 0 && (
+            <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50">
+              <span className="font-bold text-gray-700">Разом</span>
+              <span className="font-bold text-gray-900">{uah(grandTotal)}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── PENDING PAYMENT BANNER ── */}
       {b.status === "pending" && paymentLink && (
@@ -791,7 +826,7 @@ function SpaBookingDialog({ bookingId, guestName, onClose, onSaved }: {
         method: "POST",
         body: JSON.stringify({
           serviceId: selected.id,
-          specialistId: chosenSlot.specialistId || null,
+          specialistId: chosenSlot?.specialistId || null,
           guestName: guestName || "Гість",
           appointmentDate: date,
           startTime: effectiveTime,
@@ -1209,18 +1244,25 @@ function TabServices({ b }: { b: any }) {
           )}
       </div>
 
-      {/* Other services */}
-      {otherOrders.length > 0 && (
-        <div>
+      {/* Other services — always visible so staff can always add */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
           <SectionLabel>Інші послуги</SectionLabel>
-          <div className="space-y-2">{otherOrders.map(o => <OrderCard key={o.id} o={o} />)}</div>
+          <button onClick={() => setAddDialog("service")} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800 flex items-center gap-1">
+            <Plus className="w-3 h-3" />Додати
+          </button>
         </div>
-      )}
-
-      <button onClick={() => setAddDialog("service")}
-        className="w-full py-2.5 border-2 border-dashed border-indigo-100 hover:border-indigo-300 text-indigo-600 text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5">
-        <Plus className="w-3.5 h-3.5" />Додати послугу
-      </button>
+        {loadingOrders ? null : otherOrders.length === 0 ? (
+          <button
+            onClick={() => setAddDialog("service")}
+            className="w-full py-2.5 border-2 border-dashed border-indigo-100 hover:border-indigo-300 text-indigo-600 text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />Букет квітів, вино, декор…
+          </button>
+        ) : (
+          <div className="space-y-2">{otherOrders.map(o => <OrderCard key={o.id} o={o} />)}</div>
+        )}
+      </div>
 
       {addDialog && (
         <AddServiceDialog bookingId={b.id} type={addDialog} onClose={() => setAddDialog(null)} onSaved={loadOrders} />
@@ -1288,31 +1330,150 @@ function TabNotes({ b, onSave }: { b: any; onSave: (notes: string) => void }) {
 
 // ── Tab: Tasks ─────────────────────────────────────────────────────────────
 function TabTasks({ b }: { b: any }) {
-  const tasks = [
-    { id: 1, text: "Підготувати номер до заїзду", done: true,  priority: "high" },
-    { id: 2, text: "Перевірити побажання гостя",  done: false, priority: "medium" },
-  ];
+  const { toast } = useToast();
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newPriority, setNewPriority] = useState("medium");
+  const [saving, setSaving] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+
+  const loadTasks = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`${API}/bookings/${b.id}/tasks`);
+      if (r.ok) setTasks(await r.json());
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadTasks(); }, [b.id]);
+
+  const addTask = async () => {
+    if (!newTitle.trim()) return;
+    setSaving(true);
+    try {
+      const r = await apiFetch(`${API}/bookings/${b.id}/tasks`, {
+        method: "POST",
+        body: JSON.stringify({ title: newTitle.trim(), priority: newPriority }),
+      });
+      if (r.ok) {
+        toast({ title: "Завдання додано ✓" });
+        setNewTitle("");
+        setNewPriority("medium");
+        setShowAdd(false);
+        loadTasks();
+      }
+    } finally { setSaving(false); }
+  };
+
+  const toggleDone = async (task: any) => {
+    setTogglingId(task.id);
+    const nextStatus = task.status === "completed" ? "pending" : "completed";
+    try {
+      const r = await apiFetch(`${API}/bookings/${b.id}/tasks/${task.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (r.ok) setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: nextStatus } : t));
+    } finally { setTogglingId(null); }
+  };
+
+  const PRIORITY_CFG: Record<string, { label: string; color: string }> = {
+    high:   { label: "Важливо",  color: "bg-red-50 text-red-500" },
+    medium: { label: "Звичайне", color: "bg-gray-100 text-gray-400" },
+    low:    { label: "Низький",  color: "bg-blue-50 text-blue-400" },
+  };
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <SectionLabel>Завдання по бронюванню</SectionLabel>
-        <button className="flex items-center gap-1 text-xs text-indigo-600 font-semibold hover:text-indigo-800">
+        <button
+          onClick={() => setShowAdd(v => !v)}
+          className="flex items-center gap-1 text-xs text-indigo-600 font-semibold hover:text-indigo-800"
+        >
           <Plus className="w-3.5 h-3.5" /> Додати
         </button>
       </div>
 
-      {tasks.map(t => (
-        <div key={t.id} className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all ${t.done ? "bg-gray-50 border-gray-100 opacity-60" : "bg-white border-gray-200 shadow-sm"}`}>
-          {t.done ? <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" /> : <Circle className="w-5 h-5 text-gray-300 shrink-0" />}
-          <span className={`text-sm flex-1 ${t.done ? "line-through text-gray-400" : "text-gray-800 font-medium"}`}>{t.text}</span>
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.priority === "high" ? "bg-red-50 text-red-500" : "bg-gray-100 text-gray-400"}`}>
-            {t.priority === "high" ? "Важливо" : "Звичайне"}
-          </span>
-        </div>
-      ))}
+      {/* Hint */}
+      <p className="text-xs text-gray-400 -mt-1">
+        Завдання бачить уся команда у розділі «Хаускіпінг». Використовуйте для внутрішніх доручень по цьому бронюванню.
+      </p>
 
-      <button className="w-full py-3 rounded-2xl border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:border-indigo-300 hover:text-indigo-500 transition-colors font-medium flex items-center justify-center gap-2">
+      {/* Add task form */}
+      {showAdd && (
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3.5 space-y-2.5">
+          <input
+            autoFocus
+            value={newTitle}
+            onChange={e => setNewTitle(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") addTask(); if (e.key === "Escape") setShowAdd(false); }}
+            placeholder="Опис завдання…"
+            className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white"
+          />
+          <div className="flex gap-2">
+            <select
+              value={newPriority}
+              onChange={e => setNewPriority(e.target.value)}
+              className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none"
+            >
+              <option value="high">🔴 Важливо</option>
+              <option value="medium">🟡 Звичайне</option>
+              <option value="low">🔵 Низький</option>
+            </select>
+            <button
+              onClick={addTask}
+              disabled={saving || !newTitle.trim()}
+              className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              Зберегти
+            </button>
+            <button
+              onClick={() => setShowAdd(false)}
+              className="px-3 py-1.5 bg-white border border-gray-200 text-gray-500 text-xs font-semibold rounded-xl hover:bg-gray-50"
+            >
+              Скасувати
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-indigo-300" /></div>
+      ) : tasks.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">
+          <ClipboardList className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+          <p className="text-sm">Завдань ще немає</p>
+        </div>
+      ) : (
+        tasks.map(t => {
+          const done = t.status === "completed";
+          const pri = PRIORITY_CFG[t.priority] || PRIORITY_CFG.medium;
+          return (
+            <div
+              key={t.id}
+              className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all cursor-pointer ${done ? "bg-gray-50 border-gray-100 opacity-60" : "bg-white border-gray-200 shadow-sm hover:border-indigo-200"}`}
+              onClick={() => togglingId !== t.id && toggleDone(t)}
+            >
+              {togglingId === t.id
+                ? <Loader2 className="w-5 h-5 text-indigo-400 animate-spin shrink-0" />
+                : done
+                  ? <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                  : <Circle className="w-5 h-5 text-gray-300 shrink-0" />}
+              <span className={`text-sm flex-1 ${done ? "line-through text-gray-400" : "text-gray-800 font-medium"}`}>{t.title}</span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pri.color}`}>{pri.label}</span>
+            </div>
+          );
+        })
+      )}
+
+      <button
+        onClick={() => setShowAdd(true)}
+        className="w-full py-3 rounded-2xl border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:border-indigo-300 hover:text-indigo-500 transition-colors font-medium flex items-center justify-center gap-2"
+      >
         <Plus className="w-4 h-4" /> Нове завдання
       </button>
     </div>
