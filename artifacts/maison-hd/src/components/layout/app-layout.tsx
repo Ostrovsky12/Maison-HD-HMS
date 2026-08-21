@@ -227,7 +227,19 @@ const NOTIF_LABELS: Record<string, string> = {
 const NOTIF_NAV: Record<string, string> = {
   booking_created: "/bookings", checkin: "/bookings", checkout: "/bookings",
   cancellation: "/bookings", alert: "/bookings", housekeeping: "/housekeeping", report: "/analytics",
+  guest_message: "/bookings",
 };
+
+// ── Auth helper for raw fetch calls inside layout ──────────────────────────
+const layoutApiBase = (() => {
+  const base = (import.meta as any).env?.BASE_URL?.replace(/\/$/, "") ?? "";
+  return base.replace("/maison-hd", "") + "/api";
+})();
+const layoutTok = () => localStorage.getItem("hms_token");
+const layoutFetch = (path: string) =>
+  fetch(layoutApiBase + path, {
+    headers: { Authorization: `Bearer ${layoutTok()}` },
+  });
 
 function NotificationBell() {
   const [open, setOpen] = useState(false);
@@ -240,10 +252,28 @@ function NotificationBell() {
   const notifications = data?.notifications || [];
   const unread = data?.unreadCount || 0;
 
-  // Toast state: [{id, title, message, type, bookingId}]
-  type Toast = { id: number; title: string; message: string; type: string; bookingId?: number | null };
+  // ── Toast state ────────────────────────────────────────────────────────────
+  // kind: "notif" (standard bell) | "guest" (guest portal message)
+  type Toast = {
+    id: string | number;
+    title: string;
+    message: string;
+    type: string;
+    kind: "notif" | "guest";
+    bookingId?: number | null;
+  };
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  const dismissToast = (id: string | number) => setToasts(prev => prev.filter(t => t.id !== id));
+  const addToast = (t: Toast, ttl = 7000) => {
+    setToasts(prev => {
+      if (prev.some(x => x.id === t.id)) return prev;   // deduplicate
+      return [...prev, t];
+    });
+    setTimeout(() => dismissToast(t.id), ttl);
+  };
+
+  // ── Standard notifications (bell icon) ─────────────────────────────────
   const getSeenIds = (): Set<number> =>
     new Set(JSON.parse(sessionStorage.getItem("mhd_notif_seen") || "[]") as number[]);
   const markSeen = (ids: number[]) => {
@@ -266,15 +296,61 @@ function NotificationBell() {
     if (!fresh.length) return;
     markSeen(fresh.map((n: any) => n.id));
     fresh.slice(0, 3).forEach((n: any) => {
-      setToasts(prev => [...prev, { id: n.id, title: n.title, message: n.message, type: n.type, bookingId: n.bookingId }]);
-      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== n.id)), 5000);
+      addToast({ id: n.id, title: n.title, message: n.message, type: n.type, kind: "notif", bookingId: n.bookingId });
     });
   }, [notifications]);
 
-  const dismissToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
+  // ── Guest portal message polling ────────────────────────────────────────
+  const getSeenMsgIds = (): Set<number> =>
+    new Set(JSON.parse(sessionStorage.getItem("mhd_portal_seen") || "[]") as number[]);
+  const markMsgSeen = (ids: number[]) => {
+    const prev = getSeenMsgIds();
+    ids.forEach(id => prev.add(id));
+    sessionStorage.setItem("mhd_portal_seen", JSON.stringify([...prev]));
+  };
 
-  const goToNotif = (type: string) => {
-    navigate(`~${BASE}${NOTIF_NAV[type] || "/dashboard"}`);
+  useEffect(() => {
+    if (!layoutTok()) return;   // not logged in
+
+    const poll = async () => {
+      try {
+        const r = await layoutFetch("/guest/portal-unread");
+        if (!r.ok) return;
+        const msgs: any[] = await r.json();
+        if (!Array.isArray(msgs) || !msgs.length) return;
+
+        const seen = getSeenMsgIds();
+        const fresh = msgs.filter(m => !seen.has(Number(m.message_id)));
+        if (!fresh.length) return;
+        markMsgSeen(fresh.map(m => Number(m.message_id)));
+
+        fresh.slice(0, 3).forEach(m => {
+          const preview = (m.message || "").slice(0, 120);
+          const guestName = m.guest_name || "Гість";
+          const unit = m.unit_name ? ` · ${m.unit_name}` : "";
+          addToast({
+            id: `gm_${m.message_id}`,
+            title: `${guestName}${unit}`,
+            message: preview,
+            type: "guest_message",
+            kind: "guest",
+            bookingId: Number(m.booking_id) || null,
+          }, 10000);
+        });
+      } catch { /* ignore network errors */ }
+    };
+
+    poll(); // immediate on mount
+    const iv = setInterval(poll, 15000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const goToNotif = (type: string, bookingId?: number | null) => {
+    const base = NOTIF_NAV[type] || "/dashboard";
+    const path = (type === "guest_message" && bookingId)
+      ? `${base}?openBooking=${bookingId}`
+      : base;
+    navigate(`~${BASE}${path}`);
     setOpen(false);
   };
 
@@ -359,33 +435,56 @@ function NotificationBell() {
       {/* Toast overlay — macOS style, bottom-right corner */}
       {createPortal(
         <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none">
-          {toasts.map(t => (
-            <div key={t.id}
-              className="pointer-events-auto w-80 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200/60 overflow-hidden notif-toast-in"
-            >
-              <div className="flex items-start gap-3 p-4 cursor-pointer"
-                onClick={() => { goToNotif(t.type); dismissToast(t.id); }}
+          {toasts.map(t => {
+            const isGuest = t.kind === "guest";
+            return (
+              <div key={t.id}
+                className={`pointer-events-auto w-80 bg-white/97 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden notif-toast-in ${isGuest ? "border border-emerald-200/80" : "border border-gray-200/60"}`}
               >
-                <div className="shrink-0 w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center mt-0.5">
-                  <Bell className="w-4 h-4 text-indigo-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${NOTIF_COLORS[t.type] || "bg-gray-100 text-gray-700"}`}>
-                      {NOTIF_LABELS[t.type] || t.type}
-                    </span>
-                    <button onClick={e => { e.stopPropagation(); dismissToast(t.id); }}
-                      className="text-gray-300 hover:text-gray-500 transition-colors ml-1">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                <div
+                  className="flex items-start gap-3 p-4 cursor-pointer hover:bg-gray-50/60 transition-colors"
+                  onClick={() => { goToNotif(t.type, t.bookingId); dismissToast(t.id); }}
+                >
+                  {/* Icon */}
+                  <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5 ${isGuest ? "bg-emerald-50" : "bg-indigo-100"}`}>
+                    {isGuest
+                      ? <MessageSquare className="w-4 h-4 text-emerald-600" />
+                      : <Bell className="w-4 h-4 text-indigo-600" />}
                   </div>
-                  <p className="text-sm font-semibold text-gray-900 leading-tight">{t.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 leading-snug line-clamp-2">{t.message}</p>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      {isGuest ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-emerald-50 text-emerald-700">
+                          💬 Гість написав
+                        </span>
+                      ) : (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${NOTIF_COLORS[t.type] || "bg-gray-100 text-gray-700"}`}>
+                          {NOTIF_LABELS[t.type] || t.type}
+                        </span>
+                      )}
+                      <button
+                        onClick={e => { e.stopPropagation(); dismissToast(t.id); }}
+                        className="text-gray-300 hover:text-gray-500 transition-colors ml-1"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <p className={`text-sm font-semibold leading-tight ${isGuest ? "text-emerald-900" : "text-gray-900"}`}>
+                      {t.title}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-snug line-clamp-2">{t.message}</p>
+                    {isGuest && (
+                      <p className="text-[10px] text-emerald-600 mt-1.5 font-medium">
+                        Натисніть, щоб відкрити бронювання →
+                      </p>
+                    )}
+                  </div>
                 </div>
+                <div className={`h-0.5 bg-gradient-to-r ${isGuest ? "from-emerald-400 to-teal-400" : "from-indigo-500 to-violet-500"} notif-progress`} />
               </div>
-              <div className="h-0.5 bg-gradient-to-r from-indigo-500 to-violet-500 notif-progress" />
-            </div>
-          ))}
+            );
+          })}
         </div>,
         document.body
       )}

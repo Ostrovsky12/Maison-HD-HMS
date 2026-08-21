@@ -2291,27 +2291,78 @@ router.get("/:bookingId/invoice", requireAuth, requireBookingOwnership, async (r
 });
 
 // ── Booking-scoped staff tasks ────────────────────────────────────────────────
+//
+// Shared helpers that enforce the same ownership rules on every task route.
+
+/**
+ * Deny non-super-admin callers that have no organizationId.
+ * Returns true if the call may proceed, false if a 403 has already been sent.
+ */
+function requireOrgMembership(user: any, res: any): boolean {
+  if (user.role === "super_admin") return true;
+  if (!user.organizationId) {
+    res.status(403).json({ error: "Forbidden", message: "No organization membership" });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Fetch the booking row and confirm org ownership.
+ * Super-admin may read any booking; a regular user only sees their org's bookings.
+ * Returns the row ({ id, unit_id, organization_id }) or null if not found / wrong org.
+ */
+async function getBookingForOrg(
+  rawDb: any,
+  bookingId: number,
+  isSuperAdmin: boolean,
+  orgId: number | null,
+): Promise<{ id: number; unit_id: number; organization_id: number } | null> {
+  const { rows } = isSuperAdmin
+    ? await rawDb.$client.query(
+        `SELECT b.id, b.unit_id, p.organization_id
+         FROM bookings b
+         JOIN units u ON u.id = b.unit_id
+         JOIN properties p ON p.id = u.property_id
+         WHERE b.id = $1`,
+        [bookingId],
+      )
+    : await rawDb.$client.query(
+        `SELECT b.id, b.unit_id, p.organization_id
+         FROM bookings b
+         JOIN units u ON u.id = b.unit_id
+         JOIN properties p ON p.id = u.property_id
+         WHERE b.id = $1 AND p.organization_id = $2`,
+        [bookingId, orgId],
+      );
+  return rows[0] ?? null;
+}
+
+// GET /:id/tasks — list tasks scoped to this booking
 router.get("/:id/tasks", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
     const bookingId = parseInt(req.params.id);
+    const isSuperAdmin = user.role === "super_admin";
 
-    // Verify the booking belongs to the caller's org
-    const { rows: bRows } = await (db as any).$client.query(
-      `SELECT b.id FROM bookings b
-       JOIN units u ON u.id = b.unit_id
-       JOIN properties p ON p.id = u.property_id
-       WHERE b.id = $1 AND ($2::int IS NULL OR p.organization_id = $2)`,
-      [bookingId, user.organizationId ?? null],
-    );
-    if (!bRows.length) { res.status(404).json({ error: "Booking not found" }); return; }
+    if (!requireOrgMembership(user, res)) return;
+
+    const booking = await getBookingForOrg(db, bookingId, isSuperAdmin, user.organizationId);
+    if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
 
     const { rows } = await (db as any).$client.query(
-      `SELECT ht.id, ht.title, ht.description, ht.status, ht.priority,
-              ht.due_date as "dueDate", ht.notes, ht.booking_id as "bookingId",
-              ht.created_at as "createdAt", u.name as "assignedToName"
+      `SELECT ht.id,
+              ht.title,
+              ht.description,
+              ht.status,
+              ht.priority,
+              ht.due_date   AS "dueDate",
+              ht.notes,
+              ht.booking_id AS "bookingId",
+              ht.created_at AS "createdAt",
+              u.name        AS "assignedToName"
        FROM housekeeping_tasks ht
-       LEFT JOIN users u ON u.id = ht.assigned_to_id
+       LEFT JOIN users u ON u.id = ht.assigned_to
        WHERE ht.booking_id = $1
        ORDER BY ht.created_at ASC`,
       [bookingId],
@@ -2322,32 +2373,40 @@ router.get("/:id/tasks", requireAuth, async (req, res) => {
   }
 });
 
+// POST /:id/tasks — create a task for this booking
 router.post("/:id/tasks", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
     const bookingId = parseInt(req.params.id);
     const { title, description, priority = "medium", dueDate, notes } = req.body;
     if (!title?.trim()) { res.status(400).json({ error: "title is required" }); return; }
+    const isSuperAdmin = user.role === "super_admin";
 
-    // Verify booking + get unit
-    const { rows: bRows } = await (db as any).$client.query(
-      `SELECT b.unit_id FROM bookings b
-       JOIN units u ON u.id = b.unit_id
-       JOIN properties p ON p.id = u.property_id
-       WHERE b.id = $1 AND ($2::int IS NULL OR p.organization_id = $2)`,
-      [bookingId, user.organizationId ?? null],
-    );
-    if (!bRows.length) { res.status(404).json({ error: "Booking not found" }); return; }
-    const unitId = bRows[0].unit_id;
+    if (!requireOrgMembership(user, res)) return;
+
+    const booking = await getBookingForOrg(db, bookingId, isSuperAdmin, user.organizationId);
+    if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
 
     const { rows } = await (db as any).$client.query(
       `INSERT INTO housekeeping_tasks
-         (unit_id, booking_id, title, description, priority, due_date, notes, task_type, status, checklist)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'other', 'pending', '[]')
+         (unit_id, booking_id, organization_id, title, description,
+          priority, due_date, notes, status, checklist)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', '[]'::jsonb)
        RETURNING id, title, description, status, priority,
-                 due_date as "dueDate", notes, booking_id as "bookingId",
-                 created_at as "createdAt"`,
-      [unitId, bookingId, title.trim(), description || null, priority, dueDate || null, notes || null],
+                 due_date   AS "dueDate",
+                 notes,
+                 booking_id AS "bookingId",
+                 created_at AS "createdAt"`,
+      [
+        booking.unit_id,
+        bookingId,
+        booking.organization_id,
+        title.trim(),
+        description || null,
+        priority,
+        dueDate   || null,
+        notes     || null,
+      ],
     );
     res.status(201).json(rows[0]);
   } catch (err: any) {
@@ -2355,38 +2414,51 @@ router.post("/:id/tasks", requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /:id/tasks/:taskId — update status / title / priority / notes
 router.patch("/:id/tasks/:taskId", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
     const bookingId = parseInt(req.params.id);
-    const taskId = parseInt(req.params.taskId);
+    const taskId    = parseInt(req.params.taskId);
     const { status, title, priority, notes } = req.body;
+    const isSuperAdmin = user.role === "super_admin";
 
-    // Ownership check
-    const { rows: check } = await (db as any).$client.query(
-      `SELECT ht.id FROM housekeeping_tasks ht
-       JOIN bookings b ON b.id = ht.booking_id
-       JOIN units u ON u.id = b.unit_id
-       JOIN properties p ON p.id = u.property_id
-       WHERE ht.id = $1 AND ht.booking_id = $2 AND ($3::int IS NULL OR p.organization_id = $3)`,
-      [taskId, bookingId, user.organizationId ?? null],
-    );
+    if (!requireOrgMembership(user, res)) return;
+
+    // Verify the task belongs to this booking and (for non-super-admin) the caller's org
+    const { rows: check } = isSuperAdmin
+      ? await (db as any).$client.query(
+          `SELECT ht.id FROM housekeeping_tasks ht
+           WHERE ht.id = $1 AND ht.booking_id = $2`,
+          [taskId, bookingId],
+        )
+      : await (db as any).$client.query(
+          `SELECT ht.id FROM housekeeping_tasks ht
+           JOIN bookings b ON b.id = ht.booking_id
+           JOIN units u ON u.id = b.unit_id
+           JOIN properties p ON p.id = u.property_id
+           WHERE ht.id = $1 AND ht.booking_id = $2 AND p.organization_id = $3`,
+          [taskId, bookingId, user.organizationId],
+        );
+
     if (!check.length) { res.status(404).json({ error: "Task not found" }); return; }
 
     const sets: string[] = ["updated_at = NOW()"];
     const params: any[] = [];
-    if (status !== undefined)   { params.push(status);   sets.push(`status = $${params.length}`); }
-    if (title !== undefined)    { params.push(title);    sets.push(`title = $${params.length}`); }
+    if (status   !== undefined) { params.push(status);   sets.push(`status = $${params.length}`); }
+    if (title    !== undefined) { params.push(title);    sets.push(`title = $${params.length}`); }
     if (priority !== undefined) { params.push(priority); sets.push(`priority = $${params.length}`); }
-    if (notes !== undefined)    { params.push(notes);    sets.push(`notes = $${params.length}`); }
+    if (notes    !== undefined) { params.push(notes);    sets.push(`notes = $${params.length}`); }
     params.push(taskId);
 
     const { rows } = await (db as any).$client.query(
       `UPDATE housekeeping_tasks SET ${sets.join(", ")}
        WHERE id = $${params.length}
        RETURNING id, title, description, status, priority,
-                 due_date as "dueDate", notes, booking_id as "bookingId",
-                 created_at as "createdAt"`,
+                 due_date   AS "dueDate",
+                 notes,
+                 booking_id AS "bookingId",
+                 created_at AS "createdAt"`,
       params,
     );
     res.json(rows[0]);

@@ -834,11 +834,11 @@ async function ensureSchema() {
     logger.warn({ msg: auditErr?.message }, "audit_logs schema warning (non-fatal, continuing)");
   }
 
-  // Add booking_id to housekeeping_tasks for booking-scoped staff tasks
-  await db.execute(sql`
-    ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS booking_id INTEGER REFERENCES bookings(id) ON DELETE SET NULL;
-    ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS task_type_text VARCHAR(100);
-  `);
+  // Add booking_id, task_type, notes to housekeeping_tasks for booking-scoped staff tasks
+  // Each statement is idempotent (IF NOT EXISTS) — safe to run on every startup.
+  await db.execute(sql`ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS booking_id  INTEGER REFERENCES bookings(id) ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS task_type   VARCHAR(50) DEFAULT 'other'`);
+  await db.execute(sql`ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS notes       TEXT`);
 }
 
 async function bootstrap() {

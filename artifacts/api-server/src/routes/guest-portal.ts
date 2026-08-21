@@ -389,6 +389,43 @@ router.get("/portal-threads", requireAuth, async (req: any, res) => {
   }
 });
 
+// ── Staff: Unread portal messages (for global notification polling) ─────────
+// Lightweight endpoint - returns unread guest messages from the last 48 hours
+// Used by the frontend to show toast notifications on any screen
+router.get("/portal-unread", requireAuth, async (req: any, res) => {
+  try {
+    const orgId: number | null = req.user?.organizationId ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+
+    const result = await db.execute(sql`
+      SELECT
+        m.id          AS message_id,
+        m.booking_id,
+        m.message,
+        m.created_at,
+        COALESCE(
+          NULLIF(TRIM(b.guest_name), ''),
+          NULLIF(TRIM(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, '')), ''),
+          'Гість'
+        )             AS guest_name,
+        u.name        AS unit_name
+      FROM guest_portal_messages m
+      JOIN bookings b ON b.id = m.booking_id
+      JOIN units u ON u.id = b.unit_id
+      JOIN properties p ON p.id = u.property_id
+      WHERE m.direction = 'guest_to_hotel'
+        AND m.is_read = false
+        AND m.created_at > NOW() - INTERVAL '48 hours'
+        AND (${isSuperAdmin ? sql`TRUE` : sql`p.organization_id = ${orgId}`})
+      ORDER BY m.created_at DESC
+      LIMIT 20
+    `);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Staff: Mark all portal messages for a booking as read ──────────────────
 router.patch("/portal-threads/:bookingId/read-all", requireAuth, async (req: any, res) => {
   try {

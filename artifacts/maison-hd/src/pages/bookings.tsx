@@ -332,6 +332,24 @@ export default function BookingsPage() {
 
   const openDrawer = useCallback((b: any) => { setDrawerBooking(b); setDrawerOpen(true); }, []);
 
+  // Auto-open booking from URL param ?openBooking=<id>  (used by notification toasts)
+  const autoOpenDone = useRef(false);
+  useEffect(() => {
+    if (autoOpenDone.current || !bookings?.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const bookingId = Number(params.get("openBooking"));
+    if (!bookingId) return;
+    const found = bookings.find(b => b.id === bookingId);
+    if (found) {
+      openDrawer(found);
+      autoOpenDone.current = true;
+      // Clean the URL without reloading
+      const url = new URL(window.location.href);
+      url.searchParams.delete("openBooking");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [bookings, openDrawer]);
+
   const hasFilters = propertyId || dateFrom || dateTo;
   const clearFilters = () => { setPropertyId(""); setDateFrom(""); setDateTo(""); };
 
