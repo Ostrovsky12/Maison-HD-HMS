@@ -1,11 +1,40 @@
 import { Router } from "express";
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { db } from "@workspace/db";
 import { channelConfigsTable, conversationsTable, messagesTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
+import { tryFaqAutoReply } from "../lib/faq-auto-reply.js";
 
 const router = Router();
+
+function constantTimeEquals(actual: string | undefined, expected: string | undefined): boolean {
+  if (!actual || !expected) return false;
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+export function validInstagramSignature(rawBody: Buffer | undefined, signature: string | undefined, appSecret: string | undefined): boolean {
+  if (!rawBody || !signature?.startsWith("sha256=") || !appSecret) return false;
+  const expected = `sha256=${createHmac("sha256", appSecret).update(rawBody).digest("hex")}`;
+  return constantTimeEquals(signature, expected);
+}
+
+async function validTelegramWebhook(req: any, organizationId: number): Promise<boolean> {
+  const [config] = await db.select()
+    .from(channelConfigsTable)
+    .where(and(
+      eq(channelConfigsTable.organizationId, organizationId),
+      eq(channelConfigsTable.channel, "telegram" as any),
+      eq(channelConfigsTable.isEnabled, true),
+    ))
+    .limit(1);
+  return constantTimeEquals(
+    req.get("x-telegram-bot-api-secret-token"),
+    config?.config?.webhook_secret,
+  );
+}
 
 // ── Helper: find or create conversation ─────────────────────────────────────
 async function upsertConversation(
@@ -211,7 +240,16 @@ router.post("/telegram/:orgId", async (req, res) => {
     const messageId = `tg_${message.message_id}`;
 
     const conv = await upsertConversation(orgId, "telegram", chatId, senderName, text);
-    await storeInboundMessage(conv.id, text, senderName, messageId);
+    const inbound = await storeInboundMessage(conv.id, text, senderName, messageId);
+    if (inbound) {
+      await tryFaqAutoReply({
+        organizationId: orgId,
+        conversationId: conv.id,
+        channel: "telegram",
+        externalId: chatId,
+        text,
+      });
+    }
 
     logger.info({ organizationId: orgId }, "Telegram bot message stored");
   } catch (err) {
@@ -266,6 +304,14 @@ router.post("/instagram", async (req, res) => {
         logger.warn("Instagram webhook received an unknown page");
         continue;
       }
+      if (!config.isEnabled || !validInstagramSignature(
+        (req as any).rawBody,
+        req.get("x-hub-signature-256"),
+        config.config?.app_secret,
+      )) {
+        console.warn(`[instagram-webhook] rejected unverified request for page_id=${pageId}`);
+        continue;
+      }
       const orgId = config.organizationId;
 
       const messaging = entry.messaging || entry.messages || [];
@@ -291,7 +337,16 @@ router.post("/instagram", async (req, res) => {
         } catch {}
 
         const conv = await upsertConversation(orgId, "instagram", senderId, senderName, text);
-        await storeInboundMessage(conv.id, text, senderName, msgId);
+        const inbound = await storeInboundMessage(conv.id, text, senderName, msgId);
+        if (inbound) {
+          await tryFaqAutoReply({
+            organizationId: orgId,
+            conversationId: conv.id,
+            channel: "instagram",
+            externalId: senderId,
+            text,
+          });
+        }
 
         logger.info({ organizationId: orgId }, "Instagram message stored");
       }

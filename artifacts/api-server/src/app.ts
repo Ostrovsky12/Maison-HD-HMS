@@ -63,7 +63,14 @@ app.use(cors({
 app.use("/api/acc-migration/projects/:id/files", express.json({ limit: "14mb" }));
 // 50mb was excessive and a DoS risk; images/files should use object storage.
 // Keep 2mb for large JSON payloads (bulk imports etc.) but reject oversized requests.
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({
+  limit: "2mb",
+  verify(req, _res, buffer) {
+    if (req.originalUrl?.startsWith("/api/inbox/webhooks/instagram")) {
+      (req as any).rawBody = Buffer.from(buffer);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
 app.get("/api", (_req, res) => {

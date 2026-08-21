@@ -10,6 +10,8 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger.js";
+import { dispatchInboxChannelMessage } from "../lib/inbox-channel-dispatch.js";
+import { faqAutoBlocker } from "../lib/faq-auto-reply.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -404,7 +406,9 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
         logger.error({ err: error, organizationId: orgId, conversationId: id }, "Telegram reply dispatch failed"),
       );
     } else if (conv.channel === "instagram" && conv.external_id) {
-      dispatchInstagram(orgId, conv.external_id, content.trim()).catch(e =>
+      dispatchInboxChannelMessage({
+        organizationId: orgId, channel: "instagram", recipientId: conv.external_id, text: content.trim(),
+      }).catch(e =>
         console.error("[reply/instagram] dispatch error:", e)
       );
     }
@@ -493,6 +497,7 @@ async function dispatchInstagram(orgId: number, recipientId: string, text: strin
   }
   console.log(`[reply/instagram] sent to user=${recipientId}`);
 }
+
 
 // ── Internal note ───────────────────────────────────────────────────────────
 router.post("/conversations/:id/internal-note", async (req: any, res) => {
@@ -646,10 +651,11 @@ ${knowledgeContext}`;
 
     const sources = knowledgeSources.map(({ id, title, category, updatedAt }) => ({ id, title, category, updatedAt }));
     const bookingIntake = bookingIntakeFromMessage(lastInbound.content);
-    const handoffSuggested = knowledgeSources.length === 0;
+    const autoReplyBlocker = faqAutoBlocker(lastInbound.content);
+    const handoffSuggested = knowledgeSources.length === 0 || Boolean(autoReplyBlocker);
     const mode = conciergeSettings?.mode ?? "manual";
     const autoReplyEligible = mode === "faq_auto"
-      && !bookingIntake.detected
+      && !autoReplyBlocker
       && knowledgeSources.length > 0
       && knowledgeSources.every((article) => article.category === "faq");
 
@@ -673,6 +679,7 @@ ${knowledgeContext}`;
         mode,
         autoReplyEligible,
         bookingIntake,
+        autoReplyBlocker,
       },
     });
 
@@ -1182,9 +1189,9 @@ router.delete("/channels/telegram/setup", async (req: any, res) => {
 router.post("/channels/instagram/setup", async (req: any, res) => {
   try {
     const orgId = req.user.organizationId;
-    const { accessToken, pageId, verifyToken } = req.body;
-    if (!accessToken?.trim() || !pageId?.trim() || !verifyToken?.trim()) {
-      return res.status(400).json({ error: "accessToken, pageId та verifyToken обов'язкові" });
+    const { accessToken, pageId, verifyToken, appSecret } = req.body;
+    if (!accessToken?.trim() || !pageId?.trim() || !verifyToken?.trim() || !appSecret?.trim()) {
+      return res.status(400).json({ error: "accessToken, pageId, verifyToken та appSecret обов'язкові" });
     }
 
     // Verify access token by fetching page info
@@ -1210,6 +1217,7 @@ router.post("/channels/instagram/setup", async (req: any, res) => {
       page_id: pageId,
       ig_user_id: igUserId,
       verify_token: verifyToken,
+      app_secret: appSecret,
       page_name: pageName,
     };
     if (existing.length) {

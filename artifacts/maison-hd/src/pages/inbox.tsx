@@ -251,6 +251,7 @@ export default function InboxPage() {
   const [tgToken, setTgToken] = useState("");
   const [igAccessToken, setIgAccessToken] = useState("");
   const [igPageId, setIgPageId] = useState("");
+  const [igAppSecret, setIgAppSecret] = useState("");
   const [igVerifyToken, setIgVerifyToken] = useState(() => Math.random().toString(36).slice(2, 12));
   const [channelSetupLoading, setChannelSetupLoading] = useState("");
 
@@ -340,17 +341,23 @@ export default function InboxPage() {
 
   // ── Connect Instagram ────────────────────────────────────────────────────
   async function setupInstagram() {
-    if (!igAccessToken.trim() || !igPageId.trim()) return;
+    if (!igAccessToken.trim() || !igPageId.trim() || !igAppSecret.trim()) return;
     setChannelSetupLoading("instagram");
     try {
       const r = await apiFetch(`${API}/inbox/channels/instagram/setup`, {
-        method: "POST", body: JSON.stringify({ accessToken: igAccessToken, pageId: igPageId, verifyToken: igVerifyToken }),
+        method: "POST", body: JSON.stringify({
+          accessToken: igAccessToken,
+          pageId: igPageId,
+          verifyToken: igVerifyToken,
+          appSecret: igAppSecret,
+        }),
       });
       const d = await r.json();
       if (d.success) {
         toast({ title: `✅ Instagram підключено`, description: d.pageName });
         setIgAccessToken("");
         setIgPageId("");
+        setIgAppSecret("");
         loadChannels();
       } else {
         toast({ title: "Помилка", description: d.error, variant: "destructive" });
@@ -1846,6 +1853,7 @@ export default function InboxPage() {
                           <li>Meta Business App з дозволом <code>instagram_manage_messages</code></li>
                           <li>Facebook Page з підключеним Instagram Business акаунтом</li>
                           <li>Page Access Token (не User Token)</li>
+                          <li>App Secret із Meta Business App</li>
                         </ol>
                       </div>
                       <div className="space-y-2">
@@ -1853,13 +1861,15 @@ export default function InboxPage() {
                           placeholder="Facebook Page ID (числовий)" className="h-9 text-sm font-mono" />
                         <Input value={igAccessToken} onChange={e => setIgAccessToken(e.target.value)}
                           placeholder="Page Access Token (EAABxxx...)" className="h-9 text-sm font-mono" />
+                        <Input value={igAppSecret} onChange={e => setIgAppSecret(e.target.value)}
+                          type="password" placeholder="Meta App Secret" className="h-9 text-sm font-mono" />
                         <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
                           <p className="font-medium text-gray-700 mb-0.5">Verify Token (для Meta Webhook):</p>
                           <p className="font-mono">{igVerifyToken}</p>
                           <p className="mt-1">Webhook URL: <span className="font-mono text-[10px] break-all">{`${window.location.origin.replace(/\/maison-hd.*/, "")}/api/inbox/webhooks/instagram`}</span></p>
                         </div>
                         <Button size="sm" className="w-full h-9 bg-gradient-to-r from-purple-500 to-pink-500 hover:opacity-90"
-                          onClick={setupInstagram} disabled={!igAccessToken.trim() || !igPageId.trim() || channelSetupLoading === "instagram"}>
+                          onClick={setupInstagram} disabled={!igAccessToken.trim() || !igPageId.trim() || !igAppSecret.trim() || channelSetupLoading === "instagram"}>
                           {channelSetupLoading === "instagram" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Підключити Instagram"}
                         </Button>
                       </div>

@@ -3,5 +3,6 @@
 - [Tenant deletion API](tenant-deletion-api.md) — DELETE /api/super-admin/tenants endpoint for wiping all orgs (cascade)
 - [F&B module migration](fb-migration.md) — all 52 HMS F&B pages copied to Maison HD with full routes and sidebar sections
 - [Security hardening](security-hardening.md) — full audit pass: rate limits, org scope, state machine, allowlists, helmet, .env.example
+- [Inbound channel authentication](inbound-channel-authentication.md) — verify provider webhooks before any AI or outbound inbox work
 - [Canonical public document links](public-document-links.md) — signed bearer links must use a configured HTTPS origin, never request Host headers
 - [Accommodation availability invariants](accommodation-availability-invariants.md) — every write path must serialize on the same unit lock before checking booking and block overlap
