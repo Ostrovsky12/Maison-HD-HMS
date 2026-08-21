@@ -1494,6 +1494,9 @@ function TabComms({ b }: { b: any }) {
     if (r.ok) {
       const msgs = await r.json();
       setMessages(msgs);
+      // Mark all guest→hotel messages for this booking as read so the
+      // portal-unread endpoint and notification bell stop counting them.
+      apiFetch(`${API}/guest/portal-threads/${b.id}/read-all`, { method: "PATCH" }).catch(() => {});
     }
     setLoading(false);
   }, [b.id]);

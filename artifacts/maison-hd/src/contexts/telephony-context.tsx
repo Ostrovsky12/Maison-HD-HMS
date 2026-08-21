@@ -135,6 +135,18 @@ interface TelephonyCtx {
   answerCall: () => Promise<void>;
   hangup: () => void;
   onBinotelEvent: (handler: (evt: any) => void) => () => void;
+  /** Subscribe to instant guest-portal message pushes from the server.
+   *  Returns an unsubscribe function suitable for useEffect cleanup. */
+  onGuestPortalMessage: (handler: (evt: GuestPortalMessageEvent) => void) => () => void;
+}
+
+export interface GuestPortalMessageEvent {
+  orgId:      number;
+  messageId:  number | null;
+  bookingId:  number;
+  guestName:  string;
+  unitName:   string;
+  message:    string;
 }
 
 const TelephonyContext = createContext<TelephonyCtx | null>(null);
@@ -242,6 +254,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const binotelHandlers = useRef<Set<(evt: any) => void>>(new Set());
+  const guestPortalHandlers = useRef<Set<(evt: GuestPortalMessageEvent) => void>>(new Set());
 
   const [userId, setUserId] = useState<string | null>(null);
   const [online, setOnline] = useState<string[]>([]);
@@ -324,6 +337,8 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
           setOnline(p => [...new Set([...p, msg.userId])]);
         } else if (msg.type === "peer-offline") {
           setOnline(p => p.filter(x => x !== msg.userId));
+        } else if (msg.type === "guest_portal_message") {
+          guestPortalHandlers.current.forEach(h => h(msg as GuestPortalMessageEvent));
         } else if (msg.type === "binotel-incoming" || msg.type === "binotel-completed") {
           binotelHandlers.current.forEach(h => h(msg));
         } else if (msg.type === "call") {
@@ -408,13 +423,18 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     return () => { binotelHandlers.current.delete(handler); };
   }, []);
 
+  const onGuestPortalMessage = useCallback((handler: (evt: GuestPortalMessageEvent) => void) => {
+    guestPortalHandlers.current.add(handler);
+    return () => { guestPortalHandlers.current.delete(handler); };
+  }, []);
+
   // Unlock AudioContext on first user interaction (runs once for the whole app)
   useAudioUnlock();
 
   // Play ringtone when someone is calling us
   useRingtone(callState === "ringing");
 
-  const ctx: TelephonyCtx = { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup, onBinotelEvent };
+  const ctx: TelephonyCtx = { online, callState, callPeer, callTimer, callPeerFn, answerCall, hangup, onBinotelEvent, onGuestPortalMessage };
 
   return (
     <TelephonyContext.Provider value={ctx}>

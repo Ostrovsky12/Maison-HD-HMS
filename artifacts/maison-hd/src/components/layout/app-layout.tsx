@@ -23,6 +23,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { uk } from "date-fns/locale";
 import { CommandPalette, useCommandPalette } from "@/components/command-palette";
+import { useTelephony } from "@/contexts/telephony-context";
+import type { GuestPortalMessageEvent } from "@/contexts/telephony-context";
 
 // ── NAV STRUCTURE ─────────────────────────────────────────────────────────────
 type NavItem = { name: string; path: string; icon: any; roles?: string[] | null; badge?: string; moduleKey?: string };
@@ -235,11 +237,20 @@ const layoutApiBase = (() => {
   const base = (import.meta as any).env?.BASE_URL?.replace(/\/$/, "") ?? "";
   return base.replace("/maison-hd", "") + "/api";
 })();
-const layoutTok = () => localStorage.getItem("hms_token");
+const layoutTok   = () => localStorage.getItem("hms_token");
 const layoutFetch = (path: string) =>
-  fetch(layoutApiBase + path, {
-    headers: { Authorization: `Bearer ${layoutTok()}` },
-  });
+  fetch(layoutApiBase + path, { headers: { Authorization: `Bearer ${layoutTok()}` } });
+
+// Decode orgId / role from the stored JWT without an extra HTTP round-trip.
+// The payload is not sensitive here — we only use it for client-side filtering.
+const layoutOrgId = (): number | null => {
+  try { return JSON.parse(atob(layoutTok()!.split(".")[1]))?.organizationId ?? null; }
+  catch { return null; }
+};
+const layoutRole = (): string | null => {
+  try { return JSON.parse(atob(layoutTok()!.split(".")[1]))?.role ?? null; }
+  catch { return null; }
+};
 
 function NotificationBell() {
   const [open, setOpen] = useState(false);
@@ -249,6 +260,7 @@ function NotificationBell() {
   const { data, refetch } = useListNotifications({ limit: 30 });
   const markAll = useMarkAllNotificationsRead();
   const markOne = useMarkNotificationRead();
+  const { onGuestPortalMessage } = useTelephony();
   const notifications = data?.notifications || [];
   const unread = data?.unreadCount || 0;
 
@@ -344,6 +356,30 @@ function NotificationBell() {
     const iv = setInterval(poll, 15000);
     return () => clearInterval(iv);
   }, []);
+
+  // ── Instant WebSocket push from server when a guest sends a message ─────────
+  // This fires immediately (no polling delay) and falls back to the 15 s poll above.
+  useEffect(() => {
+    return onGuestPortalMessage((evt: GuestPortalMessageEvent) => {
+      // Multi-tenant guard: only show for our org (super-admin sees all)
+      const myOrgId = layoutOrgId();
+      const isSuperAdmin = layoutRole() === "super_admin";
+      if (!isSuperAdmin && myOrgId !== evt.orgId) return;
+
+      const unit = evt.unitName ? ` · ${evt.unitName}` : "";
+      addToast({
+        id: `gm_ws_${evt.messageId ?? `${evt.bookingId}_${Date.now()}`}`,
+        title: `${evt.guestName}${unit}`,
+        message: evt.message.slice(0, 120),
+        type: "guest_message",
+        kind: "guest",
+        bookingId: evt.bookingId,
+      }, 12000);
+
+      // Pre-seed sessionStorage so the backup poll skips this message
+      if (evt.messageId) markMsgSeen([Number(evt.messageId)]);
+    });
+  }, [onGuestPortalMessage]);
 
   const goToNotif = (type: string, bookingId?: number | null) => {
     const base = NOTIF_NAV[type] || "/dashboard";

@@ -7,7 +7,8 @@ import {
   guestPortalMessagesTable, guestSpecialOffersTable, guestCommunicationLogTable,
   addonsTable, notificationsTable, usersTable, legalEntitiesTable,
 } from "@workspace/db";
-import { eq, and, desc, asc, ne, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, asc, ne, sql, inArray, or, isNull } from "drizzle-orm";
+import { broadcastToAll } from "../lib/ws-broadcaster.js";
 import { randomBytes } from "crypto";
 import { requireAuth } from "../lib/auth.js";
 import { sendPushToOrg } from "./push.js";
@@ -22,6 +23,24 @@ const accessCodeLimiter = rateLimit({
   message: { error: "Забагато спроб. Спробуйте пізніше." },
 });
 
+// ── SSE registry: real-time push from hotel → guest browser ──────────────────
+// key: bookingId  value: Set of live Express Response objects
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const guestSseClients = new Map<number, Set<any>>();
+
+/**
+ * Push an SSE event to every browser tab the guest has open for this booking.
+ * Non-blocking; silently drops disconnected clients.
+ */
+function pushToGuestSse(bookingId: number, event: Record<string, unknown>): void {
+  const clients = guestSseClients.get(bookingId);
+  if (!clients?.size) return;
+  const payload = `data: ${JSON.stringify(event)}\n\n`;
+  for (const client of clients) {
+    try { (client as any).write(payload); } catch { /* disconnected */ }
+  }
+}
+
 // ── Helper: notify all staff of an org about a guest portal action ──────────
 async function notifyOrgStaff(
   orgId: number,
@@ -35,11 +54,18 @@ async function notifyOrgStaff(
     sendPushToOrg(orgId, { title, body: message }).catch(() => {});
     // Telegram notification
     sendTelegram(orgId, `🔔 <b>${title}</b>\n${message}\n#бронювання${bookingId}`).catch(() => {});
-    // In-app notifications for all staff of this org
+    // In-app notifications for all staff of this org.
+    // NOTE: do NOT filter by isActive — the column may be null for existing users
+    // and sql(null != true) would silently exclude them.
     const staffUsers = await db
       .select({ id: usersTable.id })
       .from(usersTable)
-      .where(and(eq(usersTable.organizationId, orgId), eq(usersTable.isActive, true)));
+      .where(
+        and(
+          eq(usersTable.organizationId, orgId),
+          or(eq(usersTable.isActive, true), isNull(usersTable.isActive)),
+        )
+      );
     if (staffUsers.length > 0) {
       await db.insert(notificationsTable).values(
         staffUsers.map(u => ({
@@ -176,8 +202,16 @@ router.post("/message/:bookingId", requireAuth, async (req: any, res) => {
 
     const { message } = req.body;
     const senderName = req.user?.name || req.user?.email || "Адміністратор";
-    await db.insert(guestPortalMessagesTable).values({
+    const [inserted] = await db.insert(guestPortalMessagesTable).values({
       bookingId, direction: "hotel_to_guest", senderName, message, isRead: false,
+    }).returning();
+    // Instant push to any open guest browser tab (SSE)
+    pushToGuestSse(bookingId, {
+      type:       "hotel_message",
+      messageId:  inserted.id,
+      message:    inserted.message,
+      senderName: inserted.senderName,
+      createdAt:  inserted.createdAt,
     });
     res.json({ success: true });
   } catch (err: any) {
@@ -880,6 +914,47 @@ router.patch("/service-orders/:id", requireAuth, async (req: any, res) => {
 // PUBLIC GUEST PORTAL ROUTES (no auth required)
 // ════════════════════════════════════════════════════════════════════════════
 
+// GET /api/guest/:code/events — SSE stream for instant hotel→guest push
+// No auth required; booking access code acts as the credential.
+router.get("/:code/events", accessCodeLimiter, async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase();
+    const [booking] = await db
+      .select({ id: bookingsTable.id })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.guestAccessCode, code));
+    if (!booking) return res.status(404).end();
+
+    // SSE response headers
+    res.setHeader("Content-Type",    "text/event-stream");
+    res.setHeader("Cache-Control",   "no-cache");
+    res.setHeader("Connection",      "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");   // disable nginx buffering
+    res.flushHeaders();
+
+    // Register client
+    if (!guestSseClients.has(booking.id)) guestSseClients.set(booking.id, new Set());
+    const clients = guestSseClients.get(booking.id)!;
+    clients.add(res);
+
+    // Confirm connection
+    res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+
+    // Keep-alive comment every 25 s — prevents proxies from closing idle SSE connections.
+    const keepAlive = setInterval(() => {
+      try { (res as any).write(": keepalive\n\n"); } catch { clearInterval(keepAlive); }
+    }, 25_000);
+
+    req.on("close", () => {
+      clearInterval(keepAlive);
+      clients.delete(res);
+      if (!clients.size) guestSseClients.delete(booking.id);
+    });
+  } catch (err: any) {
+    res.status(500).end();
+  }
+});
+
 // GET /api/guest/:code — full booking info
 router.get("/:code", accessCodeLimiter, async (req, res) => {
   try {
@@ -1290,14 +1365,27 @@ router.post("/:code/message", async (req, res) => {
       bookingId: booking.id, direction: "guest_to_hotel", senderName: guestName, message: message.trim(),
     }).returning();
 
-    // Notify reception
+    // Notify reception — fire-and-forget; resolved asynchronously to keep response fast
     db.select({ orgId: propertiesTable.organizationId, unitName: unitsTable.name })
       .from(bookingsTable)
       .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
       .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
       .where(eq(bookingsTable.id, booking.id)).limit(1)
       .then(([ctx]) => {
-        if (ctx) notifyOrgStaff(ctx.orgId, booking.id, "alert",
+        if (!ctx) return;
+        // Instant WebSocket push — reaches all connected staff immediately.
+        // The frontend filters by orgId so cross-org staff don't see each other's guests.
+        broadcastToAll({
+          type: "guest_portal_message",
+          orgId:     ctx.orgId,
+          messageId: msg?.id ?? null,
+          bookingId: booking.id,
+          guestName,
+          unitName:  ctx.unitName,
+          message:   message.trim().slice(0, 200),
+        });
+        // Persistent in-app notification + Telegram
+        notifyOrgStaff(ctx.orgId, booking.id, "alert",
           "💬 Нове повідомлення від гостя",
           `${guestName} (${ctx.unitName}): «${message.trim().slice(0, 120)}${message.trim().length > 120 ? "…" : ""}»`
         );

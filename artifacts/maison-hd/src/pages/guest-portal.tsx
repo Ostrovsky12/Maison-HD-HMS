@@ -266,21 +266,64 @@ export default function GuestPortalPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Live polling: refresh messages every 15s when chat tab is open
+  // ── SSE: instant push when hotel staff replies ─────────────────────────────
+  // Opens a persistent connection — the server pushes events the moment a
+  // staff member sends a message, eliminating the old 20 s polling latency.
+  useEffect(() => {
+    if (!code) return;
+    const es = new EventSource(`${API}/guest/${code}/events`);
+
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data);
+        if (evt.type !== "hotel_message") return;
+
+        // Append to the message list (deduplicate against messages already in state)
+        setMessages(prev => {
+          if (prev.some((m: any) => m.id === evt.messageId)) return prev;
+          return [...prev, {
+            id:         evt.messageId,
+            direction:  "hotel_to_guest",
+            message:    evt.message,
+            senderName: evt.senderName,
+            createdAt:  evt.createdAt,
+            isRead:     false,
+          }];
+        });
+
+        // Alert the guest with a sound + toast regardless of the active tab
+        playGuestChime();
+        toast({
+          title:       "💬 Повідомлення від готелю",
+          description: (evt.message as string).slice(0, 100),
+        });
+
+        // Update the background count ref so the fallback poll stays in sync
+        lastHotelMsgCountRef.current += 1;
+      } catch { /* ignore malformed events */ }
+    };
+
+    // Browser auto-reconnects on error — no manual retry needed
+    es.onerror = () => {};
+
+    return () => es.close();
+  }, [code]);
+
+  // Live polling: refresh full message list every 15s when chat tab is open
+  // (kept as a fallback sync; SSE handles instant delivery above)
   useEffect(() => {
     if (!code || activeTab !== "messages") return;
     const poll = setInterval(() => {
       fetch(`${API}/guest/${code}`)
         .then(r => r.json())
-        .then(d => {
-          if (d.messages) setMessages(d.messages);
-        })
+        .then(d => { if (d.messages) setMessages(d.messages); })
         .catch(() => {});
     }, 15000);
     return () => clearInterval(poll);
   }, [code, activeTab]);
 
-  // Background polling: notify guest of new hotel messages every 20s (any tab)
+  // Background polling: 60 s fallback for when SSE reconnects (any tab)
+  // SSE handles the real-time signal; this catches anything missed during a disconnect.
   useEffect(() => {
     if (!code) return;
     const poll = setInterval(async () => {
@@ -293,16 +336,13 @@ export default function GuestPortalPage() {
         const count = hotelMsgs.length;
         if (lastHotelMsgCountRef.current >= 0 && count > lastHotelMsgCountRef.current) {
           playGuestChime();
-          toast({
-            title: "💬 Повідомлення від готелю",
-            description: "Готель написав вам нове повідомлення",
-          });
+          toast({ title: "💬 Повідомлення від готелю", description: "Готель написав вам нове повідомлення" });
           if (activeTab !== "messages") setMessages(d.messages);
         }
         if (lastHotelMsgCountRef.current === -1) lastHotelMsgCountRef.current = count;
         else if (count !== lastHotelMsgCountRef.current) lastHotelMsgCountRef.current = count;
       } catch {}
-    }, 20_000);
+    }, 60_000);
     return () => clearInterval(poll);
   }, [code, activeTab]);
 
