@@ -253,6 +253,10 @@ export default function InboxPage() {
   const [igPageId, setIgPageId] = useState("");
   const [igAppSecret, setIgAppSecret] = useState("");
   const [igVerifyToken, setIgVerifyToken] = useState(() => Math.random().toString(36).slice(2, 12));
+  const [waPhoneNumberId, setWaPhoneNumberId] = useState("");
+  const [waAccessToken, setWaAccessToken] = useState("");
+  const [waAppSecret, setWaAppSecret] = useState("");
+  const [waVerifyToken] = useState(() => `wa_${Math.random().toString(36).slice(2, 14)}`);
   const [channelSetupLoading, setChannelSetupLoading] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -371,6 +375,42 @@ export default function InboxPage() {
     try {
       await apiFetch(`${API}/inbox/channels/instagram/setup`, { method: "DELETE" });
       toast({ title: "Instagram відключено" });
+      loadChannels();
+    } finally { setChannelSetupLoading(""); }
+  }
+
+  // ── Connect WhatsApp Business ─────────────────────────────────────────────
+  async function setupWhatsApp() {
+    if (!waPhoneNumberId.trim() || !waAccessToken.trim() || !waAppSecret.trim()) return;
+    setChannelSetupLoading("whatsapp");
+    try {
+      const r = await apiFetch(`${API}/inbox/channels/whatsapp/setup`, {
+        method: "POST", body: JSON.stringify({
+          phoneNumberId: waPhoneNumberId,
+          accessToken: waAccessToken,
+          appSecret: waAppSecret,
+          verifyToken: waVerifyToken,
+        }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast({ title: `✅ WhatsApp підключено`, description: `${d.verifiedName} · ${d.displayPhone}` });
+        setWaPhoneNumberId("");
+        setWaAccessToken("");
+        setWaAppSecret("");
+        loadChannels();
+      } else {
+        toast({ title: "Помилка", description: d.error, variant: "destructive" });
+      }
+    } finally { setChannelSetupLoading(""); }
+  }
+
+  // ── Disconnect WhatsApp Business ──────────────────────────────────────────
+  async function disconnectWhatsApp() {
+    setChannelSetupLoading("whatsapp-disconnect");
+    try {
+      await apiFetch(`${API}/inbox/channels/whatsapp/setup`, { method: "DELETE" });
+      toast({ title: "WhatsApp відключено" });
       loadChannels();
     } finally { setChannelSetupLoading(""); }
   }
@@ -1878,10 +1918,78 @@ export default function InboxPage() {
                 </div>
               </div>
 
+              {/* ── WHATSAPP BUSINESS ────────────────────────────────────────── */}
+              <div className="rounded-xl border border-gray-100 overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 bg-green-50">
+                  <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center flex-shrink-0">
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white"><path d="M12 0C5.374 0 0 5.373 0 12c0 2.117.554 4.095 1.518 5.815L0 24l6.335-1.482A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm6.18 16.963c-.26.733-1.515 1.4-2.072 1.485-.53.08-1.197.114-1.93-.12-.445-.143-1.015-.335-1.745-.654-3.065-1.325-5.063-4.407-5.215-4.612-.152-.205-1.24-1.648-1.24-3.144 0-1.497.784-2.233 1.062-2.54.277-.305.605-.381.807-.381h.58c.185.008.435-.07.68.519.26.619.88 2.14.958 2.297.078.157.13.34.026.549-.104.21-.156.34-.307.524-.152.183-.32.41-.456.55-.152.157-.31.328-.134.641.177.314.785 1.296 1.685 2.098 1.157 1.032 2.133 1.35 2.447 1.503.313.152.496.128.679-.077.183-.205.784-.916.993-1.23.21-.312.42-.26.707-.156.287.104 1.822.86 2.135 1.016.313.157.52.235.596.365.078.13.078.752-.182 1.488z"/></svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm text-green-900">WhatsApp Business</p>
+                    <p className="text-[11px] text-green-700">
+                      {channels.find(c => c.channel === "whatsapp")?.isEnabled
+                        ? `✓ Підключено — ${channels.find(c => c.channel === "whatsapp")?.config?.verified_name || ""} · ${channels.find(c => c.channel === "whatsapp")?.config?.display_phone || ""}`
+                        : "Не підключено"}
+                    </p>
+                  </div>
+                  {channels.find(c => c.channel === "whatsapp")?.isEnabled && (
+                    <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">ACTIVE</span>
+                  )}
+                </div>
+
+                <div className="px-4 py-4 space-y-3">
+                  {channels.find(c => c.channel === "whatsapp")?.isEnabled ? (
+                    <div className="space-y-2">
+                      <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-600 space-y-1">
+                        <p><span className="font-medium">Webhook URL:</span></p>
+                        <p className="font-mono text-[10px] break-all">{channels.find(c => c.channel === "whatsapp")?.webhookUrl}</p>
+                        <p className="mt-1"><span className="font-medium">Verify Token:</span> <span className="font-mono">{channels.find(c => c.channel === "whatsapp")?.config?.verify_token || "—"}</span></p>
+                        <p className="mt-1 text-[10px] text-gray-400">Підпишіть цей Webhook URL у Meta Business Manager → WhatsApp → Configuration → Webhooks. Виберіть поле <code>messages</code>.</p>
+                      </div>
+                      <Button variant="outline" size="sm" className="w-full h-8 text-red-500 border-red-200 hover:bg-red-50"
+                        onClick={disconnectWhatsApp} disabled={channelSetupLoading === "whatsapp-disconnect"}>
+                        {channelSetupLoading === "whatsapp-disconnect" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Відключити"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-xs text-amber-700">
+                        <p className="font-semibold mb-1">Потрібно у Meta Business Manager:</p>
+                        <ol className="space-y-1 pl-3 list-decimal">
+                          <li>WhatsApp Business App з дозволом <code>whatsapp_business_messaging</code></li>
+                          <li>Бізнес-акаунт WhatsApp Business із підтвердженим номером</li>
+                          <li>Phone Number ID (з WhatsApp → Getting Started)</li>
+                          <li>System User Access Token із правами на цей номер</li>
+                          <li>App Secret зі сторінки App Settings</li>
+                        </ol>
+                      </div>
+                      <div className="space-y-2">
+                        <Input value={waPhoneNumberId} onChange={e => setWaPhoneNumberId(e.target.value)}
+                          placeholder="Phone Number ID (числовий, напр. 1234567890)" className="h-9 text-sm font-mono" />
+                        <Input value={waAccessToken} onChange={e => setWaAccessToken(e.target.value)}
+                          placeholder="System User Access Token (EAABxxx...)" className="h-9 text-sm font-mono" />
+                        <Input value={waAppSecret} onChange={e => setWaAppSecret(e.target.value)}
+                          type="password" placeholder="Meta App Secret" className="h-9 text-sm font-mono" />
+                        <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
+                          <p className="font-medium text-gray-700 mb-0.5">Verify Token (для Meta Webhook):</p>
+                          <p className="font-mono">{waVerifyToken}</p>
+                          <p className="mt-1">Webhook URL: <span className="font-mono text-[10px] break-all">{`${window.location.origin.replace(/\/maison-hd.*/, "")}/api/inbox/webhooks/whatsapp`}</span></p>
+                        </div>
+                        <Button size="sm" className="w-full h-9 bg-green-600 hover:bg-green-700"
+                          onClick={setupWhatsApp}
+                          disabled={!waPhoneNumberId.trim() || !waAccessToken.trim() || !waAppSecret.trim() || channelSetupLoading === "whatsapp"}>
+                          {channelSetupLoading === "whatsapp" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Підключити WhatsApp Business"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* ── INFO ─────────────────────────────────────────────────────── */}
               <div className="bg-indigo-50 rounded-xl px-4 py-3 text-xs text-indigo-700">
                 <p className="font-semibold mb-1">Як це працює:</p>
-                <p>Гість пише у ваш Telegram-бот, Telegram Business або Instagram DM → повідомлення з'являється тут в Inbox → ви відповідаєте з панелі → відповідь іде гостю назад у той самий канал.</p>
+                <p>Гість пише у ваш Telegram-бот, Telegram Business, Instagram DM або WhatsApp Business → повідомлення з'являється тут в Inbox → ви відповідаєте з панелі → відповідь іде гостю назад у той самий канал.</p>
               </div>
 
             </div>

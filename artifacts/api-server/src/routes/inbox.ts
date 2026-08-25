@@ -409,7 +409,11 @@ router.post("/conversations/:id/reply", async (req: any, res) => {
       dispatchInboxChannelMessage({
         organizationId: orgId, channel: "instagram", recipientId: conv.external_id, text: content.trim(),
       }).catch(e =>
-        console.error("[reply/instagram] dispatch error:", e)
+        logger.error({ err: e, organizationId: orgId, conversationId: id }, "Instagram reply dispatch failed")
+      );
+    } else if (conv.channel === "whatsapp" && conv.external_id) {
+      dispatchWhatsApp(orgId, conv.external_id, content.trim()).catch(e =>
+        logger.error({ err: e, organizationId: orgId, conversationId: id }, "WhatsApp reply dispatch failed")
       );
     }
 
@@ -473,6 +477,37 @@ async function dispatchTelegram(
     throw new Error(`Telegram API error: ${e.description || r.status}`);
   }
   logger.info({ organizationId: orgId, delivery: isBusinessMessage ? "business" : "bot" }, "Telegram reply sent");
+}
+
+async function dispatchWhatsApp(orgId: number, recipientWaId: string, text: string) {
+  const [cfg] = await db.select().from(channelConfigsTable)
+    .where(and(
+      eq(channelConfigsTable.organizationId, orgId),
+      eq(channelConfigsTable.channel, "whatsapp" as any),
+      eq(channelConfigsTable.isEnabled, true),
+    ));
+  const accessToken = cfg?.config?.access_token;
+  const phoneNumberId = cfg?.config?.phone_number_id;
+  if (!accessToken || !phoneNumberId) throw new Error("WhatsApp Business не налаштовано для цієї організації");
+
+  const r = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: recipientWaId,
+      type: "text",
+      text: { body: text },
+    }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => null) as any;
+    throw new Error(`WhatsApp Cloud API error: ${e?.error?.message || r.status}`);
+  }
+  logger.info({ organizationId: orgId, recipientWaId }, "WhatsApp reply sent");
 }
 
 async function dispatchInstagram(orgId: number, recipientId: string, text: string) {
@@ -1005,6 +1040,7 @@ router.get("/channels", async (req: any, res) => {
       if (safeConfig.access_token) safeConfig.access_token = safeConfig.access_token.slice(0, 10) + "...";
       delete safeConfig.webhook_secret;
       delete safeConfig.business_connections;
+      delete safeConfig.app_secret;
       if (ch === "telegram") {
         safeConfig.needs_secure_webhook = String(Boolean(config?.isEnabled && !rawConfig.webhook_secret));
       }
@@ -1234,6 +1270,78 @@ router.post("/channels/instagram/setup", async (req: any, res) => {
     res.json({ success: true, pageName, igUserId, webhookUrl });
   } catch (err: any) {
     console.error("[instagram/setup]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── WhatsApp Business: setup ─────────────────────────────────────────────────
+router.post("/channels/whatsapp/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const { phoneNumberId, accessToken, appSecret, verifyToken } = req.body;
+    if (!phoneNumberId?.trim() || !accessToken?.trim() || !appSecret?.trim() || !verifyToken?.trim()) {
+      return res.status(400).json({ error: "phoneNumberId, accessToken, appSecret та verifyToken обов'язкові" });
+    }
+
+    // Verify credentials by fetching phone number info from Meta Graph API
+    const phoneR = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}?fields=display_phone_number,verified_name`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const phoneData = await phoneR.json() as any;
+    if (phoneData.error) {
+      return res.status(400).json({ error: `Meta API: ${phoneData.error.message}` });
+    }
+    const displayPhone = phoneData.display_phone_number || phoneNumberId;
+    const verifiedName = phoneData.verified_name || "WhatsApp Business";
+
+    // Build webhook URL
+    const baseUrl = process.env.PUBLIC_API_URL
+      || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : null);
+    if (!baseUrl) return res.status(500).json({ error: "PUBLIC_API_URL не налаштований" });
+    const webhookUrl = `${baseUrl}/api/inbox/webhooks/whatsapp`;
+
+    // Upsert channel config — never return secrets in this response
+    const existing = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "whatsapp" as any)));
+
+    const configData = {
+      phone_number_id: phoneNumberId,
+      access_token: accessToken,
+      app_secret: appSecret,
+      verify_token: verifyToken,
+      display_phone: displayPhone,
+      verified_name: verifiedName,
+    };
+    if (existing.length) {
+      await db.update(channelConfigsTable).set({
+        config: configData, isEnabled: true, webhookUrl, updatedAt: new Date(),
+      }).where(eq(channelConfigsTable.id, existing[0].id));
+    } else {
+      await db.insert(channelConfigsTable).values({
+        organizationId: orgId, channel: "whatsapp" as any,
+        config: configData, isEnabled: true, webhookUrl,
+      });
+    }
+
+    res.json({ success: true, displayPhone, verifiedName, webhookUrl });
+  } catch (err: any) {
+    logger.error({ err }, "WhatsApp setup failed");
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── WhatsApp Business: disconnect ────────────────────────────────────────────
+router.delete("/channels/whatsapp/setup", async (req: any, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const [cfg] = await db.select().from(channelConfigsTable)
+      .where(and(eq(channelConfigsTable.organizationId, orgId), eq(channelConfigsTable.channel, "whatsapp" as any)));
+    if (cfg) {
+      await db.update(channelConfigsTable).set({ isEnabled: false, config: {}, webhookUrl: null, updatedAt: new Date() })
+        .where(eq(channelConfigsTable.id, cfg.id));
+    }
+    res.json({ success: true });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });

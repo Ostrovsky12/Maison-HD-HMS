@@ -36,10 +36,17 @@ async function validTelegramWebhook(req: any, organizationId: number): Promise<b
   );
 }
 
+// ── WhatsApp signature verification (identical structure to Instagram) ───────
+export function validWhatsAppSignature(rawBody: Buffer | undefined, signature: string | undefined, appSecret: string | undefined): boolean {
+  if (!rawBody || !signature?.startsWith("sha256=") || !appSecret) return false;
+  const expected = `sha256=${createHmac("sha256", appSecret).update(rawBody).digest("hex")}`;
+  return constantTimeEquals(signature, expected);
+}
+
 // ── Helper: find or create conversation ─────────────────────────────────────
 async function upsertConversation(
   orgId: number,
-  channel: "telegram" | "instagram",
+  channel: "telegram" | "instagram" | "whatsapp",
   externalId: string,
   guestName: string,
   text: string,
@@ -353,6 +360,97 @@ router.post("/instagram", async (req, res) => {
     }
   } catch (err) {
     logger.error({ err }, "Instagram webhook processing failed");
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WHATSAPP BUSINESS
+// Meta sends ALL events to one URL; we identify org by phone_number_id in config
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET — webhook verification (hub.challenge)
+router.get("/whatsapp", async (req, res) => {
+  const mode = req.query["hub.mode"] as string;
+  const token = req.query["hub.verify_token"] as string;
+  const challenge = req.query["hub.challenge"] as string;
+
+  if (mode === "subscribe" && token) {
+    try {
+      const configs = await db.select().from(channelConfigsTable)
+        .where(eq(channelConfigsTable.channel, "whatsapp" as any));
+      const match = configs.find(c => c.config?.verify_token === token);
+      if (match) {
+        logger.info({ organizationId: match.organizationId }, "WhatsApp webhook verification succeeded");
+        return res.status(200).send(challenge);
+      }
+    } catch (err) {
+      logger.error({ err }, "WhatsApp webhook verification failed");
+    }
+    return res.sendStatus(403);
+  }
+  res.sendStatus(403);
+});
+
+// POST — incoming messages from WhatsApp Business Cloud API
+router.post("/whatsapp", async (req, res) => {
+  res.sendStatus(200); // Meta requires a fast 200 before any processing
+
+  try {
+    const body = req.body;
+    if (body.object !== "whatsapp_business_account") return;
+
+    // Load all WhatsApp configs once
+    const configs = await db.select().from(channelConfigsTable)
+      .where(eq(channelConfigsTable.channel, "whatsapp" as any));
+
+    for (const entry of (body.entry || [])) {
+      for (const change of (entry.changes || [])) {
+        if (change.field !== "messages") continue;
+        const value = change.value;
+
+        // Identify org by phone_number_id sent in the webhook metadata
+        const phoneNumberId = value?.metadata?.phone_number_id;
+        if (!phoneNumberId) continue;
+
+        const config = configs.find(c => c.config?.phone_number_id === phoneNumberId);
+        if (!config) {
+          logger.warn({ phoneNumberId }, "WhatsApp webhook received for unknown phone_number_id");
+          continue;
+        }
+
+        // Verify HMAC signature — skip message if invalid
+        if (!config.isEnabled || !validWhatsAppSignature(
+          (req as any).rawBody,
+          req.get("x-hub-signature-256"),
+          config.config?.app_secret,
+        )) {
+          logger.warn({ organizationId: config.organizationId }, "WhatsApp webhook rejected: invalid signature or channel disabled");
+          continue;
+        }
+
+        const orgId = config.organizationId;
+
+        for (const message of (value.messages || [])) {
+          // Only handle inbound text messages for now; skip status updates / echoes
+          if (message.type !== "text" || !message.text?.body) continue;
+
+          const senderWaId = String(message.from); // wa_id is the sender's phone number
+          const text = message.text.body;
+          const msgId = `wa_${message.id}`;
+
+          // Resolve sender display name from contacts array when available
+          const contactEntry = (value.contacts || []).find((c: any) => c.wa_id === senderWaId);
+          const senderName = contactEntry?.profile?.name || `WhatsApp ${senderWaId}`;
+
+          const conv = await upsertConversation(orgId, "whatsapp", senderWaId, senderName, text);
+          await storeInboundMessage(conv.id, text, senderName, msgId);
+
+          logger.info({ organizationId: orgId, senderWaId }, "WhatsApp message stored");
+        }
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "WhatsApp webhook processing failed");
   }
 });
 
