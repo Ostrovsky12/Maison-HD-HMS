@@ -14,6 +14,12 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { uk } from "date-fns/locale";
+import {
+  isNotificationSoundEnabled,
+  NOTIFICATION_SOUND_CHANGE_EVENT,
+  playNotificationChime,
+  setNotificationSoundEnabled,
+} from "@/lib/notification-sound";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api";
@@ -197,48 +203,10 @@ export default function InboxPage() {
   const portalBottomRef = useRef<HTMLDivElement>(null);
 
   // ── Sound notifications ───────────────────────────────────────────────────
-  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("inbox_sound") !== "off");
+  const [soundEnabled, setSoundEnabled] = useState(isNotificationSoundEnabled);
   const lastUnreadRef = useRef<number>(0);
   const lastPortalUnreadRef = useRef<number>(0);
   const lastCheckinIdRef = useRef<number>(0);
-
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  function getAudioCtx(): AudioContext | null {
-    try {
-      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      return audioCtxRef.current;
-    } catch { return null; }
-  }
-
-  function playChime(type: "message" | "checkin" = "message") {
-    try {
-      const ctx = getAudioCtx();
-      if (!ctx) return;
-      const play = () => {
-        const notes = type === "checkin" ? [523, 659, 784] : [880, 1047];
-        notes.forEach((freq, i) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.type = "sine";
-          osc.frequency.value = freq;
-          gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.14);
-          gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + i * 0.14 + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.14 + 0.28);
-          osc.start(ctx.currentTime + i * 0.14);
-          osc.stop(ctx.currentTime + i * 0.14 + 0.3);
-        });
-      };
-      if (ctx.state === "suspended") {
-        ctx.resume().then(play).catch(() => {});
-      } else {
-        play();
-      }
-    } catch {}
-  }
 
   function showBrowserNotif(title: string, body: string) {
     if (Notification.permission === "granted") {
@@ -517,6 +485,17 @@ export default function InboxPage() {
     if (Notification.permission === "default") Notification.requestPermission();
   }, []);
 
+  // Keep the Inbox control in sync with the global notification-bell control.
+  useEffect(() => {
+    const syncSoundPreference = () => setSoundEnabled(isNotificationSoundEnabled());
+    window.addEventListener(NOTIFICATION_SOUND_CHANGE_EVENT, syncSoundPreference);
+    window.addEventListener("storage", syncSoundPreference);
+    return () => {
+      window.removeEventListener(NOTIFICATION_SOUND_CHANGE_EVENT, syncSoundPreference);
+      window.removeEventListener("storage", syncSoundPreference);
+    };
+  }, []);
+
   // ── Polling: check for new messages every 30s ─────────────────────────────
   useEffect(() => {
     const timer = setInterval(async () => {
@@ -527,7 +506,7 @@ export default function InboxPage() {
           const s = await sR.json();
           const total = (s.unreadByStatus?.all || 0) as number;
           if (total > lastUnreadRef.current && lastUnreadRef.current >= 0) {
-            if (soundEnabled) playChime("message");
+            if (soundEnabled) playNotificationChime("message");
             showBrowserNotif("Новe повідомлення — Inbox", `${total - lastUnreadRef.current} нових повідомлень`);
             toast({ title: "💬 Нові повідомлення", description: `${total - lastUnreadRef.current} непрочитаних` });
             // Refresh conversations
@@ -544,7 +523,7 @@ export default function InboxPage() {
           if (Array.isArray(threads)) {
             const portalUnread = threads.reduce((acc: number, t: any) => acc + parseInt(t.unread_count || "0"), 0);
             if (portalUnread > lastPortalUnreadRef.current && lastPortalUnreadRef.current >= 0) {
-              if (soundEnabled) playChime("message");
+              if (soundEnabled) playNotificationChime("message");
               showBrowserNotif("Нове повідомлення — Гостьовий портал", "Гість написав через портал");
               toast({ title: "🏠 Портал: нове повідомлення", description: "Гість написав через гостьовий портал" });
             }
@@ -560,7 +539,7 @@ export default function InboxPage() {
             const latestId = ci[0].id as number;
             const prevId = lastCheckinIdRef.current;
             if (prevId > 0 && latestId > prevId) {
-              if (soundEnabled) playChime("checkin");
+              if (soundEnabled) playNotificationChime("checkin");
               showBrowserNotif("✅ Онлайн чекін", `${ci[0].first_name} ${ci[0].last_name} заповнив форму заїзду`);
               toast({ title: "✅ Онлайн чекін", description: `${ci[0].first_name} ${ci[0].last_name} зареєструвався онлайн` });
             }
@@ -808,8 +787,8 @@ export default function InboxPage() {
                   onClick={() => {
                     const next = !soundEnabled;
                     setSoundEnabled(next);
-                    localStorage.setItem("inbox_sound", next ? "on" : "off");
-                    if (next) playChime("message");
+                    setNotificationSoundEnabled(next);
+                    if (next) playNotificationChime("message");
                     toast({ title: next ? "🔔 Звук увімкнено" : "🔕 Звук вимкнено" });
                   }}>
                   {soundEnabled

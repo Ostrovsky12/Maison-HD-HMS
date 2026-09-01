@@ -8,7 +8,7 @@ import {
   PartyPopper, UtensilsCrossed, Zap, Bot, Building2, Globe,
   Monitor, Brain, Heart, Wallet, Wrench, ChefHat, Bike, BedDouble, Truck,
   Activity, Layers, ClipboardList, Target, Landmark, Tag, Star,
-  ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package, QrCode, Coins,
+  ChevronRight, Menu, Sparkles, Search, Wine, Moon, Package, QrCode, Coins, BellOff,
   Smartphone, Leaf, Phone, Hammer, Warehouse, Printer, CalendarRange,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,13 @@ import { uk } from "date-fns/locale";
 import { CommandPalette, useCommandPalette } from "@/components/command-palette";
 import { useTelephony } from "@/contexts/telephony-context";
 import type { GuestPortalMessageEvent } from "@/contexts/telephony-context";
+import {
+  isNotificationSoundEnabled,
+  NOTIFICATION_SOUND_CHANGE_EVENT,
+  playNotificationChime,
+  setNotificationSoundEnabled,
+  unlockNotificationSound,
+} from "@/lib/notification-sound";
 
 // ── NAV STRUCTURE ─────────────────────────────────────────────────────────────
 type NavItem = { name: string; path: string; icon: any; roles?: string[] | null; badge?: string; moduleKey?: string };
@@ -263,6 +270,26 @@ function NotificationBell() {
   const { onGuestPortalMessage } = useTelephony();
   const notifications = data?.notifications || [];
   const unread = data?.unreadCount || 0;
+  const [soundEnabled, setSoundEnabled] = useState(isNotificationSoundEnabled);
+
+  // Keep the global toggle usable from every page and unlock the shared audio
+  // context during a normal user gesture before a websocket event needs it.
+  useEffect(() => {
+    const syncSoundPreference = () => setSoundEnabled(isNotificationSoundEnabled());
+    const unlock = () => unlockNotificationSound();
+    window.addEventListener(NOTIFICATION_SOUND_CHANGE_EVENT, syncSoundPreference);
+    window.addEventListener("storage", syncSoundPreference);
+    document.addEventListener("click", unlock);
+    document.addEventListener("touchstart", unlock);
+    document.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener(NOTIFICATION_SOUND_CHANGE_EVENT, syncSoundPreference);
+      window.removeEventListener("storage", syncSoundPreference);
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("touchstart", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
+  }, []);
 
   // ── Toast state ────────────────────────────────────────────────────────────
   // kind: "notif" (standard bell) | "guest" (guest portal message)
@@ -366,6 +393,8 @@ function NotificationBell() {
       const isSuperAdmin = layoutRole() === "super_admin";
       if (!isSuperAdmin && myOrgId !== evt.orgId) return;
 
+       if (soundEnabled) playNotificationChime("message");
+
       const unit = evt.unitName ? ` · ${evt.unitName}` : "";
       addToast({
         id: `gm_ws_${evt.messageId ?? `${evt.bookingId}_${Date.now()}`}`,
@@ -379,7 +408,7 @@ function NotificationBell() {
       // Pre-seed sessionStorage so the backup poll skips this message
       if (evt.messageId) markMsgSeen([Number(evt.messageId)]);
     });
-  }, [onGuestPortalMessage]);
+  }, [onGuestPortalMessage, soundEnabled]);
 
   const goToNotif = (type: string, bookingId?: number | null) => {
     const base = NOTIF_NAV[type] || "/dashboard";
@@ -399,6 +428,21 @@ function NotificationBell() {
 
   return (
     <>
+      <button
+        type="button"
+        onClick={() => {
+          const next = !soundEnabled;
+          setNotificationSoundEnabled(next);
+          setSoundEnabled(next);
+          if (next) playNotificationChime("message");
+        }}
+        className="relative w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+        title={soundEnabled ? "Звук увімкнено (натисніть, щоб вимкнути)" : "Звук вимкнено (натисніть, щоб увімкнути)"}
+        aria-label={soundEnabled ? "Вимкнути звук сповіщень" : "Увімкнути звук сповіщень"}
+        aria-pressed={soundEnabled}
+      >
+        {soundEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+      </button>
       {/* Bell dropdown */}
       <div ref={ref} className="relative">
         <button
