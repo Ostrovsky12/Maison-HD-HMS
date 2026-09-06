@@ -34,5 +34,12 @@ export const channelConfigsTable = tableStub;
 export const aiKnowledgeArticlesTable = tableStub;
 export const aiConciergeSettingsTable = tableStub;
 export const aiConciergeAuditLogsTable = tableStub;
+export const fbCategoriesTable = tableStub;
+export const fbItemsTable = tableStub;
+export const fbTablesTable = tableStub;
+export const fbOrdersTable = tableStub;
+export const fbOrderItemsTable = tableStub;
+export const ratesTable = tableStub;
+export const channelRateSettingsTable = tableStub;
 // Catch-all for any other named import from this module
 export default {};

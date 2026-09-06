@@ -722,13 +722,61 @@ router.get("/menu/:orgSlug", menuScrapeLimiter, async (req, res) => {
       .where(and(eq(fbCategoriesTable.organizationId, orgId), eq(fbCategoriesTable.isActive, true)))
       .orderBy(asc(fbCategoriesTable.sortOrder));
 
-    const items = await db.select().from(fbItemsTable)
-      .where(and(eq(fbItemsTable.organizationId, orgId), eq(fbItemsTable.isAvailable, true)))
-      .orderBy(asc(fbItemsTable.sortOrder));
+    // Keep the public menu query deliberately narrow. Some existing tenants
+    // predate newer fb_items columns represented in the shared Drizzle schema.
+    const { rows: items } = await pool.query(
+      `SELECT id, category_id AS "categoryId", name, description, price,
+              cook_minutes AS "cookMinutes", is_vegetarian AS "isVegetarian",
+              is_popular AS "isPopular", allergens, image_url AS "imageUrl"
+       FROM fb_items
+       WHERE organization_id = $1
+         AND is_available = true
+         AND (is_stop_list IS NULL OR is_stop_list = false)
+       ORDER BY sort_order ASC NULLS LAST, name ASC`,
+      [orgId],
+    );
+
+    // Modifier tables are intentionally read separately: they are not part of
+    // the old Drizzle schema and the public payload needs only available options.
+    const { rows: modifierRows } = await pool.query(
+      `SELECT mg.id AS group_id, mg.item_id, mg.name AS group_name,
+              mg.is_required, mg.min_select, mg.max_select, mg.sort_order AS group_sort_order,
+              mo.id AS option_id, mo.name AS option_name, mo.price_delta,
+              mo.sort_order AS option_sort_order
+       FROM fb_modifier_groups mg
+       LEFT JOIN fb_modifier_options mo
+         ON mo.group_id = mg.id
+        AND mo.organization_id = mg.organization_id
+        AND mo.is_available = true
+       WHERE mg.organization_id = $1
+       ORDER BY mg.sort_order, mo.sort_order`,
+      [orgId],
+    );
+    const modifierGroupsByItem: Record<number, any[]> = {};
+    for (const row of modifierRows) {
+      const groups = modifierGroupsByItem[row.item_id] || (modifierGroupsByItem[row.item_id] = []);
+      let group = groups.find((g: any) => g.id === row.group_id);
+      if (!group) {
+        group = {
+          id: row.group_id, name: row.group_name, is_required: row.is_required,
+          min_select: row.min_select, max_select: row.max_select,
+          sort_order: row.group_sort_order, options: [],
+        };
+        groups.push(group);
+      }
+      if (row.option_id != null) {
+        group.options.push({
+          id: row.option_id, name: row.option_name, price_delta: row.price_delta,
+          sort_order: row.option_sort_order, is_available: true,
+        });
+      }
+    }
 
     const catMap = cats.map(cat => ({
       ...cat,
-      items: items.filter(i => i.categoryId === cat.id),
+      items: items
+        .filter(i => i.categoryId === cat.id)
+        .map(item => ({ ...item, modifier_groups: modifierGroupsByItem[item.id] || [] })),
     }));
 
     return res.json({ org: { id: orgId, name: orgs[0].name, slug: orgs[0].slug }, categories: catMap });
@@ -753,77 +801,163 @@ router.get("/table/:orgSlug/:tableId", async (req, res) => {
 
 // ─── POST /menu-order — place QR order from guest ────────────────────────────
 router.post("/menu-order", async (req, res) => {
+  let client: any;
   try {
-    const { orgSlug, tableId, guestName, guestCount, items, notes, guestPhone } = req.body;
-    if (!orgSlug || !items?.length) return res.status(400).json({ error: "orgSlug та items обов'язкові" });
+    const { orgSlug, tableId, guestName, guestCount, items, notes, guestPhone, tipPct } = req.body;
+    if (typeof orgSlug !== "string" || !Array.isArray(items) || items.length < 1 || items.length > 50) {
+      return res.status(400).json({ error: "orgSlug та від 1 до 50 позицій обов'язкові" });
+    }
+    const integer = (value: unknown, maximum: number) =>
+      (typeof value === "number" || typeof value === "string") &&
+      /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)) &&
+      Number(value) > 0 && Number(value) <= maximum ? Number(value) : null;
+    const requestedTip = tipPct == null || tipPct === "" ? 0 : Number(tipPct);
+    if (!Number.isFinite(requestedTip) || requestedTip < 0 || requestedTip > 50) {
+      return res.status(400).json({ error: "Некоректний відсоток чайових" });
+    }
+    const safeTipPct = Math.round(requestedTip * 100) / 100;
 
-    const orgs = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, orgSlug));
-    if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const { rows: orgs } = await client.query(
+      "SELECT id, name, slug FROM organizations WHERE slug = $1 LIMIT 1 FOR UPDATE", [orgSlug],
+    );
+    if (!orgs[0]) throw Object.assign(new Error("Organization not found"), { status: 404 });
     const orgId = orgs[0].id;
 
     let tableRecord: any = null;
-    if (tableId) {
-      const tables = await db.select().from(fbTablesTable).where(and(eq(fbTablesTable.id, parseInt(tableId)), eq(fbTablesTable.organizationId, orgId)));
-      tableRecord = tables[0] || null;
+    if (tableId != null && tableId !== "") {
+      const validTableId = integer(tableId, 2_147_483_647);
+      if (!validTableId) throw Object.assign(new Error("Некоректний стіл"), { status: 400 });
+      const { rows } = await client.query(
+        `SELECT id, number FROM fb_tables
+         WHERE id = $1 AND organization_id = $2 AND is_active = true FOR UPDATE`,
+        [validTableId, orgId],
+      );
+      if (!rows[0]) throw Object.assign(new Error("Table not found"), { status: 404 });
+      tableRecord = rows[0];
     }
 
-    const totalAmount = items.reduce((s: number, i: any) => s + parseFloat(i.price || 0) * (i.quantity || 1), 0);
-
-    const [order] = await db.insert(fbOrdersTable).values({
-      organizationId: orgId,
-      tableId: tableRecord?.id || null,
-      orderType: tableRecord ? "dine_in" : "room_service",
-      guestName: guestName || "Гість (QR)",
-      guestCount: guestCount || 1,
-      roomNumber: tableRecord ? `Стіл ${tableRecord.number}` : null,
-      status: "open",
-      totalAmount: String(totalAmount),
-      notes: notes || null,
-    }).returning();
-
-    const itemValues = items.map((i: any) => ({
-      orderId: order.id,
-      organizationId: orgId,
-      itemId: i.id || null,
-      name: i.name,
-      price: String(i.price),
-      quantity: i.quantity || 1,
-      totalPrice: String(parseFloat(i.price) * (i.quantity || 1)),
-      notes: i.notes || null,
-    }));
-    await db.insert(fbOrderItemsTable).values(itemValues);
-
-    if (tableRecord) {
-      await db.update(fbTablesTable).set({ status: "occupied", currentOrderId: order.id }).where(eq(fbTablesTable.id, tableRecord.id));
-    }
-
-    // Upsert fb_customers + append order_history if phone provided
-    if (guestPhone) {
-      try {
-        const db_ = (db as any).$client;
-        const historyEntry = {
-          order_id: order.id,
-          date: new Date().toISOString(),
-          items: items.map((i: any) => ({ name: i.name, qty: i.quantity || 1, price: i.price })),
-          total: totalAmount,
-        };
-        await db_.query(`
-          INSERT INTO fb_customers (organization_id, name, phone, visits_count, total_spent, last_visit_at, order_history)
-          VALUES ($1, $2, $3, 1, $4, NOW(), $5::jsonb)
-          ON CONFLICT (organization_id, phone) DO UPDATE SET
-            name           = COALESCE(EXCLUDED.name, fb_customers.name),
-            visits_count   = fb_customers.visits_count + 1,
-            total_spent    = fb_customers.total_spent + $4,
-            last_visit_at  = NOW(),
-            order_history  = (COALESCE(fb_customers.order_history, '[]'::jsonb) || $5::jsonb)
-        `, [orgId, guestName || null, guestPhone, totalAmount, JSON.stringify([historyEntry])]);
-      } catch (guestErr: any) {
-        console.warn("Guest upsert warn:", guestErr.message);
+    const validatedItems: any[] = [];
+    let subtotalCents = 0;
+    for (const requested of items) {
+      const itemId = integer(requested?.itemId ?? requested?.id, 2_147_483_647);
+      const quantity = integer(requested?.quantity, 100);
+      if (!itemId || !quantity) throw Object.assign(new Error("Некоректна позиція або кількість"), { status: 400 });
+      const { rows: itemRows } = await client.query(
+        `SELECT id, name, price FROM fb_items
+         WHERE id = $1 AND organization_id = $2 AND is_available = true
+           AND (is_stop_list IS NULL OR is_stop_list = false) LIMIT 1 FOR UPDATE`,
+        [itemId, orgId],
+      );
+      const item = itemRows[0];
+      if (!item) throw Object.assign(new Error("Позиція недоступна"), { status: 400 });
+      const { rows: modifierGroups } = await client.query(
+        `SELECT id AS group_id, name AS group_name, is_required, min_select, max_select
+         FROM fb_modifier_groups
+         WHERE organization_id = $1 AND item_id = $2
+         FOR UPDATE`,
+        [orgId, item.id],
+      );
+      const { rows: modifierOptions } = await client.query(
+        `SELECT mo.group_id, mo.id AS option_id, mo.name AS option_name, mo.price_delta
+         FROM fb_modifier_options mo
+         JOIN fb_modifier_groups mg ON mg.id = mo.group_id AND mg.organization_id = mo.organization_id
+         WHERE mo.organization_id = $1 AND mg.item_id = $2 AND mo.is_available = true
+         FOR UPDATE OF mo`,
+        [orgId, item.id],
+      );
+      const groups = new Map<number, any>();
+      for (const row of modifierGroups) {
+        groups.set(row.group_id, { ...row, options: new Map<number, any>() });
       }
+      for (const row of modifierOptions) {
+        const group = groups.get(row.group_id);
+        if (group) group.options.set(row.option_id, row);
+      }
+      if (requested.modifiers != null && !Array.isArray(requested.modifiers)) {
+        throw Object.assign(new Error("Некоректні модифікатори"), { status: 400 });
+      }
+      const selections = requested.modifiers || [];
+      const selectedByGroup = new Map<number, any[]>();
+      for (const selection of selections) {
+        const groupId = integer(selection?.groupId ?? selection?.group_id, 2_147_483_647);
+        const optionId = integer(selection?.optionId ?? selection?.option_id ?? selection?.id, 2_147_483_647);
+        const group = groupId && groups.get(groupId);
+        const option = group && optionId && group.options.get(optionId);
+        if (!group || !option) throw Object.assign(new Error("Некоректний або недоступний модифікатор"), { status: 400 });
+        const selected = selectedByGroup.get(groupId) || [];
+        if (selected.some(s => s.optionId === optionId)) throw Object.assign(new Error("Модифікатор обрано двічі"), { status: 400 });
+        selected.push({ groupId, groupName: group.group_name, optionId, optionName: option.option_name, priceDelta: String(option.price_delta) });
+        selectedByGroup.set(groupId, selected);
+      }
+      for (const [groupId, group] of groups) {
+        const count = selectedByGroup.get(groupId)?.length || 0;
+        const minimum = Math.max(group.is_required ? 1 : 0, Number(group.min_select) || 0);
+        const maximum = Number(group.max_select);
+        if (count < minimum || (Number.isFinite(maximum) && count > maximum)) {
+          throw Object.assign(new Error("Не виконано обов'язкові умови модифікаторів"), { status: 400 });
+        }
+      }
+      const toCents = (amount: unknown) => {
+        const parsed = Number(amount);
+        if (!Number.isFinite(parsed)) throw new Error("Некоректна ціна");
+        return Math.round(parsed * 100);
+      };
+      const modifiers = [...selectedByGroup.values()].flat();
+      const unitCents = toCents(item.price) + modifiers.reduce((sum, mod) => sum + toCents(mod.priceDelta), 0);
+      if (unitCents < 0 || subtotalCents + unitCents * quantity > 9_999_999_999) {
+        throw Object.assign(new Error("Некоректна сума замовлення"), { status: 400 });
+      }
+      const totalCents = unitCents * quantity;
+      subtotalCents += totalCents;
+      validatedItems.push({ item, quantity, modifiers, unitCents, totalCents, notes: typeof requested.notes === "string" ? requested.notes.slice(0, 2000) : null });
     }
-
-    return res.status(201).json({ orderId: order.id, orderNumber: order.id, total: totalAmount });
-  } catch (e: any) { return res.status(500).json({ error: e.message }); }
+    const tipCents = Math.round(subtotalCents * safeTipPct / 100);
+    const money = (cents: number) => (cents / 100).toFixed(2);
+    const { rows: orderRows } = await client.query(
+      `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, room_number,
+        status, total_amount, tip_amount, tip_pct, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10) RETURNING id`,
+      [orgId, tableRecord?.id || null, tableRecord ? "dine_in" : "room_service", guestName || "Гість (QR)",
+       integer(guestCount, 100) || 1, tableRecord ? `Стіл ${tableRecord.number}` : null,
+       money(subtotalCents), money(tipCents), String(safeTipPct), typeof notes === "string" ? notes.slice(0, 5000) : null],
+    );
+    const order = orderRows[0];
+    for (const row of validatedItems) {
+      await client.query(
+        `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, modifiers)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [order.id, row.item.id, orgId, row.item.name, money(row.unitCents), row.quantity,
+         money(row.totalCents), row.notes, row.modifiers.length ? JSON.stringify(row.modifiers) : null],
+      );
+    }
+    if (tableRecord) await client.query(
+      "UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2 AND organization_id = $3",
+      [order.id, tableRecord.id, orgId],
+    );
+    if (typeof guestPhone === "string" && guestPhone.trim()) {
+      const history = [{ order_id: order.id, date: new Date().toISOString(),
+        items: validatedItems.map(row => ({ name: row.item.name, qty: row.quantity, price: money(row.unitCents) })),
+        total: Number(money(subtotalCents + tipCents)) }];
+      await client.query(
+        `INSERT INTO fb_customers (organization_id, name, phone, visits_count, total_spent, last_visit_at, order_history)
+         VALUES ($1,$2,$3,1,$4,NOW(),$5::jsonb)
+         ON CONFLICT (organization_id, phone) DO UPDATE SET name=COALESCE(EXCLUDED.name,fb_customers.name),
+           visits_count=fb_customers.visits_count+1, total_spent=fb_customers.total_spent+$4,
+           last_visit_at=NOW(), order_history=(COALESCE(fb_customers.order_history,'[]'::jsonb)||$5::jsonb)`,
+        [orgId, guestName || null, guestPhone.trim(), money(subtotalCents + tipCents), JSON.stringify(history)],
+      );
+    }
+    await client.query("COMMIT");
+    return res.status(201).json({ orderId: order.id, orderNumber: order.id,
+      subtotal: Number(money(subtotalCents)), tip: Number(money(tipCents)), total: Number(money(subtotalCents + tipCents)) });
+  } catch (e: any) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    return res.status(e.status || 500).json({ error: e.message });
+  } finally {
+    client?.release();
+  }
 });
 
 // ─── GET /bookings/:ref — get by reference + guestAccessCode (required) ───────

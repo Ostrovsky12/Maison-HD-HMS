@@ -1,34 +1,88 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useParams } from "wouter";
-import {
-  ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle2,
-  Leaf, Flame, Star, Clock, Search, ArrowRight, Loader2,
-  Bot, Send, Mic, MicOff, Sparkles, MessageCircle,
+import { Drawer } from "vaul";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  Plus, Minus, X, Check, Search, Sparkles, Mic, Send, 
+  Loader2, Info, Star, Leaf, Clock
 } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_BASE = BASE.replace("/maison-hd", "") + "/api/public";
 
 const fmtMoney = (n: any) => parseFloat(n || 0).toLocaleString("uk-UA") + " ₴";
 
+const cleanString = (str: string) => 
+  str.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F02F}\u{1F0A0}-\u{1F0FF}\u{1F100}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}\u{2B50}\u{231A}\u{231B}\u{25AA}\u{25AB}\u{25FB}-\u{25FE}\u{2600}-\u{2604}\u{260E}\u{2611}\u{2614}\u{2615}\u{2618}\u{261D}\u{2620}\u{2622}\u{2623}\u{2626}\u{262A}\u{262E}\u{262F}\u{2638}-\u{263A}\u{2640}\u{2642}\u{2648}-\u{2653}\u{2660}-\u{2668}\u{267B}\u{267F}\u{2692}-\u{269C}\u{26A0}\u{26A1}\u{26AA}\u{26AB}\u{26B0}\u{26B1}\u{26BD}\u{26BE}\u{26C4}\u{26C5}\u{26CE}\u{26CF}\u{26D1}\u{26D3}\u{26D4}\u{26E9}\u{26EA}\u{26F0}-\u{26F5}\u{26F7}-\u{26FA}\u{26FD}\u{2702}\u{2705}\u{2708}-\u{270D}\u{270F}\u{2712}\u{2714}\u{2716}\u{271D}\u{2721}\u{2728}\u{2733}\u{2734}\u{2744}\u{2747}\u{274C}\u{274E}\u{2753}-\u{2755}\u{2757}\u{2763}\u{2764}\u{2795}-\u{2797}\u{27A1}\u{27B0}\u{27BF}\u{2934}\u{2935}\u{2B05}-\u{2B07}\u{2B1B}\u{2B1C}\u{2B50}\u{2B55}\u{3030}\u{303D}\u{3297}\u{3299}]/gu, '')
+     .trim();
+
+type ModifierOption = {
+  id: number;
+  name: string;
+  price_delta?: string | number;
+};
+
+type ModifierGroup = {
+  id: number;
+  name: string;
+  is_required?: boolean;
+  min_select?: number;
+  max_select?: number;
+  options: ModifierOption[];
+};
+
 type Item = {
   id: number; name: string; description?: string; price: string;
   cookMinutes?: number; isVegetarian?: boolean; isPopular?: boolean;
   allergens?: string[]; tags?: string[]; imageUrl?: string;
+  modifier_groups?: ModifierGroup[];
+  modifierGroups?: ModifierGroup[]; // For fallback
 };
 
 type Category = { id: number; name: string; emoji: string; items: Item[] };
-type CartItem = Item & { quantity: number; notes?: string };
+
+type SelectedModifier = {
+  groupId: number;
+  optionId: number;
+  name: string;
+  price: number;
+};
+
+type CartItem = {
+  cartItemId: string;
+  item: Item;
+  quantity: number;
+  notes: string;
+  modifiers: SelectedModifier[];
+};
+
 type ChatMsg = { role: "user" | "assistant"; content: string; isAction?: boolean };
 
-// ─── Quick reply suggestions shown before first user message ──────────────────
 const QUICK_REPLIES = [
-  { label: "⭐ Що рекомендуєте?", text: "Що порадите спробувати? Ваші хіти?" },
-  { label: "🌿 Вегетаріанське", text: "Які у вас вегетаріанські страви?" },
-  { label: "🍷 Рекомендуй вино", text: "Порадь вино до мого замовлення" },
-  { label: "⚠️ Є алергія", text: "У мене алергія на горіхи. Що можна замовити?" },
-  { label: "🛒 Перевір кошик", text: "Перевір мій кошик — чого не вистачає?" },
+  { label: "Рекомендує шеф", text: "Що ви рекомендуєте скуштувати сьогодні?" },
+  { label: "Вегетаріанські страви", text: "Які у вас є вегетаріанські страви?" },
+  { label: "Підібрати вино", text: "Порадьте вино до мого замовлення" },
+  { label: "Алергії та дієта", text: "У мене є алергія. Що можна безпечно замовити?" },
+  { label: "Перевірити замовлення", text: "Перевірте моє замовлення — можливо, чогось бракує?" },
 ];
+
+const generateCartItemId = (itemId: number, modifiers: SelectedModifier[], notes: string) => {
+  const modString = [...modifiers]
+    .sort((a, b) => a.groupId === b.groupId ? a.optionId - b.optionId : a.groupId - b.groupId)
+    .map(m => `${m.groupId}:${m.optionId}`)
+    .join('|');
+  return `${itemId}-${modString}-${notes}`;
+};
+
+const getCartItemPrice = (c: CartItem) => {
+  let base = parseFloat(c.item.price || "0");
+  let mods = 0;
+  for (const m of c.modifiers) {
+    mods += m.price;
+  }
+  return (base + mods) * c.quantity;
+};
 
 export default function QrMenuPage() {
   const params = useParams<{ orgSlug: string; tableId: string }>();
@@ -38,18 +92,33 @@ export default function QrMenuPage() {
   const [tableInfo, setTableInfo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showCart, setShowCart] = useState(false);
+  
   const [activeCategory, setActiveCategory] = useState<number | null>(null);
+  const [isSearchActive, setIsSearchActive] = useState(false);
   const [search, setSearch] = useState("");
+  
   const [guestName, setGuestName] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  
+  // Post-order state
   const [submitted, setSubmitted] = useState(false);
   const [orderId, setOrderId] = useState<number | null>(null);
+  const [orderNumber, setOrderNumber] = useState<string | null>(null);
+  const [serverTotal, setServerTotal] = useState<number | null>(null);
+  
   const [tipPct, setTipPct] = useState(0);
 
-  // ── Guest phone state ──────────────────────────────────────────────────────
+  // Item Detail State
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [itemSelections, setItemSelections] = useState<Record<number, ModifierOption[]>>({});
+  const [itemQty, setItemQty] = useState(1);
+  const [itemNotes, setItemNotes] = useState("");
+
+  // Guest Phone
   const [guestPhone, setGuestPhone] = useState<string>(() => {
     try { return localStorage.getItem(`qr_phone_${orgSlug}`) || ""; } catch { return ""; }
   });
@@ -58,7 +127,7 @@ export default function QrMenuPage() {
   const [pendingMsg, setPendingMsg] = useState<string | null>(null);
   const [guestGreeting, setGuestGreeting] = useState<string | null>(null);
 
-  // ── AI Chat state ──────────────────────────────────────────────────────────
+  // AI Chat
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>(() => {
     try {
@@ -68,15 +137,13 @@ export default function QrMenuPage() {
   });
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatHint, setChatHint] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [userHasSentMsg, setUserHasSentMsg] = useState(chatMessages.some(m => m.role === "user"));
+  
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
-  const prevCartLen = useRef(0);
 
-  // ── Menu load ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -96,79 +163,98 @@ export default function QrMenuPage() {
     load();
   }, [orgSlug, tableId]);
 
-  // ── Persist chat messages in sessionStorage ────────────────────────────────
   useEffect(() => {
     try { sessionStorage.setItem(`qr_chat_${orgSlug}`, JSON.stringify(chatMessages)); } catch {}
   }, [chatMessages, orgSlug]);
 
-  // ── Load guest info if phone known ─────────────────────────────────────────
   useEffect(() => {
     if (!guestPhone) return;
     fetch(`${API_BASE}/ai-waiter/guest/${orgSlug}/${encodeURIComponent(guestPhone)}`)
       .then(r => r.json())
-      .then(d => {
-        if (d.guest?.name) setGuestGreeting(d.guest.name);
-      })
+      .then(d => { if (d.guest?.name) setGuestGreeting(d.guest.name); })
       .catch(() => {});
   }, [guestPhone, orgSlug]);
 
-  // ── Proactive chat hint when first item added ──────────────────────────────
-  useEffect(() => {
-    if (cart.length > 0 && prevCartLen.current === 0 && !chatOpen) {
-      setChatHint(true);
-      const t = setTimeout(() => setChatHint(false), 6000);
-      return () => clearTimeout(t);
-    }
-    prevCartLen.current = cart.length;
-  }, [cart.length]);
-
-  // ── Auto-scroll chat to bottom ─────────────────────────────────────────────
   useEffect(() => {
     chatScrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, chatLoading]);
 
-  // ── Cart helpers ───────────────────────────────────────────────────────────
-  const addToCart = (item: Item) => {
-    setCart(prev => {
-      const ex = prev.find(c => c.id === item.id);
-      if (ex) return prev.map(c => c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { ...item, quantity: 1 }];
-    });
-  };
+  const filteredCategories = useMemo(() => {
+    if (!menu) return [];
+    if (!search) return menu.categories;
+    const q = search.toLowerCase();
+    return menu.categories.map(cat => ({
+      ...cat,
+      items: cat.items.filter(i => i.name.toLowerCase().includes(q) || i.description?.toLowerCase().includes(q)),
+    })).filter(cat => cat.items.length > 0);
+  }, [menu, search]);
 
-  const addToCartById = useCallback((itemId: number, qty: number = 1, notes?: string) => {
-    const allItems = menu?.categories.flatMap(c => c.items) || [];
-    const item = allItems.find(i => i.id === itemId);
-    if (!item) return false;
-    setCart(prev => {
-      const ex = prev.find(c => c.id === item.id);
-      if (ex) return prev.map(c => c.id === item.id ? { ...c, quantity: c.quantity + qty, notes: notes || c.notes } : c);
-      return [...prev, { ...item, quantity: qty, notes }];
-    });
-    return true;
+  const popularItems = useMemo(() => {
+    if (!menu) return [];
+    return menu.categories.flatMap(c => c.items).filter(i => i.isPopular);
   }, [menu]);
 
-  const removeFromCart = (id: number) => {
-    setCart(prev => {
-      const ex = prev.find(c => c.id === id);
-      if (ex && ex.quantity > 1) return prev.map(c => c.id === id ? { ...c, quantity: c.quantity - 1 } : c);
-      return prev.filter(c => c.id !== id);
-    });
+  useEffect(() => {
+    if (isSearchActive || !filteredCategories.length) return;
+    const handleScroll = () => {
+      const scrollY = window.scrollY + 140;
+      for (let i = filteredCategories.length - 1; i >= 0; i--) {
+        const el = document.getElementById(`category-${filteredCategories[i].id}`);
+        if (el && el.offsetTop <= scrollY) {
+          setActiveCategory(filteredCategories[i].id);
+          break;
+        }
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [filteredCategories, isSearchActive]);
+
+  const scrollToCategory = (id: number) => {
+    setActiveCategory(id);
+    const el = document.getElementById(`category-${id}`);
+    if (el) {
+      const y = el.getBoundingClientRect().top + window.scrollY - 100;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }
   };
 
-  const removeFromCartById = useCallback((itemId: number) => {
-    setCart(prev => prev.filter(c => c.id !== itemId));
-  }, []);
+  const getModifierGroups = (item: Item): ModifierGroup[] => {
+    return item.modifier_groups || item.modifierGroups || [];
+  };
 
-  // ── AI Chat helpers ────────────────────────────────────────────────────────
+  const hasRequiredModifiers = (item: Item): boolean => {
+    const groups = getModifierGroups(item);
+    return groups.some(g => (g.min_select || 0) > 0 || g.is_required);
+  };
+
+  // Chat Actions
   const applyActions = useCallback((actions: any[]) => {
     for (const a of actions) {
-      if (a.type === "add_to_cart") addToCartById(a.item_id, a.quantity || 1, a.notes);
-      if (a.type === "remove_from_cart") removeFromCartById(a.item_id);
+      if (a.type === "add_to_cart") {
+        const allItems = menu?.categories.flatMap(c => c.items) || [];
+        const item = allItems.find(i => i.id === a.item_id);
+        if (!item) continue;
+        if (hasRequiredModifiers(item)) {
+          setSelectedItem(item);
+        } else {
+          const mods: SelectedModifier[] = [];
+          const notes = a.notes || "";
+          const cartItemId = generateCartItemId(item.id, mods, notes);
+          setCart(prev => {
+            const ex = prev.find(c => c.cartItemId === cartItemId);
+            if (ex) return prev.map(c => c.cartItemId === cartItemId ? { ...c, quantity: c.quantity + (a.quantity || 1) } : c);
+            return [...prev, { cartItemId, item, quantity: a.quantity || 1, notes, modifiers: mods }];
+          });
+        }
+      }
+      if (a.type === "remove_from_cart") {
+        setCart(prev => prev.filter(c => c.item.id !== a.item_id));
+      }
     }
-  }, [addToCartById, removeFromCartById]);
+  }, [menu]);
 
-  const sendToAI = useCallback(async (msgs: ChatMsg[], _showUserMsg: boolean = true) => {
+  const sendToAI = useCallback(async (msgs: ChatMsg[]) => {
     setChatLoading(true);
     try {
       const r = await fetch(`${API_BASE}/ai-waiter/chat`, {
@@ -177,7 +263,13 @@ export default function QrMenuPage() {
         body: JSON.stringify({
           orgSlug,
           messages: msgs.map(m => ({ role: m.role, content: m.content })),
-          cart: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
+          cart: cart.map(c => ({ 
+            id: c.item.id, 
+            name: c.item.name, 
+            price: c.item.price, 
+            quantity: c.quantity,
+            modifiers: c.modifiers.map(m => m.name).join(', ')
+          })),
           guestPhone: guestPhone || undefined,
         }),
       });
@@ -187,7 +279,7 @@ export default function QrMenuPage() {
         setChatMessages(prev => [...prev, { role: "assistant", content: data.reply }]);
       }
     } catch {
-      setChatMessages(prev => [...prev, { role: "assistant", content: "Вибачте, не вдалося підключитися. Спробуйте ще раз 🙏" }]);
+      setChatMessages(prev => [...prev, { role: "assistant", content: "Не вдалося підключитися. Спробуйте ще раз." }]);
     }
     setChatLoading(false);
   }, [orgSlug, cart, applyActions, guestPhone]);
@@ -195,7 +287,6 @@ export default function QrMenuPage() {
   const sendMessage = async (textOverride?: string) => {
     const text = (textOverride || chatInput).trim();
     if (!text || chatLoading) return;
-    // On first user message, if no phone stored yet — show phone capture modal
     if (!userHasSentMsg && !guestPhone) {
       setPendingMsg(text);
       setShowPhoneModal(true);
@@ -203,8 +294,7 @@ export default function QrMenuPage() {
       return;
     }
     setUserHasSentMsg(true);
-    const userMsg: ChatMsg = { role: "user", content: text };
-    const newMsgs = [...chatMessages, userMsg];
+    const newMsgs: ChatMsg[] = [...chatMessages, { role: "user", content: text }];
     setChatMessages(newMsgs);
     setChatInput("");
     await sendToAI(newMsgs);
@@ -222,43 +312,12 @@ export default function QrMenuPage() {
     setPendingMsg(null);
     if (text) {
       setUserHasSentMsg(true);
-      const userMsg: ChatMsg = { role: "user", content: text };
-      const newMsgs = [...chatMessages, userMsg];
+      const newMsgs: ChatMsg[] = [...chatMessages, { role: "user", content: text }];
       setChatMessages(newMsgs);
       await sendToAI(newMsgs);
     }
   };
 
-  const openChat = async () => {
-    setChatOpen(true);
-    setChatHint(false);
-    setTimeout(() => chatInputRef.current?.focus(), 300);
-    if (chatMessages.length === 0) {
-      setChatLoading(true);
-      try {
-        const r = await fetch(`${API_BASE}/ai-waiter/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orgSlug,
-            messages: [{ role: "user", content: "__greet__" }],
-            cart: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
-            guestPhone: guestPhone || undefined,
-          }),
-        });
-        const data = await r.json();
-        if (data.reply) setChatMessages([{ role: "assistant", content: data.reply }]);
-      } catch {
-        const defaultGreet = guestGreeting
-          ? `З поверненням, ${guestGreeting}! 👋 Раді бачити вас знову. Чим можу допомогти?`
-          : "Вітаємо! Я AI-офіціант, радий допомогти вам обрати страви. Що вас цікавить? 😊";
-        setChatMessages([{ role: "assistant", content: defaultGreet }]);
-      }
-      setChatLoading(false);
-    }
-  };
-
-  // ── Voice input ────────────────────────────────────────────────────────────
   const toggleVoice = () => {
     if (voiceActive) {
       recognitionRef.current?.stop();
@@ -282,26 +341,10 @@ export default function QrMenuPage() {
     setVoiceActive(true);
   };
 
-  // ── Cart math ─────────────────────────────────────────────────────────────
-  const cartQty = (id: number) => cart.find(c => c.id === id)?.quantity || 0;
   const totalItems = cart.reduce((s, c) => s + c.quantity, 0);
-  const totalAmount = cart.reduce((s, c) => s + parseFloat(c.price) * c.quantity, 0);
+  const totalAmount = cart.reduce((s, c) => s + getCartItemPrice(c), 0);
   const tipAmount = Math.round(totalAmount * tipPct) / 100;
   const grandTotal = totalAmount + tipAmount;
-
-  const filteredCategories = useMemo(() => {
-    if (!menu) return [];
-    if (!search) return menu.categories.filter(c => !activeCategory || c.id === activeCategory || search);
-    const q = search.toLowerCase();
-    return menu.categories.map(cat => ({
-      ...cat,
-      items: cat.items.filter(i => i.name.toLowerCase().includes(q) || i.description?.toLowerCase().includes(q)),
-    })).filter(cat => cat.items.length > 0);
-  }, [menu, search, activeCategory]);
-
-  const displayCategories = search
-    ? filteredCategories
-    : (menu?.categories.filter(c => !activeCategory || c.id === activeCategory) || []);
 
   const placeOrder = async () => {
     if (!cart.length) return;
@@ -317,30 +360,34 @@ export default function QrMenuPage() {
           guestCount: 1,
           notes: orderNotes || null,
           tipPct: tipPct || null,
-          tipAmount: tipAmount > 0 ? tipAmount : null,
-          items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity, notes: c.notes })),
+          items: cart.map(c => ({ 
+            id: c.item.id, 
+            quantity: c.quantity, 
+            notes: c.notes || null,
+            modifiers: c.modifiers.map(m => ({ groupId: m.groupId, optionId: m.optionId }))
+          })),
           guestPhone: guestPhone || undefined,
         }),
       });
       const d = await r.json();
       if (!r.ok) {
-        toast({ title: "Помилка замовлення", description: d.error || `HTTP ${r.status}`, variant: "destructive" });
+        toast({ title: "Не вдалося оформити замовлення", description: d.error || `HTTP ${r.status}`, variant: "destructive" });
         return;
       }
       if (d.orderId) {
         setOrderId(d.orderId);
+        setOrderNumber(d.orderNumber || null);
+        setServerTotal(d.total || grandTotal);
         setSubmitted(true);
         setCart([]);
         setShowCart(false);
-        // Post-order AI message in chat
         try {
-          const postMsg = "Моє замовлення щойно оформлено!";
           const aiR = await fetch(`${API_BASE}/ai-waiter/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               orgSlug,
-              messages: [...chatMessages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: postMsg }],
+              messages: [...chatMessages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: "Я щойно оформив замовлення!" }],
               cart: [],
               guestPhone: guestPhone || undefined,
             }),
@@ -349,193 +396,294 @@ export default function QrMenuPage() {
           if (aiD.reply) {
             setChatMessages(prev => [
               ...prev,
-              { role: "user", content: postMsg },
+              { role: "user", content: "Я щойно оформив замовлення!" },
               { role: "assistant", content: aiD.reply },
             ]);
           }
         } catch {}
       } else {
-        alert(d.error || "Помилка при оформленні замовлення");
+        toast({ title: "Помилка замовлення", description: d.error || "Невідома помилка", variant: "destructive" });
       }
-    } catch { alert("Помилка з'єднання"); }
+    } catch { 
+      toast({ title: "Помилка з’єднання", description: "Не вдалося зв’язатися із сервером.", variant: "destructive" });
+    }
     setSubmitting(false);
   };
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // Item Drawer Logic
+  useEffect(() => {
+    if (selectedItem) {
+      setItemSelections({});
+      setItemQty(1);
+      setItemNotes("");
+    }
+  }, [selectedItem]);
+
+  const toggleModifier = (group: ModifierGroup, option: ModifierOption) => {
+    setItemSelections(prev => {
+      const current = prev[group.id] || [];
+      const exists = current.find(o => o.id === option.id);
+      if (exists) {
+        return { ...prev, [group.id]: current.filter(o => o.id !== option.id) };
+      } else {
+        const max = group.max_select || Infinity;
+        if (current.length >= max) {
+          if (max === 1) return { ...prev, [group.id]: [option] };
+          return prev; 
+        }
+        return { ...prev, [group.id]: [...current, option] };
+      }
+    });
+  };
+
+  const isItemValid = useMemo(() => {
+    if (!selectedItem) return false;
+    const groups = getModifierGroups(selectedItem);
+    for (const g of groups) {
+      const count = itemSelections[g.id]?.length || 0;
+      const min = g.min_select !== undefined ? g.min_select : (g.is_required ? 1 : 0);
+      if (count < min) return false;
+    }
+    return true;
+  }, [selectedItem, itemSelections]);
+
+  const estimatedItemPrice = useMemo(() => {
+    if (!selectedItem) return 0;
+    let base = parseFloat(selectedItem.price || "0");
+    let mods = 0;
+    Object.values(itemSelections).flat().forEach(opt => {
+      if (opt.price_delta) mods += parseFloat(String(opt.price_delta));
+    });
+    return (base + mods) * itemQty;
+  }, [selectedItem, itemSelections, itemQty]);
+
+  const commitItemToCart = () => {
+    if (!selectedItem || !isItemValid) return;
+    const mods: SelectedModifier[] = [];
+    Object.entries(itemSelections).forEach(([gId, opts]) => {
+      opts.forEach(opt => {
+        mods.push({
+          groupId: Number(gId),
+          optionId: opt.id,
+          name: opt.name,
+          price: parseFloat(String(opt.price_delta || "0")) 
+        });
+      });
+    });
+    const cartItemId = generateCartItemId(selectedItem.id, mods, itemNotes);
+    setCart(prev => {
+      const ex = prev.find(c => c.cartItemId === cartItemId);
+      if (ex) return prev.map(c => c.cartItemId === cartItemId ? { ...c, quantity: c.quantity + itemQty } : c);
+      return [...prev, { cartItemId, item: selectedItem, quantity: itemQty, notes: itemNotes, modifiers: mods }];
+    });
+    setSelectedItem(null);
+  };
+
   if (loading) return (
-    <div className="min-h-screen bg-stone-50 flex items-center justify-center">
-      <div className="text-center">
-        <Loader2 className="w-10 h-10 animate-spin text-amber-500 mx-auto mb-3" />
-        <p className="text-stone-500 text-sm">Завантаження меню...</p>
-      </div>
+    <div className="min-h-[100dvh] bg-[#F9F8F6] flex flex-col items-center justify-center">
+      <Loader2 className="w-8 h-8 animate-spin text-[#A37346] mb-4" />
+      <p className="text-[#7A756D] font-medium text-sm tracking-wide uppercase">Готуємо меню</p>
     </div>
   );
 
   if (error) return (
-    <div className="min-h-screen bg-stone-50 flex items-center justify-center p-6">
-      <div className="text-center max-w-sm">
-        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <X className="w-8 h-8 text-red-500" />
+    <div className="min-h-[100dvh] bg-[#F9F8F6] flex items-center justify-center p-6 text-center">
+      <div>
+        <div className="w-16 h-16 bg-white shadow-sm rounded-full flex items-center justify-center mx-auto mb-6">
+          <X className="w-6 h-6 text-red-400" />
         </div>
-        <h2 className="text-lg font-semibold text-stone-800 mb-2">Меню не знайдено</h2>
-        <p className="text-stone-500 text-sm">{error}</p>
+        <h2 className="text-xl font-serif text-[#2D2A26] mb-2">Меню недоступне</h2>
+        <p className="text-[#7A756D] text-sm">{error}</p>
       </div>
     </div>
   );
 
   if (submitted) return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50 to-stone-50 flex items-center justify-center p-6">
-      <div className="text-center max-w-sm">
-        <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle2 className="w-10 h-10 text-emerald-600" />
-        </div>
-        <h1 className="text-2xl font-bold text-stone-900 mb-2">Замовлення прийнято!</h1>
-        <p className="text-stone-500 text-sm mb-2">Номер замовлення: <span className="font-bold text-stone-800">#{orderId}</span></p>
-        {tableInfo && <p className="text-stone-500 text-sm mb-6">Стіл {tableInfo.number} · {tableInfo.location}</p>}
-        <p className="text-stone-400 text-xs mb-8">Ваше замовлення вже передано на кухню. Очікуйте, будь ласка 🙏</p>
-        <button
-          onClick={() => { setSubmitted(false); setOrderId(null); }}
-          className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-2xl font-semibold text-sm"
-        >
-          Замовити ще
-        </button>
+    <div className="min-h-[100dvh] bg-[#F9F8F6] flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
+      <div className="fixed inset-0 pointer-events-none opacity-[0.03] mix-blend-multiply" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noiseFilter\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noiseFilter)\'/%3E%3C/svg%3E")' }} />
+      <div className="w-20 h-20 bg-[#2D2A26] rounded-full flex items-center justify-center mb-8 shadow-xl relative z-10">
+        <Check className="w-10 h-10 text-[#A37346]" />
       </div>
+      <h1 className="text-3xl font-serif text-[#2D2A26] mb-3 relative z-10">Замовлення прийнято</h1>
+      <p className="text-[#7A756D] mb-2 text-lg relative z-10 font-medium">Order #{orderNumber || orderId}</p>
+      {tableInfo && <p className="text-[#7A756D] mb-4 relative z-10">Table {tableInfo.number} {tableInfo.location ? `· ${tableInfo.location}` : ''}</p>}
+      
+      {serverTotal !== null && (
+        <div className="text-2xl font-serif text-[#A37346] mb-8 relative z-10">{fmtMoney(serverTotal)}</div>
+      )}
+      
+      <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-sm mb-8 relative z-10 border border-stone-100">
+         <p className="text-[#2D2A26] font-medium text-sm leading-relaxed">
+           Замовлення передано на кухню.<br/>Ми приготуємо його з турботою.
+         </p>
+      </div>
+
+      <button
+        onClick={() => { setSubmitted(false); setOrderId(null); setOrderNumber(null); setCart([]); }}
+        className="w-full max-w-sm h-14 bg-white border border-stone-200 text-[#2D2A26] rounded-full font-medium relative z-10 shadow-sm hover:bg-stone-50 transition-colors"
+      >
+        Order More
+      </button>
     </div>
   );
 
-  // ── Main render ────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-stone-50 pb-32">
-
-      {/* Header */}
-      <div className="bg-white border-b border-stone-100 sticky top-0 z-40">
-        <div className="px-4 pt-4 pb-2 max-w-lg mx-auto">
-          <div className="flex items-center justify-between mb-3">
+    <div className="min-h-[100dvh] bg-[#F9F8F6] relative">
+      <div className="fixed inset-0 pointer-events-none opacity-[0.03] mix-blend-multiply" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noiseFilter\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noiseFilter)\'/%3E%3C/svg%3E")' }} />
+      
+      <header className="px-5 pt-8 pb-4 flex justify-between items-start sticky top-0 z-30 bg-[#F9F8F6]/95 backdrop-blur-md transition-all">
+        {!isSearchActive ? (
+          <>
             <div>
-              <h1 className="text-lg font-bold text-stone-900">{menu?.org.name}</h1>
-              {tableInfo && <p className="text-xs text-stone-500">Стіл {tableInfo.number} · {tableInfo.location}</p>}
+              <h1 className="text-2xl font-serif text-[#2D2A26] leading-tight">{menu?.org.name || 'Menu'}</h1>
+              {tableInfo && <p className="text-sm text-[#7A756D] mt-1 font-medium">Table {tableInfo.number} {tableInfo.location ? `· ${tableInfo.location}` : ''}</p>}
             </div>
-            <button
-              onClick={() => setShowCart(true)}
-              className={`relative flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${totalItems > 0 ? "bg-amber-500 text-white shadow-md" : "bg-stone-100 text-stone-500"}`}
+            <button 
+              onClick={() => setIsSearchActive(true)}
+              className="p-3 bg-white shadow-sm border border-stone-100 rounded-full text-[#2D2A26] hover:bg-stone-50 transition-colors"
+              data-testid="button-search"
             >
-              <ShoppingCart className="w-4 h-4" />
-              {totalItems > 0 && <span>{totalItems}</span>}
-              {totalItems > 0 && <span className="hidden sm:inline">{fmtMoney(totalAmount)}</span>}
+              <Search className="w-5 h-5" />
+            </button>
+          </>
+        ) : (
+          <div className="w-full flex items-center gap-3">
+            <div className="flex-1 relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+              <input 
+                autoFocus
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Пошук у меню..."
+                className="w-full pl-10 pr-4 h-12 bg-white border border-stone-100 rounded-full shadow-sm focus:outline-none focus:ring-2 focus:ring-[#A37346]/30 text-[#2D2A26]"
+                data-testid="input-search"
+              />
+            </div>
+            <button 
+              onClick={() => { setIsSearchActive(false); setSearch(""); }}
+              className="p-3 bg-white shadow-sm border border-stone-100 rounded-full text-[#2D2A26] hover:bg-stone-50 transition-colors"
+              data-testid="button-close-search"
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
-            <input
-              value={search}
-              onChange={e => { setSearch(e.target.value); if (e.target.value) setActiveCategory(null); }}
-              placeholder="Пошук страв..."
-              className="w-full pl-9 pr-3 py-2 bg-stone-100 rounded-xl text-sm border-0 focus:outline-none focus:ring-2 focus:ring-amber-400"
-            />
-            {search && (
-              <button onClick={() => { setSearch(""); setActiveCategory(menu?.categories[0]?.id || null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400">
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </div>
+        )}
+      </header>
 
-        {!search && (
-          <div className="flex gap-2 px-4 pb-3 overflow-x-auto scrollbar-hide max-w-lg mx-auto">
-            {menu?.categories.map(cat => (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${activeCategory === cat.id ? "bg-amber-500 text-white shadow-sm" : "bg-stone-100 text-stone-600"}`}
+      {!isSearchActive && popularItems.length > 0 && (
+        <section className="py-4 relative z-20">
+          <h2 className="px-5 text-lg font-serif mb-4 text-[#2D2A26]">Рекомендує шеф</h2>
+          <div className="flex overflow-x-auto px-5 gap-4 snap-x pb-4 hide-scrollbar">
+            {popularItems.map(item => (
+              <div 
+                key={item.id} 
+                className="snap-start shrink-0 w-64 bg-white rounded-[1.25rem] p-2 shadow-sm border border-stone-100 flex flex-col cursor-pointer transition-transform active:scale-[0.98]" 
+                onClick={() => setSelectedItem(item)}
               >
-                <span>{cat.emoji}</span><span>{cat.name}</span>
+                <div className="w-full aspect-[4/3] rounded-xl bg-stone-100 overflow-hidden relative">
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} className="w-full h-full object-cover" alt="" onError={e => { e.currentTarget.style.display = 'none'; }} />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-[#F9F8F6]">
+                      <span className="text-3xl font-serif text-stone-300 uppercase">{cleanString(item.name).charAt(0)}</span>
+                    </div>
+                  )}
+                  <div className="absolute top-2 left-2 flex gap-1">
+                    <span className="bg-white/90 backdrop-blur px-2 py-1 rounded-md text-[10px] font-bold tracking-wider text-[#2D2A26] uppercase flex items-center gap-1">
+                      <Star className="w-3 h-3 fill-[#A37346] text-[#A37346]" /> Вибір шефа
+                    </span>
+                  </div>
+                </div>
+                <div className="p-3 flex-1 flex flex-col justify-between">
+                  <h3 className="font-serif text-[#2D2A26] text-base leading-tight mb-2 line-clamp-2">{cleanString(item.name)}</h3>
+                  <p className="text-[#A37346] font-medium text-sm">{fmtMoney(item.price)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!isSearchActive && (
+        <div className="sticky top-[88px] z-30 bg-[#F9F8F6]/95 backdrop-blur-md pb-3 pt-2">
+          <div className="flex px-5 overflow-x-auto gap-2 hide-scrollbar">
+            {filteredCategories.map(cat => (
+              <button 
+                key={cat.id} 
+                onClick={() => scrollToCategory(cat.id)}
+                className={`px-5 py-2.5 rounded-full whitespace-nowrap text-sm font-medium transition-all ${
+                  activeCategory === cat.id 
+                    ? 'bg-[#2D2A26] text-white shadow-md' 
+                    : 'bg-white text-[#7A756D] border border-stone-200 hover:bg-stone-50'
+                }`}
+              >
+                {cleanString(cat.name)}
               </button>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Menu Items — Choice-style 2-col grid */}
-      <div className="max-w-lg mx-auto px-3 pt-4 space-y-6 pb-4">
-        {displayCategories.map(cat => (
-          <div key={cat.id}>
-            {(search || !activeCategory || displayCategories.length > 1) && (
-              <h2 className="font-bold text-stone-800 mb-3 flex items-center gap-2 px-1">
-                <span className="text-xl">{cat.emoji}</span>{cat.name}
-              </h2>
-            )}
-            <div className="grid grid-cols-2 gap-3">
+      <div className="px-5 pb-32 space-y-10 relative z-20 mt-4">
+        {filteredCategories.map(cat => (
+          <div key={cat.id} id={`category-${cat.id}`} className="scroll-mt-[150px]">
+            <h2 className="text-2xl font-serif text-[#2D2A26] mb-5 pl-1">
+              {cleanString(cat.name)}
+            </h2>
+            <div className="space-y-4">
               {cat.items.map(item => {
-                const qty = cartQty(item.id);
+                const requiredMods = hasRequiredModifiers(item);
+                const hasMods = getModifierGroups(item).length > 0;
+                
                 return (
-                  <div key={item.id}
-                    className={`bg-white rounded-2xl overflow-hidden shadow-sm transition-all ${qty > 0 ? "ring-2 ring-amber-400" : ""}`}>
-                    {/* Photo area — square aspect ratio */}
-                    <div className="relative w-full aspect-square bg-stone-100">
-                      {item.imageUrl ? (
-                        <img
-                          src={item.imageUrl}
-                          alt={item.name}
-                          className="w-full h-full object-cover"
-                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <span className="text-4xl opacity-30">{cat.emoji}</span>
-                        </div>
+                  <div 
+                    key={item.id} 
+                    className="flex gap-4 bg-white p-3.5 rounded-[1.25rem] shadow-sm border border-stone-100 cursor-pointer transition-transform active:scale-[0.98]"
+                    onClick={() => setSelectedItem(item)}
+                    data-testid={`card-product-${item.id}`}
+                  >
+                    <div className="flex-1 min-w-0 py-1 flex flex-col justify-center">
+                      <h3 className="font-serif text-[#2D2A26] text-base mb-1.5 pr-2 leading-tight">{cleanString(item.name)}</h3>
+                      {item.description && (
+                        <p className="text-sm text-[#7A756D] line-clamp-2 mb-3 pr-2 leading-relaxed">{item.description}</p>
                       )}
-                      {/* Badges top-left */}
-                      <div className="absolute top-2 left-2 flex flex-col gap-1">
-                        {item.isPopular && (
-                          <span className="bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                            <Star className="w-2.5 h-2.5 fill-white" /> Хіт
-                          </span>
-                        )}
-                        {item.isVegetarian && (
-                          <span className="bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                            <Leaf className="w-2.5 h-2.5" /> Veg
-                          </span>
-                        )}
-                      </div>
-                      {/* Add button — overlay bottom-right */}
-                      <div className="absolute bottom-2 right-2">
-                        {qty === 0 ? (
-                          <button
-                            onClick={() => addToCart(item)}
-                            className="w-9 h-9 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-full flex items-center justify-center shadow-lg transition-all"
-                          >
-                            <Plus className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1">
-                            <button onClick={() => removeFromCart(item.id)}
-                              className="w-6 h-6 bg-stone-100 rounded-full flex items-center justify-center text-stone-700 active:scale-95">
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="w-4 text-center font-bold text-stone-800 text-xs">{qty}</span>
-                            <button onClick={() => addToCart(item)}
-                              className="w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white active:scale-95">
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
+                      
+                      <div className="flex items-center justify-between mt-auto">
+                        <div className="font-medium text-[#A37346] text-sm">{fmtMoney(item.price)}</div>
+                        <div className="flex gap-1.5">
+                           {item.isVegetarian && <Leaf className="w-3.5 h-3.5 text-green-600" />}
+                           {item.cookMinutes && <div className="flex items-center text-[10px] text-stone-400 gap-0.5"><Clock className="w-3 h-3"/> {item.cookMinutes}m</div>}
+                        </div>
                       </div>
                     </div>
-
-                    {/* Info */}
-                    <div className="p-2.5">
-                      <p className="font-semibold text-stone-900 text-sm leading-snug line-clamp-2 mb-1">{item.name}</p>
-                      {item.description && (
-                        <p className="text-[11px] text-stone-400 leading-relaxed line-clamp-2 mb-1.5">{item.description}</p>
+                    <div className="w-[104px] h-[104px] shrink-0 rounded-xl bg-stone-50 relative overflow-hidden">
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none'; }} />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-[#F9F8F6]">
+                          <span className="text-2xl font-serif text-stone-300 uppercase">{cleanString(item.name).charAt(0)}</span>
+                        </div>
                       )}
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-amber-600 text-sm">{fmtMoney(item.price)}</span>
-                        {item.cookMinutes && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-stone-400">
-                            <Clock className="w-2.5 h-2.5" />{item.cookMinutes} хв
-                          </span>
-                        )}
-                      </div>
+                      <button 
+                        className="absolute bottom-1.5 right-1.5 w-8 h-8 bg-white/95 backdrop-blur rounded-full flex items-center justify-center shadow-sm text-[#2D2A26]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (requiredMods || hasMods) {
+                             setSelectedItem(item);
+                          } else {
+                             const cartItemId = generateCartItemId(item.id, [], "");
+                             setCart(prev => {
+                               const ex = prev.find(c => c.cartItemId === cartItemId);
+                               if (ex) return prev.map(c => c.cartItemId === cartItemId ? { ...c, quantity: c.quantity + 1 } : c);
+                               return [...prev, { cartItemId, item, quantity: 1, notes: "", modifiers: [] }];
+                             });
+                             toast({ description: "Додано до замовлення", duration: 1500 });
+                          }
+                        }}
+                        data-testid={`button-add-cart-${item.id}`}
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -543,315 +691,395 @@ export default function QrMenuPage() {
             </div>
           </div>
         ))}
-        {displayCategories.length === 0 && (
-          <div className="text-center py-16">
-            <Search className="w-10 h-10 text-stone-200 mx-auto mb-3" />
-            <p className="text-stone-400 text-sm">Нічого не знайдено за запитом «{search}»</p>
+        {filteredCategories.length === 0 && (
+          <div className="py-20 text-center">
+            <Search className="w-10 h-10 text-stone-300 mx-auto mb-4" />
+            <p className="text-[#7A756D] font-medium">Нічого не знайдено</p>
           </div>
         )}
       </div>
 
-      {/* Sticky Cart Button */}
-      {totalItems > 0 && !showCart && !chatOpen && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-sm px-4">
-          <button
-            onClick={() => setShowCart(true)}
-            className="w-full bg-amber-500 hover:bg-amber-600 text-white py-4 rounded-2xl font-bold text-sm shadow-xl flex items-center justify-between px-5"
-          >
-            <span className="bg-amber-600 text-white w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold">{totalItems}</span>
-            <span>Переглянути замовлення</span>
-            <span>{fmtMoney(totalAmount)}</span>
-          </button>
-        </div>
-      )}
+      {/* Floating Action Bar */}
+      <div className="fixed bottom-6 left-5 right-5 z-40 flex items-center justify-between gap-3 pointer-events-none">
+        <button 
+          onClick={() => setChatOpen(true)}
+          className="h-[52px] px-6 bg-white/95 backdrop-blur-md border border-stone-200 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.08)] flex items-center gap-2 text-[#2D2A26] font-medium pointer-events-auto hover:bg-stone-50 transition-colors"
+          data-testid="button-chat"
+        >
+          <Sparkles className="w-5 h-5 text-[#A37346]" />
+          {totalItems === 0 && <span className="text-sm">AI-консьєрж</span>}
+        </button>
+        
+        <AnimatePresence>
+          {totalItems > 0 && (
+            <motion.button 
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              onClick={() => setShowCart(true)}
+              className="flex-1 h-[52px] bg-[#2D2A26] rounded-full shadow-[0_8px_30px_rgb(45,42,38,0.25)] flex items-center justify-between px-5 text-white pointer-events-auto hover:bg-[#1A1815] transition-colors"
+              data-testid="button-cart"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-[26px] h-[26px] rounded-full bg-[#A37346] flex items-center justify-center text-xs font-bold shadow-inner">
+                  {totalItems}
+                </div>
+                <span className="font-medium text-sm">Переглянути замовлення</span>
+              </div>
+              <span className="font-medium text-sm">{fmtMoney(totalAmount)}</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
 
-      {/* Cart Sheet */}
-      {showCart && (
-        <div className="fixed inset-0 z-50">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowCart(false)} />
-          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl max-h-[90vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-stone-100">
-              <h2 className="font-bold text-stone-900">Ваше замовлення</h2>
-              <button onClick={() => setShowCart(false)} className="w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center text-stone-600">
+      {/* Item Detail Drawer */}
+      <Drawer.Root open={!!selectedItem} onOpenChange={(o) => { if (!o) setSelectedItem(null); }}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-50 backdrop-blur-sm" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 max-h-[92vh] h-full flex flex-col rounded-t-[2rem] bg-white z-50 focus:outline-none shadow-2xl" data-testid="drawer-item-detail">
+            <div className="shrink-0 w-full flex justify-center py-3 bg-white rounded-t-[2rem] absolute top-0 left-0 right-0 z-10">
+              <div className="w-12 h-1.5 rounded-full bg-stone-200" />
+            </div>
+            
+            <button onClick={() => setSelectedItem(null)} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-white/90 backdrop-blur rounded-full text-stone-500 z-20 shadow-sm border border-stone-100">
+              <X className="w-4 h-4" />
+            </button>
+            
+            <div className="flex-1 overflow-y-auto pb-28 pt-8">
+              {selectedItem?.imageUrl && (
+                <div className="w-full aspect-[4/3] bg-stone-100 mb-6">
+                  <img src={selectedItem.imageUrl} className="w-full h-full object-cover" alt="" onError={e => { e.currentTarget.style.display = 'none'; }} />
+                </div>
+              )}
+              
+              <div className="px-5 mb-8 mt-4">
+                <h2 className="text-2xl font-serif text-[#2D2A26] mb-2 leading-tight">{selectedItem ? cleanString(selectedItem.name) : ""}</h2>
+                <p className="text-lg text-[#A37346] font-medium mb-4">{fmtMoney(selectedItem?.price)}</p>
+                {selectedItem?.description && (
+                  <p className="text-[#7A756D] leading-relaxed text-sm">{selectedItem.description}</p>
+                )}
+              </div>
+
+              {selectedItem && getModifierGroups(selectedItem).length > 0 && (
+                <div className="space-y-6 px-5 mb-8">
+                  {getModifierGroups(selectedItem).map(group => (
+                    <div key={group.id} className="pt-2">
+                      <div className="flex justify-between items-baseline mb-4">
+                        <h4 className="font-medium text-[#2D2A26]">{group.name}</h4>
+                        <span className="text-xs font-medium text-[#7A756D] bg-stone-100 px-2 py-1 rounded">
+                          {group.is_required ? "Обов’язково" : "За бажанням"} 
+                          {group.max_select && group.max_select > 1 ? ` (до ${group.max_select})` : ""}
+                        </span>
+                      </div>
+                      <div className="space-y-4">
+                        {group.options.map(opt => {
+                          const isSelected = itemSelections[group.id]?.some(o => o.id === opt.id);
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => toggleModifier(group, opt)}
+                              className="flex w-full items-center justify-between cursor-pointer group text-left"
+                              data-testid={`button-modifier-${group.id}-${opt.id}`}
+                              aria-pressed={isSelected}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`w-5 h-5 flex items-center justify-center rounded-full border transition-colors ${isSelected ? 'border-[#A37346] bg-[#A37346]' : 'border-stone-300 group-hover:border-stone-400'}`}>
+                                  {isSelected && <Check className="w-3 h-3 text-white" />}
+                                </div>
+                                <span className="text-[#2D2A26] text-sm">{opt.name}</span>
+                              </div>
+                              {opt.price_delta && parseFloat(String(opt.price_delta)) > 0 && (
+                                <span className="text-sm text-[#7A756D] font-medium">+{fmtMoney(opt.price_delta)}</span>
+                              )}
+                              {opt.price_delta && parseFloat(String(opt.price_delta)) < 0 && (
+                                <span className="text-sm text-[#7A756D] font-medium">{fmtMoney(opt.price_delta)}</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="px-5 py-6 border-t border-stone-100 flex items-center justify-between">
+                <span className="font-medium text-[#2D2A26]">Кількість</span>
+                <div className="flex items-center gap-4">
+                  <button onClick={() => setItemQty(Math.max(1, itemQty - 1))} className="w-10 h-10 rounded-full border border-stone-200 flex items-center justify-center text-[#2D2A26] active:bg-stone-50 transition-colors">
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <span className="font-medium text-lg w-6 text-center text-[#2D2A26]">{itemQty}</span>
+                  <button onClick={() => setItemQty(Math.min(100, itemQty + 1))} disabled={itemQty >= 100} className="w-10 h-10 rounded-full border border-stone-200 flex items-center justify-center text-[#2D2A26] active:bg-stone-50 transition-colors disabled:opacity-40">
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-5 py-4 border-t border-stone-100">
+                <label className="block font-medium text-[#2D2A26] mb-3">Побажання до страви</label>
+                <textarea 
+                  value={itemNotes}
+                  onChange={e => setItemNotes(e.target.value)}
+                  placeholder="Алергії, склад або інші побажання"
+                  className="w-full p-4 bg-stone-50 border border-stone-100 rounded-xl resize-none h-24 text-sm focus:ring-2 focus:ring-[#A37346]/20 focus:outline-none placeholder:text-stone-400 text-[#2D2A26]"
+                />
+              </div>
+            </div>
+
+            <div className="absolute bottom-0 left-0 right-0 p-5 bg-white border-t border-stone-100 pt-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
+              <button 
+                disabled={!isItemValid}
+                onClick={commitItemToCart}
+                className="w-full h-14 bg-[#2D2A26] text-white rounded-full font-medium flex items-center justify-between px-6 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+              >
+                <span>Додати до замовлення</span>
+                <span>{fmtMoney(estimatedItemPrice)}</span>
+              </button>
+            </div>
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
+
+      {/* Cart Drawer */}
+      <Drawer.Root open={showCart} onOpenChange={setShowCart}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-50 backdrop-blur-sm" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 max-h-[92vh] h-full flex flex-col rounded-t-[2rem] bg-[#F9F8F6] z-50 focus:outline-none shadow-2xl" data-testid="drawer-cart">
+            <div className="shrink-0 pt-5 pb-4 px-6 bg-white rounded-t-[2rem] flex items-center justify-between border-b border-stone-100">
+              <h2 className="text-2xl font-serif text-[#2D2A26]">Ваше замовлення</h2>
+              <button onClick={() => setShowCart(false)} className="w-8 h-8 flex items-center justify-center bg-stone-100 rounded-full text-stone-500 hover:bg-stone-200 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
-              {cart.map(item => (
-                <div key={item.id} className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => removeFromCart(item.id)} className="w-7 h-7 bg-stone-100 rounded-lg flex items-center justify-center text-stone-600">
-                      <Minus className="w-3 h-3" />
-                    </button>
-                    <span className="w-5 text-center font-bold text-stone-800 text-sm">{item.quantity}</span>
-                    <button onClick={() => addToCart(item)} className="w-7 h-7 bg-amber-500 rounded-lg flex items-center justify-center text-white">
-                      <Plus className="w-3 h-3" />
-                    </button>
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+              {cart.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="w-20 h-20 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Info className="w-8 h-8 text-stone-300" />
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-stone-800">{item.name}</p>
-                    {item.notes && <p className="text-xs text-stone-400">{item.notes}</p>}
-                  </div>
-                  <p className="font-semibold text-stone-800 text-sm">{fmtMoney(parseFloat(item.price) * item.quantity)}</p>
+                  <p className="text-[#7A756D] font-medium">Замовлення порожнє</p>
                 </div>
-              ))}
-
-              <div className="pt-3 border-t border-stone-100 space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-stone-600 mb-1 block">Ваше ім'я (необов'язково)</label>
-                  <input
-                    value={guestName}
-                    onChange={e => setGuestName(e.target.value)}
-                    placeholder="Олексій"
-                    className="w-full border border-stone-200 rounded-xl px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-stone-600 mb-1 block">Побажання до замовлення</label>
-                  <textarea
-                    value={orderNotes}
-                    onChange={e => setOrderNotes(e.target.value)}
-                    placeholder="Без гострого, алергія на горіхи..."
-                    rows={2}
-                    className="w-full border border-stone-200 rounded-xl px-3 py-2 text-sm resize-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="px-5 py-4 border-t border-stone-100 bg-white">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-stone-500 text-sm">Сума ({totalItems} поз.)</span>
-                <span className="font-semibold text-stone-800">{fmtMoney(totalAmount)}</span>
-              </div>
-              <div className="mb-3">
-                <p className="text-xs font-medium text-stone-500 mb-1.5">Чайові для персоналу</p>
-                <div className="flex gap-2">
-                  {[0, 5, 7, 10, 15].map(pct => (
-                    <button
-                      key={pct}
-                      onClick={() => setTipPct(pct)}
-                      className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition-all ${tipPct === pct ? "bg-amber-500 text-white border-amber-500" : "bg-white text-stone-600 border-stone-200 hover:border-amber-300"}`}
-                    >
-                      {pct === 0 ? "Без" : `${pct}%`}
-                    </button>
+              ) : (
+                <div className="space-y-6">
+                  {cart.map(c => (
+                    <div key={c.cartItemId} className="flex gap-4">
+                      <div className="flex flex-col items-center justify-between py-1 bg-white border border-stone-100 rounded-full w-10">
+                        <button 
+                          onClick={() => setCart(prev => prev.map(p => p.cartItemId === c.cartItemId ? { ...p, quantity: Math.min(100, p.quantity + 1) } : p))}
+                          disabled={c.quantity >= 100}
+                          className="w-full h-8 flex items-center justify-center text-[#2D2A26]"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="font-medium text-sm text-[#2D2A26]">{c.quantity}</span>
+                        <button 
+                          onClick={() => setCart(prev => prev.map(p => {
+                            if (p.cartItemId === c.cartItemId) {
+                              if (p.quantity > 1) return { ...p, quantity: p.quantity - 1 };
+                              return null;
+                            }
+                            return p;
+                          }).filter(Boolean) as CartItem[])}
+                          className="w-full h-8 flex items-center justify-center text-[#2D2A26]"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex-1 min-w-0 py-1">
+                        <div className="flex justify-between items-start mb-1">
+                          <h4 className="font-medium text-[#2D2A26] pr-4 leading-tight">{cleanString(c.item.name)}</h4>
+                          <span className="font-medium text-[#A37346] whitespace-nowrap">{fmtMoney(getCartItemPrice(c))}</span>
+                        </div>
+                        {c.modifiers.length > 0 && (
+                          <div className="text-[13px] text-[#7A756D] space-y-0.5 mb-1.5 font-medium">
+                            {c.modifiers.map(m => (
+                              <div key={`${m.groupId}-${m.optionId}`}>+ {m.name}</div>
+                            ))}
+                          </div>
+                        )}
+                        {c.notes && (
+                          <div className="text-[13px] text-[#A37346] italic line-clamp-2">Note: {c.notes}</div>
+                        )}
+                      </div>
+                    </div>
                   ))}
+
+                  <div className="space-y-5 pt-8 border-t border-stone-200">
+                    <div>
+                       <label className="block text-sm font-medium text-[#2D2A26] mb-2">Ім’я гостя</label>
+                       <input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-3.5 bg-white border border-stone-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#A37346]/20 text-[#2D2A26] placeholder:text-stone-400 text-sm" placeholder="За бажанням" />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-[#2D2A26] mb-2">Додати чайові</label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[0, 10, 15, 20].map(pct => (
+                          <button 
+                            key={pct}
+                            onClick={() => setTipPct(pct)}
+                            className={`py-3 rounded-xl text-sm font-medium transition-colors ${
+                              tipPct === pct 
+                                ? 'bg-[#2D2A26] text-white shadow-sm' 
+                                : 'bg-white border border-stone-100 text-[#7A756D] hover:bg-stone-50'
+                            }`}
+                          >
+                            {pct === 0 ? 'Без чайових' : `${pct}%`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="pt-8 border-t border-stone-200 space-y-3 pb-8">
+                    <div className="flex justify-between text-[#7A756D] text-sm">
+                      <span>Сума страв</span>
+                      <span>{fmtMoney(totalAmount)}</span>
+                    </div>
+                    {tipAmount > 0 && (
+                      <div className="flex justify-between text-[#7A756D] text-sm">
+                        <span>Чайові</span>
+                        <span>{fmtMoney(tipAmount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-xl font-serif text-[#2D2A26] pt-3">
+                      <span>Разом</span>
+                      <span>{fmtMoney(grandTotal)}</span>
+                    </div>
+                  </div>
                 </div>
-                {tipAmount > 0 && <p className="text-xs text-stone-400 mt-1">Чайові: {fmtMoney(tipAmount)}</p>}
+              )}
+            </div>
+            
+            {cart.length > 0 && (
+              <div className="p-6 bg-white border-t border-stone-100 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+                <button 
+                  onClick={placeOrder}
+                  disabled={submitting}
+                  className="w-full h-[56px] bg-[#A37346] text-white rounded-full font-medium flex items-center justify-center gap-2 disabled:opacity-50 transition-all active:scale-[0.98]"
+                  data-testid="button-checkout"
+                >
+                  {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Confirm Order'}
+                </button>
               </div>
-              <div className="flex items-center justify-between mb-4 pt-2 border-t border-stone-100">
-                <span className="font-semibold text-stone-700">До сплати</span>
-                <span className="font-bold text-xl text-stone-900">{fmtMoney(grandTotal)}</span>
+            )}
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
+
+      {/* Chat Drawer */}
+      <Drawer.Root open={chatOpen} onOpenChange={setChatOpen}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-50 backdrop-blur-sm" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 h-[85vh] flex flex-col rounded-t-[2rem] bg-white z-50 focus:outline-none shadow-2xl">
+            <div className="shrink-0 pt-5 pb-4 px-6 border-b border-stone-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[#F9F8F6] flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-[#A37346]" />
+                </div>
+                <div>
+                  <h2 className="font-serif text-[#2D2A26] text-lg leading-none mb-1">AI-консьєрж</h2>
+                  <p className="text-[11px] text-[#7A756D] uppercase tracking-wide font-medium">Розумний помічник</p>
+                </div>
               </div>
-              <button
-                onClick={placeOrder}
-                disabled={submitting}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2"
-              >
-                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-                {submitting ? "Оформлення..." : "Замовити"}
+              <button onClick={() => setChatOpen(false)} className="w-8 h-8 flex items-center justify-center bg-stone-100 rounded-full text-stone-500 hover:bg-stone-200 transition-colors">
+                <X className="w-4 h-4" />
               </button>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* ─── Phone Capture Modal ─────────────────────────────────────────────── */}
-      {showPhoneModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => { setShowPhoneModal(false); setPendingMsg(null); }} />
-          <div className="relative bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl">
-            <div className="text-center mb-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                <Bot className="w-7 h-7 text-white" />
-              </div>
-              <h2 className="font-bold text-stone-900 text-lg">AI-офіціант запам'ятає вас</h2>
-              <p className="text-stone-500 text-sm mt-1">Введіть номер телефону, щоб AI знав ваші смаки та вітав вас по-особливому при наступному візиті.</p>
+            <div className="flex-1 overflow-y-auto px-5 py-6 space-y-4 bg-[#F9F8F6]" ref={chatScrollRef}>
+              {chatMessages.length === 0 && (
+                 <div className="flex flex-col gap-2 mt-2 mb-8">
+                   {QUICK_REPLIES.map(qr => (
+                     <button 
+                       key={qr.label} 
+                       onClick={() => sendMessage(qr.text)}
+                       className="self-start text-left px-5 py-3 rounded-2xl bg-white border border-stone-100 text-[#2D2A26] text-sm font-medium hover:bg-stone-50 transition-colors shadow-sm"
+                     >
+                       {qr.label}
+                     </button>
+                   ))}
+                 </div>
+              )}
+              
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`max-w-[85%] rounded-2xl px-5 py-3.5 text-[15px] leading-relaxed shadow-sm ${
+                  msg.role === 'user' 
+                    ? 'bg-[#2D2A26] text-white self-end ml-auto rounded-tr-sm' 
+                    : 'bg-white border border-stone-100 text-[#2D2A26] self-start rounded-tl-sm'
+                }`}>
+                  {msg.content}
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="self-start bg-white border border-stone-100 shadow-sm rounded-2xl rounded-tl-sm px-5 py-4 flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-stone-300 animate-bounce" />
+                  <div className="w-2 h-2 rounded-full bg-stone-300 animate-bounce delay-100" />
+                  <div className="w-2 h-2 rounded-full bg-stone-300 animate-bounce delay-200" />
+                </div>
+              )}
             </div>
-            <input
+
+            <div className="p-4 border-t border-stone-100 bg-white pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <div className="relative flex items-center bg-[#F9F8F6] rounded-full p-1.5 border border-stone-200 focus-within:border-[#A37346] focus-within:ring-1 focus-within:ring-[#A37346]/20 transition-all">
+                <input 
+                   ref={chatInputRef}
+                   value={chatInput}
+                   onChange={e => setChatInput(e.target.value)}
+                   onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                   placeholder="Запитайте рекомендацію..."
+                   className="flex-1 bg-transparent border-0 px-4 py-2.5 text-[15px] focus:outline-none text-[#2D2A26] placeholder:text-stone-400"
+                />
+                <button 
+                  onClick={toggleVoice}
+                  className={`w-[42px] h-[42px] shrink-0 rounded-full flex items-center justify-center transition-colors ${voiceActive ? 'bg-red-500 text-white' : 'text-stone-400 hover:text-[#2D2A26]'}`}
+                >
+                   <Mic className="w-5 h-5" />
+                </button>
+                <button 
+                  onClick={() => sendMessage()}
+                  disabled={!chatInput.trim() || chatLoading}
+                  className="w-[42px] h-[42px] shrink-0 ml-1 rounded-full bg-[#A37346] text-white flex items-center justify-center disabled:opacity-50 transition-opacity"
+                >
+                   <Send className="w-4 h-4 ml-0.5" />
+                </button>
+              </div>
+            </div>
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
+
+      {/* Phone Modal */}
+      <Drawer.Root open={showPhoneModal} onOpenChange={setShowPhoneModal}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-[70] backdrop-blur-sm" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 p-6 rounded-t-[2rem] bg-white z-[70] shadow-2xl flex flex-col pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+            <div className="shrink-0 w-full flex justify-center mb-8">
+              <div className="w-12 h-1.5 rounded-full bg-stone-200" />
+            </div>
+            <h3 className="text-2xl font-serif text-[#2D2A26] mb-3 leading-tight">Перед початком</h3>
+            <p className="text-[#7A756D] mb-6 text-sm leading-relaxed">Вкажіть номер телефону, щоб ми могли персоналізувати сервіс і повідомляти про замовлення.</p>
+            <input 
               type="tel"
               value={phoneInput}
               onChange={e => setPhoneInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") submitPhone(); }}
-              placeholder="+380 XX XXX XX XX"
-              autoFocus
-              className="w-full border-2 border-stone-200 focus:border-amber-400 rounded-2xl px-4 py-3 text-center text-lg font-medium outline-none mb-3"
+              placeholder="+380..."
+              className="w-full p-4 bg-[#F9F8F6] border border-stone-100 rounded-xl mb-6 focus:outline-none focus:ring-2 focus:ring-[#A37346]/20 text-[#2D2A26] text-lg"
             />
-            <button
-              onClick={submitPhone}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3.5 rounded-2xl font-bold text-sm mb-2"
-            >
-              Продовжити
-            </button>
-            <button
-              onClick={() => { setShowPhoneModal(false); setPendingMsg(null); }}
-              className="w-full text-stone-400 text-sm py-1"
-            >
-              Пропустити
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ─── AI Chat Floating Button ─────────────────────────────────────────── */}
-      {!submitted && menu && (
-        <div className="fixed bottom-6 right-4 z-40 flex flex-col items-end gap-2">
-          {/* Proactive hint bubble */}
-          {chatHint && !chatOpen && (
-            <div className="bg-stone-900 text-white text-xs px-4 py-2.5 rounded-2xl shadow-xl max-w-[200px] text-center leading-snug animate-bounce-in">
-              <Sparkles className="w-3 h-3 inline mr-1 text-amber-400" />
-              Запитайте AI-офіціанта про доповнення!
-              <div className="absolute -bottom-1.5 right-6 w-3 h-3 bg-stone-900 rotate-45" />
-            </div>
-          )}
-          <button
-            onClick={chatOpen ? () => setChatOpen(false) : openChat}
-            className={`w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all active:scale-95 relative ${chatOpen ? "bg-stone-700" : "bg-gradient-to-br from-amber-400 to-orange-500 hover:scale-105"}`}
-          >
-            {chatOpen ? (
-              <X className="w-5 h-5 text-white" />
-            ) : (
-              <>
-                <Bot className="w-6 h-6 text-white" />
-                {chatHint && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white" />
-                )}
-              </>
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* ─── AI Chat Drawer ───────────────────────────────────────────────────── */}
-      {chatOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end">
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={() => setChatOpen(false)} />
-
-          {/* Chat panel */}
-          <div className="relative bg-white rounded-t-3xl flex flex-col shadow-2xl" style={{ maxHeight: "88vh", minHeight: "60vh" }}>
-
-            {/* Header */}
-            <div className="bg-gradient-to-r from-amber-400 via-orange-400 to-orange-500 rounded-t-3xl px-5 py-4 flex items-center gap-3 flex-shrink-0">
-              <div className="relative">
-                <div className="w-11 h-11 bg-white/25 rounded-2xl flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-white" />
-                </div>
-                <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-white" />
-              </div>
-              <div className="flex-1">
-                <p className="font-bold text-white text-sm leading-tight">AI Офіціант</p>
-                <p className="text-amber-100 text-xs">Знає меню, склад, вина · Відповідає миттєво</p>
-              </div>
-              <button
-                onClick={() => setChatOpen(false)}
-                className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center text-white transition-colors"
-              >
-                <X className="w-4 h-4" />
+            <div className="flex gap-3">
+              <button onClick={() => setShowPhoneModal(false)} className="flex-1 py-4 text-[#7A756D] font-medium rounded-xl hover:bg-stone-50 transition-colors">
+                Пропустити
+              </button>
+              <button onClick={submitPhone} className="flex-[2] py-4 bg-[#2D2A26] text-white rounded-xl font-medium shadow-sm active:scale-[0.98] transition-transform">
+                Продовжити
               </button>
             </div>
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
-
-              {chatMessages.length === 0 && chatLoading && (
-                <div className="flex gap-2.5 justify-start">
-                  <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
-                    <Bot className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="bg-stone-100 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
-                    {[0, 150, 300].map(d => (
-                      <div key={d} className="w-2 h-2 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  {msg.role === "assistant" && (
-                    <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
-                      <Bot className="w-4 h-4 text-white" />
-                    </div>
-                  )}
-                  <div className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
-                    msg.role === "user"
-                      ? "bg-amber-500 text-white rounded-tr-sm"
-                      : "bg-stone-100 text-stone-800 rounded-tl-sm"
-                  }`}>
-                    {msg.content}
-                  </div>
-                </div>
-              ))}
-
-              {/* Typing indicator */}
-              {chatLoading && chatMessages.length > 0 && (
-                <div className="flex gap-2.5 justify-start">
-                  <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
-                    <Bot className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="bg-stone-100 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
-                    {[0, 150, 300].map(d => (
-                      <div key={d} className="w-2 h-2 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Quick reply chips — show only before first user message */}
-              {!userHasSentMsg && chatMessages.length > 0 && !chatLoading && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {QUICK_REPLIES.map(qr => (
-                    <button
-                      key={qr.label}
-                      onClick={() => sendMessage(qr.text)}
-                      className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
-                    >
-                      {qr.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div ref={chatScrollRef} />
-            </div>
-
-            {/* Input bar */}
-            <div className="px-4 pb-safe pb-4 pt-2 border-t border-stone-100 bg-white flex-shrink-0">
-              <div className="flex gap-2 items-center">
-                <div className="flex-1 bg-stone-100 rounded-2xl flex items-center px-4 py-2.5 gap-2 min-h-[46px]">
-                  <input
-                    ref={chatInputRef}
-                    value={chatInput}
-                    onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                    placeholder="Запитайте про страви, алергени, вина..."
-                    className="flex-1 bg-transparent text-sm text-stone-800 placeholder-stone-400 outline-none"
-                  />
-                  <button
-                    onClick={toggleVoice}
-                    title="Голосовий ввід"
-                    className={`flex-shrink-0 transition-colors ${voiceActive ? "text-red-500 animate-pulse" : "text-stone-400 hover:text-amber-500"}`}
-                  >
-                    {voiceActive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </button>
-                </div>
-                <button
-                  onClick={() => sendMessage()}
-                  disabled={!chatInput.trim() || chatLoading}
-                  className="w-11 h-11 bg-amber-500 hover:bg-amber-600 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-2xl flex items-center justify-center transition-all flex-shrink-0 shadow-sm"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </div>
-              <p className="text-center text-xs text-stone-400 mt-2">
-                AI може помилятися · Уточнюйте алергени у персоналу
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
