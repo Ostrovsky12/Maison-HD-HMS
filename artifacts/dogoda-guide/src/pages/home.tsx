@@ -29,14 +29,17 @@ export default function Home() {
         {/* Seasonal Note */}
         <Card className="bg-secondary/50 border-secondary shadow-none rounded-2xl overflow-hidden">
           <CardContent className="p-5 flex gap-4 items-start">
-            <div className="p-2 bg-background rounded-xl shadow-sm text-primary">
+            <div className="p-2 bg-background rounded-xl shadow-sm text-amber-700">
               <Leaf className="w-5 h-5" />
             </div>
-            <div className="space-y-1">
-              <h3 className="text-sm font-semibold text-foreground">Літо у Дзвінковому</h3>
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-foreground">Осінь у Дзвінковому — час грибів</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Розпал сезону — гриби та ягоди вже у лісі, Ірпінь теплий і тихий, ранкові прогулянки — найкраще, що тут є.
+                Після теплих дощів сосновий ліс оживає: шукайте маслюки, лисички та підберезники. Вирушайте зранку, взувайте водостійке взуття й беріть кошик.
               </p>
+              <Link href="/nature" className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800 hover:underline">
+                Грибний гід і правила безпеки <ArrowRight className="w-3 h-3" />
+              </Link>
             </div>
           </CardContent>
         </Card>
@@ -44,7 +47,7 @@ export default function Home() {
         {/* Best Route Now */}
         <section className="space-y-4">
           <h2 className="text-lg font-serif text-foreground flex items-center justify-between">
-            <span>Ідеально для зараз</span>
+            <span>Осінні маршрути</span>
             <Link href="/routes" className="text-xs font-sans font-medium text-primary hover:underline">
               Всі маршрути
             </Link>

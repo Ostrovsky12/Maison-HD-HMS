@@ -15,7 +15,7 @@ export default function RoutesPage() {
         <header className="space-y-2">
           <h1 className="text-3xl font-serif text-foreground">Маршрути</h1>
           <p className="text-muted-foreground text-sm">
-            Ретельно сплановані прогулянки для будь-якого настрою.
+            Осінні прогулянки золотим лісом і маршрути для тихого полювання.
           </p>
         </header>
 
