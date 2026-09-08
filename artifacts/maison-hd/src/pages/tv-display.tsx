@@ -6,7 +6,7 @@ const API = BASE.replace("/maison-hd", "") + "/api/tv";
 
 type Slide = "welcome" | "weather" | "services" | "food" | "activities" | "events" | "upsell" | "info";
 
-const SLIDES: Slide[] = ["welcome", "weather", "services", "food", "activities", "events", "upsell", "info"];
+const DEFAULT_SLIDES: Slide[] = ["welcome", "services", "food", "activities", "events", "upsell", "info"];
 
 const SLIDE_LABELS: Record<Slide, string> = {
   welcome: "Ласкаво просимо",
@@ -70,7 +70,7 @@ function SlideIndicator({ slides, current, onSlide }: { slides: Slide[]; current
   );
 }
 
-function WeatherWidget() {
+function WeatherWidget({ hotelName }: { hotelName?: string }) {
   const [time, setTime] = useState(new Date());
   useEffect(() => { const iv = setInterval(() => setTime(new Date()), 60_000); return () => clearInterval(iv); }, []);
 
@@ -103,7 +103,7 @@ function WeatherWidget() {
       <div className="flex items-start gap-10 mb-10">
         <div>
           <div className="text-9xl mb-2">{w.icon}</div>
-          <div className="text-blue-300 text-lg">{isDay ? "День" : "Ніч"} · Догода Resort</div>
+          <div className="text-blue-300 text-lg">{isDay ? "День" : "Ніч"}{hotelName ? ` · ${hotelName}` : ""}</div>
         </div>
         <div>
           <div className="text-8xl font-bold mb-2">{w.temp}</div>
@@ -178,7 +178,8 @@ export default function TvDisplayPage() {
   useEffect(() => {
     if (!data || isPaused) return;
     const interval = data?.screen?.contentConfig?.slideInterval || 9000;
-    const iv = setInterval(() => setSlide(s => (s + 1) % SLIDES.length), interval);
+    const count = Math.max(1, data?.screen?.contentConfig?.enabledSlides?.length || DEFAULT_SLIDES.length);
+    const iv = setInterval(() => setSlide(s => (s + 1) % count), interval);
     return () => clearInterval(iv);
   }, [data, isPaused]);
 
@@ -204,8 +205,16 @@ export default function TvDisplayPage() {
 
   const { screen, currentBooking, guestAppUrl, hotel, upsells, events } = data || {};
   const branding = screen?.branding || {};
+  const config = screen?.contentConfig || {};
+  const configuredSlides = Array.isArray(config.enabledSlides) ? config.enabledSlides.filter((s: string) => s in SLIDE_LABELS) : DEFAULT_SLIDES;
+  const slides: Slide[] = configuredSlides.length ? configuredSlides : ["welcome"];
+  const activities = Array.isArray(config.activities) ? config.activities : [];
+  const offers = Array.isArray(config.offers) ? config.offers : [];
   const guestName = currentBooking ? `${currentBooking.firstName} ${currentBooking.lastName}` : null;
-  const currentSlide = SLIDES[slide];
+  const safeSlide = slide >= slides.length ? 0 : slide;
+  const currentSlide = slides[safeSlide];
+
+  if (slide !== safeSlide) setTimeout(() => setSlide(safeSlide), 0);
 
   const bgGradients: Record<Slide, string> = {
     welcome: "from-blue-950 via-blue-900 to-indigo-900",
@@ -235,11 +244,11 @@ export default function TvDisplayPage() {
       {/* ── HEADER ── */}
       <header className="relative z-10 flex items-center justify-between px-10 py-5 border-b border-white/10 backdrop-blur-sm">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center text-3xl shadow-xl">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shadow-xl" style={{ background: branding.accentColor || "#f59e0b" }}>
             {branding.logo || "🏨"}
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-wide">{branding.hotelName || hotel?.name || "Dogoda Resort"}</h1>
+            <h1 className="text-2xl font-bold tracking-wide">{branding.hotelName || hotel?.name || "Hotel TV"}</h1>
             <p className="text-blue-300 text-sm">{screen?.unitName || screen?.displayName || `Кімната ${roomCode}`}</p>
           </div>
         </div>
@@ -283,15 +292,15 @@ export default function TvDisplayPage() {
               ) : (
                 <>
                   <h2 className="text-8xl font-bold mb-4 leading-tight">{branding.tagline || "Ласкаво просимо!"}</h2>
-                  <p className="text-blue-300 text-3xl mb-10">{branding.hotelName || hotel?.name || "Dogoda Resort"}</p>
+                  <p className="text-blue-300 text-3xl mb-10">{branding.hotelName || hotel?.name || ""}</p>
                 </>
               )}
               <div className="grid grid-cols-3 gap-5">
                 {[
-                  { icon: "📶", label: "Wi-Fi", val: hotel?.wifi?.ssid || "Dogoda-Guest", sub: hotel?.wifi?.password || "dogoda2024" },
-                  { icon: "📞", label: "Ресепшн", val: hotel?.phone || "+380 xxx", sub: "Цілодобово" },
-                  { icon: "🕛", label: "Checkout", val: hotel?.checkOutTime || "12:00", sub: "Пізній виїзд — ресепшн" },
-                ].map(i => (
+                  hotel?.wifi?.ssid && { icon: "📶", label: "Wi-Fi", val: hotel.wifi.ssid, sub: hotel.wifi.password || "" },
+                  hotel?.phone && { icon: "📞", label: "Ресепшн", val: hotel.phone, sub: hotel.receptionHours || "" },
+                  hotel?.checkOutTime && { icon: "🕛", label: "Checkout", val: hotel.checkOutTime, sub: "Пізній виїзд — ресепшн" },
+                ].filter(Boolean).map((i: any) => (
                   <div key={i.label} className="bg-white/10 rounded-2xl p-6 backdrop-blur-sm border border-white/5">
                     <div className="text-4xl mb-3">{i.icon}</div>
                     <p className="text-blue-300 text-xs uppercase tracking-widest mb-1">{i.label}</p>
@@ -304,7 +313,7 @@ export default function TvDisplayPage() {
           )}
 
           {/* SLIDE: Weather */}
-          {currentSlide === "weather" && <WeatherWidget />}
+          {currentSlide === "weather" && <WeatherWidget hotelName={branding.hotelName || hotel?.name} />}
 
           {/* SLIDE: SPA & Services */}
           {currentSlide === "services" && (
@@ -316,7 +325,7 @@ export default function TvDisplayPage() {
                   <p className="text-teal-300">Розслабтесь та поновіть сили</p>
                 </div>
               </div>
-              <p className="text-blue-300 mb-6">Забронюйте через гостьовий додаток або зателефонуйте на ресепшн · Відкрито 09:00 – 21:00</p>
+              <p className="text-blue-300 mb-6">Забронюйте через гостьовий додаток або зателефонуйте на ресепшн{hotel?.spaHours ? ` · ${hotel.spaHours}` : ""}</p>
               <div className="grid grid-cols-2 gap-5 flex-1">
                 {(upsells?.spa || []).slice(0, 4).map((s: any, i: number) => (
                   <div key={i} className="bg-white/10 rounded-2xl p-6 backdrop-blur-sm border border-white/5 hover:bg-white/15 transition-colors">
@@ -328,25 +337,7 @@ export default function TvDisplayPage() {
                     <p className="text-blue-300">⏱ {s.duration || 60} хвилин</p>
                   </div>
                 ))}
-                {(upsells?.spa || []).length === 0 && (
-                  <>
-                    {[
-                      { name: "Класичний масаж", duration: 60, price: "1 200", cat: "Масаж" },
-                      { name: "Масаж для двох", duration: 90, price: "2 200", cat: "Пара" },
-                      { name: "Aromatherapy", duration: 75, price: "1 600", cat: "Релакс" },
-                      { name: "Гарячі камені", duration: 90, price: "1 800", cat: "Преміум" },
-                    ].map((s, i) => (
-                      <div key={i} className="bg-white/10 rounded-2xl p-6 backdrop-blur-sm border border-white/5">
-                        <div className="flex justify-between items-start mb-4">
-                          <span className="bg-teal-400/20 text-teal-300 text-sm px-3 py-1 rounded-full">{s.cat}</span>
-                          <span className="text-3xl font-bold text-amber-300">₴{s.price}</span>
-                        </div>
-                        <h3 className="text-2xl font-semibold mb-2">{s.name}</h3>
-                        <p className="text-blue-300">⏱ {s.duration} хвилин</p>
-                      </div>
-                    ))}
-                  </>
-                )}
+                {(upsells?.spa || []).length === 0 && <p className="text-teal-200 text-2xl">Актуальні SPA-послуги уточнюйте на ресепшн.</p>}
               </div>
             </div>
           )}
@@ -363,11 +354,11 @@ export default function TvDisplayPage() {
               </div>
               <div className="flex gap-4 mb-6">
                 {[
-                  { icon: "🍳", label: "Сніданок", time: "07:00 – 10:30" },
-                  { icon: "🥗", label: "Обід", time: "12:00 – 15:00" },
-                  { icon: "🍷", label: "Вечеря", time: "18:00 – 22:30" },
-                  { icon: "🛎", label: "Рум-сервіс", time: "07:00 – 23:00" },
-                ].map(m => (
+                  hotel?.breakfastHours && { icon: "🍳", label: "Сніданок", time: hotel.breakfastHours },
+                  hotel?.lunchHours && { icon: "🥗", label: "Обід", time: hotel.lunchHours },
+                  hotel?.dinnerHours && { icon: "🍷", label: "Вечеря", time: hotel.dinnerHours },
+                  hotel?.roomServiceHours && { icon: "🛎", label: "Рум-сервіс", time: hotel.roomServiceHours },
+                ].filter(Boolean).map((m: any) => (
                   <div key={m.label} className="bg-white/10 rounded-xl px-4 py-3 text-center flex-1">
                     <div className="text-2xl">{m.icon}</div>
                     <div className="text-xs text-blue-300 mt-1">{m.label}</div>
@@ -383,20 +374,7 @@ export default function TvDisplayPage() {
                     <p className="text-3xl font-bold text-amber-300">₴{parseFloat(f.price || 0).toLocaleString()}</p>
                   </div>
                 ))}
-                {(upsells?.fb || []).length === 0 && [
-                  { name: "Сніданок шведський стіл", desc: "Широкий вибір страв", price: "Включено" },
-                  { name: "Стейк Ribeye", desc: "Яловичина, 300г, гриль", price: "₴890" },
-                  { name: "Суші сет", desc: "24 ролли, свіжа риба", price: "₴650" },
-                  { name: "Піца Маргарита", desc: "30см, свіжі томати, моцарела", price: "₴380" },
-                  { name: "Паста Карбонара", desc: "З беконом та пармезаном", price: "₴320" },
-                  { name: "Десерт дня", desc: "Питайте у офіціанта", price: "₴180" },
-                ].map((f, i) => (
-                  <div key={i} className="bg-white/10 rounded-2xl p-5 backdrop-blur-sm border border-white/5">
-                    <p className="text-lg font-semibold mb-1">{f.name}</p>
-                    <p className="text-blue-300 text-sm mb-3">{f.desc}</p>
-                    <p className={`text-2xl font-bold ${f.price.startsWith("₴") ? "text-amber-300" : "text-green-300"}`}>{f.price}</p>
-                  </div>
-                ))}
+                {(upsells?.fb || []).length === 0 && <p className="text-orange-200 text-2xl">Актуальне меню доступне у гостьовому додатку.</p>}
               </div>
             </div>
           )}
@@ -408,30 +386,24 @@ export default function TvDisplayPage() {
                 <span className="text-5xl">🏔️</span>
                 <div>
                   <h2 className="text-4xl font-bold">Активності & Пригоди</h2>
-                  <p className="text-green-300">Відкрийте Догоду по-новому</p>
+                  <p className="text-green-300">Відкрийте більше під час вашого перебування</p>
                 </div>
               </div>
               <p className="text-blue-300 mb-6">Резервування через гостьовий додаток або ресепшн</p>
               <div className="grid grid-cols-3 gap-5 flex-1">
-                {[
-                  { icon: "🚵", name: "Велотури", desc: "Маршрути по Карпатах", time: "08:00 – 18:00", price: "₴400/особа", tag: "Активний" },
-                  { icon: "🧘", name: "Йога та медитація", desc: "На свіжому повітрі, тренер включений", time: "07:30 & 18:00", price: "₴200/особа", tag: "Wellness" },
-                  { icon: "🏊", name: "Басейн & Водні атракції", desc: "Відкритий та закритий басейн", time: "08:00 – 21:00", price: "Включено", tag: "Відпочинок" },
-                  { icon: "🎣", name: "Рибальство", desc: "Озеро на території комплексу", time: "06:00 – 20:00", price: "₴300 + спорядження", tag: "Природа" },
-                  { icon: "🌲", name: "Піший туризм", desc: "Гід та маршрути різної складності", time: "09:00 & 15:00", price: "₴350/особа", tag: "Пригоди" },
-                  { icon: "🎾", name: "Тенісний корт", desc: "Ракетки та м'ячі в наявності", time: "08:00 – 20:00", price: "₴250/год", tag: "Спорт" },
-                ].map((a, i) => (
+                {activities.map((a: any, i: number) => (
                   <div key={i} className="bg-white/10 rounded-2xl p-5 backdrop-blur-sm border border-white/5 hover:bg-white/15 transition-colors">
                     <div className="flex items-start justify-between mb-3">
                       <span className="text-4xl">{a.icon}</span>
                       <span className="bg-green-400/20 text-green-300 text-xs px-2 py-1 rounded-full">{a.tag}</span>
                     </div>
                     <h3 className="text-xl font-semibold mb-1">{a.name}</h3>
-                    <p className="text-blue-300 text-sm mb-2">{a.desc}</p>
-                    <p className="text-blue-400 text-xs mb-1">🕐 {a.time}</p>
+                    <p className="text-blue-300 text-sm mb-2">{a.description}</p>
+                    <p className="text-blue-400 text-xs mb-1">{a.hours ? `🕐 ${a.hours}` : ""}</p>
                     <p className={`text-lg font-bold ${a.price === "Включено" ? "text-green-300" : "text-amber-300"}`}>{a.price}</p>
                   </div>
                 ))}
+                {activities.length === 0 && <p className="text-green-200 text-2xl">Інформацію про активності уточнюйте на ресепшн.</p>}
               </div>
             </div>
           )}
@@ -443,28 +415,22 @@ export default function TvDisplayPage() {
                 <span className="text-5xl">🎭</span>
                 <div>
                   <h2 className="text-4xl font-bold">Заходи та Дозвілля</h2>
-                  <p className="text-purple-300">Сьогодні та завтра у {branding.hotelName || "Dogoda"}</p>
+              <p className="text-purple-300">Сьогодні та завтра</p>
                 </div>
               </div>
               <div className="flex-1 space-y-4 mt-6">
-                {(events?.length > 0 ? events : [
-                  { start_time: "19:00", title: "Жива музика в лобі", space_name: "Лобі-бар", start_date: "Сьогодні" },
-                  { start_time: "21:00", title: "Кіно під зірками", space_name: "Відкрита тераса", start_date: "Сьогодні" },
-                  { start_time: "10:00", title: "Майстер-клас з йоги", space_name: "Wellness-зона", start_date: "Завтра" },
-                  { start_time: "18:00", title: "Дегустація карпатських вин", space_name: "Винний погріб", start_date: "Завтра" },
-                  { start_time: "20:00", title: "Вечір живої музики", space_name: "Ресторан", start_date: "Завтра" },
-                ]).map((e: any, i: number) => (
+                {(events || []).map((e: any, i: number) => (
                   <div key={i} className="flex items-center gap-6 bg-white/10 rounded-2xl p-5 backdrop-blur-sm border border-white/5">
                     <div className="bg-amber-400/20 border border-amber-400/40 rounded-xl px-5 py-4 text-center flex-shrink-0 min-w-[80px]">
-                      <p className="text-amber-300 text-xs">{e.start_date || "TBD"}</p>
-                      <p className="text-3xl font-bold text-amber-300">{e.start_time || "TBD"}</p>
+                      <p className="text-amber-300 text-xs">{e.startDate || ""}</p>
+                      <p className="text-3xl font-bold text-amber-300">{e.startTime || ""}</p>
                     </div>
                     <div className="flex-1">
                       <h3 className="text-2xl font-semibold">{e.title}</h3>
-                      <p className="text-blue-300">{e.space_name}</p>
                     </div>
                   </div>
                 ))}
+                {(!events || events.length === 0) && <p className="text-purple-200 text-2xl">На сьогодні та завтра подій не заплановано.</p>}
               </div>
             </div>
           )}
@@ -478,48 +444,21 @@ export default function TvDisplayPage() {
                 <p className="text-blue-200 text-xl mb-12">Спеціальні ціни для гостей готелю · Обмежена кількість</p>
 
                 <div className="grid grid-cols-3 gap-6">
-                  {[
-                    {
-                      icon: "🛏",
-                      title: "Пізній виїзд",
-                      desc: "Залишайтеся до 16:00 і насолоджуйтесь ще декількома годинами відпочинку",
-                      price: "₴500",
-                      orig: "₴800",
-                      tag: "-37%",
-                      cta: "до 16:00",
-                    },
-                    {
-                      icon: "💆",
-                      title: "SPA для двох",
-                      desc: "Класичний масаж для двох + джакузі + фіточай в подарунок",
-                      price: "₴1 600",
-                      orig: "₴2 200",
-                      tag: "-27%",
-                      cta: "90 хвилин",
-                    },
-                    {
-                      icon: "🌅",
-                      title: "Романтичний вечір",
-                      desc: "Вечеря при свічках, пляшка вина та квіти для двох",
-                      price: "₴1 200",
-                      orig: "₴1 800",
-                      tag: "-33%",
-                      cta: "з 19:00",
-                    },
-                  ].map((offer, i) => (
+                  {offers.slice(0, 3).map((offer: any, i: number) => (
                     <div key={i} className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 border border-amber-400/30 relative overflow-hidden">
                       <div className="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">{offer.tag}</div>
                       <div className="text-5xl mb-4">{offer.icon}</div>
                       <h3 className="text-2xl font-bold mb-2">{offer.title}</h3>
-                      <p className="text-blue-300 text-sm mb-4">{offer.desc}</p>
+                       <p className="text-blue-300 text-sm mb-4">{offer.description}</p>
                       <div className="mb-2">
                         <span className="text-4xl font-bold text-amber-300">{offer.price}</span>
-                        <span className="text-blue-400 line-through text-lg ml-2">{offer.orig}</span>
+                         <span className="text-blue-400 line-through text-lg ml-2">{offer.originalPrice}</span>
                       </div>
                       <div className="bg-amber-400/20 text-amber-300 text-sm px-3 py-1 rounded-full inline-block">{offer.cta}</div>
                     </div>
                   ))}
                 </div>
+                {offers.length === 0 && <p className="text-blue-200 text-xl">Актуальні пропозиції уточнюйте у гостьовому додатку або на ресепшн.</p>}
 
                 <p className="text-blue-400 text-sm mt-8">📞 Зателефонуйте на ресепшн або скористайтеся гостьовим додатком</p>
               </div>
@@ -533,24 +472,24 @@ export default function TvDisplayPage() {
                 <span className="text-5xl">ℹ️</span>
                 <div>
                   <h2 className="text-4xl font-bold">Інформація</h2>
-                  <p className="text-blue-300">{hotel?.name || "Dogoda Resort"} · {hotel?.address || "Київська обл., Україна"}</p>
+                  <p className="text-blue-300">{[hotel?.name, hotel?.address].filter(Boolean).join(" · ")}</p>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4 flex-1">
                 {[
-                  { icon: "📶", title: "Wi-Fi", lines: [`Мережа: ${hotel?.wifi?.ssid || "Dogoda-Guest"}`, `Пароль: ${hotel?.wifi?.password || "dogoda2024"}`, "Безкоштовно для гостей"] },
-                  { icon: "🍳", title: "Сніданок", lines: ["Ресторан, 1-й поверх", "07:00 – 10:30", "Включений у вартість"] },
-                  { icon: "🏊", title: "Басейн & SPA", lines: ["Відкритий: 08:00 – 21:00", "SPA: 09:00 – 21:00", "Фітнес: 07:00 – 22:00"] },
-                  { icon: "🚗", title: "Парковка", lines: ["Безкоштовна охоронювана", "Відеоспостереження 24/7", "Зарядна для електро"] },
-                  { icon: "🧹", title: "Прибирання", lines: ["Щоденно 10:00 – 14:00", "Або за запитом", "DND — повісьте табличку"] },
-                  { icon: "📞", title: "Контакти", lines: [hotel?.phone || "+380 xxx xxx xx", "info@dogoda.com", "Ресепшн — цілодобово"] },
-                ].map((b) => (
+                  hotel?.wifi?.ssid && { icon: "📶", title: "Wi-Fi", lines: [`Мережа: ${hotel.wifi.ssid}`, hotel.wifi.password ? `Пароль: ${hotel.wifi.password}` : ""] },
+                  hotel?.breakfastHours && { icon: "🍳", title: "Сніданок", lines: [hotel.breakfastHours] },
+                  (hotel?.poolHours || hotel?.spaHours || hotel?.fitnessHours) && { icon: "🏊", title: "Wellness", lines: [hotel.poolHours && `Басейн: ${hotel.poolHours}`, hotel.spaHours && `SPA: ${hotel.spaHours}`, hotel.fitnessHours && `Фітнес: ${hotel.fitnessHours}`].filter(Boolean) },
+                  hotel?.parkingInfo && { icon: "🚗", title: "Парковка", lines: [hotel.parkingInfo] },
+                  hotel?.housekeepingInfo && { icon: "🧹", title: "Прибирання", lines: [hotel.housekeepingInfo] },
+                  (hotel?.phone || hotel?.email) && { icon: "📞", title: "Контакти", lines: [hotel.phone, hotel.email, hotel.receptionHours].filter(Boolean) },
+                ].filter(Boolean).map((b: any) => (
                   <div key={b.title} className="bg-white/10 rounded-2xl p-5 backdrop-blur-sm border border-white/5">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-3xl">{b.icon}</span>
                       <p className="font-bold text-lg">{b.title}</p>
                     </div>
-                    {b.lines.map((l, i) => (
+                    {b.lines.map((l: string, i: number) => (
                       <p key={i} className={`text-sm ${i === 0 ? "text-white font-medium" : "text-blue-300"}`}>{l}</p>
                     ))}
                   </div>
@@ -561,7 +500,7 @@ export default function TvDisplayPage() {
 
           {/* Slide indicator */}
           <div className="mt-6">
-            <SlideIndicator slides={SLIDES} current={slide} onSlide={setSlide} />
+            <SlideIndicator slides={slides} current={safeSlide} onSlide={setSlide} />
           </div>
         </div>
 
@@ -589,26 +528,12 @@ export default function TvDisplayPage() {
 
           {/* Dynamic sidebar CTA based on slide */}
           <div className="w-full">
-            {currentSlide === "upsell" || currentSlide === "welcome" ? (
+             {offers[0] ? (
               <div className="bg-amber-400/20 border border-amber-400/40 rounded-2xl p-5 text-center">
-                <p className="text-amber-300 font-bold text-lg mb-1">Пізній виїзд</p>
-                <p className="text-white text-sm mb-2">Залишайтеся до 16:00</p>
-                <p className="text-amber-300 text-4xl font-bold">₴500</p>
-                <p className="text-amber-400/70 text-xs mt-1">-37% для гостей</p>
-              </div>
-            ) : currentSlide === "services" ? (
-              <div className="bg-teal-400/20 border border-teal-400/40 rounded-2xl p-5 text-center">
-                <p className="text-teal-300 font-bold text-lg mb-1">SPA Пара</p>
-                <p className="text-white text-sm mb-2">Масаж для двох · 90 хв</p>
-                <p className="text-amber-300 text-4xl font-bold">₴1 600</p>
-                <p className="text-teal-400/70 text-xs mt-1">Включає джакузі та чай</p>
-              </div>
-            ) : currentSlide === "activities" ? (
-              <div className="bg-green-400/20 border border-green-400/40 rounded-2xl p-5 text-center">
-                <p className="text-green-300 font-bold text-lg mb-1">Велотур</p>
-                <p className="text-white text-sm mb-2">Карпатські маршрути · 3 год</p>
-                <p className="text-amber-300 text-4xl font-bold">₴400</p>
-                <p className="text-green-400/70 text-xs mt-1">Гід та спорядження</p>
+                 <p className="text-amber-300 font-bold text-lg mb-1">{offers[0].title}</p>
+                 <p className="text-white text-sm mb-2">{offers[0].description}</p>
+                 <p className="text-amber-300 text-4xl font-bold">{offers[0].price}</p>
+                 <p className="text-amber-400/70 text-xs mt-1">{offers[0].tag}</p>
               </div>
             ) : currentSlide === "weather" ? (
               <div className="bg-blue-400/20 border border-blue-400/40 rounded-2xl p-5 text-center">
@@ -617,12 +542,7 @@ export default function TvDisplayPage() {
                 <p className="text-white text-sm">Ідеально для прогулянок та велоспорту</p>
               </div>
             ) : (
-              <div className="bg-amber-400/20 border border-amber-400/40 rounded-2xl p-5 text-center">
-                <p className="text-amber-300 font-bold text-lg mb-1">Особлива пропозиція</p>
-                <p className="text-white text-sm mb-3">SPA-масаж для двох</p>
-                <p className="text-amber-300 text-3xl font-bold">₴1 600</p>
-                <p className="text-amber-400/70 text-xs mt-1">-20% для гостей готелю</p>
-              </div>
+               <div className="bg-white/10 border border-white/20 rounded-2xl p-5 text-center"><p className="text-blue-200 text-sm">Скануйте QR-код, щоб відкрити гостьовий додаток.</p></div>
             )}
           </div>
         </aside>
@@ -630,15 +550,15 @@ export default function TvDisplayPage() {
 
       {/* ── FOOTER ── */}
       <footer className="relative z-10 flex items-center justify-between px-10 py-3 border-t border-white/10 text-blue-400 text-sm">
-        <span>{hotel?.name || "Dogoda Resort"} · {hotel?.address || "Київська обл., Україна"}</span>
+        <span>{[hotel?.name, hotel?.address].filter(Boolean).join(" · ")}</span>
         <span className="flex items-center gap-2">
-          {SLIDES.map((s, i) => (
+          {slides.map((s, i) => (
             <span key={s} className={`text-xs ${i === slide ? "text-amber-400 font-medium" : "opacity-40"}`}>
               {i === slide ? `● ${SLIDE_LABELS[s]}` : ""}
             </span>
           ))}
         </span>
-        <span>{hotel?.phone || "+380 xxx"} · Ресепшн 24/7</span>
+        <span>{[hotel?.phone, hotel?.receptionHours].filter(Boolean).join(" · ")}</span>
       </footer>
     </div>
   );

@@ -13,7 +13,16 @@ export const tvScreensTable = pgTable("tv_screens", {
     hotelName?: string; logo?: string; primaryColor?: string; accentColor?: string; tagline?: string;
   }>().default({}),
   contentConfig: jsonb("content_config").$type<{
-    slideInterval?: number; showWeather?: boolean; showEvents?: boolean; showUpsells?: boolean;
+    slideInterval?: number;
+    enabledSlides?: string[];
+    hotelInfo?: {
+      wifiSsid?: string; wifiPassword?: string; phone?: string; email?: string;
+      address?: string; checkOutTime?: string; receptionHours?: string;
+      breakfastHours?: string; lunchHours?: string; dinnerHours?: string; roomServiceHours?: string;
+      spaHours?: string; poolHours?: string; fitnessHours?: string; parkingInfo?: string; housekeepingInfo?: string;
+    };
+    activities?: Array<{ icon?: string; name?: string; description?: string; hours?: string; price?: string; tag?: string }>;
+    offers?: Array<{ icon?: string; title?: string; description?: string; price?: string; originalPrice?: string; tag?: string; cta?: string }>;
   }>().default({}),
   lastPingAt: timestamp("last_ping_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

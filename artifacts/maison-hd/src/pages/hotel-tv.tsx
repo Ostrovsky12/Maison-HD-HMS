@@ -3,8 +3,14 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Tv, QrCode, Wifi, WifiOff, Settings, ExternalLink, Monitor, Sparkles, CheckCircle2, Eye } from "lucide-react";
+import { Tv, QrCode, Wifi, Settings, ExternalLink, Monitor, CheckCircle2, Eye, Save, Plus, Trash2 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/tv";
@@ -18,10 +24,34 @@ function QrPreview({ roomCode }: { roomCode: string }) {
   return <img src={qrSrc} width={80} height={80} alt="QR" className="rounded-lg border" />;
 }
 
+const slideOptions = [
+  ["welcome", "Привітання"], ["weather", "Погода"], ["services", "SPA"], ["food", "Ресторан"],
+  ["activities", "Активності"], ["events", "Події"], ["upsell", "Пропозиції"], ["info", "Інформація"],
+] as const;
+
+const emptyEditor = {
+  displayName: "",
+  branding: { hotelName: "", logo: "🏨", primaryColor: "#1e40af", accentColor: "#f59e0b", tagline: "Ласкаво просимо!" },
+  contentConfig: {
+    slideInterval: 8000,
+    enabledSlides: ["welcome", "services", "food", "activities", "events", "upsell", "info"],
+    hotelInfo: {
+      wifiSsid: "", wifiPassword: "", phone: "", email: "", address: "", checkOutTime: "",
+      receptionHours: "", breakfastHours: "", lunchHours: "", dinnerHours: "", roomServiceHours: "",
+      spaHours: "", poolHours: "", fitnessHours: "", parkingInfo: "", housekeepingInfo: "",
+    },
+    activities: [] as any[],
+    offers: [] as any[],
+  },
+};
+
 export default function HotelTvPage() {
   const [stats, setStats] = useState<any>(null);
   const [screens, setScreens] = useState<any[]>([]);
   const [toggling, setToggling] = useState<number | null>(null);
+  const [editing, setEditing] = useState<any>(null);
+  const [editor, setEditor] = useState<any>(emptyEditor);
+  const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
   const loadStats = async () => { const r = await apiFetch("/stats"); if (r.ok) setStats(await r.json()); };
@@ -36,6 +66,47 @@ export default function HotelTvPage() {
     else toast({ title: "Помилка", variant: "destructive" });
     setToggling(null);
   };
+
+  const editScreen = (screen: any) => {
+    setEditing(screen);
+    setEditor({
+      displayName: screen.displayName || "",
+      branding: { ...emptyEditor.branding, ...(screen.branding || {}) },
+      contentConfig: {
+        ...emptyEditor.contentConfig,
+        ...(screen.contentConfig || {}),
+        hotelInfo: { ...emptyEditor.contentConfig.hotelInfo, ...(screen.contentConfig?.hotelInfo || {}) },
+        enabledSlides: screen.contentConfig?.enabledSlides || emptyEditor.contentConfig.enabledSlides,
+        activities: screen.contentConfig?.activities || [],
+        offers: screen.contentConfig?.offers || [],
+      },
+    });
+  };
+
+  const saveEditor = async () => {
+    if (!editing || editor.contentConfig.enabledSlides.length === 0) {
+      toast({ title: "Оберіть щонайменше один слайд", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const r = await apiFetch(`/screens/${editing.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(editor),
+    });
+    if (r.ok) {
+      await loadScreens();
+      setEditing(null);
+      toast({ title: "Налаштування Hotel TV збережено" });
+    } else {
+      toast({ title: "Не вдалося зберегти налаштування", variant: "destructive" });
+    }
+    setSaving(false);
+  };
+
+  const setInfo = (key: string, value: string) =>
+    setEditor((old: any) => ({ ...old, contentConfig: { ...old.contentConfig, hotelInfo: { ...old.contentConfig.hotelInfo, [key]: value } } }));
+  const setBrand = (key: string, value: string) =>
+    setEditor((old: any) => ({ ...old, branding: { ...old.branding, [key]: value } }));
 
   const openTvUrl = (roomCode: string) => {
     window.open(`${BASE}/tv/${roomCode}`, "_blank");
@@ -174,6 +245,9 @@ export default function HotelTvPage() {
 
                       {/* Actions */}
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => editScreen(s)}>
+                          <Settings className="h-3.5 w-3.5" />Редагувати
+                        </Button>
                         <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => openTvUrl(s.roomCode)}>
                           <Eye className="h-3.5 w-3.5" />Переглянути
                         </Button>
@@ -226,6 +300,94 @@ export default function HotelTvPage() {
             </ol>
           </CardContent>
         </Card>
+
+        <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
+          <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Контент Hotel TV — {editing?.unitName || editing?.roomCode}</DialogTitle>
+              <DialogDescription>Зміни зберігаються для цього TV-екрана та з’являться під час наступного оновлення.</DialogDescription>
+            </DialogHeader>
+            <Tabs defaultValue="brand">
+              <TabsList className="grid grid-cols-4 w-full">
+                <TabsTrigger value="brand">Бренд</TabsTrigger>
+                <TabsTrigger value="info">Інформація</TabsTrigger>
+                <TabsTrigger value="slides">Слайди</TabsTrigger>
+                <TabsTrigger value="content">Контент</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="brand" className="space-y-4 pt-3">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div><Label>Назва екрана</Label><Input value={editor.displayName} onChange={e => setEditor((o: any) => ({ ...o, displayName: e.target.value }))} /></div>
+                  <div><Label>Назва готелю</Label><Input value={editor.branding.hotelName} onChange={e => setBrand("hotelName", e.target.value)} /></div>
+                  <div><Label>Логотип або символ</Label><Input value={editor.branding.logo} onChange={e => setBrand("logo", e.target.value)} placeholder="🏨" /></div>
+                  <div><Label>Слоган</Label><Input value={editor.branding.tagline} onChange={e => setBrand("tagline", e.target.value)} /></div>
+                  <div><Label>Основний колір</Label><Input type="color" className="h-10" value={editor.branding.primaryColor} onChange={e => setBrand("primaryColor", e.target.value)} /></div>
+                  <div><Label>Акцентний колір</Label><Input type="color" className="h-10" value={editor.branding.accentColor} onChange={e => setBrand("accentColor", e.target.value)} /></div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="info" className="space-y-4 pt-3">
+                <div className="grid md:grid-cols-2 gap-4">
+                  {[
+                    ["wifiSsid", "Wi-Fi мережа"], ["wifiPassword", "Пароль Wi-Fi"], ["phone", "Телефон ресепшн"],
+                    ["email", "Email"], ["address", "Адреса"], ["checkOutTime", "Час виїзду"],
+                    ["receptionHours", "Робота ресепшн"], ["breakfastHours", "Сніданок"], ["lunchHours", "Обід"],
+                    ["dinnerHours", "Вечеря"], ["roomServiceHours", "Рум-сервіс"], ["spaHours", "SPA"],
+                    ["poolHours", "Басейн"], ["fitnessHours", "Фітнес"],
+                  ].map(([key, label]) => <div key={key}><Label>{label}</Label><Input value={editor.contentConfig.hotelInfo[key]} onChange={e => setInfo(key, e.target.value)} /></div>)}
+                </div>
+                <div><Label>Парковка</Label><Textarea value={editor.contentConfig.hotelInfo.parkingInfo} onChange={e => setInfo("parkingInfo", e.target.value)} /></div>
+                <div><Label>Прибирання</Label><Textarea value={editor.contentConfig.hotelInfo.housekeepingInfo} onChange={e => setInfo("housekeepingInfo", e.target.value)} /></div>
+              </TabsContent>
+
+              <TabsContent value="slides" className="space-y-5 pt-3">
+                <div>
+                  <Label>Інтервал перемикання: {Math.round(editor.contentConfig.slideInterval / 1000)} сек.</Label>
+                  <Input type="range" min="5000" max="30000" step="1000" value={editor.contentConfig.slideInterval}
+                    onChange={e => setEditor((o: any) => ({ ...o, contentConfig: { ...o.contentConfig, slideInterval: Number(e.target.value) } }))} />
+                </div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {slideOptions.map(([id, label]) => {
+                    const checked = editor.contentConfig.enabledSlides.includes(id);
+                    return <div key={id} className="flex items-center justify-between rounded-xl border p-3">
+                      <Label>{label}</Label><Switch checked={checked} onCheckedChange={(on) => setEditor((o: any) => ({
+                        ...o, contentConfig: { ...o.contentConfig, enabledSlides: on ? [...o.contentConfig.enabledSlides, id] : o.contentConfig.enabledSlides.filter((s: string) => s !== id) }
+                      }))} />
+                    </div>;
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">Слайд погоди показуйте лише після підключення реального погодного джерела.</p>
+              </TabsContent>
+
+              <TabsContent value="content" className="space-y-6 pt-3">
+                <section>
+                  <div className="flex justify-between items-center mb-3"><Label className="text-base">Активності</Label>
+                    <Button variant="outline" size="sm" onClick={() => setEditor((o: any) => ({ ...o, contentConfig: { ...o.contentConfig, activities: [...o.contentConfig.activities, { icon: "●", name: "", description: "", hours: "", price: "", tag: "" }] } }))}><Plus className="h-4 w-4 mr-1" />Додати</Button>
+                  </div>
+                  <div className="space-y-3">{editor.contentConfig.activities.map((a: any, i: number) =>
+                    <div key={i} className="grid md:grid-cols-6 gap-2 border rounded-xl p-3">
+                      {["icon", "name", "description", "hours", "price", "tag"].map(k => <Input key={k} placeholder={{icon:"Символ",name:"Назва",description:"Опис",hours:"Години",price:"Ціна",tag:"Тег"}[k as "icon"]} value={a[k]} onChange={e => setEditor((o: any) => { const activities=[...o.contentConfig.activities]; activities[i]={...activities[i],[k]:e.target.value}; return {...o,contentConfig:{...o.contentConfig,activities}}; })} />)}
+                      <Button variant="ghost" size="sm" className="md:col-span-6 text-red-600" onClick={() => setEditor((o: any) => ({...o,contentConfig:{...o.contentConfig,activities:o.contentConfig.activities.filter((_: any,n:number)=>n!==i)}}))}><Trash2 className="h-4 w-4 mr-1"/>Видалити</Button>
+                    </div>)}</div>
+                </section>
+                <section>
+                  <div className="flex justify-between items-center mb-3"><Label className="text-base">Спеціальні пропозиції</Label>
+                    <Button variant="outline" size="sm" onClick={() => setEditor((o: any) => ({ ...o, contentConfig: { ...o.contentConfig, offers: [...o.contentConfig.offers, { icon: "●", title: "", description: "", price: "", originalPrice: "", tag: "", cta: "" }] } }))}><Plus className="h-4 w-4 mr-1" />Додати</Button>
+                  </div>
+                  <div className="space-y-3">{editor.contentConfig.offers.map((a: any, i: number) =>
+                    <div key={i} className="grid md:grid-cols-4 gap-2 border rounded-xl p-3">
+                      {["icon", "title", "description", "price", "originalPrice", "tag", "cta"].map(k => <Input key={k} placeholder={{icon:"Символ",title:"Назва",description:"Опис",price:"Ціна",originalPrice:"Стара ціна",tag:"Позначка",cta:"Деталь"}[k as "icon"]} value={a[k]} onChange={e => setEditor((o: any) => { const offers=[...o.contentConfig.offers]; offers[i]={...offers[i],[k]:e.target.value}; return {...o,contentConfig:{...o.contentConfig,offers}}; })} />)}
+                      <Button variant="ghost" size="sm" className="text-red-600" onClick={() => setEditor((o: any) => ({...o,contentConfig:{...o.contentConfig,offers:o.contentConfig.offers.filter((_: any,n:number)=>n!==i)}}))}><Trash2 className="h-4 w-4 mr-1"/>Видалити</Button>
+                    </div>)}</div>
+                </section>
+              </TabsContent>
+            </Tabs>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditing(null)}>Скасувати</Button>
+              <Button onClick={saveEditor} disabled={saving}><Save className="h-4 w-4 mr-2" />{saving ? "Збереження…" : "Зберегти"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );

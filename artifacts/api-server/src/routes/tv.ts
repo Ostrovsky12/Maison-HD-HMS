@@ -25,13 +25,19 @@ async function seedTvScreens(orgId: number) {
   if (!units.length) return;
 
   const branding = {
-    hotelName: "Dogoda Resort",
+    hotelName: "",
     logo: "🏨",
     primaryColor: "#1e40af",
     accentColor: "#f59e0b",
-    tagline: "Ваш ідеальний відпочинок",
+    tagline: "Ласкаво просимо!",
   };
-  const contentConfig = { slideInterval: 8000, showWeather: true, showEvents: true, showUpsells: true };
+  const contentConfig = {
+    slideInterval: 8000,
+    enabledSlides: ["welcome", "services", "food", "activities", "events", "upsell", "info"],
+    hotelInfo: {},
+    activities: [],
+    offers: [],
+  };
 
   for (let i = 0; i < Math.min(units.length, 4); i++) {
     const u = units[i];
@@ -185,14 +191,38 @@ router.get("/display/:roomCode", async (req, res) => {
     const guestAppUrl = currentBooking?.bookingRef
       ? `/maison-hd/guest-app?ref=${currentBooking.bookingRef}`
       : `/maison-hd/guest-app`;
+    const config = (screen.contentConfig || {}) as any;
+    const info = config.hotelInfo || {};
 
     res.json({
       screen: { roomCode, displayName: screen.displayName, unitName, floor, branding: screen.branding, contentConfig: screen.contentConfig },
       currentBooking,
       guestAppUrl,
-      hotel: { name: "Dogoda Resort", wifi: { ssid: "Dogoda_Guest", password: "welcome2026" }, checkOutTime: "12:00", phone: "+380 44 123 4567", address: "вул. Гірська 12, Яремче" },
+      hotel: {
+        name: (screen.branding as any)?.hotelName || "",
+        wifi: { ssid: info.wifiSsid || "", password: info.wifiPassword || "" },
+        checkOutTime: info.checkOutTime || "",
+        phone: info.phone || "",
+        email: info.email || "",
+        address: info.address || "",
+        receptionHours: info.receptionHours || "",
+        breakfastHours: info.breakfastHours || "",
+        lunchHours: info.lunchHours || "",
+        dinnerHours: info.dinnerHours || "",
+        roomServiceHours: info.roomServiceHours || "",
+        spaHours: info.spaHours || "",
+        poolHours: info.poolHours || "",
+        fitnessHours: info.fitnessHours || "",
+        parkingInfo: info.parkingInfo || "",
+        housekeepingInfo: info.housekeepingInfo || "",
+      },
       upsells: { spa, fb },
-      events,
+      events: events.map((event: any) => ({
+        id: event.id,
+        title: event.clientName,
+        startDate: event.eventDate,
+        startTime: event.startTime,
+      })),
     });
   } catch (e: any) {
     console.error("TV display error:", e.stack || e.message);
