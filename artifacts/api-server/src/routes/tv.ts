@@ -7,6 +7,7 @@ import {
 import { eq, and, lte, gte, or, ne, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { randomUUID } from "node:crypto";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
@@ -93,6 +94,59 @@ router.get("/screens", requireAuth, async (req: any, res) => {
       .where(eq(tvScreensTable.organizationId, orgId))
       .orderBy(asc(tvScreensTable.createdAt));
     res.json({ screens });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/available-units", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const units = await db.select({
+      id: unitsTable.id,
+      name: unitsTable.name,
+      floor: unitsTable.floor,
+    }).from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(propertiesTable.organizationId, orgId))
+      .orderBy(asc(unitsTable.name));
+    const assigned = await db.select({ unitId: tvScreensTable.unitId })
+      .from(tvScreensTable).where(eq(tvScreensTable.organizationId, orgId));
+    const assignedIds = new Set(assigned.map(row => row.unitId).filter(Boolean));
+    res.json({ units: units.filter(unit => !assignedIds.has(unit.id)) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/screens", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const unitId = Number(req.body.unitId);
+    if (!Number.isInteger(unitId)) return res.status(400).json({ error: "Оберіть номер" });
+    const [unit] = await db.select({ id: unitsTable.id, name: unitsTable.name })
+      .from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(and(eq(unitsTable.id, unitId), eq(propertiesTable.organizationId, orgId)))
+      .limit(1);
+    if (!unit) return res.status(404).json({ error: "Номер не знайдено" });
+    const [existing] = await db.select({ id: tvScreensTable.id }).from(tvScreensTable)
+      .where(and(eq(tvScreensTable.organizationId, orgId), eq(tvScreensTable.unitId, unitId))).limit(1);
+    if (existing) return res.status(409).json({ error: "Для цього номера TV-екран уже створено" });
+
+    const [created] = await db.insert(tvScreensTable).values({
+      organizationId: orgId,
+      unitId,
+      roomCode: `TV-${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`,
+      displayName: req.body.displayName?.trim() || `TV — ${unit.name}`,
+      isActive: true,
+      branding: {
+        hotelName: "", logo: "🏨", primaryColor: "#1e40af", accentColor: "#f59e0b",
+        tagline: "Ласкаво просимо!", headingFont: "Space Grotesk", bodyFont: "Inter",
+      },
+      contentConfig: {
+        slideInterval: 8000,
+        enabledSlides: ["welcome", "services", "food", "activities", "events", "upsell", "info"],
+        hotelInfo: {}, activities: [], offers: [], promotionalVideos: [],
+      },
+    }).returning();
+    res.status(201).json({ screen: created });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

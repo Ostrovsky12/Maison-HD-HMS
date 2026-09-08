@@ -10,7 +10,8 @@ export const tvScreensTable = pgTable("tv_screens", {
   displayName: varchar("display_name", { length: 255 }),
   isActive: boolean("is_active").default(true),
   branding: jsonb("branding").$type<{
-    hotelName?: string; logo?: string; primaryColor?: string; accentColor?: string; tagline?: string;
+    hotelName?: string; logo?: string; logoUrl?: string; primaryColor?: string; accentColor?: string; tagline?: string;
+    headingFont?: string; bodyFont?: string;
   }>().default({}),
   contentConfig: jsonb("content_config").$type<{
     slideInterval?: number;
@@ -23,6 +24,7 @@ export const tvScreensTable = pgTable("tv_screens", {
     };
     activities?: Array<{ icon?: string; name?: string; description?: string; hours?: string; price?: string; tag?: string }>;
     offers?: Array<{ icon?: string; title?: string; description?: string; price?: string; originalPrice?: string; tag?: string; cta?: string }>;
+    promotionalVideos?: Array<{ url: string; title?: string }>;
   }>().default({}),
   lastPingAt: timestamp("last_ping_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

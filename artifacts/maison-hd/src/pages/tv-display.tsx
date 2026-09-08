@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { useRoute } from "wouter";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/tv";
 
-type Slide = "welcome" | "weather" | "services" | "food" | "activities" | "events" | "upsell" | "info";
+type Slide = "welcome" | "weather" | "services" | "food" | "activities" | "events" | "upsell" | "video" | "info";
 
 const DEFAULT_SLIDES: Slide[] = ["welcome", "services", "food", "activities", "events", "upsell", "info"];
 
@@ -16,6 +16,7 @@ const SLIDE_LABELS: Record<Slide, string> = {
   activities: "Активності",
   events: "Заходи",
   upsell: "Спецпропозиція",
+  video: "Відео",
   info: "Інформація",
 };
 
@@ -155,6 +156,7 @@ export default function TvDisplayPage() {
   const [slide, setSlide] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
+  const [videoIndex, setVideoIndex] = useState(0);
 
   const load = useCallback(async () => {
     if (!roomCode) return;
@@ -177,11 +179,16 @@ export default function TvDisplayPage() {
 
   useEffect(() => {
     if (!data || isPaused) return;
+    const enabled = Array.isArray(data?.screen?.contentConfig?.enabledSlides)
+      ? data.screen.contentConfig.enabledSlides
+      : DEFAULT_SLIDES;
+    const activeSlide = enabled[slide] || enabled[0];
+    if (activeSlide === "video") return;
     const interval = data?.screen?.contentConfig?.slideInterval || 9000;
     const count = Math.max(1, data?.screen?.contentConfig?.enabledSlides?.length || DEFAULT_SLIDES.length);
     const iv = setInterval(() => setSlide(s => (s + 1) % count), interval);
     return () => clearInterval(iv);
-  }, [data, isPaused]);
+  }, [data, isPaused, slide]);
 
   if (loading) return (
     <div className="min-h-screen bg-gradient-to-br from-blue-950 via-blue-900 to-indigo-900 flex items-center justify-center">
@@ -206,13 +213,20 @@ export default function TvDisplayPage() {
   const { screen, currentBooking, guestAppUrl, hotel, upsells, events } = data || {};
   const branding = screen?.branding || {};
   const config = screen?.contentConfig || {};
-  const configuredSlides = Array.isArray(config.enabledSlides) ? config.enabledSlides.filter((s: string) => s in SLIDE_LABELS) : DEFAULT_SLIDES;
+  const promotionalVideos = Array.isArray(config.promotionalVideos) ? config.promotionalVideos : [];
+  const configuredSlides = Array.isArray(config.enabledSlides)
+    ? config.enabledSlides.filter((s: string) => s in SLIDE_LABELS && (s !== "video" || promotionalVideos.length > 0))
+    : DEFAULT_SLIDES;
   const slides: Slide[] = configuredSlides.length ? configuredSlides : ["welcome"];
   const activities = Array.isArray(config.activities) ? config.activities : [];
   const offers = Array.isArray(config.offers) ? config.offers : [];
   const guestName = currentBooking ? `${currentBooking.firstName} ${currentBooking.lastName}` : null;
   const safeSlide = slide >= slides.length ? 0 : slide;
   const currentSlide = slides[safeSlide];
+  const primaryColor = branding.primaryColor || "#1e40af";
+  const accentColor = branding.accentColor || "#f59e0b";
+  const headingFont = branding.headingFont || "Space Grotesk";
+  const bodyFont = branding.bodyFont || "Inter";
 
   if (slide !== safeSlide) setTimeout(() => setSlide(safeSlide), 0);
 
@@ -224,12 +238,27 @@ export default function TvDisplayPage() {
     activities: "from-green-950 via-emerald-900 to-teal-950",
     events: "from-purple-950 via-violet-900 to-indigo-950",
     upsell: "from-amber-900 via-orange-900 to-red-900",
+    video: "from-black via-slate-950 to-black",
     info: "from-blue-950 via-slate-900 to-indigo-950",
+  };
+
+  const finishVideo = () => {
+    if (videoIndex < promotionalVideos.length - 1) {
+      setVideoIndex(index => index + 1);
+    } else {
+      setVideoIndex(0);
+      setSlide(index => (index + 1) % slides.length);
+    }
   };
 
   return (
     <div
-      className={`min-h-screen bg-gradient-to-br ${bgGradients[currentSlide]} text-white flex flex-col overflow-hidden select-none cursor-none transition-all duration-1000`}
+      className={`min-h-screen bg-gradient-to-br ${bgGradients[currentSlide]} text-white flex flex-col overflow-hidden select-none cursor-none transition-all duration-1000 [&_h1]:[font-family:var(--tv-heading-font)] [&_h2]:[font-family:var(--tv-heading-font)] [&_h3]:[font-family:var(--tv-heading-font)]`}
+      style={{
+        fontFamily: bodyFont,
+        "--tv-heading-font": headingFont,
+        backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${primaryColor} 58%, #020617), color-mix(in srgb, ${primaryColor} 78%, #312e81))`,
+      } as CSSProperties}
       onPointerDown={() => setIsPaused(p => !p)}
     >
       {/* Decorative background pattern */}
@@ -244,8 +273,10 @@ export default function TvDisplayPage() {
       {/* ── HEADER ── */}
       <header className="relative z-10 flex items-center justify-between px-10 py-5 border-b border-white/10 backdrop-blur-sm">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shadow-xl" style={{ background: branding.accentColor || "#f59e0b" }}>
-            {branding.logo || "🏨"}
+          <div className="w-20 h-14 rounded-2xl flex items-center justify-center text-3xl shadow-xl overflow-hidden" style={{ background: accentColor }}>
+            {branding.logoUrl
+              ? <img src={branding.logoUrl} alt={branding.hotelName || "Логотип"} className="w-full h-full object-contain bg-white p-1.5" />
+              : (branding.logo || "🏨")}
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-wide">{branding.hotelName || hotel?.name || "Hotel TV"}</h1>
@@ -462,6 +493,25 @@ export default function TvDisplayPage() {
 
                 <p className="text-blue-400 text-sm mt-8">📞 Зателефонуйте на ресепшн або скористайтеся гостьовим додатком</p>
               </div>
+            </div>
+          )}
+
+          {currentSlide === "video" && promotionalVideos[videoIndex] && (
+            <div className="flex-1 flex flex-col items-center justify-center min-h-0">
+              <video
+                key={promotionalVideos[videoIndex].url}
+                src={promotionalVideos[videoIndex].url}
+                className="w-full h-full max-h-[68vh] object-contain rounded-2xl bg-black shadow-2xl"
+                autoPlay
+                muted
+                playsInline
+                preload="auto"
+                onEnded={finishVideo}
+                onError={finishVideo}
+              />
+              {promotionalVideos[videoIndex].title && (
+                <p className="text-xl mt-3 text-blue-100" style={{ fontFamily: headingFont }}>{promotionalVideos[videoIndex].title}</p>
+              )}
             </div>
           )}
 

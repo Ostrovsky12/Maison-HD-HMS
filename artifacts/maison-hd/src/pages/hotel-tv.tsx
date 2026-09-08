@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Tv, QrCode, Wifi, Settings, ExternalLink, Monitor, CheckCircle2, Eye, Save, Plus, Trash2 } from "lucide-react";
+import { Tv, QrCode, Wifi, Settings, ExternalLink, Monitor, CheckCircle2, Eye, Save, Plus, Trash2, Upload, ImageIcon } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/tv";
@@ -26,12 +26,15 @@ function QrPreview({ roomCode }: { roomCode: string }) {
 
 const slideOptions = [
   ["welcome", "Привітання"], ["weather", "Погода"], ["services", "SPA"], ["food", "Ресторан"],
-  ["activities", "Активності"], ["events", "Події"], ["upsell", "Пропозиції"], ["info", "Інформація"],
+  ["activities", "Активності"], ["events", "Події"], ["upsell", "Пропозиції"], ["video", "Рекламні відео"], ["info", "Інформація"],
 ] as const;
 
 const emptyEditor = {
   displayName: "",
-  branding: { hotelName: "", logo: "🏨", primaryColor: "#1e40af", accentColor: "#f59e0b", tagline: "Ласкаво просимо!" },
+  branding: {
+    hotelName: "", logo: "🏨", logoUrl: "", primaryColor: "#1e40af", accentColor: "#f59e0b",
+    tagline: "Ласкаво просимо!", headingFont: "Space Grotesk", bodyFont: "Inter",
+  },
   contentConfig: {
     slideInterval: 8000,
     enabledSlides: ["welcome", "services", "food", "activities", "events", "upsell", "info"],
@@ -42,6 +45,7 @@ const emptyEditor = {
     },
     activities: [] as any[],
     offers: [] as any[],
+    promotionalVideos: [] as Array<{ url: string; title?: string }>,
   },
 };
 
@@ -52,6 +56,11 @@ export default function HotelTvPage() {
   const [editing, setEditing] = useState<any>(null);
   const [editor, setEditor] = useState<any>(emptyEditor);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({ unitId: "", displayName: "" });
+  const [availableUnits, setAvailableUnits] = useState<any[]>([]);
   const { toast } = useToast();
 
   const loadStats = async () => { const r = await apiFetch("/stats"); if (r.ok) setStats(await r.json()); };
@@ -79,6 +88,7 @@ export default function HotelTvPage() {
         enabledSlides: screen.contentConfig?.enabledSlides || emptyEditor.contentConfig.enabledSlides,
         activities: screen.contentConfig?.activities || [],
         offers: screen.contentConfig?.offers || [],
+        promotionalVideos: screen.contentConfig?.promotionalVideos || [],
       },
     });
   };
@@ -108,6 +118,97 @@ export default function HotelTvPage() {
   const setBrand = (key: string, value: string) =>
     setEditor((old: any) => ({ ...old, branding: { ...old.branding, [key]: value } }));
 
+  const uploadLogo = async (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+      toast({ title: "Оберіть PNG, JPG, WEBP або SVG до 5 МБ", variant: "destructive" });
+      return;
+    }
+    setUploadingLogo(true);
+    try {
+      const request = await fetch(`${BASE.replace("/maison-hd", "")}/api/storage/uploads/request-url`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+      });
+      if (!request.ok) throw new Error("Не вдалося підготувати завантаження");
+      const { uploadURL, objectPath } = await request.json();
+      const upload = await fetch(uploadURL, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!upload.ok) throw new Error("Не вдалося завантажити файл");
+      setBrand("logoUrl", `${BASE.replace("/maison-hd", "")}/api/storage${objectPath}`);
+      toast({ title: "Логотип завантажено. Збережіть налаштування." });
+    } catch (error: any) {
+      toast({ title: error.message || "Помилка завантаження", variant: "destructive" });
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const uploadVideo = async (file?: File) => {
+    if (!file) return;
+    const allowed = ["video/mp4", "video/webm", "video/quicktime"];
+    if (!allowed.includes(file.type) || file.size > 250 * 1024 * 1024) {
+      toast({ title: "Оберіть MP4, WEBM або MOV до 250 МБ", variant: "destructive" });
+      return;
+    }
+    setUploadingVideo(true);
+    try {
+      const request = await fetch(`${BASE.replace("/maison-hd", "")}/api/storage/uploads/request-url`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+      });
+      if (!request.ok) throw new Error("Не вдалося підготувати завантаження");
+      const { uploadURL, objectPath } = await request.json();
+      const upload = await fetch(uploadURL, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!upload.ok) throw new Error("Не вдалося завантажити відео");
+      const url = `${BASE.replace("/maison-hd", "")}/api/storage${objectPath}`;
+      setEditor((old: any) => ({
+        ...old,
+        contentConfig: {
+          ...old.contentConfig,
+          promotionalVideos: [...old.contentConfig.promotionalVideos, { url, title: file.name.replace(/\.[^.]+$/, "") }],
+          enabledSlides: old.contentConfig.enabledSlides.includes("video")
+            ? old.contentConfig.enabledSlides
+            : [...old.contentConfig.enabledSlides, "video"],
+        },
+      }));
+      toast({ title: "Відео завантажено. Збережіть налаштування." });
+    } catch (error: any) {
+      toast({ title: error.message || "Помилка завантаження", variant: "destructive" });
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
+  const openCreate = async () => {
+    const r = await apiFetch("/available-units");
+    if (r.ok) {
+      const data = await r.json();
+      setAvailableUnits(data.units || []);
+      setCreateForm({ unitId: "", displayName: "" });
+      setCreating(true);
+    } else toast({ title: "Не вдалося завантажити номери", variant: "destructive" });
+  };
+
+  const createScreen = async () => {
+    if (!createForm.unitId) {
+      toast({ title: "Оберіть номер", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const r = await apiFetch("/screens", { method: "POST", body: JSON.stringify({ ...createForm, unitId: Number(createForm.unitId) }) });
+    if (r.ok) {
+      setCreating(false);
+      await Promise.all([loadScreens(), loadStats()]);
+      toast({ title: "Новий TV-екран створено" });
+    } else {
+      const body = await r.json().catch(() => ({}));
+      toast({ title: body.error || "Не вдалося створити екран", variant: "destructive" });
+    }
+    setSaving(false);
+  };
+
   const openTvUrl = (roomCode: string) => {
     window.open(`${BASE}/tv/${roomCode}`, "_blank");
   };
@@ -127,6 +228,9 @@ export default function HotelTvPage() {
             </h1>
             <p className="text-gray-500 text-sm">Управління телевізійними екранами в номерах, контент та QR-передача</p>
           </div>
+          <Button onClick={openCreate} className="bg-indigo-600 hover:bg-indigo-700">
+            <Plus className="h-4 w-4 mr-2" />Додати TV-екран
+          </Button>
         </div>
 
         {/* Stats */}
@@ -308,21 +412,50 @@ export default function HotelTvPage() {
               <DialogDescription>Зміни зберігаються для цього TV-екрана та з’являться під час наступного оновлення.</DialogDescription>
             </DialogHeader>
             <Tabs defaultValue="brand">
-              <TabsList className="grid grid-cols-4 w-full">
+              <TabsList className="grid grid-cols-5 w-full">
                 <TabsTrigger value="brand">Бренд</TabsTrigger>
                 <TabsTrigger value="info">Інформація</TabsTrigger>
                 <TabsTrigger value="slides">Слайди</TabsTrigger>
                 <TabsTrigger value="content">Контент</TabsTrigger>
+                <TabsTrigger value="videos">Відео</TabsTrigger>
               </TabsList>
 
               <TabsContent value="brand" className="space-y-4 pt-3">
+                <div className="rounded-2xl border bg-slate-50 p-4">
+                  <Label className="mb-2 block">Логотип компанії</Label>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    <div className="h-24 w-40 rounded-xl border bg-white flex items-center justify-center overflow-hidden">
+                      {editor.branding.logoUrl
+                        ? <img src={editor.branding.logoUrl} alt="Логотип" className="h-full w-full object-contain p-2" />
+                        : <div className="text-center text-slate-400"><ImageIcon className="h-8 w-8 mx-auto" /><span className="text-xs">Логотип не додано</span></div>}
+                    </div>
+                    <div>
+                      <input id="tv-logo-upload" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" onChange={e => uploadLogo(e.target.files?.[0])} />
+                      <Button type="button" variant="outline" disabled={uploadingLogo} onClick={() => document.getElementById("tv-logo-upload")?.click()}>
+                        <Upload className="h-4 w-4 mr-2" />{uploadingLogo ? "Завантаження…" : "Завантажити логотип"}
+                      </Button>
+                      <p className="text-xs text-muted-foreground mt-2">PNG, JPG, WEBP або SVG, до 5 МБ. Рекомендовано прозорий фон.</p>
+                      {editor.branding.logoUrl && <Button type="button" variant="ghost" size="sm" className="mt-1 text-red-600" onClick={() => setBrand("logoUrl", "")}>Видалити логотип</Button>}
+                    </div>
+                  </div>
+                </div>
                 <div className="grid md:grid-cols-2 gap-4">
                   <div><Label>Назва екрана</Label><Input value={editor.displayName} onChange={e => setEditor((o: any) => ({ ...o, displayName: e.target.value }))} /></div>
                   <div><Label>Назва готелю</Label><Input value={editor.branding.hotelName} onChange={e => setBrand("hotelName", e.target.value)} /></div>
-                  <div><Label>Логотип або символ</Label><Input value={editor.branding.logo} onChange={e => setBrand("logo", e.target.value)} placeholder="🏨" /></div>
+                  <div><Label>Резервний символ</Label><Input value={editor.branding.logo} onChange={e => setBrand("logo", e.target.value)} placeholder="🏨" /></div>
                   <div><Label>Слоган</Label><Input value={editor.branding.tagline} onChange={e => setBrand("tagline", e.target.value)} /></div>
                   <div><Label>Основний колір</Label><Input type="color" className="h-10" value={editor.branding.primaryColor} onChange={e => setBrand("primaryColor", e.target.value)} /></div>
                   <div><Label>Акцентний колір</Label><Input type="color" className="h-10" value={editor.branding.accentColor} onChange={e => setBrand("accentColor", e.target.value)} /></div>
+                  <div><Label>Шрифт заголовків</Label>
+                    <select className="w-full h-10 rounded-md border bg-background px-3 text-sm" value={editor.branding.headingFont} onChange={e => setBrand("headingFont", e.target.value)}>
+                      <option value="Space Grotesk">Space Grotesk</option><option value="Inter">Inter</option><option value="Georgia">Georgia</option><option value="Arial">Arial</option>
+                    </select>
+                  </div>
+                  <div><Label>Шрифт основного тексту</Label>
+                    <select className="w-full h-10 rounded-md border bg-background px-3 text-sm" value={editor.branding.bodyFont} onChange={e => setBrand("bodyFont", e.target.value)}>
+                      <option value="Inter">Inter</option><option value="Space Grotesk">Space Grotesk</option><option value="Georgia">Georgia</option><option value="Arial">Arial</option>
+                    </select>
+                  </div>
                 </div>
               </TabsContent>
 
@@ -381,10 +514,78 @@ export default function HotelTvPage() {
                     </div>)}</div>
                 </section>
               </TabsContent>
+
+              <TabsContent value="videos" className="space-y-4 pt-3">
+                <div className="rounded-2xl border border-dashed p-5 text-center bg-slate-50">
+                  <input id="tv-video-upload" type="file" accept="video/mp4,video/webm,video/quicktime" className="hidden" onChange={e => uploadVideo(e.target.files?.[0])} />
+                  <Upload className="h-8 w-8 mx-auto text-indigo-500 mb-2" />
+                  <p className="font-medium">Рекламні відео для Hotel TV</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-3">MP4, WEBM або MOV до 250 МБ. Для Smart TV рекомендовано MP4 H.264 у Full HD.</p>
+                  <Button type="button" variant="outline" disabled={uploadingVideo} onClick={() => document.getElementById("tv-video-upload")?.click()}>
+                    {uploadingVideo ? "Завантаження…" : "Додати відео"}
+                  </Button>
+                </div>
+                <div className="space-y-3">
+                  {editor.contentConfig.promotionalVideos.map((video: any, index: number) => (
+                    <div key={`${video.url}-${index}`} className="flex flex-col sm:flex-row gap-3 rounded-xl border p-3">
+                      <video src={video.url} className="w-full sm:w-40 h-24 rounded-lg bg-black object-contain" muted preload="metadata" />
+                      <div className="flex-1">
+                        <Label>Назва відео</Label>
+                        <Input value={video.title || ""} onChange={e => setEditor((old: any) => {
+                          const promotionalVideos = [...old.contentConfig.promotionalVideos];
+                          promotionalVideos[index] = { ...promotionalVideos[index], title: e.target.value };
+                          return { ...old, contentConfig: { ...old.contentConfig, promotionalVideos } };
+                        })} />
+                      </div>
+                      <Button type="button" variant="ghost" className="text-red-600 self-end sm:self-center" onClick={() => setEditor((old: any) => {
+                        const promotionalVideos = old.contentConfig.promotionalVideos.filter((_: any, i: number) => i !== index);
+                        return {
+                          ...old,
+                          contentConfig: {
+                            ...old.contentConfig,
+                            promotionalVideos,
+                            enabledSlides: promotionalVideos.length
+                              ? old.contentConfig.enabledSlides
+                              : old.contentConfig.enabledSlides.filter((id: string) => id !== "video"),
+                          },
+                        };
+                      })}><Trash2 className="h-4 w-4 mr-1" />Видалити</Button>
+                    </div>
+                  ))}
+                  {editor.contentConfig.promotionalVideos.length === 0 && <p className="text-sm text-center text-muted-foreground py-4">Рекламних відео ще немає.</p>}
+                </div>
+              </TabsContent>
             </Tabs>
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditing(null)}>Скасувати</Button>
               <Button onClick={saveEditor} disabled={saving}><Save className="h-4 w-4 mr-2" />{saving ? "Збереження…" : "Зберегти"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={creating} onOpenChange={setCreating}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Додати TV-екран</DialogTitle>
+              <DialogDescription>Прив’яжіть новий екран до номера. Система автоматично створить унікальний URL.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Номер або будинок</Label>
+                <select className="w-full h-10 rounded-md border bg-background px-3 text-sm" value={createForm.unitId} onChange={e => {
+                  const unit = availableUnits.find(u => String(u.id) === e.target.value);
+                  setCreateForm({ unitId: e.target.value, displayName: unit ? `TV — ${unit.name}` : "" });
+                }}>
+                  <option value="">Оберіть номер</option>
+                  {availableUnits.map(unit => <option key={unit.id} value={unit.id}>{unit.name}{unit.floor ? ` · ${unit.floor} поверх` : ""}</option>)}
+                </select>
+                {availableUnits.length === 0 && <p className="text-xs text-amber-700 mt-2">Для всіх номерів TV-екрани вже створені.</p>}
+              </div>
+              <div><Label>Назва екрана</Label><Input value={createForm.displayName} onChange={e => setCreateForm(old => ({ ...old, displayName: e.target.value }))} placeholder="Наприклад, TV — Номер 101" /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreating(false)}>Скасувати</Button>
+              <Button onClick={createScreen} disabled={saving || !availableUnits.length}>{saving ? "Створення…" : "Створити екран"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
