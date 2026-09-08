@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import {
-  bookingsTable, unitsTable, spaServicesTable,
+  bookingsTable, unitsTable, propertiesTable, spaServicesTable,
   fbItemsTable, tvScreensTable, eventsTable,
 } from "@workspace/db";
 import { eq, and, lte, gte, or, ne, asc } from "drizzle-orm";
@@ -18,7 +18,10 @@ async function seedTvScreens(orgId: number) {
   if (ex.length > 0) return;
 
   const units = await db.select({ id: unitsTable.id, name: unitsTable.name })
-    .from(unitsTable).limit(6);
+    .from(unitsTable)
+    .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+    .where(eq(propertiesTable.organizationId, orgId))
+    .limit(6);
   if (!units.length) return;
 
   const branding = {
@@ -163,7 +166,8 @@ router.get("/display/:roomCode", async (req, res) => {
     // F&B
     const fbRes = await db.execute<any>(
       sql`SELECT id, name, price, description FROM fb_items
-          WHERE is_available = true AND is_popular = true LIMIT 6`
+          WHERE organization_id = ${orgId}
+            AND is_available = true AND is_popular = true LIMIT 6`
     );
     const fb = fbRes.rows || [];
 

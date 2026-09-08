@@ -43,6 +43,8 @@ export default function HotelTvPage() {
 
   const now = Date.now();
   const isOnline = (lastPing: string | null) => lastPing && now - new Date(lastPing).getTime() < 90_000;
+  const testScreen = screens.find(screen => screen.isActive);
+  const testUrl = testScreen ? `${window.location.origin}${BASE}/tv/${testScreen.roomCode}` : "";
 
   return (
     <AppLayout>
@@ -78,6 +80,37 @@ export default function HotelTvPage() {
           </div>
         )}
 
+        <Card className="border-indigo-200 bg-indigo-50/70 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                <ExternalLink className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-indigo-950">URL для запуску Hotel TV</p>
+                {testUrl ? (
+                  <code className="block text-xs text-indigo-700 break-all mt-1">{testUrl}</code>
+                ) : (
+                  <p className="text-xs text-amber-700 mt-1">Увімкніть хоча б один TV-екран, щоб отримати робочий URL.</p>
+                )}
+              </div>
+              {testUrl && (
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => {
+                    navigator.clipboard.writeText(testUrl);
+                    toast({ title: "URL скопійовано" });
+                  }}>
+                    Копіювати
+                  </Button>
+                  <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => window.open(testUrl, "_blank")}>
+                    Спробувати
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Feature cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
@@ -104,30 +137,30 @@ export default function HotelTvPage() {
               const guestAppUrl = `${BASE}/guest-app`;
               const guestQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&bgcolor=f8fafc&color=1e3a8a&qzone=1&data=${encodeURIComponent(window.location.origin + guestAppUrl)}`;
               return (
-                <Card key={s.id} className={`border-0 shadow-sm ${!s.is_active ? "opacity-60" : ""}`}>
+                <Card key={s.id} className={`border-0 shadow-sm ${!s.isActive ? "opacity-60" : ""}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
                       {/* Status LED */}
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${s.is_active ? "bg-indigo-100" : "bg-gray-100"}`}>
-                        <Monitor className={`h-6 w-6 ${s.is_active ? "text-indigo-600" : "text-gray-400"}`} />
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${s.isActive ? "bg-indigo-100" : "bg-gray-100"}`}>
+                        <Monitor className={`h-6 w-6 ${s.isActive ? "text-indigo-600" : "text-gray-400"}`} />
                       </div>
 
                       {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <span className="font-semibold">{s.display_name || s.room_code}</span>
-                          <Badge className={s.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}>
-                            {s.is_active ? "Активний" : "Вимкнено"}
+                          <span className="font-semibold">{s.displayName || s.roomCode}</span>
+                          <Badge className={s.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}>
+                            {s.isActive ? "Активний" : "Вимкнено"}
                           </Badge>
-                          {s.is_active && (
+                          {s.isActive && (
                             <Badge className={online ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-600"}>
                               {online ? "🟢 Онлайн" : "⚪ Не підключено"}
                             </Badge>
                           )}
                         </div>
                         <div className="flex items-center gap-4 text-xs text-gray-500">
-                          <span>Код: <code className="bg-gray-100 px-1 rounded">{s.room_code}</code></span>
-                          {s.unit_name && <span>Номер: {s.unit_name}</span>}
+                          <span>Код: <code className="bg-gray-100 px-1 rounded">{s.roomCode}</code></span>
+                          {s.unitName && <span>Номер: {s.unitName}</span>}
                           {s.floor && <span>Поверх: {s.floor}</span>}
                           {s.lastPingAt && <span>Ping: {new Date(s.lastPingAt).toLocaleTimeString("uk", { hour: "2-digit", minute: "2-digit" })}</span>}
                         </div>
@@ -141,21 +174,21 @@ export default function HotelTvPage() {
 
                       {/* Actions */}
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => openTvUrl(s.room_code)}>
+                        <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => openTvUrl(s.roomCode)}>
                           <Eye className="h-3.5 w-3.5" />Переглянути
                         </Button>
                         <Button
                           size="sm"
-                          className={`h-8 text-xs ${s.is_active ? "bg-gray-200 text-gray-700 hover:bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700 text-white"}`}
-                          onClick={() => toggleScreen(s.id, s.is_active)}
+                          className={`h-8 text-xs ${s.isActive ? "bg-gray-200 text-gray-700 hover:bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700 text-white"}`}
+                          onClick={() => toggleScreen(s.id, s.isActive)}
                           disabled={toggling === s.id}>
-                          {s.is_active ? "Вимкнути" : "Увімкнути"}
+                          {s.isActive ? "Вимкнути" : "Увімкнути"}
                         </Button>
                       </div>
                     </div>
 
                     {/* TV URL */}
-                    {s.is_active && (
+                    {s.isActive && (
                       <div className="mt-3 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
                         <span className="text-xs text-gray-400">URL:</span>
                         <code className="text-xs text-indigo-600 flex-1 truncate">{window.location.origin}{tvUrl}</code>
