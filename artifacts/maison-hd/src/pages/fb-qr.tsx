@@ -19,6 +19,8 @@ import {
 
 // ─── API helper ───────────────────────────────────────────────────────────────
 const API = "/api/fb";
+const MAISON_BASE = (import.meta.env.BASE_URL || "/maison-hd/").replace(/\/$/, "");
+const ROOT_BASE = MAISON_BASE.replace(/\/maison-hd$/, "");
 async function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("hms_token");
   const r = await fetch(`${API}${path}`, {
@@ -30,10 +32,9 @@ async function apiFetch(path: string, opts?: RequestInit) {
 }
 
 // ─── QR URL builder ───────────────────────────────────────────────────────────
-function buildQrUrl(tableId: number): string {
-  const base = window.location.origin;
-  const rcBase = base + (import.meta.env.BASE_URL || "").replace(/hms\/?$/, "room-concierge");
-  return `${rcBase}/guest-menu?tid=${tableId}`;
+function buildQrUrl(tableId: number, orgSlug: string): string {
+  if (!orgSlug) return "";
+  return `${window.location.origin}${MAISON_BASE}/qr-menu/${encodeURIComponent(orgSlug)}/${tableId}`;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -306,12 +307,13 @@ function GroupsTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── QR Card ──────────────────────────────────────────────────────────────────
-function QrCard({ table, size, showLabel, fgColor, onDownload, onEdit, onDelete }: {
+function QrCard({ table, orgSlug, size, showLabel, fgColor, onDownload, onEdit, onDelete }: {
   table: Table; size: number; showLabel: boolean; fgColor: string;
+  orgSlug: string;
   onDownload: (t: Table) => void; onEdit: (t: Table) => void; onDelete: (id: number) => void;
 }) {
   const { toast } = useToast();
-  const url = buildQrUrl(table.id);
+  const url = buildQrUrl(table.id, orgSlug);
   return (
     <div className="border rounded-xl p-4 bg-card flex flex-col items-center gap-3 group hover:shadow-md transition-shadow relative">
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity no-print">
@@ -460,7 +462,7 @@ function QrSettings({ qrSize, setQrSize, fgColor, setFgColor, showLabel, setShow
 }
 
 // ─── QR Codes tab ─────────────────────────────────────────────────────────────
-function QrCodesTab() {
+function QrCodesTab({ orgSlug }: { orgSlug: string }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -608,7 +610,7 @@ function QrCodesTab() {
                   <tr key={t.id} className="hover:bg-muted/20">
                     <td className="px-3 py-2">
                       <div className="bg-white p-1 inline-block border rounded">
-                        <QRCodeCanvas value={buildQrUrl(t.id)} size={48} fgColor={fgColor} bgColor="#fff" level="M" id={`qr-table-${t.id}`} />
+                        <QRCodeCanvas value={buildQrUrl(t.id, orgSlug)} size={48} fgColor={fgColor} bgColor="#fff" level="H" id={`qr-table-${t.id}`} />
                       </div>
                     </td>
                     <td className="px-3 py-2 font-semibold">Стіл {t.number}</td>
@@ -620,7 +622,7 @@ function QrCodesTab() {
                     <td className="px-3 py-2 text-muted-foreground">{t.location || "—"}</td>
                     <td className="px-3 py-2 text-center">{t.capacity}</td>
                     <td className="px-3 py-2 max-w-[180px]">
-                      <span className="text-xs font-mono text-muted-foreground truncate block">{buildQrUrl(t.id)}</span>
+                      <span className="text-xs font-mono text-muted-foreground truncate block">{buildQrUrl(t.id, orgSlug)}</span>
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex gap-1 justify-end">
@@ -686,7 +688,7 @@ function QrCodesTab() {
           <div className="print-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {filtered.map(t => (
               <div key={t.id} className="qr-card">
-                <QrCard table={t} size={qrSize} showLabel={showLabel} fgColor={fgColor}
+                <QrCard table={t} orgSlug={orgSlug} size={qrSize} showLabel={showLabel} fgColor={fgColor}
                   onDownload={downloadQr} onEdit={t => setTableDialog({ open: true, initial: t })} onDelete={id => deleteTable.mutate(id)} />
               </div>
             ))}
@@ -710,9 +712,7 @@ interface Outlet {
 }
 
 function buildOutletQrUrl(slug: string): string {
-  const base = window.location.origin;
-  const rcBase = base + (import.meta.env.BASE_URL || "").replace(/hms\/?$/, "room-concierge");
-  return `${rcBase}/guest-menu?outlet=${slug}`;
+  return `${window.location.origin}${ROOT_BASE}/room-concierge/guest-menu?outlet=${encodeURIComponent(slug)}`;
 }
 
 function OutletQrCard({ outlet, size, fgColor }: {
@@ -844,6 +844,19 @@ function OutletsQrTab() {
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function FbQrCodes() {
+  const { data: meData, isLoading: isLoadingOrganization, isError: organizationError } = useQuery({
+    queryKey: ["me-fb-qr"],
+    queryFn: async () => {
+      const token = localStorage.getItem("hms_token");
+      const response = await fetch(`${ROOT_BASE}/api/organizations/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Не вдалося визначити заклад");
+      return response.json();
+    },
+  });
+  const orgSlug = meData?.slug || "";
+
   return (
     <AppLayout>
       <style>{`
@@ -882,7 +895,15 @@ export default function FbQrCodes() {
           </TabsList>
 
           <TabsContent value="qr" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col">
-            <QrCodesTab />
+            {organizationError ? (
+              <div className="m-5 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                Не вдалося визначити ваш заклад. Оновіть сторінку та увійдіть знову.
+              </div>
+            ) : isLoadingOrganization || !orgSlug ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Визначаємо заклад і готуємо QR-коди…</div>
+            ) : (
+              <QrCodesTab orgSlug={orgSlug} />
+            )}
           </TabsContent>
 
           <TabsContent value="groups" className="flex-1 overflow-y-auto mt-0">

@@ -6,3 +6,4 @@
 - [Inbound channel authentication](inbound-channel-authentication.md) — verify provider webhooks before any AI or outbound inbox work
 - [Canonical public document links](public-document-links.md) — signed bearer links must use a configured HTTPS origin, never request Host headers
 - [Accommodation availability invariants](accommodation-availability-invariants.md) — every write path must serialize on the same unit lock before checking booking and block overlap
+- [Canonical F&B table QR](canonical-fb-table-qr.md) — table QR codes must resolve the authenticated organization slug and open the Maison HD public menu

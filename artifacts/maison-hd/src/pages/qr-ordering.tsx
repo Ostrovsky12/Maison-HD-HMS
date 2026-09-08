@@ -7,6 +7,7 @@ import {
   Plus, Pencil, Trash2, X, Save, LayoutGrid, Users,
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { QRCodeCanvas } from "qrcode.react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_FB = BASE.replace("/maison-hd", "") + "/api/fb";
@@ -29,8 +30,14 @@ const fmtMoney = (n: any)    => parseFloat(n || 0).toLocaleString("uk-UA") + " �
 type Table = { id: number; number: string; location: string; capacity: number; status: string; isActive: boolean; currentOrderId?: number };
 
 function QrImage({ url, size = 160 }: { url: string; size?: number }) {
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(url)}&size=${size}x${size}&bgcolor=ffffff&color=1e1b4b&margin=4`;
-  return <img src={qrUrl} alt="QR Code" width={size} height={size} className="rounded-xl" />;
+  if (!url) {
+    return <div style={{ width: size, height: size }} className="rounded-xl bg-gray-100 animate-pulse" />;
+  }
+  return (
+    <div className="rounded-xl bg-white p-2">
+      <QRCodeCanvas value={url} size={size - 16} bgColor="#ffffff" fgColor="#1e1b4b" level="H" includeMargin />
+    </div>
+  );
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -167,7 +174,6 @@ function TableFormModal({ table, existingSections, onSave, onClose, isSaving }: 
 export default function QrOrderingPage() {
   const qc = useQueryClient();
   const [expandedTable,    setExpandedTable]    = useState<number | null>(null);
-  const [orgSlug,          setOrgSlug]          = useState<string>("");
   const [orderStatusFilter,setOrderStatusFilter]= useState("active");
   const [tableModal,       setTableModal]       = useState<"new" | Table | null>(null);
   const [deleteConfirm,    setDeleteConfirm]    = useState<number | null>(null);
@@ -193,14 +199,15 @@ export default function QrOrderingPage() {
   });
 
   const { data: meData } = useQuery({
-    queryKey: ["me-qr"],
+    queryKey: ["organization-me-qr"],
     queryFn: async () => {
-      const r = await fetch(BASE.replace("/maison-hd", "") + "/api/auth/me", { headers: { Authorization: `Bearer ${tok()}` } });
+      const r = await fetch(BASE.replace("/maison-hd", "") + "/api/organizations/me", { headers: { Authorization: `Bearer ${tok()}` } });
+      if (!r.ok) throw new Error("Не вдалося визначити заклад");
       return r.json();
     },
   });
 
-  const slug   = meData?.organization?.slug || orgSlug || "dogoda";
+  const slug   = meData?.slug || "";
   const tables: Table[] = tablesData || [];
   const orders: any[]   = ordersData || [];
 
@@ -237,10 +244,15 @@ export default function QrOrderingPage() {
   });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  const guestMenuUrl = (tableId: number) => `${window.location.origin}${BASE}/qr-menu/${slug}/${tableId}`;
+  const guestMenuUrl = (tableId: number) =>
+    slug ? `${window.location.origin}${BASE}/qr-menu/${encodeURIComponent(slug)}/${tableId}` : "";
 
   const printQr = (tableId: number, tableNum: string) => {
     const url = guestMenuUrl(tableId);
+    if (!url) return;
+    const sourceCanvas = document.getElementById(`print-qr-${tableId}`) as HTMLCanvasElement | null;
+    if (!sourceCanvas) return;
+    const qrDataUrl = sourceCanvas.toDataURL("image/png");
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`<!DOCTYPE html><html><head><title>QR ${tableNum}</title><style>
@@ -252,7 +264,7 @@ export default function QrOrderingPage() {
     </style></head><body>
       <h1>${tableNum}</h1>
       <p>Скануйте QR для замовлення</p>
-      <img src="https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(url)}&size=300x300&bgcolor=ffffff&color=1e1b4b&margin=6" width="300" height="300"/>
+      <img src="${qrDataUrl}" width="300" height="300"/>
       <small>${url}</small>
       <script>window.onload=function(){window.print()}</script>
     </body></html>`);
@@ -345,7 +357,9 @@ export default function QrOrderingPage() {
                 <h2 className="font-semibold text-gray-900 text-sm">Столи, кімнати, котеджі</h2>
               </div>
               <span className="text-xs text-gray-400">
-                URL: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">/qr-menu/{slug}/ID</code>
+                URL: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">
+                  {slug ? `/qr-menu/${slug}/ID` : "визначаємо заклад…"}
+                </code>
               </span>
             </div>
 
@@ -384,6 +398,19 @@ export default function QrOrderingPage() {
 
                         return (
                           <div key={table.id}>
+                             {url && (
+                               <div className="hidden" aria-hidden="true">
+                                 <QRCodeCanvas
+                                   id={`print-qr-${table.id}`}
+                                   value={url}
+                                   size={300}
+                                   bgColor="#ffffff"
+                                   fgColor="#1e1b4b"
+                                   level="H"
+                                   includeMargin
+                                 />
+                               </div>
+                             )}
                             <div
                               className={`flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors cursor-pointer ${isExpanded ? "bg-violet-50/40" : ""}`}
                               onClick={() => setExpandedTable(isExpanded ? null : table.id)}>
@@ -413,15 +440,15 @@ export default function QrOrderingPage() {
 
                               {/* Action buttons */}
                               <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                                <button onClick={() => window.open(url, "_blank")}
+                                <button onClick={() => url && window.open(url, "_blank")} disabled={!url}
                                   className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" title="Відкрити меню">
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>
-                                <button onClick={() => printQr(table.id, table.number)}
+                                <button onClick={() => printQr(table.id, table.number)} disabled={!url}
                                   className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Друк QR">
                                   <Printer className="w-3.5 h-3.5" />
                                 </button>
-                                <CopyButton text={url} />
+                                {url && <CopyButton text={url} />}
                                 <button onClick={() => setTableModal(table)}
                                   className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" title="Редагувати">
                                   <Pencil className="w-3.5 h-3.5" />
