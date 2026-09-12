@@ -6,7 +6,7 @@ const API = BASE.replace("/maison-hd", "") + "/api/tv";
 
 type Slide = "welcome" | "weather" | "services" | "food" | "activities" | "events" | "upsell" | "video" | "info";
 
-const DEFAULT_SLIDES: Slide[] = ["welcome", "services", "food", "activities", "events", "upsell", "info"];
+const DEFAULT_SLIDES: Slide[] = ["welcome", "weather", "services", "food", "activities", "events", "upsell", "info"];
 
 const SLIDE_LABELS: Record<Slide, string> = {
   welcome: "Ласкаво просимо",
@@ -71,49 +71,39 @@ function SlideIndicator({ slides, current, onSlide }: { slides: Slide[]; current
   );
 }
 
-function WeatherWidget({ hotelName }: { hotelName?: string }) {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => { const iv = setInterval(() => setTime(new Date()), 60_000); return () => clearInterval(iv); }, []);
-
-  const hour = time.getHours();
-  const isDay = hour >= 7 && hour < 20;
-  const season = (() => {
-    const m = time.getMonth();
-    if (m >= 2 && m <= 4) return "spring";
-    if (m >= 5 && m <= 7) return "summer";
-    if (m >= 8 && m <= 10) return "autumn";
-    return "winter";
-  })();
-
-  const seasonData: Record<string, { icon: string; temp: string; desc: string; feel: string; wind: string; humidity: string }> = {
-    spring: { icon: "🌤", temp: "+15°", desc: "Переважно ясно", feel: "+12°", wind: "18 км/г", humidity: "52%" },
-    summer: { icon: "☀️", temp: "+27°", desc: "Ясно та сонячно", feel: "+30°", wind: "10 км/г", humidity: "40%" },
-    autumn: { icon: "🌥", temp: "+8°", desc: "Хмарно", feel: "+5°", wind: "25 км/г", humidity: "72%" },
-    winter: { icon: "❄️", temp: "-3°", desc: "Морозно, сніг", feel: "-8°", wind: "20 км/г", humidity: "80%" },
-  };
-  const w = seasonData[season];
-
-  const forecast = [
-    { day: "Сьогодні", icon: w.icon, hi: w.temp, lo: (parseInt(w.temp) - 6) + "°" },
-    { day: "Завтра", icon: season === "summer" ? "⛅" : season === "winter" ? "🌨" : "🌦", hi: (parseInt(w.temp) + 2) + "°", lo: (parseInt(w.temp) - 4) + "°" },
-    { day: "Після", icon: season === "summer" ? "☀️" : season === "autumn" ? "🌧" : "🌤", hi: (parseInt(w.temp) - 1) + "°", lo: (parseInt(w.temp) - 7) + "°" },
-  ];
+function WeatherWidget({ weather }: { weather?: any }) {
+  if (!weather?.current) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-center">
+        <div className="text-8xl mb-6">🌡️</div>
+        <h2 className="text-5xl font-bold mb-4">Погода недоступна</h2>
+        <p className="text-blue-200 text-2xl max-w-2xl">{weather?.message || "Локацію для погоди ще не налаштовано"}</p>
+      </div>
+    );
+  }
+  const w = weather.current;
+  const forecast = Array.isArray(weather.forecast) ? weather.forecast : [];
+  const updated = weather.updatedAt
+    ? new Date(weather.updatedAt).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+    : "";
+  const dayLabels = ["Сьогодні", "Завтра", "Післязавтра"];
+  const temp = (value: number) => `${Math.round(value) > 0 ? "+" : ""}${Math.round(value)}°`;
 
   return (
     <div className="flex-1 flex flex-col justify-center">
       <div className="flex items-start gap-10 mb-10">
         <div>
           <div className="text-9xl mb-2">{w.icon}</div>
-          <div className="text-blue-300 text-lg">{isDay ? "День" : "Ніч"}{hotelName ? ` · ${hotelName}` : ""}</div>
+          <div className="text-blue-300 text-lg">{w.isDay ? "День" : "Ніч"}{weather.location ? ` · ${weather.location}` : ""}</div>
         </div>
         <div>
-          <div className="text-8xl font-bold mb-2">{w.temp}</div>
-          <div className="text-3xl text-blue-200">{w.desc}</div>
+          <div className="text-8xl font-bold mb-2">{temp(w.temperature)}</div>
+          <div className="text-3xl text-blue-200">{w.description}</div>
           <div className="flex gap-6 mt-4">
             {[
-              { label: "Відчувається", val: w.feel },
-              { label: "Вітер", val: w.wind },
-              { label: "Вологість", val: w.humidity },
+              { label: "Відчувається", val: temp(w.apparentTemperature) },
+              { label: "Вітер", val: `${Math.round(w.windSpeed)} км/год` },
+              { label: "Вологість", val: `${Math.round(w.humidity)}%` },
             ].map(d => (
               <div key={d.label} className="bg-white/10 rounded-xl px-4 py-2">
                 <div className="text-blue-300 text-xs">{d.label}</div>
@@ -125,24 +115,20 @@ function WeatherWidget({ hotelName }: { hotelName?: string }) {
       </div>
 
       <div className="flex gap-4">
-        {forecast.map((f, i) => (
+        {forecast.map((f: any, i: number) => (
           <div key={i} className="flex-1 bg-white/10 rounded-2xl p-5 text-center backdrop-blur-sm border border-white/5">
-            <p className="text-blue-300 text-sm mb-2">{f.day}</p>
+            <p className="text-blue-300 text-sm mb-2">{dayLabels[i] || f.date}</p>
             <div className="text-4xl mb-2">{f.icon}</div>
             <div className="flex justify-center gap-3">
-              <span className="text-lg font-bold">{f.hi}</span>
-              <span className="text-blue-400">{f.lo}</span>
+              <span className="text-lg font-bold">{temp(f.temperatureMax)}</span>
+              <span className="text-blue-400">{temp(f.temperatureMin)}</span>
             </div>
           </div>
         ))}
-        <div className="flex-1 bg-white/10 rounded-2xl p-5 text-center backdrop-blur-sm border border-white/5">
-          <p className="text-blue-300 text-sm mb-2">Вид для спорту</p>
-          <div className="text-4xl mb-2">🏃</div>
-          <div className="text-sm text-green-300 font-medium">
-            {season === "summer" ? "Відмінно!" : season === "winter" ? "Лижі ⛷" : "Добре"}
-          </div>
-        </div>
       </div>
+      <p className={`mt-5 text-sm ${weather.status === "stale" ? "text-amber-300" : "text-blue-300"}`}>
+        {weather.status === "stale" ? weather.message : `Оновлено: ${updated}`}
+      </p>
     </div>
   );
 }
@@ -210,7 +196,7 @@ export default function TvDisplayPage() {
     </div>
   );
 
-  const { screen, currentBooking, guestAppUrl, hotel, upsells, events } = data || {};
+  const { screen, currentBooking, guestAppUrl, hotel, upsells, events, weather } = data || {};
   const branding = screen?.branding || {};
   const config = screen?.contentConfig || {};
   const promotionalVideos = Array.isArray(config.promotionalVideos) ? config.promotionalVideos : [];
@@ -344,7 +330,7 @@ export default function TvDisplayPage() {
           )}
 
           {/* SLIDE: Weather */}
-          {currentSlide === "weather" && <WeatherWidget hotelName={branding.hotelName || hotel?.name} />}
+          {currentSlide === "weather" && <WeatherWidget weather={weather} />}
 
           {/* SLIDE: SPA & Services */}
           {currentSlide === "services" && (
@@ -587,9 +573,9 @@ export default function TvDisplayPage() {
               </div>
             ) : currentSlide === "weather" ? (
               <div className="bg-blue-400/20 border border-blue-400/40 rounded-2xl p-5 text-center">
-                <div className="text-4xl mb-2">☀️</div>
-                <p className="text-blue-300 font-bold text-lg mb-1">Активний день</p>
-                <p className="text-white text-sm">Ідеально для прогулянок та велоспорту</p>
+                <div className="text-4xl mb-2">{weather?.current?.icon || "🌡️"}</div>
+                <p className="text-blue-300 font-bold text-lg mb-1">{weather?.current?.description || "Погода"}</p>
+                <p className="text-white text-sm">{weather?.location || weather?.message || "Дані тимчасово недоступні"}</p>
               </div>
             ) : (
                <div className="bg-white/10 border border-white/20 rounded-2xl p-5 text-center"><p className="text-blue-200 text-sm">Скануйте QR-код, щоб відкрити гостьовий додаток.</p></div>

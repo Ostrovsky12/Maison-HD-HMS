@@ -37,7 +37,7 @@ const emptyEditor = {
   },
   contentConfig: {
     slideInterval: 8000,
-    enabledSlides: ["welcome", "services", "food", "activities", "events", "upsell", "info"],
+    enabledSlides: ["welcome", "weather", "services", "food", "activities", "events", "upsell", "info"],
     hotelInfo: {
       wifiSsid: "", wifiPassword: "", phone: "", email: "", address: "", checkOutTime: "",
       receptionHours: "", breakfastHours: "", lunchHours: "", dinnerHours: "", roomServiceHours: "",
@@ -46,6 +46,7 @@ const emptyEditor = {
     activities: [] as any[],
     offers: [] as any[],
     promotionalVideos: [] as Array<{ url: string; title?: string }>,
+    weather: { location: "", latitude: "", longitude: "" },
   },
 };
 
@@ -89,6 +90,7 @@ export default function HotelTvPage() {
         activities: screen.contentConfig?.activities || [],
         offers: screen.contentConfig?.offers || [],
         promotionalVideos: screen.contentConfig?.promotionalVideos || [],
+        weather: { ...emptyEditor.contentConfig.weather, ...(screen.contentConfig?.weather || {}) },
       },
     });
   };
@@ -117,6 +119,8 @@ export default function HotelTvPage() {
     setEditor((old: any) => ({ ...old, contentConfig: { ...old.contentConfig, hotelInfo: { ...old.contentConfig.hotelInfo, [key]: value } } }));
   const setBrand = (key: string, value: string) =>
     setEditor((old: any) => ({ ...old, branding: { ...old.branding, [key]: value } }));
+  const setWeather = (key: string, value: string) =>
+    setEditor((old: any) => ({ ...old, contentConfig: { ...old.contentConfig, weather: { ...old.contentConfig.weather, [key]: value } } }));
 
   const uploadLogo = async (file?: File) => {
     if (!file) return;
@@ -489,7 +493,29 @@ export default function HotelTvPage() {
                     </div>;
                   })}
                 </div>
-                <p className="text-xs text-muted-foreground">Слайд погоди показуйте лише після підключення реального погодного джерела.</p>
+                <div className="rounded-2xl border bg-slate-50 p-4 space-y-3">
+                  <div>
+                    <Label className="text-base">Локація для погоди</Label>
+                    <p className="text-xs text-muted-foreground mt-1">Вкажіть назву населеного пункту або точні координати. Координати мають пріоритет.</p>
+                  </div>
+                  <Input
+                    value={editor.contentConfig.weather.location}
+                    onChange={e => setWeather("location", e.target.value)}
+                    placeholder="Наприклад, Буковель, Україна"
+                  />
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <Label>Широта</Label>
+                      <Input type="number" min="-90" max="90" step="any" value={editor.contentConfig.weather.latitude}
+                        onChange={e => setWeather("latitude", e.target.value)} placeholder="48.353" />
+                    </div>
+                    <div>
+                      <Label>Довгота</Label>
+                      <Input type="number" min="-180" max="180" step="any" value={editor.contentConfig.weather.longitude}
+                        onChange={e => setWeather("longitude", e.target.value)} placeholder="24.412" />
+                    </div>
+                  </div>
+                </div>
               </TabsContent>
 
               <TabsContent value="content" className="space-y-6 pt-3">

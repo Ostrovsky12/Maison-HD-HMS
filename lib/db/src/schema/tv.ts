@@ -25,6 +25,11 @@ export const tvScreensTable = pgTable("tv_screens", {
     activities?: Array<{ icon?: string; name?: string; description?: string; hours?: string; price?: string; tag?: string }>;
     offers?: Array<{ icon?: string; title?: string; description?: string; price?: string; originalPrice?: string; tag?: string; cta?: string }>;
     promotionalVideos?: Array<{ url: string; title?: string }>;
+    weather?: {
+      location?: string;
+      latitude?: number;
+      longitude?: number;
+    };
   }>().default({}),
   lastPingAt: timestamp("last_ping_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

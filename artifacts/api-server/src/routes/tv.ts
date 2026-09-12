@@ -8,6 +8,7 @@ import { eq, and, lte, gte, or, ne, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { randomUUID } from "node:crypto";
+import { getTvWeather } from "../services/tv-weather.js";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
@@ -34,7 +35,7 @@ async function seedTvScreens(orgId: number) {
   };
   const contentConfig = {
     slideInterval: 8000,
-    enabledSlides: ["welcome", "services", "food", "activities", "events", "upsell", "info"],
+    enabledSlides: ["welcome", "weather", "services", "food", "activities", "events", "upsell", "info"],
     hotelInfo: {},
     activities: [],
     offers: [],
@@ -142,8 +143,8 @@ router.post("/screens", requireAuth, async (req: any, res) => {
       },
       contentConfig: {
         slideInterval: 8000,
-        enabledSlides: ["welcome", "services", "food", "activities", "events", "upsell", "info"],
-        hotelInfo: {}, activities: [], offers: [], promotionalVideos: [],
+        enabledSlides: ["welcome", "weather", "services", "food", "activities", "events", "upsell", "info"],
+        hotelInfo: {}, activities: [], offers: [], promotionalVideos: [], weather: {},
       },
     }).returning();
     res.status(201).json({ screen: created });
@@ -247,6 +248,7 @@ router.get("/display/:roomCode", async (req, res) => {
       : `/maison-hd/guest-app`;
     const config = (screen.contentConfig || {}) as any;
     const info = config.hotelInfo || {};
+    const weather = await getTvWeather(orgId, config.weather || {});
 
     res.json({
       screen: { roomCode, displayName: screen.displayName, unitName, floor, branding: screen.branding, contentConfig: screen.contentConfig },
@@ -271,6 +273,7 @@ router.get("/display/:roomCode", async (req, res) => {
         housekeepingInfo: info.housekeepingInfo || "",
       },
       upsells: { spa, fb },
+      weather,
       events: events.map((event: any) => ({
         id: event.id,
         title: event.clientName,

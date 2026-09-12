@@ -8,4 +8,5 @@
 - [Accommodation availability invariants](accommodation-availability-invariants.md) — every write path must serialize on the same unit lock before checking booking and block overlap
 - [Canonical F&B table QR](canonical-fb-table-qr.md) — table QR codes must resolve the authenticated organization slug and open the Maison HD public menu
 - [Hotel TV content integrity](hotel-tv-content-integrity.md) — TV screens use saved per-screen content and honest empty states, never fabricated hotel details or offers
+- [Hotel TV weather integrity](hotel-tv-weather-integrity.md) — weather cache and stale fallbacks stay tenant-scoped; unavailable data is never simulated
 - [Unified PRRO scope](unified-prro-scope.md) — fiscalization is a Maison HD platform service for hotel and F&B operations, not an F&B-only feature
