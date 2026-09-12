@@ -9,6 +9,8 @@ The current operating model contains several independent sellers: the restaurant
 
 Fiscalization is a policy decision per transaction, not a universal consequence of receiving payment. The engine must support documented non-fiscal outcomes with a reason and evidence, including service-payment exemptions where legally applicable.
 
+The approved approach is to keep SPA LiqPay payments conditionally non-fiscal only when a documented rule applies, while seeking an individual tax consultation for the exact payment flow.
+
 **Why:** Restricting PRRO to F&B would leave accommodation, deposits, folio settlement, additional hotel services, refunds, and mixed guest bills outside the fiscal workflow and would create incompatible duplicate cash systems. Multiple independent sellers and payment-specific exemptions make a single undifferentiated cash flow legally and operationally unsafe.
 
 **How to apply:** Keep fiscal registers, shifts, documents, signing, DPS transport, idempotency, reconciliation, and audit in a product-level domain. Hotel, kitchen, bar, and SPA modules should provide source-specific adapters. Resolve the seller and fiscalization policy before allocating payment or creating a fiscal document; split mixed bills by seller and record why any transaction was not fiscalized.
