@@ -85,6 +85,7 @@ import fbMarketingRouter from "./fb-marketing.js";
 import fbAccessRouter from "./fb-access.js";
 import fbAppsRouter from "./fb-apps.js";
 import fbConfigRouter from "./fb-config.js";
+import prroRouter from "./prro.js";
 
 const router: IRouter = Router();
 
@@ -123,6 +124,7 @@ router.use("/fb", fbRouter);
 router.use("/fb/warehouse", fbWarehouseRouter);
 router.use("/fb/settings", fbSettingsRouter);
 router.use("/fb/prro", fbPrroRouter);
+router.use("/prro", prroRouter);
 router.use("/fb/import/poster", fbImportPosterRouter);
 router.use("/hq", hqRouter);
 router.use("/automation", automationRouter);
