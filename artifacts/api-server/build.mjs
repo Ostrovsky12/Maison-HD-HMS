@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -102,6 +102,7 @@ async function buildAll() {
       "electron",
       "openai",
       "web-push",
+      "xmllint-wasm",
     ],
     sourcemap: "linked",
     plugins: [
@@ -120,6 +121,16 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  await mkdir(path.join(distDir, "proto"), { recursive: true });
+  await copyFile(
+    path.join(artifactDir, "src/proto/dps-prro.proto"),
+    path.join(distDir, "proto/dps-prro.proto"),
+  );
+  await mkdir(path.join(distDir, "schemas"), { recursive: true });
+  await Promise.all(["dps-check.xsd", "dps-zreport.xsd"].map(file => copyFile(
+    path.join(artifactDir, "src/schemas", file),
+    path.join(distDir, "schemas", file),
+  )));
 }
 
 buildAll().catch((err) => {

@@ -839,6 +839,120 @@ async function ensureSchema() {
   await db.execute(sql`ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS booking_id  INTEGER REFERENCES bookings(id) ON DELETE SET NULL`);
   await db.execute(sql`ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS task_type   VARCHAR(50) DEFAULT 'other'`);
   await db.execute(sql`ALTER TABLE housekeeping_tasks ADD COLUMN IF NOT EXISTS notes       TEXT`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS prro_registers (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      legal_entity_id INTEGER NOT NULL REFERENCES legal_entities(id),
+      name VARCHAR(255) NOT NULL,
+      fiscal_number VARCHAR(32),
+      device_id VARCHAR(100) NOT NULL,
+      location_name VARCHAR(255),
+      location_address TEXT,
+      status VARCHAR(32) NOT NULL DEFAULT 'draft',
+      provider VARCHAR(32) NOT NULL DEFAULT 'dps',
+      offline_allowed BOOLEAN NOT NULL DEFAULT false,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (organization_id, device_id)
+    );
+    CREATE INDEX IF NOT EXISTS prro_registers_org_entity_idx
+      ON prro_registers (organization_id, legal_entity_id);
+
+    CREATE TABLE IF NOT EXISTS prro_shifts (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      legal_entity_id INTEGER NOT NULL REFERENCES legal_entities(id),
+      register_id INTEGER NOT NULL REFERENCES prro_registers(id),
+      cashier_user_id INTEGER REFERENCES users(id),
+      signer_key_id VARCHAR(255),
+      status VARCHAR(24) NOT NULL DEFAULT 'opening',
+      dps_shift_id VARCHAR(100),
+      opened_at TIMESTAMPTZ,
+      closed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS prro_shifts_register_status_idx
+      ON prro_shifts (organization_id, register_id, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS prro_shifts_one_active_per_register_uq
+      ON prro_shifts (organization_id, register_id)
+      WHERE status IN ('opening', 'open', 'closing');
+
+    CREATE TABLE IF NOT EXISTS fiscal_documents (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      legal_entity_id INTEGER NOT NULL REFERENCES legal_entities(id),
+      register_id INTEGER REFERENCES prro_registers(id),
+      shift_id INTEGER REFERENCES prro_shifts(id),
+      source_type VARCHAR(40) NOT NULL,
+      source_id VARCHAR(100) NOT NULL,
+      document_type VARCHAR(24) NOT NULL DEFAULT 'sale',
+      payment_channel VARCHAR(40) NOT NULL,
+      policy_decision VARCHAR(24) NOT NULL,
+      policy_code VARCHAR(100) NOT NULL,
+      policy_reason TEXT NOT NULL,
+      policy_version VARCHAR(32) NOT NULL,
+      status VARCHAR(24) NOT NULL DEFAULT 'draft',
+      currency VARCHAR(3) NOT NULL DEFAULT 'UAH',
+      total_amount NUMERIC(14,2) NOT NULL,
+      idempotency_key VARCHAR(160) NOT NULL,
+      content_hash VARCHAR(64) NOT NULL,
+      previous_hash VARCHAR(64),
+      local_number INTEGER,
+      fiscal_number VARCHAR(100),
+      dps_document_id VARCHAR(100),
+      xml_payload TEXT,
+      signed_payload TEXT,
+      dps_signed_id TEXT,
+      dps_signed_data TEXT,
+      dps_response JSONB,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TIMESTAMPTZ,
+      last_error TEXT,
+      payload_snapshot JSONB NOT NULL,
+      policy_evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      submitted_at TIMESTAMPTZ,
+      fiscalized_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (organization_id, idempotency_key)
+    );
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS local_number INTEGER;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS dps_document_id VARCHAR(100);
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS xml_payload TEXT;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS signed_payload TEXT;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS dps_signed_id TEXT;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS dps_signed_data TEXT;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS dps_response JSONB;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS last_error TEXT;
+    ALTER TABLE fiscal_documents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    CREATE INDEX IF NOT EXISTS fiscal_documents_org_created_idx
+      ON fiscal_documents (organization_id, created_at);
+    CREATE INDEX IF NOT EXISTS fiscal_documents_seller_source_idx
+      ON fiscal_documents (organization_id, legal_entity_id, source_type, source_id);
+    CREATE INDEX IF NOT EXISTS fiscal_documents_hash_idx
+      ON fiscal_documents (organization_id, content_hash);
+    CREATE INDEX IF NOT EXISTS fiscal_documents_retry_idx
+      ON fiscal_documents (status, next_retry_at);
+
+    CREATE TABLE IF NOT EXISTS fiscal_events (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      fiscal_document_id INTEGER NOT NULL REFERENCES fiscal_documents(id),
+      event_type VARCHAR(50) NOT NULL,
+      event_status VARCHAR(24) NOT NULL,
+      request_id VARCHAR(100),
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS fiscal_events_document_idx
+      ON fiscal_events (organization_id, fiscal_document_id, created_at);
+  `);
 }
 
 async function bootstrap() {
