@@ -11,7 +11,8 @@ export const paymentTypeEnum = pgEnum("payment_type", ["deposit", "payment", "pa
 
 export const paymentsTable = pgTable("payments", {
   id: serial("id").primaryKey(),
-  bookingId: integer("booking_id").notNull().references(() => bookingsTable.id),
+  bookingId: integer("booking_id").references(() => bookingsTable.id),
+  paymentSessionId: integer("payment_session_id"),
   invoiceId: integer("invoice_id"),
   legalEntityId: integer("legal_entity_id").references(() => legalEntitiesTable.id),
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),

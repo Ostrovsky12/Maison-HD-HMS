@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { db } from '@workspace/db';
 import { sql } from 'drizzle-orm';
 import { requireAuth } from '../lib/auth.js';
+import { allocatePositiveFiscalItems, orchestrateFiscalization, isSubmissionEligible } from '../services/prro-orchestrator.js';
+import { submitDocument } from './prro.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -396,7 +398,59 @@ router.patch('/orders/:id', async (req, res) => {
       await db.execute(sql`UPDATE restaurant_tables SET status = 'free', updated_at = NOW() WHERE id = ${order.table_id}`);
     }
 
-    res.json({ order });
+    let fiscalization: any = null;
+    if (status === 'paid') {
+      try {
+        const entityResult = await db.execute(sql`
+          SELECT COALESCE(b.legal_entity_id, p.legal_entity_id) AS legal_entity_id
+            FROM restaurant_orders ro
+            LEFT JOIN properties p ON p.id = ro.property_id AND p.organization_id = ${orgId}
+            LEFT JOIN bookings b ON b.id = ro.booking_id AND b.organization_id = ${orgId}
+           WHERE ro.id = ${parseInt(id)} AND ro.organization_id = ${orgId}`);
+        const legalEntityId = (entityResult.rows[0] as any)?.legal_entity_id;
+        const itemsResult = await db.execute(sql`
+          SELECT roi.quantity, roi.unit_price, roi.total_price, mi.name,
+                 NULLIF(to_jsonb(mi)->>'legal_entity_id', '')::int AS legal_entity_id
+            FROM restaurant_order_items roi
+            LEFT JOIN menu_items mi ON mi.id = roi.menu_item_id
+           WHERE roi.order_id = ${parseInt(id)}`);
+        const fiscalItems: any[] = (itemsResult.rows as any[]).map(item => ({
+          name: item.name || "Ресторанна позиція",
+          quantity: Number(item.quantity || 1),
+          unitPrice: Number(item.unit_price || 0),
+          amount: Number(item.total_price ?? Number(item.unit_price || 0) * Number(item.quantity || 1)),
+          legalEntityId: item.legal_entity_id || legalEntityId,
+        }));
+        const payableAmount = Number(order.paid_amount || order.total || 0);
+        const payableItems = allocatePositiveFiscalItems(fiscalItems, payableAmount);
+        const sourceType = ["bar", "bar_order", "cocktail", "drinks"].includes(String(order.order_type).toLowerCase())
+          ? "bar_order" : "fb_order";
+        const result = await orchestrateFiscalization({
+          organizationId: orgId,
+          sourceType,
+          sourceId: String(id),
+          defaultLegalEntityId: legalEntityId,
+          items: payableItems,
+          totalAmount: payableAmount,
+          itemKind: "goods",
+          paymentChannel: payment_method === "cash" ? "cash"
+            : payment_method === "card" ? "pos_card" : "pos_card",
+          idempotencyKey: `restaurant-order:${orgId}:${id}:payment`,
+          createdBy: (req as any).user?.userId,
+          requestId: String(req.id ?? ""),
+        });
+        const documents = [];
+        for (const document of result.documents) {
+          documents.push(isSubmissionEligible(document.status)
+            ? await submitDocument(orgId, Number(document.id), String(req.id ?? ""))
+            : document);
+        }
+        fiscalization = { ...result, documents };
+      } catch (error: any) {
+        fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+      }
+    }
+    res.json({ order, fiscalization });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

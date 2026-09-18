@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth } from "../lib/auth.js";
+import { requireAuth, requireRole } from "../lib/auth.js";
 import { getProvider, classifyError } from "../lib/payment-provider.js";
 import { generateSplitPaymentLinks, getInvoiceSplits } from "../lib/split-billing.js";
+import { allocatePositiveFiscalItems, orchestrateFiscalization, isSubmissionEligible, resolvePaymentSessionFiscalSource } from "../services/prro-orchestrator.js";
+import { submitDocument } from "./prro.js";
 import crypto from "crypto";
 
 const router = Router();
@@ -59,7 +61,7 @@ router.post("/webhook/liqpay", async (req, res) => {
        LEFT JOIN legal_entities le ON le.id = ps.legal_entity_id
        WHERE ps.provider_order_id = $1 ORDER BY ps.id DESC LIMIT 1`, [orderId]);
 
-    const session = sessions[0];
+    let session = sessions[0];
     if (session) {
       orgId = session.organization_id;
       sessionId = session.id;
@@ -87,18 +89,78 @@ router.post("/webhook/liqpay", async (req, res) => {
       const newStatus = statusMap[parsed.status] || "pending";
 
       if (newStatus === "paid") {
-        await DB().query(`
-          UPDATE payment_sessions SET status = 'paid', paid_amount = $2, paid_at = NOW(),
-            provider_tx_id = $3, provider_fee = $4, callback_data = $5, updated_at = NOW()
-          WHERE id = $1`,
-          [session.id, parsed.amount || session.amount, String(parsed.payment_id || ""),
-           parsed.commission_credit || null, JSON.stringify(parsed)]);
-
-        await DB().query(`
-          INSERT INTO payments (booking_id, organization_id, amount, method, status, external_id, liqpay_order_id, liqpay_status, currency, description, payment_type)
-          VALUES ($1,$2,$3,'liqpay','completed',$4,$5,$6,$7,$8,'payment')
-          ON CONFLICT DO NOTHING`,
-          [session.booking_id||null, session.organization_id, parsed.amount||session.amount, String(parsed.payment_id||""), orderId, parsed.status, parsed.currency||"UAH", session.description||"Онлайн-оплата"]);
+        const paidAmount = Number(parsed.amount);
+        const paidCurrency = String(parsed.currency || "");
+        if (!Number.isFinite(paidAmount) || paidAmount <= 0 ||
+            Math.abs(paidAmount - Number(session.amount)) > 0.01 ||
+            paidCurrency !== String(session.currency || "UAH") ||
+            String(parsed.order_id) !== String(session.provider_order_id) ||
+            (parsed.action && !["pay", "hold"].includes(String(parsed.action)))) {
+          return res.status(400).json({ error: "LiqPay callback does not match payment session" });
+        }
+        const paymentClient = await DB().connect();
+        try {
+          await paymentClient.query("BEGIN");
+          const locked = await paymentClient.query(
+            `SELECT * FROM payment_sessions WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+            [session.id, session.organization_id],
+          );
+          if (!locked.rows[0]) throw new Error("Payment session disappeared");
+          session = { ...session, ...locked.rows[0] };
+          let paymentId: number | null = null;
+          const existingPayment = await paymentClient.query(
+            `SELECT id FROM payments
+              WHERE organization_id = $1
+                AND (payment_session_id = $2 OR liqpay_order_id = $3)
+              ORDER BY id LIMIT 1 FOR UPDATE`,
+            [session.organization_id, session.id, orderId],
+          );
+          if (existingPayment.rows[0]) {
+            paymentId = Number(existingPayment.rows[0].id);
+          } else {
+            const inserted = await paymentClient.query(`
+              INSERT INTO payments (booking_id, organization_id, payment_session_id, amount, method, status, external_id, liqpay_order_id, liqpay_status, currency, description, payment_type)
+              VALUES ($1,$2,$3,$4,'liqpay','completed',$5,$6,$7,$8,$9,'payment')
+              RETURNING id`,
+              [session.booking_id || null, session.organization_id, session.id, paidAmount,
+               String(parsed.payment_id || ""), orderId, parsed.status, paidCurrency, session.description || "Онлайн-оплата"]);
+            paymentId = Number(inserted.rows[0]?.id);
+          }
+          if (session.status !== "paid" || Math.abs(Number(session.paid_amount || 0) - paidAmount) > 0.01) {
+            await paymentClient.query(`
+              UPDATE payment_sessions SET status = 'paid', paid_amount = $3, paid_at = NOW(),
+                provider_tx_id = $4, provider_fee = $5, callback_data = $6, payment_id = $7, updated_at = NOW()
+              WHERE id = $1 AND organization_id = $2`,
+              [session.id, session.organization_id, paidAmount, String(parsed.payment_id || ""),
+               parsed.commission_credit || null, JSON.stringify(parsed), paymentId]);
+          }
+          await paymentClient.query("COMMIT");
+        } catch (paymentError) {
+          await paymentClient.query("ROLLBACK").catch(() => {});
+          throw paymentError;
+        } finally {
+          paymentClient.release();
+        }
+        try {
+          const paidAmount = Number(parsed.amount || session.amount);
+          const fiscalSource = await resolvePaymentSessionFiscalSource(session, paidAmount);
+          const fiscal = await orchestrateFiscalization({
+            organizationId: Number(session.organization_id),
+            sourceType: fiscalSource.sourceType,
+            sourceId: fiscalSource.sourceId,
+            defaultLegalEntityId: session.legal_entity_id,
+            items: fiscalSource.items,
+            totalAmount: paidAmount,
+            itemKind: fiscalSource.sourceType === "spa_booking" ? "service" : "mixed",
+            paymentChannel: "online_card",
+            idempotencyKey: `payment-session:${session.organization_id}:${session.id}`,
+          });
+          for (const document of fiscal.documents) {
+            if (isSubmissionEligible(document.status)) await submitDocument(Number(session.organization_id), Number(document.id));
+          }
+        } catch (fiscalError: any) {
+          await saveDiagnostic(session.organization_id, session.id, "prro", fiscalError?.message || "Фіскалізація не виконана").catch(() => {});
+        }
       } else if (newStatus === "failed" || newStatus === "expired") {
         await DB().query(`
           UPDATE payment_sessions SET status = $2, failed_at = NOW(), last_error = $3, callback_data = $4, updated_at = NOW()
@@ -183,6 +245,39 @@ router.post("/sessions", async (req: any, res) => {
     } = req.body;
 
     if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: "Amount must be > 0" });
+    if (bookingId) {
+      const { rows } = await DB().query(
+        `SELECT b.id FROM bookings b
+          LEFT JOIN units u ON u.id = b.unit_id
+          LEFT JOIN properties p ON p.id = u.property_id
+         WHERE b.id = $1 AND b.organization_id = $2
+           AND (p.organization_id = $2 OR p.organization_id IS NULL)`,
+        [bookingId, orgId],
+      );
+      if (!rows[0]) return res.status(403).json({ error: "Booking is outside organization" });
+    }
+    if (invoiceId) {
+      const { rows } = await DB().query(
+        `SELECT id FROM invoices WHERE id = $1 AND organization_id = $2`,
+        [invoiceId, orgId],
+      );
+      if (!rows[0]) return res.status(403).json({ error: "Invoice is outside organization" });
+    }
+    if (folioId) {
+      const { rows } = await DB().query(
+        `SELECT id FROM bookings WHERE folio_id = $1 AND organization_id = $2`,
+        [folioId, orgId],
+      );
+      if (!rows[0]) return res.status(403).json({ error: "Folio is outside organization" });
+    }
+    if (legalEntityId) {
+      const { rows } = await DB().query(
+        `SELECT id FROM legal_entities
+          WHERE id = $1 AND organization_id = $2 AND is_active = true`,
+        [legalEntityId, orgId],
+      );
+      if (!rows[0]) return res.status(403).json({ error: "Legal entity is outside organization or inactive" });
+    }
 
     const entity = await getEntityKeys(orgId, legalEntityId);
     const sessionRef = genSessionRef("PAY");
@@ -377,23 +472,90 @@ router.post("/sessions/:id/mark-paid", async (req: any, res) => {
     const userId = req.user?.userId;
     const id = parseInt(req.params.id);
     const { amount, method = "cash", notes } = req.body;
-    const { rows } = await DB().query(`SELECT * FROM payment_sessions WHERE id = $1 AND organization_id = $2`, [id, orgId]);
-    if (!rows[0]) return res.status(404).json({ error: "Not found" });
-    const session = rows[0];
+    const client = await DB().connect();
+    let session: any;
+    let paymentId = 0;
+    let paidAmt = 0;
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `SELECT * FROM payment_sessions WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [id, orgId],
+      );
+      if (!rows[0]) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Not found" });
+      }
+      session = rows[0];
+      paidAmt = amount === undefined ? Number(session.amount) : Number(amount);
+      if (!Number.isFinite(paidAmt) || paidAmt <= 0 || paidAmt > Number(session.amount) + 0.01) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Invalid payment amount" });
+      }
+      if (session.status === "paid" && session.payment_id) {
+        if (Math.abs(Number(session.paid_amount || 0) - paidAmt) > 0.01) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({ error: "Payment session already settled for another amount" });
+        }
+        paymentId = Number(session.payment_id);
+      } else {
+        const existingPayment = await client.query(
+          `SELECT id FROM payments
+            WHERE organization_id = $1 AND external_id = $2
+            ORDER BY id LIMIT 1 FOR UPDATE`,
+          [orgId, session.session_ref],
+        );
+        if (existingPayment.rows[0]) {
+          paymentId = Number(existingPayment.rows[0].id);
+        } else {
+          const { rows: inserted } = await client.query(`
+              INSERT INTO payments (booking_id, organization_id, payment_session_id, amount, method, status, description, payment_type, external_id, currency)
+              VALUES ($1, $2, $3, $4, $5, 'completed', $6, 'payment', $7, $8) RETURNING id`,
+            [session.booking_id || null, orgId, session.id, paidAmt, method, session.description || notes || "Оплата", session.session_ref, session.currency]);
+          paymentId = Number(inserted[0].id);
+        }
+        await client.query(`
+          UPDATE payment_sessions SET status = 'paid', paid_amount = $3, paid_at = NOW(), payment_id = $4, updated_at = NOW()
+          WHERE id = $1 AND organization_id = $2`,
+          [id, orgId, paidAmt, paymentId]);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
 
-    const paidAmt = amount ? parseFloat(amount) : parseFloat(session.amount);
-
-    // Record in payments table
-    const { rows: pRows } = await DB().query(`
-      INSERT INTO payments (booking_id, organization_id, amount, method, status, description, payment_type, external_id, currency)
-      VALUES ($1, $2, $3, $4, 'completed', $5, 'payment', $6, $7) RETURNING id`,
-      [session.booking_id || null, orgId, paidAmt, method, session.description || notes || "Оплата", session.session_ref, session.currency]);
-
-    await DB().query(`
-      UPDATE payment_sessions SET status = 'paid', paid_amount = $3, paid_at = NOW(), payment_id = $4, updated_at = NOW()
-      WHERE id = $1 AND organization_id = $2`, [id, orgId, paidAmt, pRows[0]?.id]);
-
-    res.json({ success: true, paymentId: pRows[0]?.id, paidAmount: paidAmt });
+    let fiscalization: any = null;
+    try {
+      const fiscalSource = await resolvePaymentSessionFiscalSource(session, paidAmt);
+      const result = await orchestrateFiscalization({
+        organizationId: orgId,
+        sourceType: fiscalSource.sourceType,
+        sourceId: fiscalSource.sourceId,
+        defaultLegalEntityId: session.legal_entity_id,
+        items: fiscalSource.items,
+        totalAmount: paidAmt,
+        itemKind: fiscalSource.sourceType === "spa_booking" ? "service" : "mixed",
+        paymentChannel: method === "cash" ? "cash" : method === "iban_transfer" ? "iban_transfer" : "online_card",
+        idempotencyKey: `payment-session:${orgId}:${session.id}`,
+        createdBy: userId,
+        requestId: String(req.id ?? ""),
+        exemptionAuthority: req.body?.exemptionAuthority,
+        exemptionReference: req.body?.exemptionReference,
+      });
+      const documents = [];
+      for (const document of result.documents) {
+        documents.push(isSubmissionEligible(document.status)
+          ? await submitDocument(orgId, Number(document.id), String(req.id ?? ""))
+          : document);
+      }
+      fiscalization = { ...result, documents };
+    } catch (error: any) {
+      fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+    }
+    res.json({ success: true, paymentId, paidAmount: paidAmt, fiscalization });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -630,33 +792,139 @@ router.get("/invoices/:invoiceId/splits", async (req: any, res) => {
 });
 
 // Mark a split as paid (webhook integration point)
-router.post("/invoices/:invoiceId/splits/:splitId/mark-paid", async (req: any, res) => {
+router.post("/invoices/:invoiceId/splits/:splitId/mark-paid", requireRole("super_admin", "owner", "admin", "manager"), async (req: any, res) => {
   try {
-    const db = DB().$client;
     const orgId: number = req.user.organizationId;
     const invoiceId = parseInt(req.params.invoiceId);
     const splitId   = parseInt(req.params.splitId);
     const { paidAmount, txId } = req.body;
-
-    const { rows: [split] } = await db.query(
-      `UPDATE invoice_splits SET status = 'paid', paid_amount = $1, liqpay_tx_id = $2, paid_at = NOW(), updated_at = NOW()
-       WHERE id = $3 AND invoice_id = $4 RETURNING *`,
-      [paidAmount || null, txId || null, splitId, invoiceId],
-    );
-
-    if (!split) return res.status(404).json({ error: "Split not found" });
-
-    // Check if all splits paid → update parent invoice
-    const { rows: allSplits } = await db.query(
-      `SELECT status FROM invoice_splits WHERE invoice_id = $1`, [invoiceId]);
-    const allPaid = allSplits.every((s: any) => s.status === "paid");
-    if (allPaid) {
-      await db.query(
-        `UPDATE invoices SET status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = $1`,
-        [invoiceId]);
+    const requestedAmount = paidAmount === undefined ? null : Number(paidAmount);
+    if (requestedAmount !== null && (!Number.isFinite(requestedAmount) || requestedAmount <= 0)) {
+      return res.status(422).json({ error: "paidAmount must be positive" });
+    }
+    const client = await DB().connect();
+    let split: any;
+    let event: any;
+    let eventReplayed = false;
+    try {
+      await client.query("BEGIN");
+      const found = await client.query(
+        `SELECT s.*, i.amount AS invoice_amount, i.organization_id
+           FROM invoice_splits s
+           JOIN invoices i ON i.id = s.invoice_id
+          WHERE s.id = $1 AND s.invoice_id = $2 AND i.organization_id = $3
+          FOR UPDATE OF s, i`,
+        [splitId, invoiceId, orgId],
+      );
+      split = found.rows[0];
+      if (!split) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Split not found" });
+      }
+      const expected = Number(split.amount);
+      if (requestedAmount !== null && Math.abs(requestedAmount - expected) > 0.01) {
+        await client.query("ROLLBACK");
+        return res.status(422).json({ error: "paidAmount must equal the split amount" });
+      }
+      if (split.status === "paid" && split.liqpay_tx_id && txId &&
+          String(split.liqpay_tx_id) !== String(txId)) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "Split already paid with another transaction" });
+      }
+      const transactionIdentity = String(txId || split.liqpay_tx_id || `split-${splitId}`);
+      const eventKey = `invoice-split:${splitId}:payment:${transactionIdentity}`;
+      const splitItems = Array.isArray(split.items_snapshot) ? split.items_snapshot : [];
+      const splitSourceType = splitItems.length > 0 &&
+        splitItems.every((item: any) => item.source === "minibar" || item.metadata?.source === "minibar")
+        ? "minibar" : "hotel_folio";
+      const inserted = await client.query(
+        `INSERT INTO payment_events
+           (organization_id, source_type, source_id, event_key, previous_amount, target_amount, delta_amount, currency, payload)
+         VALUES ($1,$2,$3,$4,0,$5,$5,$6,$7)
+         ON CONFLICT (organization_id, event_key) DO NOTHING
+         RETURNING *`,
+        [orgId, splitSourceType, `invoice-split:${splitId}`, eventKey, expected, split.currency || "UAH",
+         JSON.stringify({ invoiceId, splitId, txId: transactionIdentity })],
+      );
+      event = inserted.rows[0];
+      if (!event) {
+        eventReplayed = true;
+        const existingEvent = await client.query(
+          `SELECT * FROM payment_events WHERE organization_id = $1 AND event_key = $2 FOR UPDATE`,
+          [orgId, eventKey],
+        );
+        event = existingEvent.rows[0];
+      }
+      if (event && split.status !== "paid") {
+        await client.query(
+          `UPDATE invoice_splits SET status = 'paid', paid_amount = $1,
+                  liqpay_tx_id = COALESCE($2, liqpay_tx_id), paid_at = COALESCE(paid_at, NOW()), updated_at = NOW()
+             WHERE id = $3`,
+          [expected, txId || null, splitId],
+        );
+        split.status = "paid";
+        split.paid_amount = expected;
+      }
+      const { rows: allSplits } = await client.query(
+        `SELECT status FROM invoice_splits WHERE invoice_id = $1`, [invoiceId],
+      );
+      if (allSplits.length > 0 && allSplits.every((row: any) => row.status === "paid")) {
+        await client.query(
+          `UPDATE invoices SET status = 'paid', paid_at = COALESCE(paid_at, NOW()), updated_at = NOW()
+            WHERE id = $1 AND organization_id = $2`, [invoiceId, orgId],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
     }
 
-    res.json({ ok: true, split });
+    let fiscalization: any = null;
+    try {
+      const snapshot = Array.isArray(split.items_snapshot) ? split.items_snapshot : [];
+      if (!snapshot.length) throw new Error("У split відсутній незмінний snapshot позицій");
+      const sourceItems = snapshot.map((item: any) => ({
+        name: item.name || item.description || "Позиція split",
+        quantity: Number(item.quantity ?? item.qty ?? 1),
+        unitPrice: Number(item.unitPrice ?? item.price ?? item.amount ?? 0),
+        amount: Number(item.amount ?? item.total ?? 0),
+        legalEntityId: item.legalEntityId ?? item.legal_entity_id ?? split.legal_entity_id,
+        taxCode: item.taxCode ?? item.vatRate,
+        metadata: { ...(item.metadata || {}), ...(item.source ? { source: item.source } : {}) },
+      }));
+      const items = allocatePositiveFiscalItems(sourceItems, Number(split.amount));
+      const sourceType = items.every((item: any) => item.metadata?.source === "minibar") ? "minibar" : "hotel_folio";
+      const result = await orchestrateFiscalization({
+        organizationId: orgId,
+        sourceType,
+        sourceId: `payment-event:${event.id}`,
+        defaultLegalEntityId: split.legal_entity_id,
+        items,
+        totalAmount: Number(split.amount),
+        itemKind: "mixed",
+        paymentChannel: "online_card",
+        idempotencyKey: `payment-event:${orgId}:${event.id}`,
+        createdBy: req.user?.userId,
+        requestId: String(req.id ?? ""),
+      });
+      const documents = [];
+      for (const document of result.documents) {
+        documents.push(isSubmissionEligible(document.status)
+          ? await submitDocument(orgId, Number(document.id), String(req.id ?? ""))
+          : document);
+      }
+      fiscalization = { ...result, documents };
+      await DB().query(
+        `UPDATE payment_events SET status = 'allocated', updated_at = NOW() WHERE id = $1 AND status = 'pending'`,
+        [event.id],
+      );
+    } catch (error: any) {
+      fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+    }
+    res.json({ ok: true, split, fiscalization, replayed: eventReplayed });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -183,6 +183,8 @@ async function ensureSchema() {
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_id INTEGER;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_session_id INTEGER;
+    ALTER TABLE payments ALTER COLUMN booking_id DROP NOT NULL;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS legal_entity_id INTEGER;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS net_amount NUMERIC(10, 2);
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(10, 2) DEFAULT 0;
@@ -197,6 +199,27 @@ async function ensureSchema() {
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS staff_id INTEGER;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+    CREATE TABLE IF NOT EXISTS payment_events (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      event_key TEXT NOT NULL,
+      previous_amount NUMERIC(12, 2) NOT NULL,
+      target_amount NUMERIC(12, 2) NOT NULL,
+      delta_amount NUMERIC(12, 2) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'UAH',
+      status TEXT NOT NULL DEFAULT 'pending',
+      payload JSONB,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS payment_events_org_event_key_uq
+      ON payment_events (organization_id, event_key);
+    CREATE UNIQUE INDEX IF NOT EXISTS payments_payment_session_uq
+      ON payments (payment_session_id) WHERE payment_session_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS payments_org_liqpay_order_uq
+      ON payments (organization_id, liqpay_order_id) WHERE liqpay_order_id IS NOT NULL;
     CREATE TABLE IF NOT EXISTS calendar_holidays (
       id SERIAL PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,

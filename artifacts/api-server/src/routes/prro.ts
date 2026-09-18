@@ -77,14 +77,26 @@ async function loadContext(organizationId: number, documentId: number) {
     seller: legalEntitiesTable,
     shift: prroShiftsTable,
   }).from(fiscalDocumentsTable)
-    .innerJoin(prroRegistersTable, eq(prroRegistersTable.id, fiscalDocumentsTable.registerId))
+    .innerJoin(prroRegistersTable, and(
+      eq(prroRegistersTable.id, fiscalDocumentsTable.registerId),
+      eq(prroRegistersTable.organizationId, organizationId),
+      eq(prroRegistersTable.legalEntityId, fiscalDocumentsTable.legalEntityId),
+    ))
     .innerJoin(legalEntitiesTable, eq(legalEntitiesTable.id, fiscalDocumentsTable.legalEntityId))
-    .leftJoin(prroShiftsTable, eq(prroShiftsTable.id, fiscalDocumentsTable.shiftId))
+    .leftJoin(prroShiftsTable, and(
+      eq(prroShiftsTable.id, fiscalDocumentsTable.shiftId),
+      eq(prroShiftsTable.organizationId, organizationId),
+      eq(prroShiftsTable.legalEntityId, fiscalDocumentsTable.legalEntityId),
+      eq(prroShiftsTable.registerId, fiscalDocumentsTable.registerId),
+    ))
     .where(and(
       eq(fiscalDocumentsTable.id, documentId),
       eq(fiscalDocumentsTable.organizationId, organizationId),
       eq(prroRegistersTable.organizationId, organizationId),
       eq(legalEntitiesTable.organizationId, organizationId),
+      eq(legalEntitiesTable.isActive, true),
+      eq(prroRegistersTable.isActive, true),
+      sql`${prroRegistersTable.status} in ('registered', 'active')`,
     ));
   return row;
 }
@@ -95,11 +107,22 @@ function documentKind(type: string): PrroDocumentKind {
   throw new Error(`Unsupported PRRO document type: ${type}`);
 }
 
-async function submitDocument(organizationId: number, documentId: number, requestId?: string) {
+export async function submitDocument(organizationId: number, documentId: number, requestId?: string) {
   const context = await loadContext(organizationId, documentId);
   if (!context) throw new Error("Фіскальний документ не знайдено");
   const { document, register, seller, shift } = context;
   if (document.status === "fiscalized" || document.status === "completed") return document;
+  if (!seller.isActive) throw new Error("Продавець неактивний");
+  if (!register.isActive || !["registered", "active"].includes(register.status)) {
+    throw new Error("Каса неактивна або не зареєстрована");
+  }
+  if (!shift || shift.legalEntityId !== document.legalEntityId ||
+      shift.registerId !== register.id || !shift.signerKeyId) {
+    throw new Error("Зміна не належить продавцю або не має scoped КЕП");
+  }
+  if (document.documentType !== "open_shift" && shift.status !== "open") {
+    throw new Error("Для фіскального документа потрібна відкрита зміна");
+  }
   if (!register.fiscalNumber) throw new Error("Для каси не задано фіскальний номер ДПС");
   if (!shift?.signerKeyId) throw new Error("Для зміни не задано ідентифікатор КЕП");
   if (!seller.edrpou) throw new Error("Для продавця не задано податковий номер");
@@ -324,7 +347,11 @@ router.post("/registers", requireAuth, requireRole("super_admin", "owner", "admi
     return void res.status(400).json({ error: "legalEntityId, name, deviceId і fiscalNumber обов'язкові" });
   }
   const [seller] = await db.select({ id: legalEntitiesTable.id }).from(legalEntitiesTable)
-    .where(and(eq(legalEntitiesTable.id, legalEntityId), eq(legalEntitiesTable.organizationId, organizationId)));
+    .where(and(
+      eq(legalEntitiesTable.id, legalEntityId),
+      eq(legalEntitiesTable.organizationId, organizationId),
+      eq(legalEntitiesTable.isActive, true),
+    ));
   if (!seller) return void res.status(404).json({ error: "Продавця не знайдено" });
   const [register] = await db.insert(prroRegistersTable).values({
     organizationId, legalEntityId, name, deviceId, fiscalNumber,
@@ -343,6 +370,8 @@ router.post("/registers/:registerId/shifts/open", requireAuth, requireRole("supe
   if (!registerId || !signerKeyId) return void res.status(400).json({ error: "signerKeyId обов'язковий" });
   const [register] = await db.select().from(prroRegistersTable).where(and(
     eq(prroRegistersTable.id, registerId), eq(prroRegistersTable.organizationId, organizationId),
+    eq(prroRegistersTable.isActive, true),
+    sql`${prroRegistersTable.status} in ('registered', 'active')`,
   ));
   if (!register) return void res.status(404).json({ error: "Касу не знайдено" });
   try {
@@ -461,11 +490,21 @@ router.post("/documents", requireAuth, async (req, res): Promise<void> => {
   const [register] = await db.select().from(prroRegistersTable).where(and(
     eq(prroRegistersTable.id, registerId), eq(prroRegistersTable.organizationId, organizationId),
     eq(prroRegistersTable.legalEntityId, legalEntityId),
+    eq(prroRegistersTable.isActive, true),
+    sql`${prroRegistersTable.status} in ('registered', 'active')`,
   ));
   if (!register) return void res.status(400).json({ error: "Каса не належить вибраному продавцю" });
+  const [seller] = await db.select({ id: legalEntitiesTable.id }).from(legalEntitiesTable).where(and(
+    eq(legalEntitiesTable.id, legalEntityId),
+    eq(legalEntitiesTable.organizationId, organizationId),
+    eq(legalEntitiesTable.isActive, true),
+  ));
+  if (!seller) return void res.status(400).json({ error: "Продавця не знайдено або він неактивний" });
   const [shift] = await db.select().from(prroShiftsTable).where(and(
     eq(prroShiftsTable.organizationId, organizationId), eq(prroShiftsTable.registerId, registerId),
+    eq(prroShiftsTable.legalEntityId, legalEntityId),
     eq(prroShiftsTable.status, "open"),
+    sql`${prroShiftsTable.signerKeyId} is not null`,
   )).orderBy(desc(prroShiftsTable.openedAt)).limit(1);
   if (!shift) return void res.status(409).json({ error: "Спочатку відкрийте зміну" });
   const policy = decideFiscalization(policyInput);

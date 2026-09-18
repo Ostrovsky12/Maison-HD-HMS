@@ -10,6 +10,7 @@
 - [Hotel TV content integrity](hotel-tv-content-integrity.md) — TV screens use saved per-screen content and honest empty states, never fabricated hotel details or offers
 - [Hotel TV weather integrity](hotel-tv-weather-integrity.md) — weather cache and stale fallbacks stay tenant-scoped; unavailable data is never simulated
 - [Unified PRRO scope](unified-prro-scope.md) — fiscalization is a Maison HD platform service for hotel and F&B operations, not an F&B-only feature
+- [Atomic seller payment events](atomic-seller-payment-events.md) — allocate immutable payment events to sellers atomically before any PRRO submission
 - [PRRO signing boundary](prro-signing-boundary.md) — private KEP material stays in a scoped signer/HSM service and is never accepted by the API
 - [Ambiguous DPS outcomes](prro-ambiguous-outcomes.md) — never resend after an uncertain transport result until signed DPS state proves it safe
 - [Tenant-scoped realtime events](tenant-realtime-events.md) — authenticate WebSockets and keep peer signaling/provider broadcasts inside one organization

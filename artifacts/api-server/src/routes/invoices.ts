@@ -4,6 +4,8 @@ import { db } from "@workspace/db";
 import { invoicesTable, bookingsTable, guestsTable, usersTable, channelConfigsTable, legalEntitiesTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql, isNull, or } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { allocatePositiveFiscalItems, orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
+import { submitDocument } from "./prro.js";
 import { calculateInvoiceTotals } from "../lib/invoice-totals.js";
 
 const router = Router();
@@ -347,31 +349,189 @@ router.post("/:invoiceId/pay", requireAuth, async (req, res) => {
     const invoiceId = parseInt(String(req.params.invoiceId), 10);
     const access = await assertInvoiceAccess(invoiceId, user);
     if ("error" in access) return res.status(access.status).json({ error: access.error });
-    const existing = access.invoice;
     const { paymentMethod, paidAmount } = req.body;
-
-    // Overflow protection: paidAmount must not exceed invoice amount
-    const invoiceAmount = parseFloat(existing.amount || "0");
-    const paid = parseFloat(String(paidAmount ?? existing.amount));
-    if (!Number.isFinite(paid) || paid < 0 || paid > invoiceAmount) {
-      return res.status(400).json({ error: `paidAmount must be between 0 and ${invoiceAmount}` });
+    const orgId = user.organizationId;
+    let persistedSplitPaid: number | null = null;
+    try {
+      const splitResult = await (db as any).$client.query(
+        `SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS paid_amount
+           FROM invoice_splits WHERE invoice_id = $1`,
+        [invoiceId],
+      );
+      if (Number(splitResult.rows[0]?.paid_amount || 0) > 0) {
+        persistedSplitPaid = Number(splitResult.rows[0].paid_amount);
+      }
+    } catch {
+      // Older deployments do not have invoice_splits; invoice lines remain
+      // the authoritative persisted source.
+    }
+    const client = await (db as any).$client.connect();
+    let invoice: any;
+    let paymentEvent: any;
+    try {
+      await client.query("BEGIN");
+      const locked = await client.query(
+        `SELECT * FROM invoices WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [invoiceId, orgId],
+      );
+      invoice = locked.rows[0];
+      if (!invoice) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Not found" });
+      }
+      invoice.organizationId = invoice.organization_id;
+      invoice.legalEntityId = invoice.legal_entity_id;
+      invoice.invoiceItems = invoice.invoice_items;
+      invoice.invoiceNumber = invoice.invoice_number;
+      invoice.description = invoice.description;
+      await client.query("SAVEPOINT invoice_split_lookup");
+      try {
+        const splitResult = await client.query(
+          `SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS paid_amount
+             FROM invoice_splits WHERE invoice_id = $1`,
+          [invoiceId],
+        );
+        persistedSplitPaid = Number(splitResult.rows[0]?.paid_amount || 0) > 0
+          ? Number(splitResult.rows[0].paid_amount) : null;
+        await client.query("RELEASE SAVEPOINT invoice_split_lookup");
+      } catch {
+        await client.query("ROLLBACK TO SAVEPOINT invoice_split_lookup");
+        await client.query("RELEASE SAVEPOINT invoice_split_lookup");
+      }
+      const invoiceAmount = Number(invoice.amount || 0);
+      const previousPaid = Number(invoice.paid_amount || 0);
+      const requestedTarget = paidAmount === undefined ? invoiceAmount : Number(paidAmount);
+      const targetPaid = persistedSplitPaid === null ? requestedTarget : persistedSplitPaid;
+      if (persistedSplitPaid !== null) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: "Invoice has paid splits; complete fiscalization through each split payment boundary",
+        });
+      }
+      if (!Number.isFinite(targetPaid) || targetPaid < previousPaid || targetPaid > invoiceAmount) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `paidAmount must be between ${previousPaid} and ${invoiceAmount}` });
+      }
+      const eventKey = `invoice:${invoiceId}:paid-to:${targetPaid.toFixed(2)}`;
+      const inserted = await client.query(
+        `INSERT INTO payment_events
+           (organization_id, source_type, source_id, event_key, previous_amount, target_amount, delta_amount, currency, payload)
+         VALUES ($1,'hotel_folio',$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (organization_id, event_key) DO NOTHING
+         RETURNING *`,
+        [orgId, `invoice:${invoiceId}`, eventKey, previousPaid.toFixed(2), targetPaid.toFixed(2),
+         Math.max(0, targetPaid - previousPaid).toFixed(2), invoice.currency || "UAH",
+         JSON.stringify({ invoiceId, paymentMethod: paymentMethod || null, requestId: String(req.id ?? "") })],
+      );
+      if (inserted.rows[0]) {
+        paymentEvent = inserted.rows[0];
+        await client.query(
+          `UPDATE invoices
+              SET paid_amount = $1,
+                  status = CASE WHEN $1 >= amount THEN 'paid'::invoice_status ELSE 'pending'::invoice_status END,
+                  payment_method = $2, paid_at = CASE WHEN $1 >= amount THEN NOW() ELSE paid_at END,
+                  updated_at = NOW()
+            WHERE id = $3 AND organization_id = $4`,
+          [targetPaid.toFixed(2), paymentMethod || null, invoiceId, orgId],
+        );
+        invoice.paid_amount = targetPaid.toFixed(2);
+        invoice.status = targetPaid >= invoiceAmount ? "paid" : "pending";
+      } else {
+        const existingEvent = await client.query(
+          `SELECT * FROM payment_events WHERE organization_id = $1 AND event_key = $2 FOR UPDATE`,
+          [orgId, eventKey],
+        );
+        paymentEvent = existingEvent.rows[0];
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
     }
 
-    // Scope update to organization for tenant callers
-    const orgId = user.organizationId;
-    const payCondition = orgId
-      ? and(eq(invoicesTable.id, invoiceId), eq(invoicesTable.organizationId, orgId))
-      : eq(invoicesTable.id, invoiceId);
-
-    const [invoice] = await db.update(invoicesTable).set({
-      status: "paid",
-      paymentMethod,
-      paidAmount: paid.toFixed(2),
-      paidAt: new Date(),
-      updatedAt: new Date(),
-    }).where(payCondition).returning();
-
-    return res.json(invoice);
+    let fiscalization: any = null;
+    const paid = Number(paymentEvent?.delta_amount || 0);
+    if (paymentEvent && paid > 0) {
+      try {
+        const rawItems = Array.isArray(invoice.invoiceItems)
+          ? invoice.invoiceItems
+          : typeof invoice.invoiceItems === "string"
+            ? (() => { try { return JSON.parse(invoice.invoiceItems as string); } catch { return []; } })()
+            : [];
+        let items = rawItems.length ? rawItems.map((item: any) => ({
+          name: String(item.name || item.description || "Позиція рахунку"),
+          quantity: Number(item.quantity || item.qty || 1),
+          unitPrice: Number(item.unitPrice ?? item.price ?? item.amount ?? 0),
+          amount: Number(item.amount ?? Number(item.unitPrice ?? item.price ?? 0) * Number(item.quantity || item.qty || 1)),
+          legalEntityId: item.legalEntityId ?? item.legal_entity_id ?? invoice.legalEntityId,
+          taxCode: item.taxCode ?? item.tax_code,
+          metadata: {
+            ...(item.metadata || {}),
+            source: item.source || item.sourceType || item.source_type || "invoice",
+          },
+        })) : [{
+          name: invoice.description || `Рахунок #${invoice.invoiceNumber}`,
+          quantity: 1,
+          unitPrice: paid,
+          amount: paid,
+          legalEntityId: invoice.legalEntityId,
+        }];
+        const hasMinibarLines = items.some((item: any) => item.metadata?.source === "minibar");
+        if (!hasMinibarLines && invoice.booking_id) {
+          const minibar = await (db as any).$client.query(
+            `SELECT mc.id, mc.item_name, mc.item_price, mc.quantity, mc.total_amount,
+                    NULLIF(to_jsonb(mi)->>'legal_entity_id', '')::int AS legal_entity_id
+               FROM minibar_charges mc
+               JOIN bookings b ON b.id = mc.booking_id AND b.organization_id = $2
+               JOIN units u ON u.id = b.unit_id
+               JOIN properties p ON p.id = u.property_id AND p.organization_id = $2
+               LEFT JOIN minibar_items mi ON mi.id = mc.item_id
+              WHERE mc.booking_id = $1 ORDER BY mc.id`,
+            [invoice.booking_id, orgId],
+          );
+          for (const charge of minibar.rows) {
+            items.push({
+              name: charge.item_name, quantity: Number(charge.quantity || 1),
+              unitPrice: Number(charge.item_price), amount: Number(charge.total_amount),
+              legalEntityId: charge.legal_entity_id || invoice.legal_entity_id,
+              metadata: { source: "minibar", minibarChargeId: charge.id },
+            });
+          }
+        }
+        items = allocatePositiveFiscalItems(items, paid);
+        const method = String(paymentMethod || "cash").toLowerCase();
+        const result = await orchestrateFiscalization({
+          organizationId: Number(invoice.organizationId),
+          sourceType: items.some((item: any) => item.metadata?.source === "minibar") ? "minibar" : "hotel_folio",
+          sourceId: `payment-event:${paymentEvent.id}`,
+          defaultLegalEntityId: invoice.legalEntityId,
+          items,
+          totalAmount: paid,
+          itemKind: "mixed",
+          paymentChannel: method.includes("bank") ? "iban_transfer"
+            : method.includes("liqpay") || method.includes("card") ? "online_card" : "cash",
+          idempotencyKey: `payment-event:${orgId}:${paymentEvent.id}`,
+          createdBy: user.userId,
+          requestId: String(req.id ?? ""),
+        });
+        const documents = [];
+        for (const document of result.documents) {
+          documents.push(isSubmissionEligible(document.status)
+            ? await submitDocument(Number(invoice.organizationId), Number(document.id), String(req.id ?? ""))
+            : document);
+        }
+        fiscalization = { ...result, documents };
+        await (db as any).$client.query(
+          `UPDATE payment_events SET status = 'allocated', updated_at = NOW() WHERE id = $1 AND status = 'pending'`,
+          [paymentEvent.id],
+        );
+      } catch (error: any) {
+        fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+      }
+    }
+    return res.json({ invoice, fiscalization });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }

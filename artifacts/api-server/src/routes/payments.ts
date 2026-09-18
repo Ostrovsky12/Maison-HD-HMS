@@ -3,6 +3,8 @@ import { db } from "@workspace/db";
 import { paymentsTable, bookingsTable, unitsTable, propertiesTable } from "@workspace/db/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
+import { submitDocument } from "./prro.js";
 
 const router = Router();
 
@@ -16,6 +18,8 @@ async function getBookingForOrg(bookingId: number, orgId: number) {
       paidAmount: bookingsTable.paidAmount,
       paymentStatus: bookingsTable.paymentStatus,
       organizationId: bookingsTable.organizationId,
+      legalEntityId: bookingsTable.legalEntityId,
+      propertyLegalEntityId: propertiesTable.legalEntityId,
     })
     .from(bookingsTable)
     .innerJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
@@ -78,6 +82,10 @@ router.post("/", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const { bookingId, amount, method, notes } = req.body;
 
+  if (!user.organizationId) {
+    res.status(403).json({ error: "Organization context is required" });
+    return;
+  }
   if (!bookingId || amount === undefined) {
     res.status(400).json({ error: "bookingId and amount are required" });
     return;
@@ -89,13 +97,12 @@ router.post("/", requireAuth, async (req, res) => {
     return;
   }
 
-  // Verify booking belongs to caller's org before accepting payment
-  if (user.organizationId) {
-    const booking = await getBookingForOrg(bookingId, user.organizationId);
-    if (!booking) {
-      res.status(403).json({ error: "Forbidden", message: "Booking not found in your organization" });
-      return;
-    }
+  // Verify booking belongs to caller's org before accepting payment and retain
+  // the booking/property seller fallback for fiscalization.
+  const verifiedBooking = await getBookingForOrg(bookingId, user.organizationId);
+  if (!verifiedBooking) {
+    res.status(403).json({ error: "Forbidden", message: "Booking not found in your organization" });
+    return;
   }
 
   const [payment] = await db.insert(paymentsTable).values({
@@ -106,7 +113,7 @@ router.post("/", requireAuth, async (req, res) => {
     notes,
   }).returning();
 
-  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+  const booking = verifiedBooking;
   if (booking) {
     const newPaidAmount = Number(booking.paidAmount) + numAmount;
     const totalAmount = Number(booking.totalAmount);
@@ -121,7 +128,43 @@ router.post("/", requireAuth, async (req, res) => {
     }).where(eq(bookingsTable.id, bookingId));
   }
 
-  res.status(201).json({ ...payment, amount: Number(payment.amount) });
+  let fiscalization: any = null;
+  try {
+    const legalEntityId = booking?.legalEntityId || booking?.propertyLegalEntityId;
+    const methodName = String(method || "cash").toLowerCase();
+    const paymentChannel = methodName === "cash" ? "cash"
+      : methodName.includes("iban") || methodName.includes("bank") ? "iban_transfer"
+      : methodName.includes("card") || methodName.includes("liqpay") ? "online_card" : "pos_card";
+    const result = await orchestrateFiscalization({
+      organizationId: user.organizationId,
+      sourceType: "booking",
+      sourceId: `payment:${payment.id}`,
+      defaultLegalEntityId: legalEntityId,
+      items: [{
+        name: `Оплата бронювання #${bookingId}`,
+        quantity: 1,
+        unitPrice: numAmount,
+        amount: numAmount,
+        legalEntityId,
+      }],
+      totalAmount: numAmount,
+      itemKind: "service",
+      paymentChannel,
+      idempotencyKey: `booking-payment:${user.organizationId}:${payment.id}`,
+      createdBy: user.userId,
+      requestId: String(req.id ?? ""),
+    });
+    const documents = [];
+    for (const document of result.documents) {
+      documents.push(isSubmissionEligible(document.status)
+        ? await submitDocument(user.organizationId, Number(document.id), String(req.id ?? ""))
+        : document);
+    }
+    fiscalization = { ...result, documents };
+  } catch (error: any) {
+    fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+  }
+  res.status(201).json({ ...payment, amount: Number(payment.amount), fiscalization });
 });
 
 export default router;

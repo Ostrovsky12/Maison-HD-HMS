@@ -62,17 +62,22 @@ export async function resolveBookingLegalEntity(
 
   // 1. Booking may have explicit legal_entity_id
   const { rows: [booking] } = await db.query(
-    `SELECT b.legal_entity_id, p.legal_entity_id AS prop_legal_entity_id
+    `SELECT b.legal_entity_id, p.legal_entity_id AS prop_legal_entity_id,
+            ble.id AS booking_entity_id, ple.id AS property_entity_id
      FROM bookings b
      LEFT JOIN units u ON u.id = b.unit_id
      LEFT JOIN properties p ON p.id = u.property_id
+      LEFT JOIN legal_entities ble
+        ON ble.id = b.legal_entity_id AND ble.organization_id = $2 AND ble.is_active = true
+      LEFT JOIN legal_entities ple
+        ON ple.id = p.legal_entity_id AND ple.organization_id = $2 AND ple.is_active = true
      WHERE b.id = $1 AND b.organization_id = $2`,
     [bookingId, orgId],
   );
 
   if (!booking) return null;
   // booking-level takes priority, then property-level
-  return booking.legal_entity_id || booking.prop_legal_entity_id || null;
+  return booking.booking_entity_id || booking.property_entity_id || null;
 }
 
 // ─── Group items by legal entity ──────────────────────────────────────────────
@@ -94,11 +99,14 @@ export async function groupItemsByEntity(
   const entityMap = new Map<number, typeof entities[0]>();
   for (const e of entities) entityMap.set(e.id, e);
 
-  const groups = new Map<number | null, SplitItem[]>();
+  const groups = new Map<number, SplitItem[]>();
 
   for (const item of items) {
     const entityId = item.legalEntityId ?? defaultLegalEntityId;
-    const key = entityId ?? null;
+    if (!entityId || !entityMap.has(entityId)) {
+      throw new Error("Позиція рахунку посилається на невідомого або неактивного продавця");
+    }
+    const key = entityId;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(item);
   }
@@ -110,9 +118,9 @@ export async function groupItemsByEntity(
     const amount = groupItems.reduce((s, i) => s + Number(i.amount), 0);
 
     result.push({
-      legalEntityId: entityId ?? 0,
-      entityName: entity?.name ?? "Невідома юр. особа",
-      entityType: entity?.type ?? "fop",
+        legalEntityId: entityId as number,
+        entityName: entity!.name,
+        entityType: entity!.type,
       amount: Math.round(amount * 100) / 100,
       items: groupItems,
       hasLiqpay: !!(entity?.liqpay_public_key && entity?.liqpay_private_key),
@@ -141,9 +149,10 @@ export async function generateSplitPaymentLinks(params: {
   if (!regenerate) {
     const { rows: existing } = await db.query(
       `SELECT s.*, le.name AS entity_name FROM invoice_splits s
-       LEFT JOIN legal_entities le ON le.id = s.legal_entity_id
+       JOIN invoices i ON i.id = s.invoice_id AND i.organization_id = $2
+       LEFT JOIN legal_entities le ON le.id = s.legal_entity_id AND le.organization_id = $2
        WHERE s.invoice_id = $1 ORDER BY s.amount DESC`,
-      [invoiceId],
+      [invoiceId, orgId],
     );
     if (existing.length > 0) {
       return {
@@ -172,7 +181,7 @@ export async function generateSplitPaymentLinks(params: {
      LEFT JOIN bookings b ON b.id = i.booking_id
      LEFT JOIN units u ON u.id = b.unit_id
      LEFT JOIN properties p ON p.id = u.property_id
-     WHERE i.id = $1 AND (i.booking_id IN (SELECT id FROM bookings WHERE organization_id = $2) OR i.guest_id IN (SELECT id FROM guests WHERE organization_id = $2))`,
+      WHERE i.id = $1 AND i.organization_id = $2`,
     [invoiceId, orgId],
   );
 
@@ -189,7 +198,11 @@ export async function generateSplitPaymentLinks(params: {
 
   // Delete old splits if regenerating
   if (regenerate) {
-    await db.query(`DELETE FROM invoice_splits WHERE invoice_id = $1`, [invoiceId]);
+    await db.query(
+      `DELETE FROM invoice_splits s USING invoices i
+        WHERE s.invoice_id = i.id AND s.invoice_id = $1 AND i.organization_id = $2`,
+      [invoiceId, orgId],
+    );
   }
 
   // Load entity keys
@@ -207,12 +220,10 @@ export async function generateSplitPaymentLinks(params: {
 
   const splits = [];
   const missingKeys: string[] = [];
-  const ts = Date.now();
-
   for (let i = 0; i < groups.length; i++) {
     const g = groups[i];
     const keys = g.legalEntityId ? keyMap.get(g.legalEntityId) : undefined;
-    const orderId = `INV-${invoiceId}-E${g.legalEntityId || 0}-${ts}-${i}`;
+    const orderId = `INV-${invoiceId}-E${g.legalEntityId}`;
     let paymentLink: string | null = null;
 
     if (keys?.pub && keys?.priv) {
@@ -283,11 +294,12 @@ export async function getInvoiceSplits(invoiceId: number, orgId: number) {
   const db = DB();
   const { rows } = await db.query(
     `SELECT s.*, le.name AS entity_name, le.type AS entity_type
-     FROM invoice_splits s
-     LEFT JOIN legal_entities le ON le.id = s.legal_entity_id
-     WHERE s.invoice_id = $1
+      FROM invoice_splits s
+      JOIN invoices i ON i.id = s.invoice_id AND i.organization_id = $2
+      LEFT JOIN legal_entities le ON le.id = s.legal_entity_id AND le.organization_id = $2
+      WHERE s.invoice_id = $1
      ORDER BY s.amount DESC`,
-    [invoiceId],
+    [invoiceId, orgId],
   );
   return rows;
 }

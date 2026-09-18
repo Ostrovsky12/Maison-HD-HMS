@@ -3,7 +3,8 @@ import { db, pool } from "@workspace/db";
 import { fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable } from "@workspace/db";
 import { eq, and, desc, asc, sql, gte, lte, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
-import { createFiscalReceipt, buildCheckboxGoods, toCheckboxPaymentType } from "../services/checkbox.js";
+import { allocatePositiveFiscalItems, orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
+import { submitDocument } from "./prro.js";
 
 const router = Router();
 const getOrg = (req: any): number => req.user?.organizationId;
@@ -1462,50 +1463,74 @@ router.post("/orders/:id/pay", requireAuth, async (req: any, res) => {
 
     const updatedOrder = r.rows[0];
 
-    // ── Checkbox ПРРО (async, non-blocking) ──────────────────────────────────
+    // ── Shared PRRO orchestration (one document per seller) ─────────────────
     let fiscalResult: any = null;
     try {
-      // Determine legal entity
       const leId = legalEntityId || updatedOrder.legal_entity_id;
-      if (leId) {
-        const leRow = await db_.query(
-          `SELECT * FROM legal_entities WHERE id = $1 AND organization_id = $2 AND prro_enabled = true
-           AND checkbox_login IS NOT NULL AND checkbox_password IS NOT NULL AND checkbox_license_key IS NOT NULL`,
-          [leId, orgId]
-        );
-        const le = leRow.rows[0];
-        if (le) {
-          // Fetch order items with their tax info
-          const itemsRow = await db_.query(
-            `SELECT oi.*, fi.vat_rate, fi.is_alcohol, fi.uktzed_code
-             FROM fb_order_items oi
-             LEFT JOIN fb_items fi ON fi.id = oi.item_id
-             WHERE oi.order_id = $1`, [orderId]
-          );
-          const goods = buildCheckboxGoods(itemsRow.rows);
-          const totalKopecks = Math.round(finalAmount * 100);
-          const payments = [{
-            type: toCheckboxPaymentType(paymentMethod),
-            value: totalKopecks,
-          }];
-          fiscalResult = await createFiscalReceipt(
-            { login: le.checkbox_login, password: le.checkbox_password, licenseKey: le.checkbox_license_key },
-            goods, payments, Math.round(tip * 100)
-          );
-          // Store fiscal data
-          await db_.query(
-            `UPDATE fb_orders SET
-               fiscal_receipt_id = $1, fiscal_receipt_url = $2, fiscal_qr_url = $3,
-               fiscal_status = 'done', fiscal_data = $4, updated_at = NOW()
-             WHERE id = $5`,
-            [fiscalResult.id, fiscalResult.receiptUrl, fiscalResult.qrUrl,
-             JSON.stringify(fiscalResult), orderId]
-          );
-        }
+      const itemsRow = await db_.query(
+        `SELECT oi.name, oi.quantity, oi.price, oi.total_price, fi.legal_entity_id,
+                fi.vat_rate, fi.uktzed_code
+           FROM fb_order_items oi
+           LEFT JOIN fb_items fi ON fi.id = oi.item_id
+          WHERE oi.order_id = $1 AND oi.organization_id = $2
+          ORDER BY oi.id`, [orderId, orgId]
+      );
+      const itemKind = "goods" as const;
+      const fiscalItems = itemsRow.rows.map((item: any) => ({
+        name: item.name || "Позиція",
+        quantity: Number(item.quantity || 1),
+        unitPrice: Number(item.price || 0),
+        amount: Number(item.total_price ?? Number(item.price || 0) * Number(item.quantity || 1)),
+        taxCode: item.vat_rate !== undefined && item.vat_rate !== null ? String(item.vat_rate) : undefined,
+        productCode: item.uktzed_code || undefined,
+        legalEntityId: item.legal_entity_id || leId || undefined,
+      }));
+      if (tip > 0 && leId) {
+        fiscalItems.push({
+          name: "Сервісний збір",
+          quantity: 1,
+          unitPrice: tip,
+          amount: tip,
+          legalEntityId: leId,
+        });
       }
+      const payableItems = allocatePositiveFiscalItems(fiscalItems, finalAmount);
+      const paymentChannel = effectiveMethod === "cash" ? "cash"
+        : effectiveMethod === "pos" || effectiveMethod === "card" ? "pos_card" : "pos_card";
+      const allocation = await orchestrateFiscalization({
+        organizationId: orgId,
+        sourceType: "fb_order",
+        sourceId: String(orderId),
+        items: payableItems,
+        defaultLegalEntityId: leId,
+        totalAmount: finalAmount,
+        paymentChannel,
+        idempotencyKey: `fb-order:${orgId}:${orderId}:payment`,
+        createdBy: req.user?.userId,
+        requestId: String(req.id ?? ""),
+      });
+      const submitted = [];
+      for (const document of allocation.documents) {
+        submitted.push(isSubmissionEligible(document.status)
+          ? await submitDocument(orgId, Number(document.id), String(req.id ?? ""))
+          : document);
+      }
+      fiscalResult = { ...allocation, documents: submitted };
+      const first = submitted[0] as any;
+      const fiscalized = submitted.filter((d: any) => ["fiscalized", "completed"].includes(d?.status)).length;
+      const fiscalStatus = fiscalized === submitted.length ? "done"
+        : submitted.some((d: any) => d?.status === "review") ? "review" : "error";
+      await db_.query(
+        `UPDATE fb_orders SET
+           fiscal_receipt_id = $1, fiscal_receipt_url = $2, fiscal_qr_url = $3,
+           fiscal_status = $4, fiscal_data = $5, updated_at = NOW()
+         WHERE id = $6 AND organization_id = $7`,
+        [first?.dpsDocumentId || first?.dps_document_id || null,
+         first?.dpsDocumentId ? `https://cabinet.tax.gov.ua/check?id=${first.dpsDocumentId}` : null,
+         null, fiscalStatus, JSON.stringify(fiscalResult), orderId, orgId]
+      );
     } catch (fiscalErr: any) {
-      // Non-blocking — log but don't fail payment
-      console.error("[CHECKBOX ПРРО] Error:", fiscalErr.message);
+      // Payment remains recorded, while fiscalization is explicitly visible for retry/review.
       await db_.query(
         `UPDATE fb_orders SET fiscal_status = 'error', fiscal_data = $1 WHERE id = $2 AND organization_id = $3`,
         [JSON.stringify({ error: fiscalErr.message }), orderId, orgId]

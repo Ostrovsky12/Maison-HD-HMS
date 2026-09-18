@@ -50,4 +50,12 @@ describe("DPS PRRO XML", () => {
   it("rejects totals that do not reconcile with receipt lines", () => {
     expect(() => buildPrroXml({ ...base, totalAmount: 124.99 })).toThrow("line total");
   });
+
+  it("rejects negative PRICE/COST adjustment lines", () => {
+    expect(() => buildPrroXml({
+      ...base,
+      totalAmount: 124,
+      lines: [{ name: "Знижка", quantity: 1, unitPrice: -1 }],
+    })).toThrow("invalid monetary");
+  });
 });

@@ -6,6 +6,8 @@ import {
 } from "@workspace/db";
 import { eq, and, desc, asc, gte, lte, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { calculatePaymentDelta, orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
+import { submitDocument } from "./prro.js";
 
 const router = Router();
 
@@ -326,16 +328,130 @@ router.patch("/appointments/:id", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrgId(req);
     const { status, staffNotes, paidAmount } = req.body;
-    const updates: any = { updatedAt: new Date() };
-    if (status) updates.status = status;
-    if (staffNotes !== undefined) updates.staffNotes = staffNotes;
-    if (paidAmount !== undefined) updates.paidAmount = paidAmount;
-
-    const [appt] = await db.update(spaAppointmentsTable)
-      .set(updates)
-      .where(and(eq(spaAppointmentsTable.id, parseInt(req.params.id)), eq(spaAppointmentsTable.organizationId, orgId)))
-      .returning();
-    res.json({ appointment: appt });
+    const appointmentId = parseInt(req.params.id);
+    const client = await (db as any).$client.connect();
+    let current: any;
+    let appt: any;
+    let paymentEvent: any;
+    try {
+      await client.query("BEGIN");
+      const locked = await client.query(
+        `SELECT a.*, s.name AS service_name
+           FROM spa_appointments a
+           LEFT JOIN spa_services s ON s.id = a.service_id
+          WHERE a.id = $1 AND a.organization_id = $2 FOR UPDATE`,
+        [appointmentId, orgId],
+      );
+      current = locked.rows[0];
+      if (!current) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Appointment not found" });
+      }
+      const previousPaid = Number(current.paid_amount || 0);
+      const requestedPaid = paidAmount === undefined ? previousPaid : Number(paidAmount);
+      if (!Number.isFinite(requestedPaid) || requestedPaid < previousPaid) {
+        await client.query("ROLLBACK");
+        return res.status(422).json({ error: "paidAmount must not decrease" });
+      }
+      const eventKey = `spa:${appointmentId}:paid-to:${requestedPaid.toFixed(2)}`;
+      const inserted = await client.query(
+        `INSERT INTO payment_events
+           (organization_id, source_type, source_id, event_key, previous_amount, target_amount, delta_amount, currency, payload)
+         VALUES ($1,'spa_booking',$2,$3,$4,$5,$6,'UAH',$7)
+         ON CONFLICT (organization_id, event_key) DO NOTHING
+         RETURNING *`,
+        [orgId, `spa:${appointmentId}`, eventKey, previousPaid.toFixed(2), requestedPaid.toFixed(2),
+         Math.max(0, requestedPaid - previousPaid).toFixed(2),
+         JSON.stringify({ appointmentId, paymentMethod: req.body.method || null, requestId: String(req.id ?? "") })],
+      );
+      paymentEvent = inserted.rows[0];
+      if (!paymentEvent) {
+        const existingEvent = await client.query(
+          `SELECT * FROM payment_events WHERE organization_id = $1 AND event_key = $2 FOR UPDATE`,
+          [orgId, eventKey],
+        );
+        paymentEvent = existingEvent.rows[0];
+      } else {
+        const updates: any[] = [];
+        const values: any[] = [];
+        if (status) { values.push(status); updates.push(`status = $${values.length}`); }
+        if (staffNotes !== undefined) { values.push(staffNotes); updates.push(`staff_notes = $${values.length}`); }
+        if (paidAmount !== undefined) {
+          values.push(requestedPaid.toFixed(2)); updates.push(`paid_amount = $${values.length}`);
+        }
+        values.push(appointmentId, orgId);
+        await client.query(
+          `UPDATE spa_appointments SET ${updates.length ? `${updates.join(", ")},` : ""}
+             updated_at = NOW() WHERE id = $${values.length - 1} AND organization_id = $${values.length}`,
+          values,
+        );
+      }
+      const refreshed = await client.query(
+        `SELECT * FROM spa_appointments WHERE id = $1 AND organization_id = $2`,
+        [appointmentId, orgId],
+      );
+      appt = refreshed.rows[0];
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+    let fiscalization: any = null;
+    const paymentDelta = Number(paymentEvent?.delta_amount || 0);
+    const paymentEventKey = `appointment:${appointmentId}:paid-to:${Number(paymentEvent?.target_amount || 0).toFixed(2)}`;
+    if (paymentDelta > 0) {
+      try {
+        const raw = await (db as any).$client.query(
+          `SELECT a.booking_id, COALESCE(b.legal_entity_id, p.legal_entity_id) AS legal_entity_id
+             FROM spa_appointments a
+             LEFT JOIN bookings b ON b.id = a.booking_id AND b.organization_id = $2
+             LEFT JOIN units u ON u.id = b.unit_id
+             LEFT JOIN properties p ON p.id = u.property_id AND p.organization_id = $2
+            WHERE a.id = $1 AND a.organization_id = $2`,
+          [appointmentId, orgId],
+        );
+        const legalEntityId = req.body.legalEntityId || raw.rows[0]?.legal_entity_id;
+        const method = req.body.method === "cash" ? "cash"
+          : req.body.method === "iban_transfer" ? "iban_transfer" : "online_card";
+        const result = await orchestrateFiscalization({
+          organizationId: orgId,
+          sourceType: "spa_booking",
+          sourceId: paymentEventKey,
+          defaultLegalEntityId: legalEntityId,
+          items: [{
+            name: current.service_name || "SPA послуга",
+            quantity: 1,
+            unitPrice: paymentDelta,
+            amount: paymentDelta,
+            legalEntityId,
+          }],
+          totalAmount: paymentDelta,
+          itemKind: "service",
+          paymentChannel: method,
+          exemptionAuthority: req.body.exemptionAuthority,
+          exemptionReference: req.body.exemptionReference,
+          idempotencyKey: `payment-event:${orgId}:${paymentEvent.id}`,
+          createdBy: req.user?.userId,
+          requestId: String(req.id ?? ""),
+        });
+        const documents = [];
+        for (const document of result.documents) {
+          documents.push(isSubmissionEligible(document.status)
+            ? await submitDocument(orgId, Number(document.id), String(req.id ?? ""))
+            : document);
+        }
+        fiscalization = { ...result, documents };
+        await (db as any).$client.query(
+          `UPDATE payment_events SET status = 'allocated', updated_at = NOW() WHERE id = $1 AND status = 'pending'`,
+          [paymentEvent.id],
+        );
+      } catch (error: any) {
+        fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+      }
+    }
+    res.json({ appointment: appt, fiscalization });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

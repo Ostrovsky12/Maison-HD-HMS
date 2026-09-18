@@ -12,6 +12,8 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import { generateLiqPayForm, verifyLiqPayCallback, parseLiqPayData } from "../lib/liqpay.js";
 import { fireBookingEvent } from "../lib/automation-runner.js";
 import { sendGuestConfirmationEmail, sendGuestConfirmationSms, notifyBookingCreated } from "../lib/notify.js";
+import { orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
+import { submitDocument } from "./prro.js";
 
 const router = Router();
 
@@ -594,6 +596,46 @@ router.post("/liqpay/:bookingId", async (req, res) => {
   } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
+async function retryPublicBookingFiscalization(liqpayOrderId: string, bookingId: number) {
+  const paymentLookup = await pool.query(
+    `SELECT p.id, p.amount, b.organization_id, b.legal_entity_id,
+            pr.legal_entity_id AS property_legal_entity_id
+       FROM payments p
+       JOIN bookings b ON b.id = p.booking_id
+       LEFT JOIN units u ON u.id = b.unit_id
+       LEFT JOIN properties pr ON pr.id = u.property_id
+      WHERE p.liqpay_order_id = $1
+      ORDER BY p.id DESC LIMIT 1`,
+    [liqpayOrderId],
+  );
+  const paidPayment = paymentLookup.rows[0];
+  if (!paidPayment) return null;
+  const result = await orchestrateFiscalization({
+    organizationId: Number(paidPayment.organization_id),
+    sourceType: "booking",
+    sourceId: `payment:${paidPayment.id}`,
+    defaultLegalEntityId: paidPayment.legal_entity_id || paidPayment.property_legal_entity_id,
+    items: [{
+      name: `Оплата бронювання #${bookingId}`,
+      quantity: 1,
+      unitPrice: Number(paidPayment.amount),
+      amount: Number(paidPayment.amount),
+      legalEntityId: paidPayment.legal_entity_id || paidPayment.property_legal_entity_id,
+    }],
+    totalAmount: Number(paidPayment.amount),
+    itemKind: "service",
+    paymentChannel: "online_card",
+    idempotencyKey: `booking-payment:${paidPayment.organization_id}:${paidPayment.id}`,
+  });
+  const documents = [];
+  for (const document of result.documents) {
+    documents.push(isSubmissionEligible(document.status)
+      ? await submitDocument(Number(paidPayment.organization_id), Number(document.id))
+      : document);
+  }
+  return { ...result, documents };
+}
+
 // ─── POST /liqpay/callback — LiqPay server callback (public) ─────────────────
 // Hardened: exact order_id format, positive finite amount, amount <= outstanding,
 // idempotent (deduplicates by liqpay_order_id in payments table), atomic update.
@@ -630,6 +672,7 @@ router.post("/liqpay/callback", async (req, res) => {
     }
 
     const client = await pool.connect();
+    let clientReleased = false;
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [liqpayOrderId]);
@@ -640,7 +683,15 @@ router.post("/liqpay/callback", async (req, res) => {
       );
       if (existing.rows.length > 0) {
         await client.query("ROLLBACK");
-        return res.json({ ok: true });
+        client.release();
+        clientReleased = true;
+        let fiscalization: any = null;
+        try {
+          fiscalization = await retryPublicBookingFiscalization(liqpayOrderId, bookingId);
+        } catch (error: any) {
+          fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+        }
+        return res.json({ ok: true, replayed: true, fiscalization });
       }
 
       const bookingResult = await client.query(
@@ -685,7 +736,15 @@ router.post("/liqpay/callback", async (req, res) => {
       );
       if (paymentResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.json({ ok: true });
+        client.release();
+        clientReleased = true;
+        let fiscalization: any = null;
+        try {
+          fiscalization = await retryPublicBookingFiscalization(liqpayOrderId, bookingId);
+        } catch (error: any) {
+          fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+        }
+        return res.json({ ok: true, replayed: true, fiscalization });
       }
 
       const newPaid = prevPaid + paid;
@@ -703,10 +762,18 @@ router.post("/liqpay/callback", async (req, res) => {
       await client.query("ROLLBACK");
       throw error;
     } finally {
-      client.release();
+      if (!clientReleased) client.release();
     }
 
-    return res.json({ ok: true });
+    // Fiscalization is idempotent by the persisted payment id. A repeated
+    // callback can therefore safely retry allocation without another receipt.
+    let fiscalization: any = null;
+    try {
+      fiscalization = await retryPublicBookingFiscalization(liqpayOrderId, bookingId);
+    } catch (error: any) {
+      fiscalization = { error: error instanceof Error ? error.message : "Фіскалізація не виконана" };
+    }
+    return res.json({ ok: true, fiscalization });
   } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
