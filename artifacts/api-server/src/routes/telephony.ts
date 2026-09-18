@@ -152,6 +152,11 @@ function secureEqual(actual: string, expected: string): boolean {
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
+function hasAnalyzableCallNotes(notes: string | null | undefined): boolean {
+  const text = notes?.trim() || "";
+  return text.length >= 20 && !text.startsWith("Binotel:") && !text.startsWith("Binotel REST:");
+}
+
 async function requestBinotel(method: string, key: string, secret: string, params: Record<string, unknown> = {}) {
   const response = await fetch(`${BINOTEL_API_BASE}/${method}.json`, {
     method: "POST",
@@ -293,7 +298,12 @@ router.post("/calls/:id/summarize", requireAuth, async (req: any, res) => {
       .where(and(eq(callLogsTable.id, id), eq(callLogsTable.organizationId, orgId)));
     if (!call) return res.status(404).json({ error: "Call not found" });
 
-    const notesText = call.notes || "Нотатки відсутні";
+    if (!hasAnalyzableCallNotes(call.notes)) {
+      return res.status(422).json({
+        error: "AI-аналіз доступний лише після додавання змістовних нотаток або транскрипції розмови.",
+      });
+    }
+    const notesText = call.notes!.trim();
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1-nano",
       max_completion_tokens: 1024,
@@ -656,10 +666,6 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
       // Find guest by phone
       const guest = externalNumber ? await findGuestByPhone(orgId, externalNumber) : undefined;
 
-      // Look up settings for AI summary toggle
-      const [settings] = await db.select({ aiEnabled: settingsTable.aiSummaryEnabled })
-        .from(settingsTable).where(eq(settingsTable.organizationId, orgId));
-
       // Create call log entry
       const [callLog] = await db.insert(callLogsTable).values({
         organizationId: orgId,
@@ -679,30 +685,6 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
         isNewCaller,
         notes: `Binotel: ${direction === "inbound" ? "Вхідний" : "Вихідний"} дзвінок. Оператор: ${operatorName || "невідомо"}`,
       }).returning();
-
-      // Auto AI summary for completed calls
-      if (settings?.aiEnabled && status === "completed" && billsec > 30) {
-        try {
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4.1-nano",
-            max_completion_tokens: 512,
-            messages: [{
-              role: "system",
-              content: `Ти асистент call-центру готелю. Відповідай в JSON: {"summary":"...","sentiment":"positive|neutral|negative","actionItems":["..."]}`
-            }, {
-              role: "user",
-              content: `Дзвінок від ${clientName || externalNumber}, тривалість ${billsec}с, оператор ${operatorName}. Тип: ${direction}. Нові гості: ${isNewCaller}.`,
-            }],
-          });
-          const raw = completion.choices[0]?.message?.content || "{}";
-          const parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
-          await db.update(callLogsTable).set({
-            aiSummary: parsed.summary,
-            aiSentiment: parsed.sentiment,
-            aiActionItems: JSON.stringify(parsed.actionItems || []),
-          }).where(eq(callLogsTable.id, callLog.id));
-        } catch { /* AI summary optional */ }
-      }
 
       // Broadcast completion to UI
       broadcastToOrganization(orgId, {
@@ -799,51 +781,73 @@ router.post("/binotel/sync", requireAuth, async (req: any, res) => {
       ...Object.entries((incoming.callDetails || {}) as Record<string, any>),
       ...Object.entries((outgoing.callDetails || {}) as Record<string, any>),
     ];
-    let imported = 0;
+    const imported = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(81101, ${orgId})`);
+      await tx.update(callLogsTable).set({
+        aiSummary: null,
+        aiSentiment: null,
+        aiActionItems: null,
+      }).where(and(
+        eq(callLogsTable.organizationId, orgId),
+        sql`(${callLogsTable.notes} LIKE 'Binotel:%' OR ${callLogsTable.notes} LIKE 'Binotel REST:%')`,
+        sql`${callLogsTable.aiSummary} IS NOT NULL`,
+      ));
+      await tx.execute(sql`
+        DELETE FROM call_logs duplicate
+        USING call_logs original
+        WHERE duplicate.organization_id = ${orgId}
+          AND original.organization_id = duplicate.organization_id
+          AND original.external_call_id = duplicate.external_call_id
+          AND original.id < duplicate.id
+          AND duplicate.external_call_id IS NOT NULL
+      `);
+      let importedCount = 0;
 
-    for (const [generalCallId, call] of calls) {
-      const externalCallId = String(generalCallId);
-      const [existing] = await db.select({ id: callLogsTable.id }).from(callLogsTable)
-        .where(and(
-          eq(callLogsTable.organizationId, orgId),
-          eq(callLogsTable.externalCallId, externalCallId),
-        ))
-        .limit(1);
-      if (existing) continue;
+      for (const [generalCallId, call] of calls) {
+        const externalCallId = String(generalCallId);
+        const [existing] = await tx.select({ id: callLogsTable.id }).from(callLogsTable)
+          .where(and(
+            eq(callLogsTable.organizationId, orgId),
+            eq(callLogsTable.externalCallId, externalCallId),
+          ))
+          .limit(1);
+        if (existing) continue;
 
-      const callType = Number(call.callType ?? 0);
-      const direction = callType === 1 ? "outbound" : callType === 2 ? "internal" : "inbound";
-      const externalNumber = String(call.externalNumber || call.callerIDNum || "");
-      const billsec = Number(call.billsec || 0);
-      const waitsec = Number(call.waitsec || 0);
-      const disposition = String(call.disposition || "NOANSWER");
-      const status = ["NOANSWER", "BUSY", "FAILED"].includes(disposition) ? "missed" : "completed";
-      const startTime = Number(call.startTime || Math.floor(Date.now() / 1000));
-      const operatorName = String(call.employeeData?.name || "");
-      const operatorEmail = String(call.employeeData?.email || "");
-      const clientName = String(call.customerData?.name || "");
-      const guest = externalNumber ? await findGuestByPhone(orgId, externalNumber) : undefined;
+        const callType = Number(call.callType ?? 0);
+        const direction = callType === 1 ? "outbound" : callType === 2 ? "internal" : "inbound";
+        const externalNumber = String(call.externalNumber || call.callerIDNum || "");
+        const billsec = Number(call.billsec || 0);
+        const waitsec = Number(call.waitsec || 0);
+        const disposition = String(call.disposition || "NOANSWER");
+        const status = ["NOANSWER", "BUSY", "FAILED"].includes(disposition) ? "missed" : "completed";
+        const startTime = Number(call.startTime || Math.floor(Date.now() / 1000));
+        const operatorName = String(call.employeeData?.name || "");
+        const operatorEmail = String(call.employeeData?.email || "");
+        const clientName = String(call.customerData?.name || "");
+        const guest = externalNumber ? await findGuestByPhone(orgId, externalNumber) : undefined;
 
-      await db.insert(callLogsTable).values({
-        organizationId: orgId,
-        direction,
-        callerNumber: externalNumber || null,
-        callerName: clientName || guest?.name || null,
-        status,
-        durationSec: billsec,
-        waitTimeSec: waitsec,
-        startedAt: new Date(startTime * 1000),
-        endedAt: new Date((startTime + Math.max(billsec, 0)) * 1000),
-        recordingUrl: call.recordingURL || call.recordingUrl || null,
-        externalCallId,
-        operatorName: operatorName || null,
-        operatorEmail: operatorEmail || null,
-        guestId: guest?.id || null,
-        isNewCaller: Number(call.isNewCall ?? 0) === 1,
-        notes: `Binotel REST: ${direction === "inbound" ? "Вхідний" : "Вихідний"} дзвінок. Оператор: ${operatorName || "невідомо"}`,
-      });
-      imported += 1;
-    }
+        await tx.insert(callLogsTable).values({
+          organizationId: orgId,
+          direction,
+          callerNumber: externalNumber || null,
+          callerName: clientName || guest?.name || null,
+          status,
+          durationSec: billsec,
+          waitTimeSec: waitsec,
+          startedAt: new Date(startTime * 1000),
+          endedAt: new Date((startTime + Math.max(billsec, 0)) * 1000),
+          recordingUrl: call.recordingURL || call.recordingUrl || null,
+          externalCallId,
+          operatorName: operatorName || null,
+          operatorEmail: operatorEmail || null,
+          guestId: guest?.id || null,
+          isNewCaller: Number(call.isNewCall ?? 0) === 1,
+          notes: `Binotel REST: ${direction === "inbound" ? "Вхідний" : "Вихідний"} дзвінок. Оператор: ${operatorName || "невідомо"}`,
+        });
+        importedCount += 1;
+      }
+      return importedCount;
+    });
 
     if (imported > 0) {
       broadcastToOrganization(orgId, { type: "binotel-synced", imported });

@@ -16,3 +16,4 @@
 - [Tenant-scoped realtime events](tenant-realtime-events.md) — authenticate WebSockets and keep peer signaling/provider broadcasts inside one organization
 - [Tenant-owned integration credentials](tenant-integration-credentials.md) — each tenant connects and rotates its own provider keys; never share credentials globally
 - [Binotel delivery fallback](binotel-delivery-fallback.md) — use webhooks for realtime events and tenant REST sync to recover completed calls without duplicates
+- [Call analysis grounding](call-analysis-grounding.md) — summarize calls only from transcripts or meaningful notes, never from provider metadata alone

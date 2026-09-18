@@ -188,10 +188,13 @@ export default function TelephonyPage() {
     try {
       const res = await fetch(`${API}/calls/${callId}/summarize`, { method: "POST", headers: h() });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Не вдалося проаналізувати дзвінок");
       setSelectedCall(data);
       setCalls(prev => prev.map(c => c.id === callId ? { ...c, aiSummary: data.aiSummary, aiSentiment: data.aiSentiment } : c));
       toast({ title: "AI підсумок створено" });
-    } catch { toast({ title: "Помилка", variant: "destructive" }); }
+    } catch (e: any) {
+      toast({ title: "AI-аналіз недоступний", description: e.message, variant: "destructive" });
+    }
     setSummarizing(false);
   }
 
@@ -657,10 +660,14 @@ export default function TelephonyPage() {
                         </div>
                       )}
                     </div>
-                  ) : (
+                  ) : selectedCall.notes && !selectedCall.notes.startsWith("Binotel:") && !selectedCall.notes.startsWith("Binotel REST:") ? (
                     <Button size="sm" className="w-full" onClick={() => summarizeCall(selectedCall.id)} disabled={summarizing}>
                       {summarizing ? <><RefreshCw size={13} className="mr-1 animate-spin" />Аналіз...</> : <><Bot size={13} className="mr-1" />AI Аналіз розмови</>}
                     </Button>
+                  ) : (
+                    <div className="rounded bg-muted/50 p-2 text-xs text-muted-foreground">
+                      AI-аналіз з’явиться після додавання змістовних нотаток або транскрипції розмови.
+                    </div>
                   )}
                 </div>
               )}
