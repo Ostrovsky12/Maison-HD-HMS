@@ -896,12 +896,17 @@ function AccountingDocumentSendDialog({ item, onClose, onSent }: any) {
       if (!response.ok) throw new Error(result.message || result.error || "Не вдалося надіслати документ");
       const link = result.documentUrl || result.invoiceUrl || result.link || "";
       setPublicUrl(link);
+      if (channel === "link" && link) {
+        await navigator.clipboard.writeText(link).catch(() => {});
+      }
       onSent?.();
       toast({
         title: channel === "telegram" ? "Документ надіслано" : "Посилання готове",
         description: channel === "telegram"
           ? `${isAct ? "Акт" : "Рахунок"} надіслано через Telegram.`
-          : "Скопіюйте посилання та надішліть отримувачу.",
+          : channel === "link"
+            ? "Повне посилання скопійовано. Надішліть його отримувачу."
+            : "Скопіюйте посилання та надішліть отримувачу.",
       });
     } catch (error: any) {
       toast({ title: "Помилка надсилання", description: error.message, variant: "destructive" });
@@ -926,12 +931,15 @@ function AccountingDocumentSendDialog({ item, onClose, onSent }: any) {
               <CheckCircle2 className="h-11 w-11 text-emerald-500" />
               <p className="font-semibold">{channel === "telegram" ? "Документ надіслано" : "Посилання створено"}</p>
             </div>
-            <div className="flex items-center gap-2 rounded-xl border bg-gray-50 p-3">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-xl border bg-gray-50 p-3">
               <Link2 className="h-4 w-4 text-gray-400 shrink-0" />
-              <span className="text-xs font-mono truncate flex-1">{publicUrl}</span>
+              <span className="min-w-0 flex-1 truncate text-xs font-mono" title={publicUrl}>
+                {publicUrl}
+              </span>
               <Button
                 size="sm"
                 variant="outline"
+                className="shrink-0"
                 onClick={async () => {
                   await navigator.clipboard.writeText(publicUrl);
                   toast({ title: "Посилання скопійовано" });
@@ -940,6 +948,12 @@ function AccountingDocumentSendDialog({ item, onClose, onSent }: any) {
                 <Copy className="h-3.5 w-3.5 mr-1" /> Копіювати
               </Button>
             </div>
+            <Button
+              className="w-full"
+              onClick={() => window.open(publicUrl, "_blank", "noopener,noreferrer")}
+            >
+              <ExternalLink className="h-4 w-4 mr-1" /> Перевірити посилання
+            </Button>
             <Button className="w-full" variant="outline" onClick={onClose}>Закрити</Button>
           </div>
         ) : (

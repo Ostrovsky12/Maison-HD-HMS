@@ -19,11 +19,11 @@ function getPublicDocumentSecret(): string {
 }
 
 function createPublicDocumentToken(documentId: number, organizationId: number): string {
-  const payload = Buffer.from(JSON.stringify({
+  const payload = Buffer.from(JSON.stringify([
     documentId,
     organizationId,
-    expiresAt: Date.now() + PUBLIC_DOCUMENT_TTL_MS,
-  })).toString("base64url");
+    Date.now() + PUBLIC_DOCUMENT_TTL_MS,
+  ])).toString("base64url");
   const signature = createHmac("sha256", getPublicDocumentSecret()).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
@@ -36,13 +36,16 @@ function verifyPublicDocumentToken(token: string): { documentId: number; organiz
     const actual = Buffer.from(signature, "base64url");
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
     const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const documentId = Array.isArray(decoded) ? decoded[0] : decoded.documentId;
+    const organizationId = Array.isArray(decoded) ? decoded[1] : decoded.organizationId;
+    const expiresAt = Array.isArray(decoded) ? decoded[2] : decoded.expiresAt;
     if (
-      !Number.isInteger(decoded.documentId) ||
-      !Number.isInteger(decoded.organizationId) ||
-      !Number.isFinite(decoded.expiresAt) ||
-      decoded.expiresAt < Date.now()
+      !Number.isInteger(documentId) ||
+      !Number.isInteger(organizationId) ||
+      !Number.isFinite(expiresAt) ||
+      expiresAt < Date.now()
     ) return null;
-    return { documentId: decoded.documentId, organizationId: decoded.organizationId };
+    return { documentId, organizationId };
   } catch {
     return null;
   }
@@ -77,7 +80,7 @@ function escapeTelegramHtml(value: unknown): string {
 router.get("/public/documents/:token", async (req, res) => {
   try {
     const access = verifyPublicDocumentToken(req.params.token);
-    if (!access) return res.status(404).send("Документ не знайдено або посилання прострочене");
+    if (!access) return res.status(404).send("Посилання недійсне, скопійоване не повністю або протерміноване");
 
     const { rows: docs } = await pool.query(
       `SELECT *
