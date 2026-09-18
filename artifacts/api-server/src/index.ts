@@ -8,6 +8,7 @@ import { sql } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { registerClient, unregisterClient, getOnlinePeers, sendToClient } from "./lib/ws-broadcaster.js";
+import { verifyToken } from "./lib/auth.js";
 import { scheduleBackups } from "./lib/backup.js";
 
 const rawPort = process.env["PORT"];
@@ -988,23 +989,26 @@ async function bootstrap() {
 
   wss.on("connection", (ws, req) => {
     let myId: string | null = null;
+    let myOrganizationId: number | null = null;
 
     ws.on("message", (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
-        // Register: { type: "register", userId: "user-123" }
-        if (msg.type === "register" && msg.userId) {
-          myId = String(msg.userId);
-          registerClient(myId, ws);
-          ws.send(JSON.stringify({ type: "registered", userId: myId, peers: getOnlinePeers(myId) }));
+        // Register with a signed access token so tenant-scoped events cannot leak.
+        if (msg.type === "register" && msg.token) {
+          const identity = verifyToken(String(msg.token));
+          myId = String(identity.userId);
+          myOrganizationId = identity.organizationId;
+          registerClient(myId, myOrganizationId, ws);
+          ws.send(JSON.stringify({ type: "registered", userId: myId, peers: getOnlinePeers(myId, myOrganizationId) }));
           // Notify others
-          getOnlinePeers(myId).forEach(id => sendToClient(id, { type: "peer-online", userId: myId }));
+          getOnlinePeers(myId, myOrganizationId).forEach(id => sendToClient(id, { type: "peer-online", userId: myId }, myOrganizationId));
           return;
         }
         // Relay signals: offer, answer, ice-candidate, call, hangup
         const { to, ...payload } = msg;
         if (to) {
-          sendToClient(String(to), { ...payload, from: myId });
+          sendToClient(String(to), { ...payload, from: myId }, myOrganizationId);
         }
       } catch { /* ignore malformed */ }
     });
@@ -1012,7 +1016,7 @@ async function bootstrap() {
     ws.on("close", () => {
       if (myId) {
         unregisterClient(myId);
-        getOnlinePeers().forEach(id => sendToClient(id, { type: "peer-offline", userId: myId }));
+        getOnlinePeers(undefined, myOrganizationId).forEach(id => sendToClient(id, { type: "peer-offline", userId: myId }, myOrganizationId));
       }
     });
   });

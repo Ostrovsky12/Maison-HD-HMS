@@ -32,3 +32,6 @@ channel = "stable-25_05"
 
 [userenv.production]
 PUBLIC_APP_URL = "https://maison-hd.com"
+
+[userenv.shared]
+PUBLIC_URL = "https://maison-hd.com"

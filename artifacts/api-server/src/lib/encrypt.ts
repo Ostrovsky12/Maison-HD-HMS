@@ -5,10 +5,17 @@ const PREFIX = "enc:";
 
 function getKey(): Buffer {
   const raw = process.env.ENCRYPTION_KEY;
-  if (!raw || raw.length < 64) {
-    throw new Error("ENCRYPTION_KEY env var must be a 64-char hex string (32 bytes)");
+  if (raw && /^[0-9a-fA-F]{64,}$/.test(raw)) {
+    return Buffer.from(raw.slice(0, 64), "hex");
   }
-  return Buffer.from(raw.slice(0, 64), "hex");
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret || Buffer.byteLength(sessionSecret, "utf8") < 32) {
+    throw new Error("ENCRYPTION_KEY or SESSION_SECRET must be configured with at least 32 bytes");
+  }
+  return crypto.createHash("sha256")
+    .update("maison-hd:field-encryption:v1:")
+    .update(sessionSecret)
+    .digest();
 }
 
 export function encrypt(plaintext: string | null | undefined): string | null {

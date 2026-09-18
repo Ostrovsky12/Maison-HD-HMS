@@ -12,3 +12,5 @@
 - [Unified PRRO scope](unified-prro-scope.md) — fiscalization is a Maison HD platform service for hotel and F&B operations, not an F&B-only feature
 - [PRRO signing boundary](prro-signing-boundary.md) — private KEP material stays in a scoped signer/HSM service and is never accepted by the API
 - [Ambiguous DPS outcomes](prro-ambiguous-outcomes.md) — never resend after an uncertain transport result until signed DPS state proves it safe
+- [Tenant-scoped realtime events](tenant-realtime-events.md) — authenticate WebSockets and keep peer signaling/provider broadcasts inside one organization
+- [Tenant-owned integration credentials](tenant-integration-credentials.md) — each tenant connects and rotates its own provider keys; never share credentials globally

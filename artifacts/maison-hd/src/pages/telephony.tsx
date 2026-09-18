@@ -148,6 +148,7 @@ export default function TelephonyPage() {
   // Settings form
   const [settingsForm, setSettingsForm] = useState<any>(null);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [testingBinotel, setTestingBinotel] = useState(false);
 
   // IVR modal
   const [ivrModal, setIvrModal] = useState(false);
@@ -244,6 +245,19 @@ export default function TelephonyPage() {
       load();
     } catch { toast({ title: "Помилка", variant: "destructive" }); }
     setSavingSettings(false);
+  }
+
+  async function handleTestBinotel() {
+    setTestingBinotel(true);
+    try {
+      const res = await fetch(`${API}/binotel/test-connection`, { method: "POST", headers: h() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Помилка підключення");
+      toast({ title: "Binotel підключено", description: "API Key та API Secret працюють." });
+    } catch (e: any) {
+      toast({ title: "Binotel не підключено", description: e.message, variant: "destructive" });
+    }
+    setTestingBinotel(false);
   }
 
   async function handleCreateLine() {
@@ -951,6 +965,40 @@ export default function TelephonyPage() {
                             placeholder="12345"
                           />
                         </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-1">
+                            <Label>API Key</Label>
+                            <Input
+                              type="password"
+                              autoComplete="new-password"
+                              value={settingsForm.binotelApiKey || ""}
+                              onChange={e => setSettingsForm({ ...settingsForm, binotelApiKey: e.target.value })}
+                              placeholder="Вставте новий API Key"
+                            />
+                            <p className="text-xs text-muted-foreground">Зберігається зашифрованим і більше не показується.</p>
+                          </div>
+                          <div className="space-y-1">
+                            <Label>API Secret</Label>
+                            <Input
+                              type="password"
+                              autoComplete="new-password"
+                              value={settingsForm.binotelApiSecret || ""}
+                              onChange={e => setSettingsForm({ ...settingsForm, binotelApiSecret: e.target.value })}
+                              placeholder="Вставте API Secret"
+                            />
+                            <p className="text-xs text-muted-foreground">Не надсилайте секрет у чат або повідомлення.</p>
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleTestBinotel}
+                          disabled={testingBinotel || savingSettings || !settingsForm.binotelApiKeyConfigured || !settingsForm.binotelApiSecretConfigured}
+                        >
+                          {testingBinotel ? "Перевіряємо…" : "Перевірити з’єднання з Binotel"}
+                        </Button>
 
                         {webhookUrls && (
                           <div className="space-y-2">

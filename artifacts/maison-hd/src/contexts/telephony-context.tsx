@@ -327,7 +327,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       const socket = new WebSocket(`${WS_BASE}/ws/telephony`);
       ws.current = socket;
 
-      socket.onopen = () => send({ type: "register", userId });
+      socket.onopen = () => send({ type: "register", token: tok() });
 
       socket.onmessage = async (e) => {
         const msg = JSON.parse(e.data);

@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { requireAuth } from "../lib/auth.js";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { requireAuth, requireRole } from "../lib/auth.js";
 import { db } from "../db/index.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { eq, and, desc, asc, gte, count, sql } from "drizzle-orm";
@@ -7,7 +8,9 @@ import {
   pgTable, serial, integer, smallint, varchar, text, boolean,
   timestamp, date, numeric,
 } from "drizzle-orm/pg-core";
-import { broadcastToAll } from "../lib/ws-broadcaster.js";
+import { broadcastToOrganization } from "../lib/ws-broadcaster.js";
+import { decrypt, encrypt } from "../lib/encrypt.js";
+import { logger } from "../lib/logger.js";
 
 // Binotel server IPs (for webhook security)
 const BINOTEL_IPS = new Set([
@@ -125,6 +128,29 @@ const ivrMenusTable = pgTable("ivr_menus", {
 
 const router = Router();
 const getOrgId = (req: any) => req.user?.organizationId;
+const MASKED_SECRET = "••••••••";
+const BINOTEL_API_BASE = "https://api.binotel.com/api/4.0";
+
+function safeSettings(settings: any) {
+  return {
+    ...settings,
+    binotelApiKey: settings.binotelApiKey ? MASKED_SECRET : "",
+    binotelApiSecret: settings.binotelApiSecret ? MASKED_SECRET : "",
+    binotelSecretToken: undefined,
+    binotelApiKeyConfigured: Boolean(settings.binotelApiKey),
+    binotelApiSecretConfigured: Boolean(settings.binotelApiSecret),
+  };
+}
+
+function isMaskedSecret(value: unknown): boolean {
+  return typeof value === "string" && value.includes("•");
+}
+
+function secureEqual(actual: string, expected: string): boolean {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 router.get("/settings", requireAuth, async (req: any, res) => {
@@ -133,26 +159,36 @@ router.get("/settings", requireAuth, async (req: any, res) => {
     const [s] = await db.select().from(settingsTable).where(eq(settingsTable.organizationId, orgId));
     if (!s) {
       const [created] = await db.insert(settingsTable).values({ organizationId: orgId }).returning();
-      return res.json(created);
+      return res.json(safeSettings(created));
     }
-    res.json(s);
+    res.json(safeSettings(s));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-router.patch("/settings", requireAuth, async (req: any, res) => {
+router.patch("/settings", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res) => {
   const orgId = getOrgId(req);
   const upd: any = {};
   for (const f of [
     "isEnabled","greetingMessage","businessHoursStart","businessHoursEnd","afterHoursAction",
     "maxQueueSize","ringTimeoutSec","ivrEnabled","recordingEnabled","aiSummaryEnabled","mainNumber",
-    "binotelEnabled","binotelCompanyId","binotelApiKey","binotelApiSecret","binotelSecretToken",
+    "binotelEnabled","binotelCompanyId",
   ]) {
     if (req.body[f] !== undefined) upd[f] = req.body[f];
   }
+  for (const field of ["binotelApiKey", "binotelApiSecret"] as const) {
+    const value = req.body[field];
+    if (value === undefined || value === "" || isMaskedSecret(value)) continue;
+    upd[field] = value === null ? null : encrypt(String(value).trim());
+  }
   upd.updatedAt = new Date();
   try {
+    const [current] = await db.select().from(settingsTable).where(eq(settingsTable.organizationId, orgId));
+    if (req.body.binotelEnabled && !current?.binotelSecretToken) {
+      upd.binotelSecretToken = encrypt(randomBytes(32).toString("base64url"));
+    }
     const [s] = await db.update(settingsTable).set(upd).where(eq(settingsTable.organizationId, orgId)).returning();
-    res.json(s);
+    if (!s) return res.status(404).json({ error: "Telephony settings not found" });
+    res.json(safeSettings(s));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -477,12 +513,21 @@ async function findGuestByPhone(orgId: number, phone: string) {
 async function findOrgByBinotelCompanyId(companyId: string) {
   try {
     const rows = await db.execute(sql`
-      SELECT ts.organization_id as id FROM telephony_settings ts
+      SELECT ts.organization_id as id,
+             ts.binotel_secret_token as "secretToken",
+             o.name
+      FROM telephony_settings ts
+      JOIN organizations o ON o.id = ts.organization_id
       WHERE ts.binotel_company_id = ${companyId} AND ts.binotel_enabled = true
       LIMIT 1
     `);
-    return rows.rows[0] as { id: number } | undefined;
+    return rows.rows[0] as { id: number; name: string; secretToken: string | null } | undefined;
   } catch { return undefined; }
+}
+
+function hasValidWebhookToken(provided: unknown, stored: string | null): boolean {
+  const expected = decrypt(stored) || "";
+  return typeof provided === "string" && Boolean(expected) && secureEqual(provided, expected);
 }
 
 // Middleware to check Binotel IP (allow local for testing)
@@ -508,6 +553,9 @@ router.post("/binotel/call-settings", binotelIpGuard, async (req: any, res) => {
     // Find org
     const org = await findOrgByBinotelCompanyId(companyId);
     if (!org) return res.json({}); // Unknown org — return empty, Binotel continues normally
+    if (!hasValidWebhookToken(req.query.token, org.secretToken)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const orgId = org.id;
 
@@ -515,7 +563,7 @@ router.post("/binotel/call-settings", binotelIpGuard, async (req: any, res) => {
     const guest = callerNumber ? await findGuestByPhone(orgId, callerNumber) : undefined;
 
     // Broadcast real-time incoming call notification to all connected staff
-    broadcastToAll({
+    broadcastToOrganization(orgId, {
       type: "binotel-incoming",
       callerNumber,
       callerName: guest?.name || null,
@@ -532,7 +580,7 @@ router.post("/binotel/call-settings", binotelIpGuard, async (req: any, res) => {
       return res.json({
         customerData: {
           name: guest.name,
-          description: "Гість ДОГОДА",
+          description: `Гість ${org.name}`,
           linkToCrmUrl: `${baseUrl}/maison-hd/guests`,
           linkToCrmTitle: "Відкрити в CRM",
         },
@@ -548,7 +596,7 @@ router.post("/binotel/call-settings", binotelIpGuard, async (req: any, res) => {
       },
     });
   } catch (e: any) {
-    console.error("Binotel call-settings error:", e.message);
+    logger.error({ err: e }, "Binotel call-settings failed");
     res.json({});
   }
 });
@@ -559,11 +607,14 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
   try {
     const body = req.body;
     const callDetails = body.callDetails || {};
+    let acceptedCalls = 0;
 
     for (const [generalCallId, call] of Object.entries(callDetails as Record<string, any>)) {
       const companyId = String(call.companyID || "");
       const org = await findOrgByBinotelCompanyId(companyId);
       if (!org) continue;
+      if (!hasValidWebhookToken(req.query.token, org.secretToken)) continue;
+      acceptedCalls += 1;
 
       const orgId = org.id;
       const externalNumber = call.externalNumber || call.callerIDNum || "";
@@ -637,7 +688,7 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
       }
 
       // Broadcast completion to UI
-      broadcastToAll({
+      broadcastToOrganization(orgId, {
         type: "binotel-completed",
         callLogId: callLog.id,
         callerNumber: externalNumber,
@@ -650,22 +701,38 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
       });
     }
 
+    if (Object.keys(callDetails).length > 0 && acceptedCalls === 0) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     res.json({ status: "ok" });
   } catch (e: any) {
-    console.error("Binotel call-completed error:", e.message);
-    res.status(500).json({ error: e.message });
+    logger.error({ err: e }, "Binotel call-completed failed");
+    res.status(500).json({ error: "Failed to process Binotel webhook" });
   }
 });
 
 // GET /telephony/binotel/test
 // Test endpoint — allows manual testing of the webhook (no IP check)
-router.get("/binotel/test", requireAuth, async (req: any, res) => {
-  const domain = req.headers.host || "your-domain.replit.app";
-  const protocol = req.headers["x-forwarded-proto"] || "https";
-  const base = `${protocol}://${domain}/api/telephony/binotel`;
+router.get("/binotel/test", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res) => {
+  const orgId = getOrgId(req);
+  const publicUrl = process.env.PUBLIC_URL?.replace(/\/+$/, "");
+  if (!publicUrl?.startsWith("https://")) {
+    return res.status(503).json({ error: "PUBLIC_URL is not configured" });
+  }
+  let [settings] = await db.select().from(settingsTable).where(eq(settingsTable.organizationId, orgId));
+  if (!settings) return res.status(404).json({ error: "Telephony settings not found" });
+  if (!settings.binotelSecretToken) {
+    [settings] = await db.update(settingsTable)
+      .set({ binotelSecretToken: encrypt(randomBytes(32).toString("base64url")), updatedAt: new Date() })
+      .where(eq(settingsTable.organizationId, orgId))
+      .returning();
+  }
+  const token = decrypt(settings.binotelSecretToken);
+  const base = `${publicUrl}/api/telephony/binotel`;
+  const query = `?token=${encodeURIComponent(token || "")}`;
   res.json({
-    callSettingsUrl: `${base}/call-settings`,
-    callCompletedUrl: `${base}/call-completed`,
+    callSettingsUrl: `${base}/call-settings${query}`,
+    callCompletedUrl: `${base}/call-completed${query}`,
     instructions: {
       step1: "Зайдіть в Binotel кабінет → API та інтеграції",
       step2: `Вставте URL API CALL SETTINGS: ${base}/call-settings`,
@@ -673,6 +740,40 @@ router.get("/binotel/test", requireAuth, async (req: any, res) => {
       step4: "Збережіть Company ID з Binotel в налаштуваннях системи",
     },
   });
+});
+
+router.post("/binotel/test-connection", requireAuth, requireRole("super_admin", "owner", "manager"), async (req: any, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const [settings] = await db.select().from(settingsTable).where(eq(settingsTable.organizationId, orgId));
+    const key = decrypt(settings?.binotelApiKey) || "";
+    const secret = decrypt(settings?.binotelApiSecret) || "";
+    if (!key || !secret) {
+      return res.status(400).json({ error: "Збережіть API Key та API Secret перед перевіркою" });
+    }
+    const response = await fetch(`${BINOTEL_API_BASE}/stats/all-incoming-calls-since.json`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        timestamp: Math.floor(Date.now() / 1000) - 300,
+        key,
+        secret,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const result = await response.json().catch(() => ({})) as any;
+    if (!response.ok || result.status !== "success") {
+      logger.warn({ orgId, status: response.status, binotelCode: result.code }, "Binotel connection test rejected");
+      return res.status(502).json({
+        error: "Binotel відхилив підключення. Перевірте нові API Key та API Secret.",
+        code: result.code || null,
+      });
+    }
+    res.json({ status: "success" });
+  } catch (e: any) {
+    logger.error({ err: e, orgId }, "Binotel connection test failed");
+    res.status(502).json({ error: "Не вдалося з'єднатися з Binotel" });
+  }
 });
 
 export default router;
