@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTelephony } from "@/contexts/telephony-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,22 @@ const SCENARIO_LABELS: Record<string, string> = {
   upsell: "Продаж", confirmation: "Підтвердження", general: "Загальне",
 };
 
+const OUTCOME_LABELS: Record<string, string> = {
+  booking_confirmed: "Бронювання підтверджено",
+  booking_pending: "Рішення щодо бронювання очікується",
+  information: "Інформаційний дзвінок",
+  refusal: "Відмова від бронювання",
+  complaint: "Скарга",
+  other: "Інший результат",
+};
+
+const SATISFACTION_LABELS: Record<string, string> = {
+  satisfied: "Гість залишився задоволеним",
+  neutral: "Нейтральне враження",
+  dissatisfied: "Гість залишився незадоволеним",
+  unknown: "Недостатньо даних",
+};
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function TelephonyPage() {
   const [tab, setTab] = useState("dashboard");
@@ -132,6 +148,8 @@ export default function TelephonyPage() {
   // Call log detail
   const [selectedCall, setSelectedCall] = useState<any>(null);
   const [summarizing, setSummarizing] = useState(false);
+  const [autoAnalyzing, setAutoAnalyzing] = useState(false);
+  const analysisBatchRunning = useRef(false);
 
   // Script modals
   const [scriptModal, setScriptModal] = useState(false);
@@ -179,6 +197,7 @@ export default function TelephonyPage() {
       setSettingsForm(se);
     } catch { toast({ title: "Помилка завантаження", variant: "destructive" }); }
     setLoading(false);
+    void analyzePendingCalls();
   }
 
   useEffect(() => { load(); }, []);
@@ -196,6 +215,41 @@ export default function TelephonyPage() {
       toast({ title: "AI-аналіз недоступний", description: e.message, variant: "destructive" });
     }
     setSummarizing(false);
+  }
+
+  async function analyzeRecording(callId: number) {
+    setSummarizing(true);
+    try {
+      const res = await fetch(`${API}/calls/${callId}/analyze-recording`, { method: "POST", headers: h() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Не вдалося проаналізувати запис");
+      setSelectedCall(data);
+      setCalls(prev => prev.map(c => c.id === callId ? data : c));
+      toast({ title: "Запис дзвінка проаналізовано" });
+    } catch (e: any) {
+      toast({ title: "AI-аналіз недоступний", description: e.message, variant: "destructive" });
+    }
+    setSummarizing(false);
+  }
+
+  async function analyzePendingCalls() {
+    if (analysisBatchRunning.current) return;
+    analysisBatchRunning.current = true;
+    setAutoAnalyzing(true);
+    try {
+      const res = await fetch(`${API}/binotel/analyze-pending`, { method: "POST", headers: h() });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.analyses) && data.analyses.length > 0) {
+        const byId = new Map(data.analyses.map((call: any) => [call.id, call]));
+        setCalls(prev => prev.map(call => byId.get(call.id) || call));
+        setSelectedCall((current: any) => current && byId.get(current.id) ? byId.get(current.id) : current);
+      }
+    } catch {
+      // Automatic analysis retries the next time the journal is refreshed.
+    } finally {
+      analysisBatchRunning.current = false;
+      setAutoAnalyzing(false);
+    }
   }
 
   async function handleSaveScript() {
@@ -335,6 +389,11 @@ export default function TelephonyPage() {
             <p className="text-muted-foreground text-sm">Call-центр з AI аналізом, IVR та внутрішнім зв'язком WebRTC</p>
           </div>
           <div className="flex gap-2 flex-wrap">
+            {autoAnalyzing && (
+              <Badge variant="outline" className="gap-1 text-blue-600 border-blue-200">
+                <Loader2 size={12} className="animate-spin" /> AI аналізує нові дзвінки
+              </Badge>
+            )}
             <Button variant="outline" size="sm" onClick={load}><RefreshCw size={13} className="mr-1" />Оновити</Button>
             <Button variant="outline" size="sm" onClick={() => { setLogModal(true); setLogForm({ direction: "inbound", callerNumber: "", callerName: "", status: "completed", durationSec: 0, notes: "" }); }}>
               <Plus size={13} className="mr-1" />Фіксувати дзвінок
@@ -649,9 +708,37 @@ export default function TelephonyPage() {
                           </span>
                         </div>
                       )}
+                      {selectedCall.aiAnalysis?.sentimentReason && (
+                        <p className="text-xs text-muted-foreground">{selectedCall.aiAnalysis.sentimentReason}</p>
+                      )}
+                      {selectedCall.aiAnalysis?.analysisStatus === "completed" && (
+                        <div className="space-y-2 rounded border p-2">
+                          <div>
+                            <p className="text-xs font-medium text-muted-foreground">Чи залишився гість задоволеним</p>
+                            <p className="text-sm font-medium">
+                              {SATISFACTION_LABELS[selectedCall.aiAnalysis.guestSatisfaction] || "Недостатньо даних"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium text-muted-foreground">Фінал розмови</p>
+                            <p className="text-sm font-medium">
+                              {OUTCOME_LABELS[selectedCall.aiAnalysis.outcome] || "Інший результат"}
+                            </p>
+                            {selectedCall.aiAnalysis.outcomeReason && (
+                              <p className="text-xs text-muted-foreground mt-0.5">{selectedCall.aiAnalysis.outcomeReason}</p>
+                            )}
+                          </div>
+                          {selectedCall.aiAnalysis.refusalReason && (
+                            <div className="rounded bg-red-50 p-2">
+                              <p className="text-xs font-medium text-red-700">Причина відмови</p>
+                              <p className="text-sm text-red-800">{selectedCall.aiAnalysis.refusalReason}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {selectedCall.aiActionItemsParsed?.length > 0 && (
                         <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">Дії:</p>
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Як підвищити шанс бронювання:</p>
                           <ul className="text-xs space-y-1">
                             {selectedCall.aiActionItemsParsed.map((item: string, i: number) => (
                               <li key={i} className="flex items-start gap-1"><ChevronRight size={10} className="mt-0.5 shrink-0 text-blue-500" />{item}</li>
@@ -660,6 +747,18 @@ export default function TelephonyPage() {
                         </div>
                       )}
                     </div>
+                  ) : selectedCall.aiAnalysis?.analysisStatus === "recording_unavailable" ? (
+                    <div className="rounded bg-amber-50 p-2 text-xs text-amber-800">
+                      Binotel не надав запис цієї розмови, тому змістовний AI-аналіз неможливий.
+                    </div>
+                  ) : selectedCall.aiAnalysis?.analysisStatus === "no_speech" ? (
+                    <div className="rounded bg-muted/50 p-2 text-xs text-muted-foreground">
+                      У записі не виявлено достатньо мовлення для аналізу.
+                    </div>
+                  ) : selectedCall.externalCallId && selectedCall.status === "completed" && (selectedCall.durationSec || 0) >= 10 ? (
+                    <Button size="sm" className="w-full" onClick={() => analyzeRecording(selectedCall.id)} disabled={summarizing}>
+                      {summarizing ? <><RefreshCw size={13} className="mr-1 animate-spin" />Аналіз запису...</> : <><Bot size={13} className="mr-1" />Проаналізувати запис розмови</>}
+                    </Button>
                   ) : selectedCall.notes && !selectedCall.notes.startsWith("Binotel:") && !selectedCall.notes.startsWith("Binotel REST:") ? (
                     <Button size="sm" className="w-full" onClick={() => summarizeCall(selectedCall.id)} disabled={summarizing}>
                       {summarizing ? <><RefreshCw size={13} className="mr-1 animate-spin" />Аналіз...</> : <><Bot size={13} className="mr-1" />AI Аналіз розмови</>}

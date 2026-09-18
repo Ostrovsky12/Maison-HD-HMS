@@ -3,6 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { db } from "../db/index.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { speechToText } from "@workspace/integrations-openai-ai-server/audio";
 import { eq, and, desc, asc, gte, count, sql } from "drizzle-orm";
 import {
   pgTable, serial, integer, smallint, varchar, text, boolean,
@@ -157,6 +158,43 @@ function hasAnalyzableCallNotes(notes: string | null | undefined): boolean {
   return text.length >= 20 && !text.startsWith("Binotel:") && !text.startsWith("Binotel REST:");
 }
 
+type StoredCallAnalysis = {
+  analysisStatus: "completed" | "recording_unavailable" | "no_speech" | "failed";
+  guestSatisfaction?: "satisfied" | "neutral" | "dissatisfied" | "unknown";
+  outcome?: "booking_confirmed" | "booking_pending" | "information" | "refusal" | "complaint" | "other";
+  outcomeReason?: string;
+  refusalReason?: string | null;
+  recommendations?: string[];
+  evidence?: string[];
+  sentimentReason?: string;
+};
+
+function parseStoredCallAnalysis(value: string | null | undefined): StoredCallAnalysis | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && !Array.isArray(parsed) && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function callForClient(call: typeof callLogsTable.$inferSelect) {
+  const aiAnalysis = parseStoredCallAnalysis(call.aiActionItems);
+  return {
+    ...call,
+    aiAnalysis,
+    aiActionItemsParsed: aiAnalysis?.recommendations || (() => {
+      try {
+        const legacy = JSON.parse(call.aiActionItems || "[]");
+        return Array.isArray(legacy) ? legacy : [];
+      } catch {
+        return [];
+      }
+    })(),
+  };
+}
+
 async function requestBinotel(method: string, key: string, secret: string, params: Record<string, unknown> = {}) {
   const response = await fetch(`${BINOTEL_API_BASE}/${method}.json`, {
     method: "POST",
@@ -172,6 +210,164 @@ async function requestBinotel(method: string, key: string, secret: string, param
     throw error;
   }
   return result;
+}
+
+function normalizeCallAnalysis(parsed: any): StoredCallAnalysis {
+  const satisfaction = new Set(["satisfied", "neutral", "dissatisfied", "unknown"]);
+  const outcomes = new Set(["booking_confirmed", "booking_pending", "information", "refusal", "complaint", "other"]);
+  return {
+    analysisStatus: "completed",
+    guestSatisfaction: satisfaction.has(parsed.guestSatisfaction) ? parsed.guestSatisfaction : "unknown",
+    outcome: outcomes.has(parsed.outcome) ? parsed.outcome : "other",
+    outcomeReason: String(parsed.outcomeReason || "Недостатньо даних для визначення результату."),
+    refusalReason: parsed.refusalReason ? String(parsed.refusalReason) : null,
+    recommendations: Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.slice(0, 5).map(String)
+      : [],
+    evidence: Array.isArray(parsed.evidence) ? parsed.evidence.slice(0, 4).map(String) : [],
+  };
+}
+
+async function analyzeCallContent(call: typeof callLogsTable.$inferSelect, content: string) {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-5.4-mini",
+    max_completion_tokens: 1800,
+    response_format: { type: "json_object" },
+    messages: [{
+      role: "system",
+      content: `Ти контролер якості відділу бронювання готелю. Аналізуй тільки фактичний зміст розмови.
+Не вигадуй наміри, емоції, причини чи результат. Якщо цього немає в тексті, використовуй unknown або прямо напиши, що даних недостатньо.
+Поверни лише JSON:
+{
+  "summary": "стислий зміст розмови у 2-3 реченнях",
+  "sentiment": "positive|neutral|negative",
+  "sentimentReason": "ознаки настрою гостя наприкінці розмови",
+  "guestSatisfaction": "satisfied|neutral|dissatisfied|unknown",
+  "outcome": "booking_confirmed|booking_pending|information|refusal|complaint|other",
+  "outcomeReason": "що саме стало фіналом розмови",
+  "refusalReason": "причина відмови, лише якщо гість відмовився; інакше null",
+  "recommendations": ["конкретна фраза або дія оператора, що могла підвищити шанс бронювання"],
+  "evidence": ["короткі цитати або точні факти з розмови, на яких базується висновок"]
+}`,
+    }, {
+      role: "user",
+      content: `Напрямок дзвінка: ${call.direction === "inbound" ? "вхідний" : "вихідний"}
+Тривалість: ${call.durationSec || 0} секунд
+Оператор: ${call.operatorName || "не вказано"}
+
+Текст розмови або змістовні нотатки:
+${content}`,
+    }],
+  });
+  const raw = completion.choices[0]?.message?.content || "{}";
+  const parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+  const analysis = normalizeCallAnalysis(parsed);
+  const sentiment = ["positive", "neutral", "negative"].includes(parsed.sentiment)
+    ? parsed.sentiment
+    : "neutral";
+  return {
+    summary: String(parsed.summary || "Недостатньо даних для формування підсумку."),
+    sentiment,
+    sentimentReason: String(parsed.sentimentReason || ""),
+    analysis,
+  };
+}
+
+const binotelAnalysisInFlight = new Set<number>();
+const binotelAnalysisWorkers = new Set<number>();
+
+async function analyzeBinotelRecording(call: typeof callLogsTable.$inferSelect, orgId: number) {
+  if (!call.externalCallId || binotelAnalysisInFlight.has(call.id)) return null;
+  binotelAnalysisInFlight.add(call.id);
+  try {
+    const [settings] = await db.select().from(settingsTable)
+      .where(eq(settingsTable.organizationId, orgId));
+    if (!settings?.binotelEnabled || !settings.aiSummaryEnabled) return null;
+    const key = decrypt(settings.binotelApiKey) || "";
+    const secret = decrypt(settings.binotelApiSecret) || "";
+    if (!key || !secret) return null;
+
+    const record = await requestBinotel("stats/call-record", key, secret, {
+      generalCallID: call.externalCallId,
+    });
+    if (!record.url) {
+      const unavailable: StoredCallAnalysis = { analysisStatus: "recording_unavailable" };
+      const [updated] = await db.update(callLogsTable).set({
+        aiActionItems: JSON.stringify(unavailable),
+      }).where(and(eq(callLogsTable.id, call.id), eq(callLogsTable.organizationId, orgId))).returning();
+      return callForClient(updated);
+    }
+
+    const url = new URL(String(record.url));
+    if (url.protocol !== "https:") throw new Error("Binotel returned a non-HTTPS recording URL");
+    const audioResponse = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    if (!audioResponse.ok) throw new Error(`Unable to download Binotel recording (${audioResponse.status})`);
+    const declaredSize = Number(audioResponse.headers.get("content-length") || 0);
+    if (declaredSize > 25 * 1024 * 1024) throw new Error("Binotel recording exceeds 25 MB");
+    const audio = Buffer.from(await audioResponse.arrayBuffer());
+    if (audio.length > 25 * 1024 * 1024) throw new Error("Binotel recording exceeds 25 MB");
+
+    const extension = url.pathname.toLowerCase().endsWith(".wav")
+      ? "wav"
+      : url.pathname.toLowerCase().endsWith(".webm")
+        ? "webm"
+        : "mp3";
+    const transcript = (await speechToText(audio, extension)).trim();
+    if (transcript.length < 20) {
+      const noSpeech: StoredCallAnalysis = { analysisStatus: "no_speech" };
+      const [updated] = await db.update(callLogsTable).set({
+        aiActionItems: JSON.stringify(noSpeech),
+      }).where(and(eq(callLogsTable.id, call.id), eq(callLogsTable.organizationId, orgId))).returning();
+      return callForClient(updated);
+    }
+
+    const result = await analyzeCallContent(call, transcript);
+    const storedAnalysis = {
+      ...result.analysis,
+      sentimentReason: result.sentimentReason,
+    };
+    const [updated] = await db.update(callLogsTable).set({
+      aiSummary: result.summary,
+      aiSentiment: result.sentiment,
+      aiActionItems: JSON.stringify(storedAnalysis),
+    }).where(and(eq(callLogsTable.id, call.id), eq(callLogsTable.organizationId, orgId))).returning();
+    broadcastToOrganization(orgId, { type: "binotel-analysis-completed", callLogId: call.id });
+    return callForClient(updated);
+  } catch (error) {
+    logger.warn({ err: error, orgId, callLogId: call.id }, "Binotel call analysis failed");
+    return null;
+  } finally {
+    binotelAnalysisInFlight.delete(call.id);
+  }
+}
+
+function startBinotelAnalysisWorker(orgId: number) {
+  if (binotelAnalysisWorkers.has(orgId)) return;
+  binotelAnalysisWorkers.add(orgId);
+  void (async () => {
+    try {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const [call] = await db.select().from(callLogsTable)
+          .where(and(
+            eq(callLogsTable.organizationId, orgId),
+            eq(callLogsTable.status, "completed"),
+            sql`COALESCE(${callLogsTable.durationSec}, 0) >= 10`,
+            sql`${callLogsTable.externalCallId} IS NOT NULL`,
+            sql`${callLogsTable.aiSummary} IS NULL`,
+            sql`${callLogsTable.aiActionItems} IS NULL`,
+          ))
+          .orderBy(asc(callLogsTable.startedAt))
+          .limit(1);
+        if (!call) break;
+        await analyzeBinotelRecording(call, orgId);
+        await new Promise(resolve => setTimeout(resolve, 13_000));
+      }
+    } catch (error) {
+      logger.warn({ err: error, orgId }, "Binotel analysis worker stopped");
+    } finally {
+      binotelAnalysisWorkers.delete(orgId);
+    }
+  })();
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -221,7 +417,7 @@ router.get("/lines", requireAuth, async (req: any, res) => {
     const rows = await db.select().from(linesTable)
       .where(and(eq(linesTable.organizationId, orgId), eq(linesTable.isActive, true)))
       .orderBy(asc(linesTable.extension));
-    res.json(rows);
+    res.json(rows.map(callForClient));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -303,46 +499,35 @@ router.post("/calls/:id/summarize", requireAuth, async (req: any, res) => {
         error: "AI-аналіз доступний лише після додавання змістовних нотаток або транскрипції розмови.",
       });
     }
-    const notesText = call.notes!.trim();
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-nano",
-      max_completion_tokens: 1024,
-      messages: [{
-        role: "system",
-        content: `Ти асистент call-центру готелю. Аналізуй нотатки дзвінків та генеруй структуровані підсумки.
-Відповідай строго в JSON форматі:
-{
-  "summary": "Короткий підсумок 1-2 речення",
-  "sentiment": "positive|neutral|negative",
-  "sentimentReason": "Чому такий настрій",
-  "actionItems": ["дія 1", "дія 2"],
-  "category": "booking|complaint|inquiry|upsell|confirmation|other",
-  "urgency": "low|medium|high"
-}`
-      }, {
-        role: "user",
-        content: `Проаналізуй дзвінок:
-Напрямок: ${call.direction === "inbound" ? "Вхідний" : "Вихідний"}
-Тривалість: ${call.durationSec}с
-Статус: ${call.status}
-Нотатки оператора: ${notesText}`,
-      }],
-    });
-
-    let parsed: any = {};
-    try {
-      const raw = completion.choices[0]?.message?.content || "{}";
-      parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
-    } catch { parsed = { summary: completion.choices[0]?.message?.content, sentiment: "neutral", actionItems: [] }; }
-
+    const result = await analyzeCallContent(call, call.notes!.trim());
+    const storedAnalysis = { ...result.analysis, sentimentReason: result.sentimentReason };
     const [updated] = await db.update(callLogsTable).set({
-      aiSummary: parsed.summary,
-      aiSentiment: parsed.sentiment,
-      aiActionItems: JSON.stringify(parsed.actionItems || []),
-    }).where(eq(callLogsTable.id, id)).returning();
+      aiSummary: result.summary,
+      aiSentiment: result.sentiment,
+      aiActionItems: JSON.stringify(storedAnalysis),
+    }).where(and(eq(callLogsTable.id, id), eq(callLogsTable.organizationId, orgId))).returning();
 
-    res.json({ ...updated, aiCategory: parsed.category, aiUrgency: parsed.urgency, aiSentimentReason: parsed.sentimentReason, aiActionItemsParsed: parsed.actionItems || [] });
+    res.json(callForClient(updated));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/calls/:id/analyze-recording", requireAuth, async (req: any, res) => {
+  const orgId = getOrgId(req);
+  const id = parseInt(req.params.id);
+  try {
+    const [call] = await db.select().from(callLogsTable)
+      .where(and(eq(callLogsTable.id, id), eq(callLogsTable.organizationId, orgId)));
+    if (!call) return res.status(404).json({ error: "Call not found" });
+    if (!call.externalCallId) return res.status(422).json({ error: "Дзвінок не пов’язаний із записом Binotel." });
+    if (call.status !== "completed" || (call.durationSec || 0) < 10) {
+      return res.status(422).json({ error: "Для цього дзвінка немає завершеної розмови для аналізу." });
+    }
+    const analyzed = await analyzeBinotelRecording(call, orgId);
+    if (!analyzed) return res.status(502).json({ error: "Не вдалося отримати або проаналізувати запис розмови." });
+    res.json(analyzed);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── AI Suggest script ─────────────────────────────────────────────────────────
@@ -698,6 +883,9 @@ router.post("/binotel/call-completed", binotelIpGuard, async (req: any, res) => 
         operatorName,
         isNewCaller,
       });
+      if (status === "completed" && billsec >= 10) {
+        startBinotelAnalysisWorker(orgId);
+      }
     }
 
     if (Object.keys(callDetails).length > 0 && acceptedCalls === 0) {
@@ -763,6 +951,33 @@ router.post("/binotel/test-connection", requireAuth, requireRole("super_admin", 
   }
 });
 
+router.post("/binotel/analyze-pending", requireAuth, async (req: any, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const pending = await db.select().from(callLogsTable)
+      .where(and(
+        eq(callLogsTable.organizationId, orgId),
+        eq(callLogsTable.status, "completed"),
+        sql`COALESCE(${callLogsTable.durationSec}, 0) >= 10`,
+        sql`${callLogsTable.externalCallId} IS NOT NULL`,
+        sql`${callLogsTable.aiSummary} IS NULL`,
+        sql`${callLogsTable.aiActionItems} IS NULL`,
+      ))
+      .orderBy(desc(callLogsTable.startedAt))
+      .limit(3);
+
+    const analyses = [];
+    for (const call of pending) {
+      const analyzed = await analyzeBinotelRecording(call, orgId);
+      if (analyzed) analyses.push(analyzed);
+    }
+    res.json({ processed: analyses.length, analyses });
+  } catch (e: any) {
+    logger.error({ err: e, orgId }, "Pending Binotel analysis failed");
+    res.status(500).json({ error: "Не вдалося запустити автоматичний аналіз дзвінків" });
+  }
+});
+
 router.post("/binotel/sync", requireAuth, async (req: any, res) => {
   const orgId = getOrgId(req);
   try {
@@ -791,6 +1006,7 @@ router.post("/binotel/sync", requireAuth, async (req: any, res) => {
         eq(callLogsTable.organizationId, orgId),
         sql`(${callLogsTable.notes} LIKE 'Binotel:%' OR ${callLogsTable.notes} LIKE 'Binotel REST:%')`,
         sql`${callLogsTable.aiSummary} IS NOT NULL`,
+        sql`(${callLogsTable.aiActionItems} IS NULL OR ${callLogsTable.aiActionItems} NOT LIKE '%"analysisStatus":"completed"%')`,
       ));
       await tx.execute(sql`
         DELETE FROM call_logs duplicate
@@ -852,6 +1068,7 @@ router.post("/binotel/sync", requireAuth, async (req: any, res) => {
     if (imported > 0) {
       broadcastToOrganization(orgId, { type: "binotel-synced", imported });
     }
+    startBinotelAnalysisWorker(orgId);
     res.json({ imported });
   } catch (e: any) {
     logger.error({ err: e, orgId }, "Binotel REST synchronization failed");
