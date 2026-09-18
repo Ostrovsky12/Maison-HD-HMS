@@ -15,3 +15,4 @@
 - [Ambiguous DPS outcomes](prro-ambiguous-outcomes.md) — never resend after an uncertain transport result until signed DPS state proves it safe
 - [Tenant-scoped realtime events](tenant-realtime-events.md) — authenticate WebSockets and keep peer signaling/provider broadcasts inside one organization
 - [Tenant-owned integration credentials](tenant-integration-credentials.md) — each tenant connects and rotates its own provider keys; never share credentials globally
+- [Binotel delivery fallback](binotel-delivery-fallback.md) — use webhooks for realtime events and tenant REST sync to recover completed calls without duplicates

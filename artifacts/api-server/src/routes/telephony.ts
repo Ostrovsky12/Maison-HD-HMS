@@ -152,6 +152,23 @@ function secureEqual(actual: string, expected: string): boolean {
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
+async function requestBinotel(method: string, key: string, secret: string, params: Record<string, unknown> = {}) {
+  const response = await fetch(`${BINOTEL_API_BASE}/${method}.json`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...params, key, secret }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const result = await response.json().catch(() => ({})) as any;
+  if (!response.ok || result.status !== "success") {
+    const error = new Error("Binotel API request failed") as Error & { code?: string; httpStatus?: number };
+    error.code = result.code;
+    error.httpStatus = response.status;
+    throw error;
+  }
+  return result;
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 router.get("/settings", requireAuth, async (req: any, res) => {
   const orgId = getOrgId(req);
@@ -751,28 +768,90 @@ router.post("/binotel/test-connection", requireAuth, requireRole("super_admin", 
     if (!key || !secret) {
       return res.status(400).json({ error: "Збережіть API Key та API Secret перед перевіркою" });
     }
-    const response = await fetch(`${BINOTEL_API_BASE}/stats/all-incoming-calls-since.json`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        timestamp: Math.floor(Date.now() / 1000) - 300,
-        key,
-        secret,
-      }),
-      signal: AbortSignal.timeout(10_000),
+    await requestBinotel("stats/all-incoming-calls-since", key, secret, {
+      timestamp: Math.floor(Date.now() / 1000) - 300,
     });
-    const result = await response.json().catch(() => ({})) as any;
-    if (!response.ok || result.status !== "success") {
-      logger.warn({ orgId, status: response.status, binotelCode: result.code }, "Binotel connection test rejected");
-      return res.status(502).json({
-        error: "Binotel відхилив підключення. Перевірте нові API Key та API Secret.",
-        code: result.code || null,
-      });
-    }
     res.json({ status: "success" });
   } catch (e: any) {
-    logger.error({ err: e, orgId }, "Binotel connection test failed");
-    res.status(502).json({ error: "Не вдалося з'єднатися з Binotel" });
+    logger.warn({ orgId, binotelCode: e.code, httpStatus: e.httpStatus }, "Binotel connection test rejected");
+    res.status(502).json({
+      error: "Binotel відхилив підключення. Перевірте API Key та API Secret.",
+      code: e.code || null,
+    });
+  }
+});
+
+router.post("/binotel/sync", requireAuth, async (req: any, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const [settings] = await db.select().from(settingsTable).where(eq(settingsTable.organizationId, orgId));
+    if (!settings?.binotelEnabled) return res.json({ imported: 0, skipped: true });
+    const key = decrypt(settings.binotelApiKey) || "";
+    const secret = decrypt(settings.binotelApiSecret) || "";
+    if (!key || !secret) return res.status(400).json({ error: "Binotel credentials are not configured" });
+
+    const timestamp = Math.floor(Date.now() / 1000) - 48 * 60 * 60;
+    const [incoming, outgoing] = await Promise.all([
+      requestBinotel("stats/all-incoming-calls-since", key, secret, { timestamp }),
+      requestBinotel("stats/all-outgoing-calls-since", key, secret, { timestamp }),
+    ]);
+    const calls = [
+      ...Object.entries((incoming.callDetails || {}) as Record<string, any>),
+      ...Object.entries((outgoing.callDetails || {}) as Record<string, any>),
+    ];
+    let imported = 0;
+
+    for (const [generalCallId, call] of calls) {
+      const externalCallId = String(generalCallId);
+      const [existing] = await db.select({ id: callLogsTable.id }).from(callLogsTable)
+        .where(and(
+          eq(callLogsTable.organizationId, orgId),
+          eq(callLogsTable.externalCallId, externalCallId),
+        ))
+        .limit(1);
+      if (existing) continue;
+
+      const callType = Number(call.callType ?? 0);
+      const direction = callType === 1 ? "outbound" : callType === 2 ? "internal" : "inbound";
+      const externalNumber = String(call.externalNumber || call.callerIDNum || "");
+      const billsec = Number(call.billsec || 0);
+      const waitsec = Number(call.waitsec || 0);
+      const disposition = String(call.disposition || "NOANSWER");
+      const status = ["NOANSWER", "BUSY", "FAILED"].includes(disposition) ? "missed" : "completed";
+      const startTime = Number(call.startTime || Math.floor(Date.now() / 1000));
+      const operatorName = String(call.employeeData?.name || "");
+      const operatorEmail = String(call.employeeData?.email || "");
+      const clientName = String(call.customerData?.name || "");
+      const guest = externalNumber ? await findGuestByPhone(orgId, externalNumber) : undefined;
+
+      await db.insert(callLogsTable).values({
+        organizationId: orgId,
+        direction,
+        callerNumber: externalNumber || null,
+        callerName: clientName || guest?.name || null,
+        status,
+        durationSec: billsec,
+        waitTimeSec: waitsec,
+        startedAt: new Date(startTime * 1000),
+        endedAt: new Date((startTime + Math.max(billsec, 0)) * 1000),
+        recordingUrl: call.recordingURL || call.recordingUrl || null,
+        externalCallId,
+        operatorName: operatorName || null,
+        operatorEmail: operatorEmail || null,
+        guestId: guest?.id || null,
+        isNewCaller: Number(call.isNewCall ?? 0) === 1,
+        notes: `Binotel REST: ${direction === "inbound" ? "Вхідний" : "Вихідний"} дзвінок. Оператор: ${operatorName || "невідомо"}`,
+      });
+      imported += 1;
+    }
+
+    if (imported > 0) {
+      broadcastToOrganization(orgId, { type: "binotel-synced", imported });
+    }
+    res.json({ imported });
+  } catch (e: any) {
+    logger.error({ err: e, orgId }, "Binotel REST synchronization failed");
+    res.status(502).json({ error: "Не вдалося синхронізувати дзвінки Binotel" });
   }
 });
 

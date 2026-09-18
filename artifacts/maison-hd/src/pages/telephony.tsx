@@ -158,6 +158,7 @@ export default function TelephonyPage() {
   async function load() {
     setLoading(true);
     try {
+      await fetch(`${API}/binotel/sync`, { method: "POST", headers: h() }).catch(() => null);
       const [cR, lR, sR, vmR, iR, stR, seR] = await Promise.all([
         fetch(`${API}/calls`, { headers: h() }),
         fetch(`${API}/lines`, { headers: h() }),
