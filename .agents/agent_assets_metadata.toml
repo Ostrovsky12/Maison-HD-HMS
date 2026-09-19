@@ -57,3 +57,17 @@ mtime_ms = 1789800626307
 storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:b611ff1f-342c-4c82-a9e7-87ef30a9353c/f0ad9941-447c-4025-9353-c4b11682a384/131bcdc1-4d93-4702-909a-fcbe4d1bf504"
 storage_version_token = "1789801082496948"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "K2vutFJOw6DcM4G5y0ZND"
+uri = "file://attached_assets/maison-hd-accounting-audit.zip"
+type = "unspecified"
+title = "Завантажити maison-hd-accounting-audit.zip"
+description = "ZIP-архів бухгалтерії Maison HD для аудиту, 709 КБ. Файл перевірено — архів не пошкоджений."
+logical_id = "98cbda4a-ba4b-4d96-b776-d8bcdc2a072d"
+content_hash = "sha256:0be0734c1a41487c8e588bb24fb00ad0cd9975d8dc70cb321fead9b24200bb95"
+size = 725879
+mtime_ms = 1789801178372
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:b611ff1f-342c-4c82-a9e7-87ef30a9353c/98cbda4a-ba4b-4d96-b776-d8bcdc2a072d/5778369d-b6da-4e87-a66a-7023d845908f"
+storage_version_token = "1789801183101565"
+content_type = "application/octet-stream"
