@@ -6,30 +6,35 @@ id = "fJmH7InscsNrPez3fjlgr"
 uri = "file://artifacts/maison-hd/public/brand/maison-hd-icon.svg"
 type = "image"
 title = "Maison HD — Іконка (M монограма)"
+logical_id = "fa9c8024-f7a5-480c-a893-49092569496d"
 
 [[outputs]]
 id = "UmQcfJvoeS-H_2YOO--Gf"
 uri = "file://artifacts/maison-hd/public/brand/maison-hd-logo.svg"
 type = "image"
 title = "Maison HD — Повний логотип з текстом"
+logical_id = "f4cf6551-f5df-45b5-9280-c38e7c35f950"
 
 [[outputs]]
 id = "qi-i_Rm11FUBVtCVpInmm"
 uri = "file://artifacts/maison-hd/public/brand/maison-hd-instagram.png"
 type = "image"
 title = "Maison HD — Instagram (1000×1000 PNG)"
+logical_id = "0297d6df-e88c-4f9c-94c9-2c778b8278ca"
 
 [[outputs]]
 id = "6g1zDhN9vK3dlsePkN9Nq"
 uri = "file://artifacts/maison-hd/public/brand/maison-hd-logo.png"
 type = "image"
 title = "Maison HD — Повний логотип (2800×640 PNG)"
+logical_id = "9c803f6a-3bc2-4b69-baf7-5fd0e15cc789"
 
 [[outputs]]
 id = "IyZnax9rAbXVQw2DvIRec"
 uri = "file://telephony-export.zip"
 type = "unspecified"
 title = "Telephony Module — Maison HD"
+logical_id = "a75eae87-ccac-4106-9391-e6a5b2a60760"
 
 [[outputs]]
 id = "k1JlyHC9AkgzpiKWC2Ajd"
@@ -37,3 +42,18 @@ uri = "file://maison-hd-audit.zip"
 type = "unspecified"
 title = "Maison HD — Аудит коду"
 description = "Вихідний код: API Server, Maison HD HMS, DOGODA Guide, Room Concierge, Waiter, DB schema. Без node_modules та dist."
+logical_id = "0702c90c-9b3f-40bb-b8a6-1f8491a0babe"
+
+[[outputs]]
+id = "A_9AJLJrxxoNJQ3UeBskT"
+uri = "file://exports/maison-hd-accounting-audit-2026-09-19.zip"
+type = "unspecified"
+title = "Maison HD — бухгалтерія: пакет для аудиту"
+description = "ZIP із 110 файлами: frontend, API, бухгалтерське ядро, ПРРО, схеми БД, міграції, OpenAPI-контракти, README з архітектурою, manifest і SHA-256. Секрети та дані БД не включені."
+logical_id = "f0ad9941-447c-4025-9353-c4b11682a384"
+content_hash = "sha256:0be0734c1a41487c8e588bb24fb00ad0cd9975d8dc70cb321fead9b24200bb95"
+size = 725879
+mtime_ms = 1789800626307
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:b611ff1f-342c-4c82-a9e7-87ef30a9353c/f0ad9941-447c-4025-9353-c4b11682a384/e91eb889-e214-4ec3-8028-463cc9226835"
+storage_version_token = "1789800639243672"
+content_type = "application/octet-stream"
