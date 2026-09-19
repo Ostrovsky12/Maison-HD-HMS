@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="money"><xs:restriction base="xs:decimal"><xs:fractionDigits value="2"/><xs:minInclusive value="0"/></xs:restriction></xs:simpleType>
+  <xs:element name="ZREPORT"><xs:complexType><xs:sequence>
+    <xs:element name="ZREPHEAD"><xs:complexType><xs:sequence>
+      <xs:element name="TIN" type="xs:string"/><xs:element name="ORGNM" type="xs:string"/>
+      <xs:element name="POINTNM" type="xs:string"/><xs:element name="POINTADDR" type="xs:string"/>
+      <xs:element name="ORDERDATE" type="xs:string"/><xs:element name="ORDERTIME" type="xs:string"/>
+      <xs:element name="ORDERNUM" type="xs:nonNegativeInteger"/><xs:element name="CASHDESKNUM" type="xs:string"/>
+      <xs:element name="CASHREGISTERNUM" type="xs:string"/><xs:element name="CASHIER" type="xs:string"/>
+      <xs:element name="MAC" type="xs:string" minOccurs="0"/><xs:element name="VER" type="xs:positiveInteger"/>
+    </xs:sequence></xs:complexType></xs:element>
+    <xs:element name="ZREPREALIZ"><xs:complexType><xs:sequence><xs:element name="SUM" type="money"/></xs:sequence></xs:complexType></xs:element>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>

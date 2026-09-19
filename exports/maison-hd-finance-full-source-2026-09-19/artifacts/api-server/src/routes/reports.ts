@@ -1,0 +1,675 @@
+import { Router } from "express";
+import { db, pool } from "@workspace/db";
+import { bookingsTable, unitsTable, propertiesTable, guestsTable, minibarChargesTable } from "@workspace/db";
+import { bookingAddonsTable, addonsTable, guestServiceOrdersTable } from "@workspace/db/schema";
+import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
+import { requireAuth } from "../lib/auth.js";
+
+const router = Router();
+const getOrg = (req: any) => req.user?.organizationId;
+const today = () => new Date().toISOString().slice(0, 10);
+const monthStart = () => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); };
+
+// Helper: get unit IDs for an org
+async function getOrgUnitIds(orgId: number): Promise<number[]> {
+  const units = await db.select({ id: unitsTable.id })
+    .from(unitsTable)
+    .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+    .where(eq(propertiesTable.organizationId, orgId));
+  return units.map(u => u.id);
+}
+
+// Helper: compute summary for a date range
+async function computeSummary(unitIds: number[], from: string, to: string) {
+  if (unitIds.length === 0) return null;
+  const bookings = await db.select({
+    status: bookingsTable.status,
+    totalAmount: bookingsTable.totalAmount,
+    paidAmount: bookingsTable.paidAmount,
+    checkIn: bookingsTable.checkIn,
+    checkOut: bookingsTable.checkOut,
+    adults: bookingsTable.adults,
+    childrenUnder6: bookingsTable.childrenUnder6,
+    childrenOver6: bookingsTable.childrenOver6,
+    source: bookingsTable.source,
+  }).from(bookingsTable)
+    .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to)));
+
+  const active = bookings.filter(b => b.status !== "cancelled");
+  const periodDays = Math.max(1, Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1);
+  const totalRevenue = active.reduce((s, b) => s + parseFloat(b.totalAmount || "0"), 0);
+  const paidRevenue = active.reduce((s, b) => s + parseFloat(b.paidAmount || "0"), 0);
+  const totalNights = active.reduce((s, b) => s + Math.max(0, Math.floor((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000)), 0);
+  const avgOccupancy = Math.min(100, Math.round((totalNights / (unitIds.length * periodDays)) * 100));
+  const adr = totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0;
+  const revpar = unitIds.length > 0 ? Math.round(totalRevenue / (unitIds.length * periodDays)) : 0;
+  const avgStay = active.length > 0 ? +(totalNights / active.length).toFixed(1) : 0;
+  const totalGuests = active.reduce((s, b) => s + (b.adults || 1) + (b.childrenUnder6 || 0) + (b.childrenOver6 || 0), 0);
+
+  const bySource: Record<string, number> = {};
+  for (const b of active) { const src = b.source || "direct"; bySource[src] = (bySource[src] || 0) + parseFloat(b.totalAmount || "0"); }
+
+  return {
+    from, to, periodDays,
+    bookings: active.length,
+    cancelled: bookings.filter(b => b.status === "cancelled").length,
+    revenue: totalRevenue,
+    paid: paidRevenue,
+    outstanding: totalRevenue - paidRevenue,
+    nights: totalNights,
+    occupancy: avgOccupancy,
+    adr,
+    revpar,
+    avgStay,
+    totalGuests,
+    bySource: Object.entries(bySource).map(([source, amount]) => ({ source, amount })).sort((a, b) => b.amount - a.amount),
+  };
+}
+
+// GET /reports/summary?from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get("/summary", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+    const unitIds = await getOrgUnitIds(orgId);
+    if (unitIds.length === 0) return res.json({ period: { from, to, days: 1 }, bookings: { total: 0, confirmed: 0, cancelled: 0 }, revenue: { total: 0, paid: 0, outstanding: 0 }, guests: { total: 0, avgStay: "0", totalNights: 0 }, occupancy: { avgPercent: 0, totalUnits: 0, totalNights: 0, periodDays: 1 }, kpis: { avgRevPerNight: 0, revPar: 0 }, bySource: [] });
+
+    const s = await computeSummary(unitIds, from, to);
+    if (!s) return res.json({});
+    res.json({
+      period: { from, to, days: s.periodDays },
+      bookings: { total: s.bookings + s.cancelled, confirmed: s.bookings, cancelled: s.cancelled },
+      revenue: { total: s.revenue, paid: s.paid, outstanding: s.outstanding },
+      guests: { total: s.totalGuests, avgStay: String(s.avgStay), totalNights: s.nights },
+      occupancy: { avgPercent: s.occupancy, totalUnits: unitIds.length, totalNights: s.nights, periodDays: s.periodDays },
+      kpis: { avgRevPerNight: s.adr, revPar: s.revpar },
+      bySource: s.bySource,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/bookings?from=&to= — detailed list for print/export
+router.get("/bookings", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+    const unitIds = await getOrgUnitIds(orgId);
+    if (unitIds.length === 0) return res.json({ bookings: [] });
+
+    const rows = await db.select({
+      id: bookingsTable.id, bookingRef: bookingsTable.bookingRef, status: bookingsTable.status,
+      checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut, adults: bookingsTable.adults,
+      totalAmount: bookingsTable.totalAmount, paidAmount: bookingsTable.paidAmount,
+      paymentStatus: bookingsTable.paymentStatus, source: bookingsTable.source,
+      firstName: bookingsTable.firstName, lastName: bookingsTable.lastName, phone: bookingsTable.phone,
+      unitName: unitsTable.name,
+    }).from(bookingsTable)
+      .leftJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
+      .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to)))
+      .orderBy(desc(bookingsTable.checkIn));
+
+    res.json({ bookings: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/housekeeping — current cleaning status
+router.get("/housekeeping", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const units = await db.select({ id: unitsTable.id, name: unitsTable.name, housekeepingStatus: unitsTable.housekeepingStatus })
+      .from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(propertiesTable.organizationId, orgId));
+
+    const stats = { clean: 0, dirty: 0, in_progress: 0, inspected: 0 };
+    for (const u of units) { const s = u.housekeepingStatus as keyof typeof stats; if (s in stats) stats[s]++; }
+    res.json({ stats, units, total: units.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/guests?from=&to= — guest analytics
+router.get("/guests", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+    const unitIds = await getOrgUnitIds(orgId);
+    if (unitIds.length === 0) return res.json({ stats: {}, topGuests: [], repeatGuests: [] });
+
+    const rows = await db.select({
+      id: bookingsTable.id, firstName: bookingsTable.firstName, lastName: bookingsTable.lastName,
+      phone: bookingsTable.phone, email: bookingsTable.email,
+      checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
+      totalAmount: bookingsTable.totalAmount, status: bookingsTable.status, source: bookingsTable.source,
+      adults: bookingsTable.adults,
+    }).from(bookingsTable)
+      .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to)))
+      .orderBy(desc(bookingsTable.checkIn));
+
+    const active = rows.filter(b => b.status !== "cancelled");
+    const guestMap = new Map<string, { name: string; phone: string; email: string; bookings: number; revenue: number; nights: number; lastVisit: string }>();
+
+    for (const b of active) {
+      const key = b.phone || `${b.firstName}_${b.lastName}`;
+      const nights = Math.max(0, Math.floor((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000));
+      if (guestMap.has(key)) {
+        const g = guestMap.get(key)!;
+        g.bookings++; g.revenue += parseFloat(b.totalAmount || "0"); g.nights += nights;
+        if (b.checkIn > g.lastVisit) g.lastVisit = b.checkIn;
+      } else {
+        guestMap.set(key, { name: `${b.firstName || ""} ${b.lastName || ""}`.trim() || "—", phone: b.phone || "—", email: b.email || "—", bookings: 1, revenue: parseFloat(b.totalAmount || "0"), nights, lastVisit: b.checkIn });
+      }
+    }
+
+    const guests = Array.from(guestMap.values()).sort((a, b) => b.revenue - a.revenue);
+    const repeatGuests = guests.filter(g => g.bookings > 1);
+    const totalNights = active.reduce((s, b) => s + Math.max(0, Math.floor((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000)), 0);
+
+    const bySource: Record<string, number> = {};
+    for (const b of active) { const src = b.source || "direct"; bySource[src] = (bySource[src] || 0) + 1; }
+
+    res.json({
+      stats: {
+        totalUnique: guests.length,
+        repeatGuests: repeatGuests.length,
+        returnRate: guests.length > 0 ? Math.round((repeatGuests.length / guests.length) * 100) : 0,
+        avgStay: active.length > 0 ? (totalNights / active.length).toFixed(1) : "0",
+        bySource: Object.entries(bySource).map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count),
+      },
+      topGuests: guests.slice(0, 25),
+      repeatGuests: repeatGuests.slice(0, 10),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/financial?from=&to= — revenue breakdown by category & property
+router.get("/financial", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+    const unitIds = await getOrgUnitIds(orgId);
+    if (unitIds.length === 0) return res.json({ revenue: {}, byProperty: [], byPaymentStatus: {} });
+
+    const rows = await db.select({
+      id: bookingsTable.id, totalAmount: bookingsTable.totalAmount, paidAmount: bookingsTable.paidAmount,
+      paymentStatus: bookingsTable.paymentStatus, status: bookingsTable.status,
+      checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut,
+      propertyId: propertiesTable.id, propertyName: propertiesTable.name,
+    }).from(bookingsTable)
+      .leftJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
+      .leftJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to)));
+
+    const active = rows.filter(b => b.status !== "cancelled");
+    const accommodationRevenue = active.reduce((s, b) => s + parseFloat(b.totalAmount || "0"), 0);
+    const paidAmount = active.reduce((s, b) => s + parseFloat(b.paidAmount || "0"), 0);
+
+    // Minibar
+    const bookingIds = active.map(b => b.id);
+    let minibarRevenue = 0;
+    if (bookingIds.length > 0) {
+      const charges = await db.select({ totalAmount: minibarChargesTable.totalAmount })
+        .from(minibarChargesTable).where(inArray(minibarChargesTable.bookingId, bookingIds));
+      minibarRevenue = charges.reduce((s, c) => s + parseFloat(c.totalAmount || "0"), 0);
+    }
+
+    // By property
+    const propMap = new Map<number, { name: string; revenue: number; bookings: number; nights: number }>();
+    for (const b of active) {
+      const pid = b.propertyId!;
+      const nights = Math.max(0, Math.floor((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000));
+      if (propMap.has(pid)) { const p = propMap.get(pid)!; p.revenue += parseFloat(b.totalAmount || "0"); p.bookings++; p.nights += nights; }
+      else propMap.set(pid, { name: b.propertyName || "—", revenue: parseFloat(b.totalAmount || "0"), bookings: 1, nights });
+    }
+
+    // By payment status
+    const byPayStatus: Record<string, number> = { paid: 0, partial: 0, unpaid: 0 };
+    for (const b of active) { const ps = b.paymentStatus || "unpaid"; byPayStatus[ps] = (byPayStatus[ps] || 0) + parseFloat(b.totalAmount || "0"); }
+
+    res.json({
+      revenue: { accommodation: accommodationRevenue, minibar: minibarRevenue, total: accommodationRevenue + minibarRevenue, paid: paidAmount, outstanding: accommodationRevenue - paidAmount },
+      byPaymentStatus: byPayStatus,
+      byProperty: Array.from(propMap.values()).sort((a, b) => b.revenue - a.revenue),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/units-perf?from=&to= — per-unit performance
+router.get("/units-perf", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+    const periodDays = Math.max(1, Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1);
+
+    const units = await db.select({ id: unitsTable.id, name: unitsTable.name, propertyName: propertiesTable.name })
+      .from(unitsTable).innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(propertiesTable.organizationId, orgId));
+
+    const unitIds = units.map(u => u.id);
+    if (unitIds.length === 0) return res.json({ units: [], periodDays });
+
+    const bookings = await db.select({ unitId: bookingsTable.unitId, totalAmount: bookingsTable.totalAmount, checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut, status: bookingsTable.status })
+      .from(bookingsTable)
+      .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to)));
+
+    const unitMap = new Map<number, { revenue: number; bookings: number; nights: number }>();
+    for (const u of units) unitMap.set(u.id, { revenue: 0, bookings: 0, nights: 0 });
+
+    for (const b of bookings) {
+      if (b.status === "cancelled") continue;
+      const nights = Math.max(0, Math.floor((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000));
+      const u = unitMap.get(b.unitId!);
+      if (u) { u.revenue += parseFloat(b.totalAmount || "0"); u.bookings++; u.nights += nights; }
+    }
+
+    const result = units.map(u => {
+      const s = unitMap.get(u.id)!;
+      return { id: u.id, name: u.name, propertyName: u.propertyName, revenue: s.revenue, bookings: s.bookings, nights: s.nights, occupancy: Math.min(100, Math.round((s.nights / periodDays) * 100)), adr: s.nights > 0 ? Math.round(s.revenue / s.nights) : 0 };
+    }).sort((a, b) => b.revenue - a.revenue);
+
+    res.json({ units: result, periodDays });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/comparison?p1from=&p1to=&p2from=&p2to= — two-period comparison
+router.get("/comparison", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const { p1from, p1to, p2from, p2to } = req.query as Record<string, string>;
+    if (!p1from || !p1to || !p2from || !p2to) return res.status(400).json({ error: "All 4 date params required" });
+
+    const unitIds = await getOrgUnitIds(orgId);
+    if (unitIds.length === 0) return res.json({ period1: null, period2: null });
+
+    const [period1, period2] = await Promise.all([computeSummary(unitIds, p1from, p1to), computeSummary(unitIds, p2from, p2to)]);
+    res.json({ period1, period2 });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/owner?from=&to= — executive one-pager for owner
+router.get("/owner", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+    const unitIds = await getOrgUnitIds(orgId);
+    if (unitIds.length === 0) return res.json({});
+
+    // Prev period (same length)
+    const periodDays = Math.max(1, Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1);
+    const prevTo = new Date(new Date(from).getTime() - 86400000).toISOString().slice(0, 10);
+    const prevFrom = new Date(new Date(prevTo).getTime() - (periodDays - 1) * 86400000).toISOString().slice(0, 10);
+
+    const [current, previous] = await Promise.all([computeSummary(unitIds, from, to), computeSummary(unitIds, prevFrom, prevTo)]);
+
+    // Unpaid bookings
+    const unpaid = await db.select({ id: bookingsTable.id, bookingRef: bookingsTable.bookingRef, firstName: bookingsTable.firstName, lastName: bookingsTable.lastName, totalAmount: bookingsTable.totalAmount, paidAmount: bookingsTable.paidAmount, checkIn: bookingsTable.checkIn, checkOut: bookingsTable.checkOut, unitName: unitsTable.name })
+      .from(bookingsTable).leftJoin(unitsTable, eq(bookingsTable.unitId, unitsTable.id))
+      .where(and(inArray(bookingsTable.unitId, unitIds), eq(bookingsTable.paymentStatus, "unpaid"), lte(bookingsTable.checkIn, to)))
+      .orderBy(desc(bookingsTable.totalAmount)).limit(10);
+
+    // Housekeeping snapshot
+    const hkUnits = await db.select({ housekeepingStatus: unitsTable.housekeepingStatus }).from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(propertiesTable.organizationId, orgId));
+    const hkStats = { clean: 0, dirty: 0, in_progress: 0, inspected: 0 };
+    for (const u of hkUnits) { const s = u.housekeepingStatus as keyof typeof hkStats; if (s in hkStats) hkStats[s]++; }
+
+    // Minibar revenue this period
+    const bookingIds = (await db.select({ id: bookingsTable.id }).from(bookingsTable)
+      .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to), sql`${bookingsTable.status} != 'cancelled'`))).map(b => b.id);
+    let minibarRevenue = 0;
+    if (bookingIds.length > 0) {
+      const charges = await db.select({ totalAmount: minibarChargesTable.totalAmount }).from(minibarChargesTable).where(inArray(minibarChargesTable.bookingId, bookingIds));
+      minibarRevenue = charges.reduce((s, c) => s + parseFloat(c.totalAmount || "0"), 0);
+    }
+
+    res.json({ current, previous, minibarRevenue, unpaidBookings: unpaid, housekeeping: hkStats, totalUnits: unitIds.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/services?from=&to= — revenue breakdown by service category
+router.get("/services", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+
+    // All units for this org with property info (incl. touristTaxRate)
+    const units = await db.select({
+      id: unitsTable.id,
+      propertyId: propertiesTable.id,
+      propertyName: propertiesTable.name,
+      touristTaxRate: propertiesTable.touristTaxRate,
+    }).from(unitsTable)
+      .innerJoin(propertiesTable, eq(unitsTable.propertyId, propertiesTable.id))
+      .where(eq(propertiesTable.organizationId, orgId));
+
+    const unitIds = units.map(u => u.id);
+    if (unitIds.length === 0) return res.json({ categories: [], total: 0, byProperty: [], addonsList: [], serviceOrdersList: [] });
+
+    const unitMeta = new Map(units.map(u => [u.id, u]));
+
+    // Active bookings in period
+    const bookings = await db.select({
+      id: bookingsTable.id,
+      unitId: bookingsTable.unitId,
+      totalAmount: bookingsTable.totalAmount,
+      paidAmount: bookingsTable.paidAmount,
+      checkIn: bookingsTable.checkIn,
+      checkOut: bookingsTable.checkOut,
+      adults: bookingsTable.adults,
+      status: bookingsTable.status,
+    }).from(bookingsTable)
+      .where(and(inArray(bookingsTable.unitId, unitIds), gte(bookingsTable.checkIn, from), lte(bookingsTable.checkIn, to)));
+
+    const active = bookings.filter(b => b.status !== "cancelled");
+    const bookingIds = active.map(b => b.id);
+
+    // Tourist tax: computed per booking
+    let touristTaxTotal = 0;
+    const touristTaxByProp = new Map<number, number>();
+    for (const b of active) {
+      const meta = unitMeta.get(b.unitId!);
+      const rate = Number(meta?.touristTaxRate || 0);
+      if (rate > 0) {
+        const nights = Math.max(0, Math.floor((new Date(b.checkOut).getTime() - new Date(b.checkIn).getTime()) / 86400000));
+        const adults = b.adults || 1;
+        const tax = Math.round(rate * adults * nights * 100) / 100;
+        touristTaxTotal += tax;
+        const pid = meta!.propertyId;
+        touristTaxByProp.set(pid, (touristTaxByProp.get(pid) || 0) + tax);
+      }
+    }
+
+    // Addons
+    let addonsTotal = 0;
+    const addonsMap = new Map<string, { name: string; amount: number; qty: number }>();
+    const addonsByProp = new Map<number, number>();
+    if (bookingIds.length > 0) {
+      const addonRows = await db.select({
+        bookingId: bookingAddonsTable.bookingId,
+        name: addonsTable.name,
+        qty: bookingAddonsTable.quantity,
+        price: addonsTable.price,
+        totalPrice: bookingAddonsTable.totalPrice,
+      }).from(bookingAddonsTable)
+        .leftJoin(addonsTable, eq(bookingAddonsTable.addonId, addonsTable.id))
+        .where(inArray(bookingAddonsTable.bookingId, bookingIds));
+
+      for (const a of addonRows) {
+        const amt = Number(a.totalPrice || 0) || (Number(a.price || 0) * Number(a.qty || 1));
+        addonsTotal += amt;
+        const name = a.name || "Додаток";
+        const existing = addonsMap.get(name);
+        if (existing) { existing.amount += amt; existing.qty += Number(a.qty || 1); }
+        else addonsMap.set(name, { name, amount: amt, qty: Number(a.qty || 1) });
+        // Map booking → property
+        const bk = active.find(b => b.id === a.bookingId);
+        if (bk) {
+          const pid = unitMeta.get(bk.unitId!)?.propertyId;
+          if (pid) addonsByProp.set(pid, (addonsByProp.get(pid) || 0) + amt);
+        }
+      }
+    }
+
+    // Guest service orders
+    let serviceOrdersTotal = 0;
+    const serviceTypeMap = new Map<string, { name: string; amount: number; count: number }>();
+    const serviceOrdersByProp = new Map<number, number>();
+    if (bookingIds.length > 0) {
+      const orders = await db.select({
+        bookingId: guestServiceOrdersTable.bookingId,
+        serviceName: guestServiceOrdersTable.serviceName,
+        totalPrice: guestServiceOrdersTable.totalPrice,
+        status: guestServiceOrdersTable.status,
+      }).from(guestServiceOrdersTable)
+        .where(inArray(guestServiceOrdersTable.bookingId, bookingIds));
+
+      for (const o of orders) {
+        if (o.status === "cancelled") continue;
+        const amt = Number(o.totalPrice || 0);
+        serviceOrdersTotal += amt;
+        const key = o.serviceName || "Послуга";
+        const existing = serviceTypeMap.get(key);
+        if (existing) { existing.amount += amt; existing.count++; }
+        else serviceTypeMap.set(key, { name: key, amount: amt, count: 1 });
+        const bk = active.find(b => b.id === o.bookingId);
+        if (bk) {
+          const pid = unitMeta.get(bk.unitId!)?.propertyId;
+          if (pid) serviceOrdersByProp.set(pid, (serviceOrdersByProp.get(pid) || 0) + amt);
+        }
+      }
+    }
+
+    // Minibar
+    let minibarTotal = 0;
+    const minibarByProp = new Map<number, number>();
+    if (bookingIds.length > 0) {
+      const charges = await db.select({ bookingId: minibarChargesTable.bookingId, totalAmount: minibarChargesTable.totalAmount })
+        .from(minibarChargesTable).where(inArray(minibarChargesTable.bookingId, bookingIds));
+      for (const c of charges) {
+        const amt = Number(c.totalAmount || 0);
+        minibarTotal += amt;
+        const bk = active.find(b => b.id === c.bookingId);
+        if (bk) {
+          const pid = unitMeta.get(bk.unitId!)?.propertyId;
+          if (pid) minibarByProp.set(pid, (minibarByProp.get(pid) || 0) + amt);
+        }
+      }
+    }
+
+    // Accommodation = total - addons - service orders - tourist tax - minibar
+    const grossTotal = active.reduce((s, b) => s + Number(b.totalAmount || 0), 0);
+    const accommodationTotal = Math.max(0, Math.round((grossTotal - addonsTotal - serviceOrdersTotal - touristTaxTotal - minibarTotal) * 100) / 100);
+
+    const grandTotal = accommodationTotal + touristTaxTotal + addonsTotal + serviceOrdersTotal + minibarTotal;
+
+    // Per-property: build from pid-keyed maps
+    const propResultMap = new Map<number, { name: string; accommodation: number; touristTax: number; addons: number; serviceOrders: number; minibar: number }>();
+    for (const u of units) {
+      if (!propResultMap.has(u.propertyId))
+        propResultMap.set(u.propertyId, { name: u.propertyName, accommodation: 0, touristTax: 0, addons: 0, serviceOrders: 0, minibar: 0 });
+    }
+    for (const b of active) {
+      const pid = unitMeta.get(b.unitId!)?.propertyId;
+      if (!pid) continue;
+      const p = propResultMap.get(pid);
+      if (p) p.accommodation += Number(b.totalAmount || 0);
+    }
+    for (const [pid, amt] of addonsByProp) { const p = propResultMap.get(pid); if (p) { p.accommodation = Math.max(0, p.accommodation - amt); p.addons += amt; } }
+    for (const [pid, amt] of serviceOrdersByProp) { const p = propResultMap.get(pid); if (p) { p.serviceOrders += amt; } }
+    for (const [pid, amt] of minibarByProp) { const p = propResultMap.get(pid); if (p) { p.minibar += amt; } }
+    for (const [pid, amt] of touristTaxByProp) { const p = propResultMap.get(pid); if (p) { p.accommodation = Math.max(0, p.accommodation - amt); p.touristTax += amt; } }
+
+    res.json({
+      from, to,
+      categories: [
+        { key: "accommodation", label: "Проживання",           amount: Math.round(accommodationTotal * 100) / 100 },
+        { key: "touristTax",    label: "Туристичний збір",     amount: Math.round(touristTaxTotal * 100) / 100 },
+        { key: "addons",        label: "Додаткові послуги",    amount: Math.round(addonsTotal * 100) / 100 },
+        { key: "serviceOrders", label: "Сервісні замовлення",  amount: Math.round(serviceOrdersTotal * 100) / 100 },
+        { key: "minibar",       label: "Мінібар",              amount: Math.round(minibarTotal * 100) / 100 },
+      ],
+      total: Math.round(grandTotal * 100) / 100,
+      bookings: active.length,
+      byProperty: Array.from(propResultMap.entries()).map(([, p]) => ({
+        ...p,
+        total: Math.round((p.accommodation + p.touristTax + p.addons + p.serviceOrders + p.minibar) * 100) / 100,
+      })).filter(p => p.total > 0).sort((a, b) => b.total - a.total),
+      addonsList: Array.from(addonsMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 20),
+      serviceOrdersList: Array.from(serviceTypeMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 20),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /reports/analytics?from=&to= — comprehensive guest & service analytics
+router.get("/analytics", requireAuth, async (req: any, res) => {
+  try {
+    const orgId = getOrg(req);
+    const from = (req.query.from as string) || monthStart();
+    const to = (req.query.to as string) || today();
+
+    // Org units + property tourist tax rates
+    const { rows: unitRows } = await pool.query<{
+      unit_id: number; property_id: number; property_name: string;
+      tourist_tax_rate: string; bedrooms: number;
+    }>(
+      `SELECT u.id AS unit_id, p.id AS property_id, p.name AS property_name,
+              p.tourist_tax_rate, COALESCE(u.bedrooms, 0) AS bedrooms
+       FROM units u
+       JOIN properties p ON u.property_id = p.id
+       WHERE p.organization_id = $1`, [orgId]
+    );
+    if (!unitRows.length) return res.json({ bookings: 0, guests: {}, children: {}, withPets: 0, touristTax: 0, nights: {}, spa: {}, addons: {}, units: [] });
+
+    const unitIds = unitRows.map(r => r.unit_id);
+    const unitMeta = new Map(unitRows.map(r => [r.unit_id, r]));
+
+    // Main bookings in period (non-cancelled)
+    const { rows: bookings } = await pool.query<{
+      id: number; unit_id: number; adults: number;
+      children_under_6: number; children_over_6: number;
+      with_pets: boolean; check_in: string; check_out: string;
+      total_amount: string;
+    }>(
+      `SELECT id, unit_id, adults, children_under_6, children_over_6,
+              with_pets, check_in, check_out, total_amount
+       FROM bookings
+       WHERE unit_id = ANY($1::int[])
+         AND check_in >= $2 AND check_in <= $3
+         AND status != 'cancelled'`,
+      [unitIds, from, to]
+    );
+
+    // Aggregates
+    let totalAdults = 0, totalChildrenUnder6 = 0, totalChildrenOver6 = 0;
+    let withPetsCount = 0, touristTaxTotal = 0;
+    const nightsByBedrooms = new Map<number, number>(); // bedrooms → nights
+    const nightsByPropertyId = new Map<number, { name: string; nights: number; revenue: number }>();
+
+    for (const b of bookings) {
+      totalAdults += b.adults || 1;
+      totalChildrenUnder6 += b.children_under_6 || 0;
+      totalChildrenOver6 += b.children_over_6 || 0;
+      if (b.with_pets) withPetsCount++;
+
+      const meta = unitMeta.get(b.unit_id);
+      const rate = Number(meta?.tourist_tax_rate || 0);
+      const nights = Math.max(0, Math.floor((new Date(b.check_out).getTime() - new Date(b.check_in).getTime()) / 86400000));
+
+      if (rate > 0) touristTaxTotal += Math.round(rate * (b.adults || 1) * nights * 100) / 100;
+
+      // Nights by bedrooms
+      const br = meta?.bedrooms ?? 0;
+      nightsByBedrooms.set(br, (nightsByBedrooms.get(br) || 0) + nights);
+
+      // Nights by property
+      if (meta) {
+        const pid = meta.property_id;
+        const existing = nightsByPropertyId.get(pid);
+        if (existing) { existing.nights += nights; existing.revenue += Number(b.total_amount || 0); }
+        else nightsByPropertyId.set(pid, { name: meta.property_name, nights, revenue: Number(b.total_amount || 0) });
+      }
+    }
+
+    const bookingIds = bookings.map(b => b.id);
+
+    // SPA bookings: from spa_bookings table joined with spa_services  
+    let spaJacuzzi = { sessions: 0, revenue: 0 };
+    let spaThermal = { sessions: 0, revenue: 0 };
+    let spaPool    = { sessions: 0, revenue: 0 };
+    let spaMassage = { sessions: 0, revenue: 0 };
+    let spaSauna   = { sessions: 0, revenue: 0 };
+    let spaOther   = { sessions: 0, revenue: 0 };
+    if (bookingIds.length > 0) {
+      const { rows: spaRows } = await pool.query<{ category: string; sessions: string; revenue: string }>(
+        `SELECT ss.category, COUNT(sb.id)::text AS sessions, COALESCE(SUM(sb.total_amount), 0)::text AS revenue
+         FROM spa_bookings sb
+         JOIN spa_services ss ON sb.service_id = ss.id
+         WHERE (sb.reservation_id = ANY($1::int[]) OR sb.organization_id = $2)
+           AND sb.appointment_date >= $3 AND sb.appointment_date <= $4
+           AND sb.status != 'cancelled'
+         GROUP BY ss.category`,
+        [bookingIds, orgId, from, to]
+      );
+      for (const r of spaRows) {
+        const s = parseInt(r.sessions), rev = parseFloat(r.revenue);
+        switch (r.category) {
+          case 'jacuzzi': spaJacuzzi = { sessions: s, revenue: rev }; break;
+          case 'thermal': spaThermal = { sessions: s, revenue: rev }; break;
+          case 'pool':    spaPool    = { sessions: s, revenue: rev }; break;
+          case 'massage': case 'body': case 'face': spaMassage = { sessions: spaMassage.sessions + s, revenue: spaMassage.revenue + rev }; break;
+          case 'sauna':   spaSauna   = { sessions: s, revenue: rev }; break;
+          default:        spaOther   = { sessions: spaOther.sessions + s, revenue: spaOther.revenue + rev };
+        }
+      }
+    }
+
+    // Booking addons: cribs, chairs + all addons summary
+    const addonsSummary = new Map<string, { name: string; qty: number; revenue: number }>();
+    let cribsCount = 0, chairsCount = 0;
+    if (bookingIds.length > 0) {
+      const { rows: addonRows } = await pool.query<{
+        addon_name: string; qty: string; total: string;
+      }>(
+        `SELECT a.name AS addon_name, SUM(ba.quantity)::text AS qty, COALESCE(SUM(ba.total_price), 0)::text AS total
+         FROM booking_addons ba
+         JOIN addons a ON ba.addon_id = a.id
+         WHERE ba.booking_id = ANY($1::int[])
+         GROUP BY a.id, a.name`,
+        [bookingIds]
+      );
+      for (const r of addonRows) {
+        const qty = parseInt(r.qty), rev = parseFloat(r.total);
+        addonsSummary.set(r.addon_name, { name: r.addon_name, qty, revenue: rev });
+        const lower = r.addon_name.toLowerCase();
+        if (lower.includes('ліжко') || lower.includes('crib') || lower.includes('ліжечко')) cribsCount += qty;
+        if (lower.includes('стіл') || lower.includes('стіле') || lower.includes('chair')) chairsCount += qty;
+      }
+    }
+
+    res.json({
+      from, to,
+      bookings: bookings.length,
+      guests: {
+        adults: totalAdults,
+        childrenUnder6: totalChildrenUnder6,
+        childrenOver6: totalChildrenOver6,
+        childrenTotal: totalChildrenUnder6 + totalChildrenOver6,
+        total: totalAdults + totalChildrenUnder6 + totalChildrenOver6,
+      },
+      withPets: withPetsCount,
+      touristTax: Math.round(touristTaxTotal * 100) / 100,
+      nights: {
+        byBedrooms: Array.from(nightsByBedrooms.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([bedrooms, nights]) => ({
+            bedrooms,
+            label: bedrooms === 0 ? "Без кімнат (SPA/інше)" : bedrooms === 1 ? "1 спальня" : `${bedrooms} спальні`,
+            nights,
+          })),
+        byProperty: Array.from(nightsByPropertyId.values()).sort((a, b) => b.nights - a.nights),
+      },
+      spa: {
+        jacuzzi: spaJacuzzi,
+        thermal: spaThermal,
+        pool: spaPool,
+        massage: spaMassage,
+        sauna: spaSauna,
+        other: spaOther,
+      },
+      addons: {
+        cribs: cribsCount,
+        chairs: chairsCount,
+        all: Array.from(addonsSummary.values()).sort((a, b) => b.qty - a.qty),
+      },
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+export default router;

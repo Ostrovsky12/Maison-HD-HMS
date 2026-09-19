@@ -1,0 +1,37 @@
+modules = ["nodejs-24", "python-base-3.13", "postgresql-16"]
+
+[[artifacts]]
+id = "artifacts/api-server"
+
+[[artifacts]]
+id = "artifacts/mockup-sandbox"
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.production]
+PUBLIC_APP_URL = "https://maison-hd.com"
+
+[userenv.shared]
+PUBLIC_URL = "https://maison-hd.com"

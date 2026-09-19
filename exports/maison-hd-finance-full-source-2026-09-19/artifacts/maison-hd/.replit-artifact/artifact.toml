@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Maison HD — HMS"
+version = "1.0.0"
+id = "artifacts/maison-hd"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26242
+
+[services.development]
+run = "pnpm --filter @workspace/maison-hd run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/maison-hd", "run", "build" ]
+publicDir = "artifacts/maison-hd/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26242"
+BASE_PATH = "/"

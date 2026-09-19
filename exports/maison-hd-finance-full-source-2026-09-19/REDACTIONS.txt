@@ -1,0 +1,21 @@
+Sensitive-looking literal assignments redacted from the audit copy only. Original workspace files were not modified.
+Values are intentionally not recorded.
+
+artifacts/maison-hd/src/pages/fb-registers.tsx:195	field=password
+artifacts/maison-hd/src/pages/settings.tsx:1910	field=Password
+artifacts/maison-hd/src/pages/guest-app.tsx:27	field=password
+artifacts/api-server/src/routes/ota.ts:33	field=apiKey
+artifacts/api-server/src/routes/ota.ts:34	field=Secret
+artifacts/api-server/src/routes/ota.ts:43	field=apiKey
+artifacts/api-server/src/routes/guide.ts:371	field=Token
+artifacts/api-server/src/routes/guide.ts:374	field=Token
+artifacts/api-server/src/routes/guide.ts:376	field=Token
+artifacts/api-server/src/routes/telephony.ts:132	field=SECRET
+artifacts/api-server/src/tests/inbox-business-webhooks.test.ts:33	field=token
+artifacts/api-server/src/tests/inbox-business-webhooks.test.ts:34	field=secret
+artifacts/api-server/src/tests/faq-auto-reply.test.ts:75	field=token
+artifacts/api-server/src/tests/faq-auto-reply.test.ts:155	field=token
+artifacts/api-server/src/tests/inbox-webhook-signature.test.ts:6	field=Secret
+artifacts/api-server/src/tests/inbox-whatsapp.test.ts:39	field=SECRET
+artifacts/api-server/src/tests/inbox-whatsapp.test.ts:78	field=token
+artifacts/api-server/src/tests/inbox-whatsapp.test.ts:80	field=token
