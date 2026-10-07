@@ -181,6 +181,7 @@ const NAV: NavSection[] = [
       { name: "Фінанси",           path: "/finance",           icon: Wallet,          roles: ["super_admin", "owner", "manager", "reception"] },
       { name: "Рахунки",           path: "/invoices",          icon: FileText,        roles: null },
       { name: "Бухгалтерія",       path: "/accounting",        icon: Landmark,        roles: ["super_admin", "owner", "manager"], moduleKey: "accounting" },
+      { name: "Облік ПРРО",        path: "/accounting/prro",   icon: Printer,         roles: ["super_admin", "owner", "admin", "manager", "accountant"], moduleKey: "accounting" },
       { name: "Нічний аудит",      path: "/night-audit",       icon: Moon,            roles: ["super_admin", "owner", "manager"], moduleKey: "night_audit" },
       { name: "Продажі & CRM",     path: "/sales",             icon: Target,          roles: ["super_admin", "owner", "manager", "reception"] },
       { name: "Migration Center",  path: "/migration-center",  icon: ArrowRightLeft,  roles: ["super_admin", "owner", "manager"], badge: "NEW" },

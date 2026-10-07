@@ -9,6 +9,7 @@ import {
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
 import { DpsPrroError, dpsPrroClient } from "../services/dps-prro.js";
+import { reclassificationError, summarizeRegisterReports } from "../services/prro-accountant.js";
 import { decideFiscalization, type FiscalPolicyInput } from "../services/prro-policy.js";
 import { prroSigner } from "../services/prro-signer.js";
 import { buildPrroXml, type PrroDocumentKind, type PrroXmlLine } from "../services/prro-xml.js";
@@ -336,7 +337,193 @@ router.get("/registers", requireAuth, async (req, res): Promise<void> => {
   res.json({ registers });
 });
 
-router.post("/registers", requireAuth, requireRole("super_admin", "owner", "admin", "manager"), async (req, res): Promise<void> => {
+router.get("/accountant/overview", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
+  const organizationId = orgId(req);
+  if (!organizationId) return void res.status(403).json({ error: "No organization" });
+
+  const [entities, registers, shifts, reports] = await Promise.all([
+    db.select({
+      id: legalEntitiesTable.id,
+      name: legalEntitiesTable.name,
+      type: legalEntitiesTable.type,
+      edrpou: legalEntitiesTable.edrpou,
+    }).from(legalEntitiesTable).where(and(
+      eq(legalEntitiesTable.organizationId, organizationId),
+      eq(legalEntitiesTable.isActive, true),
+    )).orderBy(legalEntitiesTable.name),
+    db.select().from(prroRegistersTable).where(and(
+      eq(prroRegistersTable.organizationId, organizationId),
+      eq(prroRegistersTable.isActive, true),
+    )).orderBy(prroRegistersTable.name),
+    db.select().from(prroShiftsTable).where(and(
+      eq(prroShiftsTable.organizationId, organizationId),
+      sql`${prroShiftsTable.status} in ('opening', 'open', 'closing')`,
+    )).orderBy(desc(prroShiftsTable.createdAt)),
+    db.select({
+      id: fiscalDocumentsTable.id,
+      registerId: fiscalDocumentsTable.registerId,
+      shiftId: fiscalDocumentsTable.shiftId,
+      documentType: fiscalDocumentsTable.documentType,
+      status: fiscalDocumentsTable.status,
+      fiscalNumber: fiscalDocumentsTable.fiscalNumber,
+      dpsDocumentId: fiscalDocumentsTable.dpsDocumentId,
+      totalAmount: fiscalDocumentsTable.totalAmount,
+      createdAt: fiscalDocumentsTable.createdAt,
+      fiscalizedAt: fiscalDocumentsTable.fiscalizedAt,
+    }).from(fiscalDocumentsTable).where(and(
+      eq(fiscalDocumentsTable.organizationId, organizationId),
+      sql`${fiscalDocumentsTable.documentType} in ('x_report', 'z_report')`,
+    )).orderBy(desc(fiscalDocumentsTable.createdAt)).limit(500),
+  ]);
+
+  const reportByRegister = summarizeRegisterReports(reports);
+  const activeShiftByRegister = new Map(shifts.map(shift => [shift.registerId, shift]));
+
+  res.json({
+    legalEntities: entities.map(entity => ({
+      ...entity,
+      registers: registers.filter(register => register.legalEntityId === entity.id).map(register => ({
+        ...register,
+        activeShift: activeShiftByRegister.get(register.id) ?? null,
+        ...(reportByRegister.get(register.id) ?? {
+          lastXReport: null,
+          lastZReport: null,
+          latestXReportAttempt: null,
+          latestZReportAttempt: null,
+        }),
+      })),
+    })),
+  });
+});
+
+router.get("/accountant/journal", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
+  const organizationId = orgId(req);
+  if (!organizationId) return void res.status(403).json({ error: "No organization" });
+  const decision = typeof req.query.decision === "string" ? req.query.decision : undefined;
+  const legalEntityId = positiveInt(req.query.legalEntityId);
+  const limit = Math.min(200, positiveInt(req.query.limit) ?? 100);
+  if (decision && !inSet(decision, ["fiscalize", "exempt", "manual_review"])) {
+    return void res.status(400).json({ error: "Некоректний тип рішення" });
+  }
+  const conditions = [eq(fiscalDocumentsTable.organizationId, organizationId)];
+  if (decision) conditions.push(eq(fiscalDocumentsTable.policyDecision, decision));
+  if (legalEntityId) conditions.push(eq(fiscalDocumentsTable.legalEntityId, legalEntityId));
+  const rows = await db.select({
+    document: fiscalDocumentsTable,
+    sellerName: legalEntitiesTable.name,
+    registerName: prroRegistersTable.name,
+  }).from(fiscalDocumentsTable)
+    .innerJoin(legalEntitiesTable, and(
+      eq(legalEntitiesTable.id, fiscalDocumentsTable.legalEntityId),
+      eq(legalEntitiesTable.organizationId, organizationId),
+    ))
+    .leftJoin(prroRegistersTable, and(
+      eq(prroRegistersTable.id, fiscalDocumentsTable.registerId),
+      eq(prroRegistersTable.organizationId, organizationId),
+    ))
+    .where(and(...conditions)).orderBy(desc(fiscalDocumentsTable.createdAt)).limit(limit);
+  res.json({
+    documents: rows.map(({ document: { signedPayload, xmlPayload, dpsSignedData, ...document }, sellerName, registerName }) => {
+      const evidence = typeof document.policyEvidence === "object" && document.policyEvidence
+        ? document.policyEvidence as Record<string, unknown>
+        : {};
+      return {
+        ...document,
+        sellerName,
+        registerName,
+        reviewLegalBasis: evidence.legalBasis ?? null,
+        reviewLegalReference: evidence.legalReference ?? null,
+        reviewedBy: evidence.confirmedByUserId ?? null,
+        reviewedAt: evidence.confirmedAt ?? null,
+      };
+    }),
+  });
+});
+
+router.post("/accountant/documents/:documentId/reclassify", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
+  const organizationId = orgId(req);
+  const documentId = positiveInt(req.params.documentId);
+  const decision = req.body?.decision;
+  const legalBasis = clean(req.body?.legalBasis, 2000);
+  const legalReference = clean(req.body?.legalReference, 500);
+  const reason = clean(req.body?.reason, 1000);
+  if (!organizationId) return void res.status(403).json({ error: "No organization" });
+  if (!documentId || !inSet(decision, ["fiscalize", "exempt", "manual_review"]) || !legalBasis || !legalReference || !reason) {
+    return void res.status(400).json({ error: "Потрібні рішення, причина та підтверджена правова підстава з посиланням" });
+  }
+
+  try {
+    const document = await db.transaction(async tx => {
+      const [current] = await tx.select().from(fiscalDocumentsTable).where(and(
+        eq(fiscalDocumentsTable.id, documentId),
+        eq(fiscalDocumentsTable.organizationId, organizationId),
+      )).limit(1);
+      if (!current) throw new Error("NOT_FOUND");
+      const reviewError = reclassificationError(current);
+      if (reviewError) throw new Error(reviewError);
+
+      const nextStatus = decision === "fiscalize" ? "draft" : decision === "exempt" ? "exempt" : "review";
+      const [updated] = await tx.update(fiscalDocumentsTable).set({
+        policyDecision: decision,
+        policyCode: "accountant_confirmed",
+        policyReason: reason,
+        policyEvidence: {
+          ...(typeof current.policyEvidence === "object" && current.policyEvidence ? current.policyEvidence : {}),
+          legalBasis,
+          legalReference,
+          confirmedByUserId: userId(req),
+          confirmedAt: new Date().toISOString(),
+        },
+        status: nextStatus,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(fiscalDocumentsTable.id, documentId),
+        eq(fiscalDocumentsTable.organizationId, organizationId),
+        sql`${fiscalDocumentsTable.status} in ('exempt', 'review')`,
+        sql`${fiscalDocumentsTable.fiscalizedAt} is null`,
+      )).returning();
+      if (!updated) throw new Error("CONCURRENT_CHANGE");
+      await tx.insert(fiscalEventsTable).values({
+        organizationId,
+        fiscalDocumentId: documentId,
+        eventType: "accountant_reclassified",
+        eventStatus: nextStatus,
+        requestId: String(req.id ?? ""),
+        payload: {
+          previousDecision: current.policyDecision,
+          decision,
+          reason,
+          legalBasis,
+          legalReference,
+          reviewedBy: userId(req),
+        },
+      });
+      return updated;
+    });
+
+    if (decision === "fiscalize") {
+      try {
+        const fiscalized = await submitDocument(organizationId, documentId, String(req.id ?? ""));
+        return void res.json({ document: fiscalized });
+      } catch (error) {
+        return void res.status(502).json({
+          error: error instanceof Error ? error.message : "Помилка ДПС",
+          documentId,
+        });
+      }
+    }
+    res.json({ document });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "NOT_FOUND") return void res.status(404).json({ error: "Документ не знайдено" });
+    if (message === "IMMUTABLE") return void res.status(409).json({ error: "Фіскалізований документ незмінний" });
+    if (message === "NOT_REVIEWABLE") return void res.status(409).json({ error: "Перегляд доступний лише для exempt або manual_review" });
+    if (message === "CONCURRENT_CHANGE") return void res.status(409).json({ error: "Документ уже змінено іншим користувачем" });
+    throw error;
+  }
+});
+
+router.post("/registers", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
   const organizationId = orgId(req);
   const legalEntityId = positiveInt(req.body?.legalEntityId);
   const name = clean(req.body?.name, 255);
@@ -362,7 +549,41 @@ router.post("/registers", requireAuth, requireRole("super_admin", "owner", "admi
   res.status(201).json({ register });
 });
 
-router.post("/registers/:registerId/shifts/open", requireAuth, requireRole("super_admin", "owner", "admin", "manager"), async (req, res): Promise<void> => {
+router.patch("/registers/:registerId", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
+  const organizationId = orgId(req);
+  const registerId = positiveInt(req.params.registerId);
+  if (!organizationId) return void res.status(403).json({ error: "No organization" });
+  if (!registerId) return void res.status(400).json({ error: "Некоректна каса" });
+  const patch: Record<string, unknown> = {};
+  if (req.body?.name !== undefined) {
+    const name = clean(req.body.name, 255);
+    if (!name || name.length < 2) return void res.status(400).json({ error: "Некоректна назва каси" });
+    patch.name = name;
+  }
+  if (req.body?.deviceId !== undefined) {
+    const deviceId = clean(req.body.deviceId, 100);
+    if (!deviceId || deviceId.length < 3) return void res.status(400).json({ error: "Некоректний deviceId" });
+    patch.deviceId = deviceId;
+  }
+  if (req.body?.fiscalNumber !== undefined) {
+    const fiscalNumber = clean(req.body.fiscalNumber, 32);
+    if (!fiscalNumber) return void res.status(400).json({ error: "Некоректний фіскальний номер" });
+    patch.fiscalNumber = fiscalNumber;
+  }
+  if (req.body?.locationName !== undefined) patch.locationName = clean(req.body.locationName, 255) ?? null;
+  if (req.body?.locationAddress !== undefined) patch.locationAddress = clean(req.body.locationAddress, 1000) ?? null;
+  if (!Object.keys(patch).length) return void res.status(400).json({ error: "Немає змін для збереження" });
+  patch.updatedAt = new Date();
+  const [register] = await db.update(prroRegistersTable).set(patch).where(and(
+    eq(prroRegistersTable.id, registerId),
+    eq(prroRegistersTable.organizationId, organizationId),
+    eq(prroRegistersTable.isActive, true),
+  )).returning();
+  if (!register) return void res.status(404).json({ error: "Касу не знайдено" });
+  res.json({ register });
+});
+
+router.post("/registers/:registerId/shifts/open", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
   const organizationId = orgId(req);
   const registerId = positiveInt(req.params.registerId);
   const signerKeyId = clean(req.body?.signerKeyId, 255);
@@ -569,7 +790,7 @@ router.post("/documents", requireAuth, async (req, res): Promise<void> => {
   }
 });
 
-router.post("/documents/:documentId/retry", requireAuth, requireRole("super_admin", "owner", "admin", "manager"), async (req, res): Promise<void> => {
+router.post("/documents/:documentId/retry", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
   const organizationId = orgId(req);
   const documentId = positiveInt(req.params.documentId);
   if (!organizationId) return void res.status(403).json({ error: "No organization" });
@@ -588,7 +809,7 @@ router.post("/documents/:documentId/retry", requireAuth, requireRole("super_admi
   }
 });
 
-router.post("/documents/:documentId/reconcile", requireAuth, requireRole("super_admin", "owner", "admin", "manager"), async (req, res): Promise<void> => {
+router.post("/documents/:documentId/reconcile", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
   const organizationId = orgId(req);
   const documentId = positiveInt(req.params.documentId);
   if (!organizationId) return void res.status(403).json({ error: "No organization" });
@@ -733,7 +954,7 @@ router.post("/registers/:registerId/reports/x", requireAuth, async (req, res): P
   res.status(201).json({ document });
 });
 
-router.post("/registers/:registerId/shifts/:shiftId/close", requireAuth, requireRole("super_admin", "owner", "admin", "manager"), async (req, res): Promise<void> => {
+router.post("/registers/:registerId/shifts/:shiftId/close", requireAuth, requireRole("super_admin", "owner", "admin", "manager", "accountant"), async (req, res): Promise<void> => {
   const organizationId = orgId(req);
   const registerId = positiveInt(req.params.registerId);
   const shiftId = positiveInt(req.params.shiftId);

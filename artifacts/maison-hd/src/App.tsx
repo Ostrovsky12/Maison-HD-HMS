@@ -99,6 +99,7 @@ import TvDisplayPage from "@/pages/tv-display";
 import AiHubPage from "@/pages/ai-hub";
 import GuestExperiencePage from "@/pages/guest-experience";
 import AccountingPage from "@/pages/accounting";
+import AccountantPrroPage from "@/pages/accounting-prro";
 import FinancePage from "@/pages/finance";
 import MigrationCenterPage from "@/pages/migration-center";
 import PaymentsLayerPage from "@/pages/payments";
@@ -322,6 +323,7 @@ function Router() {
       <Route path="/ai-hub"><ProtectedRoute component={AiHubPage} /></Route>
       <Route path="/guest-experience"><ProtectedRoute component={GuestExperiencePage} /></Route>
       <Route path="/accounting"><ProtectedRoute component={AccountingPage} /></Route>
+      <Route path="/accounting/prro"><ProtectedRoute component={AccountantPrroPage} roles={["super_admin", "owner", "admin", "manager", "accountant"]} /></Route>
       <Route path="/finance"><ProtectedRoute component={FinancePage} /></Route>
       <Route path="/migration-center"><ProtectedRoute component={MigrationCenterPage} roles={["super_admin","owner","manager"]} /></Route>
       <Route path="/payments-layer"><ProtectedRoute component={PaymentsLayerPage} /></Route>
