@@ -18,3 +18,4 @@
 - [Binotel delivery fallback](binotel-delivery-fallback.md) — use webhooks for realtime events and tenant REST sync to recover completed calls without duplicates
 - [Call analysis grounding](call-analysis-grounding.md) — summarize calls only from transcripts or meaningful notes, never from provider metadata alone
 - [Brand positioning](maison-hd-brand-positioning.md) — public landing presents modern business solutions and seven products, not only hospitality software
+- [Platform lead notifications](platform-lead-notifications.md) — connected Gmail is for Maison HD landing enquiries only, never tenant guest communications

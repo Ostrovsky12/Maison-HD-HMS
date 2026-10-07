@@ -35,3 +35,5 @@ PUBLIC_APP_URL = "https://maison-hd.com"
 
 [userenv.shared]
 PUBLIC_URL = "https://maison-hd.com"
+MAISONHD_LEADS_EMAIL = "maisonhd2025@gmail.com"
+MAISONHD_LEADS_EMAIL_ENABLED = "true"
