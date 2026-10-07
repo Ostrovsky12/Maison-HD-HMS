@@ -1,18 +1,17 @@
-import { ArrowRight } from "lucide-react";
 import type { Lang } from "./content";
 import { content } from "./content";
 
 export function Pain({ lang }: { lang: Lang }) {
   const p = content[lang].pain;
-  const [a, b] = lang === "ua" ? ["Дайте нам ", "ВАШ БІЛЬ"] : ["Give us ", "YOUR PAIN"];
-  const rest = lang === "ua" ? " і ми знайдемо рішення." : ", and we will find the solution.";
+  const m = p.title.match(/^(.*?)(ВАШ БІЛЬ|YOUR PAIN)(.*)$/);
   return (
-    <section className="mh-sec mh-pain" aria-labelledby="pain-t">
+    <section className="mh-sec mh-pain" id="pain">
+      <div className="mh-pulse" aria-hidden="true"><i /><i /><i /></div>
       <div className="mh-wrap">
-        <p className="mh-mono" style={{ marginBottom: "1.5rem" }}>{p.kicker}</p>
-        <h2 id="pain-t">{a}<em>{b}</em>{lang === "ua" ? " —" : ""}{rest}</h2>
+        <span className="mh-mono">{p.kicker}</span>
+        <h2>{m ? <>{m[1]}<em>{m[2]}</em>{m[3]}</> : p.title}</h2>
         <p>{p.body}</p>
-        <a href="#contact" className="mh-btn" data-testid="link-pain-contact">{p.cta}<ArrowRight size={16} aria-hidden="true" /></a>
+        <a href="#contact" className="mh-btn light" data-testid="link-pain-contact">{p.cta}</a>
       </div>
     </section>
   );

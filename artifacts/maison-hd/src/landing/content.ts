@@ -21,10 +21,10 @@ export const content = {
       kicker: "Технологічний партнер",
       title: "MAISON HD",
       sub: "сучасні рішення для бізнесу",
-      body: "Ми проєктуємо й будуємо програмні продукти для конкретних операційних задач: від готелів і ресторанів до експортної документації, платежів і маркетингу. Не універсальний комбайн, а набір точних інструментів.",
+      body: "Технологічний партнер, що створює сучасні AI-продукти для власників бізнесу: практичне програмне забезпечення замість ручних операцій. Проєктуємо й будуємо продукти для конкретних операційних задач: від готелів і ресторанів до експортної документації, платежів і маркетингу. Не універсальний комбайн, а набір точних інструментів.",
       cta1: "Дайте нам ваш біль",
       cta2: "Дивитися продукти",
-      index: ["2 платформи", "5 продуктів", "1 команда"],
+      index: ["2 платформи", "5 продуктів", "AI для операцій"],
     },
     about: {
       title: "Ми беремося за задачі, які зараз вирішуються таблицями, месенджерами та ручною працею.",
@@ -49,7 +49,7 @@ export const content = {
       sub: "Кожен продукт живе на власному сайті. Натисніть, щоб побачити його наживо.",
       open: "Відкрити",
       items: [
-        P("marketing", "Marketing", "AI Marketing OS", "AI-орієнтований робочий простір для маркетингу бізнесу.", ["Єдине місце для маркетингової роботи", "Побудований навколо AI-підходу"]),
+        P("marketing", "Marketing", "Маркетинговий відділ", "Маркетинговий відділ з повним штатом спеціалістів в одному місці.", ["Увесь маркетинг бізнесу в одному місці", "Повний штат спеціалістів замість розрізнених підрядників"]),
         P("eudr", "EUDR Ready", "Експорт і відстежуваність", "Підготовка до вимог EUDR для експортерів сої та деревини: перевірка готовності та впорядкування даних.", ["Постачальники, походження, геолокація, документи", "Аудит готовності: досьє, прогалини, ризики", "Інструмент підготовки, а не сертифікація й не подання DDS"]),
         P("paynow", "PayNow", "Рахунки та надходження", "Виставлення рахунків за IBAN і контроль вхідних платежів для кількох юридичних осіб.", ["Юридичні особи в одному місці", "Рахунки на оплату за IBAN", "Відстеження вхідних платежів"]),
         P("finance", "Finance", "Облікова платформа", "Платформа для документів, банків і подвійного запису з ПРРО та архівом. Наразі пілотний етап.", ["Документи, банки, подвійний запис", "ПРРО, архів, режим аудитора", "Платформа в пілоті: без заяв про сертифікацію"]),
@@ -80,10 +80,10 @@ export const content = {
       kicker: "Technology partner",
       title: "MAISON HD",
       sub: "modern solutions for business",
-      body: "We design and build software for specific operational problems: from hotels and restaurants to export documentation, payments and marketing. Not one catch-all suite, but a set of precise tools.",
+      body: "A technology partner building modern AI products for business owners: practical software in place of manual operations. We design and build software for specific operational problems: from hotels and restaurants to export documentation, payments and marketing. Not one catch-all suite, but a set of precise tools.",
       cta1: "Give us your pain",
       cta2: "See the products",
-      index: ["2 platforms", "5 products", "1 team"],
+      index: ["2 platforms", "5 products", "AI for operations"],
     },
     about: {
       title: "We take on the work that is still done in spreadsheets, chat threads and by hand.",
@@ -108,7 +108,7 @@ export const content = {
       sub: "Each product lives on its own site. Open one to see it live.",
       open: "Open",
       items: [
-        P("marketing", "Marketing", "AI Marketing OS", "An AI-oriented workspace for business marketing.", ["One place for marketing work", "Built around an AI-first approach"]),
+        P("marketing", "Marketing", "Marketing department", "A marketing department with a full staff of specialists in one place.", ["All of a business's marketing in one place", "A full staff of specialists instead of scattered contractors"]),
         P("eudr", "EUDR Ready", "Export and traceability", "EUDR preparation for soy and timber exporters: readiness checks and organised data.", ["Suppliers, origin, geolocation, documents", "Readiness audit: dossiers, gaps, risks", "A preparation tool, not certification or DDS filing"]),
         P("paynow", "PayNow", "Invoices and receipts", "IBAN invoicing and incoming-payment tracking across several legal entities.", ["Legal entities in one place", "IBAN invoices", "Incoming payment tracking"]),
         P("finance", "Finance", "Accounting platform", "A platform for documents, banks and double entry, with PRRO and an archive. Currently at pilot stage.", ["Documents, banks, double entry", "PRRO, archive, auditor view", "Pilot platform: no certification claims"]),

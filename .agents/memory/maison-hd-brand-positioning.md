@@ -7,6 +7,10 @@ The main public message is «MAISON HD — сучасні рішення для 
 
 The user requested the invitation «Дайте нам ВАШ БІЛЬ — і ми знайдемо рішення» and a general description that Maison HD can help their business.
 
+Marketing is «маркетинговий відділ з повним штатом спеціалістів в одному місці», per the user's correction; do not reduce its description to a generic AI workspace.
+
+The user rejected the static ivory/green/orange editorial landing. For this brand, they want a modern AI-company presentation with the actual logo, moving elements and visual breaks, not a simple text catalog.
+
 **Why:** The user explicitly broadened the public landing's positioning to the existing business-product portfolio.
 
 **How to apply:** Keep this scope when changing public landing copy. Verify descriptions against product sites; do not infer functionality from names or describe pilot fiscal capabilities as certified.
