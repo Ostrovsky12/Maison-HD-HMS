@@ -66,7 +66,6 @@
 .mh-spin.s2{inset:10%;animation-duration:26s;animation-direction:reverse}
 .mh-node{position:absolute;left:50%;top:0;margin-left:-3rem;width:6rem;text-align:center;font-family:'JetBrains Mono',monospace;font-size:.7rem;padding:.4rem 0;border-radius:999px;background:#120f33;border:1px solid var(--cy);color:var(--cy);animation:mhSpin 38s linear infinite reverse}
 .s2 .mh-node{animation-duration:26s;animation-direction:normal;border-color:#a78bfa;color:#c4b5fd}
-.s1 .n0{transform-origin:50% 235px;transform:none}
 .mh-spin .mh-node.n1{top:auto;bottom:14%;left:14%;margin:0}.mh-spin .mh-node.n2{top:auto;bottom:14%;left:auto;right:14%;margin:0}
 .mh-spin.s2 .mh-node.n1{top:50%;bottom:auto;left:auto;right:-3rem;margin:0}
 @media(max-width:860px){.mh-hero-grid{grid-template-columns:1fr}.mh-orbit{width:min(86vw,360px)}.mh-node{font-size:.62rem;width:5rem;margin-left:-2.5rem}}

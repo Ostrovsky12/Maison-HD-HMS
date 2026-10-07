@@ -11,6 +11,10 @@ Marketing is «маркетинговий відділ з повним штат�
 
 The user rejected the static ivory/green/orange editorial landing. For this brand, they want a modern AI-company presentation with the actual logo, moving elements and visual breaks, not a simple text catalog.
 
+The user confirmed they like the dark violet/indigo redesign with the actual logo and moving product orbit. Preserve this direction when making targeted corrections.
+
+**Why:** The user explicitly approved the redesign («Мені все подобається») and requested only an orbit correction.
+
 **Why:** The user explicitly broadened the public landing's positioning to the existing business-product portfolio.
 
 **How to apply:** Keep this scope when changing public landing copy. Verify descriptions against product sites; do not infer functionality from names or describe pilot fiscal capabilities as certified.
