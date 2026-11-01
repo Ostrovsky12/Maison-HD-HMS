@@ -15,6 +15,8 @@ Refresh the menu and prices from the user's confirmed current source before conf
 
 For the DOGODA workflow, the user confirmed that the current menu and prices are in Poster; import from Poster into Maison HD, not the reverse. Resolve the selected organization separately rather than inferring it from the DOGODA brand name.
 
+The user identified **«Котеджний комплекс ДОГОДА»** as the organization for this QR/Waiter integration workflow, not **«Заміський комплекс DOGODA Resort»**.
+
 **Why:** The user corrected the assumption that the stored Maison HD menu was ready for testing: it contained old dishes/prices and needed the new menu first. They explicitly identified Poster as the current source. Similarly branded DOGODA organizations are distinct tenants; a successful import was observed in a different organization from the one previously assumed for testing.
 
 **How to apply:** Confirm the authoritative source, import direction, and selected organization before updating dishes or quoting test totals. Resolve table identities within that organization; duplicate table numbers are not unique identities. Do not configure tests against the old prices or assume menu import also exports the catalogue to Poster.

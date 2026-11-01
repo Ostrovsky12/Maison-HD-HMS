@@ -20,3 +20,4 @@
 - [Brand positioning](maison-hd-brand-positioning.md) — public landing presents modern business solutions and seven products, not only hospitality software
 - [Platform lead notifications](platform-lead-notifications.md) — connected Gmail is for Maison HD landing enquiries only, never tenant guest communications
 - [Poster order integration](poster-order-integration.md) — QR guests and Mobile Waiter share orders; Poster handles kitchen/bar tickets and paid-bill fiscalization
+- [Sandbox network diagnostics](sandbox-network-diagnostics.md) — missing AbortSignal can look like upstream failure when broad catches hide reference errors
