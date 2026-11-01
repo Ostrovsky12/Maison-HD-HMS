@@ -22,6 +22,76 @@ export interface PosterMenuImportInput {
   options?: PosterMenuImportOptions;
 }
 
+export type PosterDispatchDiagnosticOperation =
+  (typeof PosterDispatchDiagnosticOperation)[keyof typeof PosterDispatchDiagnosticOperation];
+
+export const PosterDispatchDiagnosticOperation = {
+  unknown: "unknown",
+  menugetProducts: "menu.getProducts",
+  dashgetTransaction: "dash.getTransaction",
+  spotsgetSpots: "spots.getSpots",
+  spotsgetTableHallTables: "spots.getTableHallTables",
+  accessgetTablets: "access.getTablets",
+  accessgetEmployees: "access.getEmployees",
+  transactionscreateTransaction: "transactions.createTransaction",
+  transactionschangeComment: "transactions.changeComment",
+  transactionsaddTransactionProduct: "transactions.addTransactionProduct",
+  transactionschangeTransactionProductCount:
+    "transactions.changeTransactionProductCount",
+} as const;
+
+export type PosterDispatchDiagnosticOutcome =
+  (typeof PosterDispatchDiagnosticOutcome)[keyof typeof PosterDispatchDiagnosticOutcome];
+
+export const PosterDispatchDiagnosticOutcome = {
+  rejected: "rejected",
+  uncertain: "uncertain",
+  unavailable: "unavailable",
+} as const;
+
+export interface PosterDispatchDiagnostic {
+  operation: PosterDispatchDiagnosticOperation;
+  outcome: PosterDispatchDiagnosticOutcome;
+  /**
+   * @minimum 100
+   * @maximum 599
+   */
+  httpStatus?: number;
+  /**
+   * @minimum 1
+   * @maximum 999999999
+   */
+  providerCode?: number;
+  /** @maxLength 500 */
+  recommendation: string;
+}
+
+export type PosterDispatchStateStatus =
+  (typeof PosterDispatchStateStatus)[keyof typeof PosterDispatchStateStatus];
+
+export const PosterDispatchStateStatus = {
+  pending: "pending",
+  synced: "synced",
+  blocked: "blocked",
+  review: "review",
+  closed_remote: "closed_remote",
+  disabled: "disabled",
+} as const;
+
+export interface PosterDispatchState {
+  status: PosterDispatchStateStatus;
+  remoteOrderId?: number;
+  message?: string;
+  lastSync?: string;
+  diagnostic?: PosterDispatchDiagnostic;
+}
+
+export interface PosterDispatchResponse {
+  enabled: boolean;
+  state: PosterDispatchState | null;
+  printSupported: boolean;
+}
+
 export type PosterOrderBridgeInputTableMap = { [key: string]: number };
 
 export type PosterOrderBridgeInputProductMap = { [key: string]: number };
@@ -1535,10 +1605,6 @@ export type PreviewPosterMenuImport200 = { [key: string]: unknown };
 export type ExecutePosterMenuImport200 = { [key: string]: unknown };
 
 export type GetPosterOrderBridgeCatalog200 = { [key: string]: unknown };
-
-export type GetPosterOrderBridgeOrder200 = { [key: string]: unknown };
-
-export type SendPosterOrderBridgeOrder200 = { [key: string]: unknown };
 
 export type ListTvPropertyWeather200 = {
   properties: TvPropertyWeather[];

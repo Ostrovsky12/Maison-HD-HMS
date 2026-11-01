@@ -1,6 +1,7 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger.js";
 import { createHash } from "node:crypto";
+import { PosterWriteError, posterCode, posterDiagnostic, providerErrorCode, type PosterDiagnostic } from "./poster-diagnostics.js";
 
 export type BridgeConfig = {
   enabled: boolean; spotId: number; tabletId: number; waiterId: number;
@@ -13,14 +14,13 @@ export type BridgeState = {
   accountBinding?: string;
   quantities?: Record<string, number>; prices?: Record<string, number>; comment?: string;
   pending?: { method: string; at: string; params: Record<string, any> };
+  diagnostic?: PosterDiagnostic;
 };
-
-class PosterWriteError extends Error {
-  constructor(message: string, public uncertain = false) { super(message); }
-}
 
 // Never expose provider URLs (they contain the tenant's bearer token).
 export async function bridgeCall(token: string, method: string, params: Record<string, any> = {}, write = false): Promise<any> {
+  const unconfirmed = (message: string, http?: number) =>
+    new PosterWriteError(message, write, posterDiagnostic(method, write ? "uncertain" : "unavailable", http));
   let r: Response;
   try {
     const url = new URL(`https://joinposter.com/api/${method}`);
@@ -32,18 +32,24 @@ export async function bridgeCall(token: string, method: string, params: Record<s
       options.body = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]));
     } else for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
     r = await fetch(url, options);
-  } catch { throw new PosterWriteError("Зв’язок із Poster перервано.", write); }
-  if (!r.ok) throw new PosterWriteError(`Poster HTTP ${r.status}.`, write);
+  } catch { throw unconfirmed("Зв’язок із Poster перервано."); }
   let body: any;
-  try { body = await r.json(); } catch { throw new PosterWriteError("Некоректна відповідь Poster.", write); }
-  if (!body || typeof body !== "object") throw new PosterWriteError("Порожня відповідь Poster.", write);
-  if (body.error || (body.error_code !== undefined && Number(body.error_code) !== 0)) {
-    throw new PosterWriteError("Poster відхилив запит. Перевірте доступ і налаштування каси.");
+  try { body = await r.json(); } catch {
+    if (!r.ok) throw unconfirmed(`Poster HTTP ${r.status}.`, r.status);
+    throw unconfirmed("Некоректна відповідь Poster.", r.status);
   }
-  if (body.response === undefined || body.response === null) throw new PosterWriteError("Непідтверджений результат Poster.", write);
-  if (body.response.err_code !== undefined && Number(body.response.err_code) !== 0) {
-    throw new PosterWriteError("Poster не виконав операцію з рахунком.");
+  const code = providerErrorCode(body);
+  // Preserve the existing conservative hold for every non-2xx write response.
+  if (!r.ok) throw new PosterWriteError(`Poster HTTP ${r.status}.`, write,
+    posterDiagnostic(method, write ? "uncertain" : "unavailable", r.status, code));
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw unconfirmed("Порожня відповідь Poster.", r.status);
+  if (body.error || code !== undefined) {
+    throw new PosterWriteError("Poster відхилив запит.", false,
+      posterDiagnostic(method, "rejected", r.status, code));
   }
+  if (body.error_code !== undefined && posterCode(body.error_code) !== 0) throw unconfirmed("Некоректний код відповіді Poster.", r.status);
+  if (body.response === undefined || body.response === null) throw unconfirmed("Непідтверджений результат Poster.", r.status);
+  if (body.response.err_code !== undefined && posterCode(body.response.err_code) !== 0) throw unconfirmed("Некоректний код відповіді Poster.", r.status);
   return body.response;
 }
 
@@ -188,6 +194,7 @@ export async function dispatchPosterOrder(orgId: number, orderId: number) {
         assertRemoteUnchanged(Array.isArray(observed) ? observed[0] : null, state, config);
       }
       // Persist BEFORE crossing the network. A process crash must never lead to a blind replay.
+      delete state.diagnostic;
       state.pending = { method, at: new Date().toISOString(), params };
       state.accountBinding = accountBinding;
       state.status = "pending";
@@ -198,7 +205,12 @@ export async function dispatchPosterOrder(orgId: number, orderId: number) {
         if (e instanceof PosterWriteError && !e.uncertain) delete state.pending;
         throw e;
       }
-      accept(result);
+      try { accept(result); } catch (error) {
+        if (error instanceof PosterWriteError && !error.diagnostic) {
+          error.diagnostic = posterDiagnostic(method, "uncertain");
+        }
+        throw error;
+      }
       delete state.pending;
       await saveState(client, orgId, orderId, state);
     };
@@ -237,6 +249,7 @@ export async function dispatchPosterOrder(orgId: number, orderId: number) {
       }
     }
     state.status = "synced"; state.message = "Передано у відкритий рахунок Poster. Друк бігунків окремо не підтверджено.";
+    delete state.diagnostic;
     state.lastSync = new Date().toISOString();
     await saveState(client, orgId, orderId, state);
     return state;
@@ -245,6 +258,12 @@ export async function dispatchPosterOrder(orgId: number, orderId: number) {
     state.message = state.pending ? "Результат запиту невідомий. Потрібна звірка з Poster; автоматичний повтор заборонено."
       : error instanceof PosterWriteError ? error.message
         : error instanceof Error && !("query" in error) ? error.message : "Не вдалося обробити передавання.";
+    if (error instanceof PosterWriteError && error.diagnostic) {
+      state.diagnostic = error.diagnostic;
+      logger.warn({ organizationId: orgId, orderId, diagnostic: state.diagnostic }, "Poster dispatch failed");
+    } else {
+      delete state.diagnostic;
+    }
     // Do not propagate database errors (they may contain query parameters).
     if (locked) await saveState(client, orgId, orderId, state).catch(() => {});
     return state;

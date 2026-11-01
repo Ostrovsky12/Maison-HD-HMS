@@ -4,6 +4,7 @@ const fixture = vi.hoisted(() => ({ query: vi.fn(), release: vi.fn(), fetch: vi.
 vi.mock("@workspace/db", () => ({ pool: { connect: async () => ({ query: fixture.query, release: fixture.release }), query: fixture.query } }));
 vi.mock("../lib/logger.js", () => ({ logger: { warn: vi.fn() } }));
 import { bridgePlan, assertRemoteUnchanged, dispatchPosterOrder } from "../lib/poster-order-bridge.js";
+import { logger } from "../lib/logger.js";
 
 const config = { enabled: true, spotId: 1, tabletId: 2, waiterId: 3, tableMap: { "10": 20 }, productMap: { "100": 200 } };
 const item = { item_id: 100, name: "Soup", price: "50.00", quantity: 2, status: "pending" };
@@ -98,6 +99,52 @@ describe("Poster open-order dispatch", () => {
   it("does not close or fiscalize any bill", async () => {
     await dispatchPosterOrder(39, 5);
     expect(writes.some(m => /close|fiscal|pay|print/i.test(m))).toBe(false);
+  });
+  it("persists explicit rejection diagnostics and logs no provider payload or credentials", async () => {
+    const normalFetch = fixture.fetch.getMockImplementation()!;
+    fixture.fetch.mockImplementation(async (url: URL, opts: RequestInit) => {
+      if (opts.method === "POST") return new Response(JSON.stringify({ error: { code: 20, message: "fake-provider-token" } }));
+      return normalFetch(url, opts);
+    });
+    const failed = await dispatchPosterOrder(39, 5);
+    expect(failed).toMatchObject({ status: "blocked", diagnostic: { operation: "transactions.createTransaction", providerCode: 20, outcome: "rejected" } });
+    expect(failed.pending).toBeUndefined();
+    expect(order.poster_sync.diagnostic.providerCode).toBe(20);
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("fake-provider-token");
+    expect(logger.warn).toHaveBeenCalled();
+  });
+  it("retains timeout diagnostics and never replays the uncertain write", async () => {
+    loseCreateResponse = true;
+    const failed = await dispatchPosterOrder(39, 5);
+    expect(failed).toMatchObject({ status: "review", diagnostic: { operation: "transactions.createTransaction", outcome: "uncertain" } });
+    expect(order.poster_sync.pending.method).toBe("transactions.createTransaction");
+    await dispatchPosterOrder(39, 5);
+    expect(writes).toEqual(["transactions.createTransaction"]);
+    expect(order.poster_sync.diagnostic.outcome).toBe("uncertain");
+  });
+  it("does not accept a malformed create acknowledgement or clear its pending hold", async () => {
+    const normalFetch = fixture.fetch.getMockImplementation()!;
+    fixture.fetch.mockImplementation(async (url: URL, opts: RequestInit) => {
+      if (opts.method === "POST") { writes.push("transactions.createTransaction"); return new Response(JSON.stringify({ response: {} })); }
+      return normalFetch(url, opts);
+    });
+    expect(await dispatchPosterOrder(39, 5)).toMatchObject({ status: "review", diagnostic: { operation: "transactions.createTransaction", outcome: "uncertain" } });
+    await dispatchPosterOrder(39, 5);
+    expect(writes).toHaveLength(1);
+  });
+  it("does not replay on HTTP failure and clears stale diagnostics only after a successful explicit attempt", async () => {
+    const normalFetch = fixture.fetch.getMockImplementation()!;
+    fixture.fetch.mockImplementation(async (url: URL, opts: RequestInit) => {
+      if (opts.method === "POST") { writes.push("transactions.createTransaction"); return new Response("unavailable", { status: 503 }); }
+      return normalFetch(url, opts);
+    });
+    expect(await dispatchPosterOrder(39, 5)).toMatchObject({ status: "review", diagnostic: { httpStatus: 503, outcome: "uncertain" } });
+    await dispatchPosterOrder(39, 5); expect(writes).toHaveLength(1);
+    // Separate, explicitly rejected (not uncertain) historical state.
+    order.poster_sync = { status: "blocked", quantities: {}, diagnostic: { outcome: "rejected", providerCode: 20 } };
+    fixture.fetch.mockImplementation(normalFetch);
+    expect(await dispatchPosterOrder(39, 5)).toMatchObject({ status: "synced" });
+    expect(order.poster_sync.diagnostic).toBeUndefined();
   });
 });
 

@@ -87,19 +87,143 @@ export const GetPosterOrderBridgeOrderParams = zod.object({
   id: zod.coerce.number(),
 });
 
-export const GetPosterOrderBridgeOrderResponse = zod.record(
-  zod.string(),
-  zod.unknown(),
-);
+export const getPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMin = 100;
+export const getPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMax = 599;
+
+export const getPosterOrderBridgeOrderResponseStateOneDiagnosticProviderCodeMax = 999999999;
+
+export const getPosterOrderBridgeOrderResponseStateOneDiagnosticRecommendationMax = 500;
+
+export const GetPosterOrderBridgeOrderResponse = zod.object({
+  enabled: zod.boolean(),
+  state: zod.union([
+    zod.object({
+      status: zod.enum([
+        "pending",
+        "synced",
+        "blocked",
+        "review",
+        "closed_remote",
+        "disabled",
+      ]),
+      remoteOrderId: zod.number().optional(),
+      message: zod.string().optional(),
+      lastSync: zod.string().optional(),
+      diagnostic: zod
+        .object({
+          operation: zod.enum([
+            "unknown",
+            "menu.getProducts",
+            "dash.getTransaction",
+            "spots.getSpots",
+            "spots.getTableHallTables",
+            "access.getTablets",
+            "access.getEmployees",
+            "transactions.createTransaction",
+            "transactions.changeComment",
+            "transactions.addTransactionProduct",
+            "transactions.changeTransactionProductCount",
+          ]),
+          outcome: zod.enum(["rejected", "uncertain", "unavailable"]),
+          httpStatus: zod
+            .number()
+            .min(
+              getPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMin,
+            )
+            .max(
+              getPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMax,
+            )
+            .optional(),
+          providerCode: zod
+            .number()
+            .min(1)
+            .max(
+              getPosterOrderBridgeOrderResponseStateOneDiagnosticProviderCodeMax,
+            )
+            .optional(),
+          recommendation: zod
+            .string()
+            .max(
+              getPosterOrderBridgeOrderResponseStateOneDiagnosticRecommendationMax,
+            ),
+        })
+        .optional(),
+    }),
+    zod.null(),
+  ]),
+  printSupported: zod.boolean(),
+});
 
 export const SendPosterOrderBridgeOrderParams = zod.object({
   id: zod.coerce.number(),
 });
 
-export const SendPosterOrderBridgeOrderResponse = zod.record(
-  zod.string(),
-  zod.unknown(),
-);
+export const sendPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMin = 100;
+export const sendPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMax = 599;
+
+export const sendPosterOrderBridgeOrderResponseStateOneDiagnosticProviderCodeMax = 999999999;
+
+export const sendPosterOrderBridgeOrderResponseStateOneDiagnosticRecommendationMax = 500;
+
+export const SendPosterOrderBridgeOrderResponse = zod.object({
+  enabled: zod.boolean(),
+  state: zod.union([
+    zod.object({
+      status: zod.enum([
+        "pending",
+        "synced",
+        "blocked",
+        "review",
+        "closed_remote",
+        "disabled",
+      ]),
+      remoteOrderId: zod.number().optional(),
+      message: zod.string().optional(),
+      lastSync: zod.string().optional(),
+      diagnostic: zod
+        .object({
+          operation: zod.enum([
+            "unknown",
+            "menu.getProducts",
+            "dash.getTransaction",
+            "spots.getSpots",
+            "spots.getTableHallTables",
+            "access.getTablets",
+            "access.getEmployees",
+            "transactions.createTransaction",
+            "transactions.changeComment",
+            "transactions.addTransactionProduct",
+            "transactions.changeTransactionProductCount",
+          ]),
+          outcome: zod.enum(["rejected", "uncertain", "unavailable"]),
+          httpStatus: zod
+            .number()
+            .min(
+              sendPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMin,
+            )
+            .max(
+              sendPosterOrderBridgeOrderResponseStateOneDiagnosticHttpStatusMax,
+            )
+            .optional(),
+          providerCode: zod
+            .number()
+            .min(1)
+            .max(
+              sendPosterOrderBridgeOrderResponseStateOneDiagnosticProviderCodeMax,
+            )
+            .optional(),
+          recommendation: zod
+            .string()
+            .max(
+              sendPosterOrderBridgeOrderResponseStateOneDiagnosticRecommendationMax,
+            ),
+        })
+        .optional(),
+    }),
+    zod.null(),
+  ]),
+  printSupported: zod.boolean(),
+});
 
 export const listTvPropertyWeatherResponsePropertiesItemWeatherLocationMax = 255;
 

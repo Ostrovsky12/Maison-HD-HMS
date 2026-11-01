@@ -2,13 +2,15 @@ import { Router } from "express";
 import { pool } from "@workspace/db";
 import { UpdatePosterOrderBridgeBody } from "@workspace/api-zod";
 import { bridgeAccount, bridgeCall, dispatchPosterOrder } from "../lib/poster-order-bridge.js";
+import { visiblePosterDiagnostic } from "../lib/poster-diagnostics.js";
 
 const router = Router();
 const input = UpdatePosterOrderBridgeBody;
 const canConfigure = (req: any) => ["owner", "manager", "admin", "super_admin"].includes(req.user?.role);
 function visibleState(state: any) {
   if (!state) return null;
-  return { status: state.status, remoteOrderId: state.remoteOrderId, message: state.message, lastSync: state.lastSync };
+  return { status: state.status, remoteOrderId: state.remoteOrderId, message: state.message, lastSync: state.lastSync,
+    diagnostic: visiblePosterDiagnostic(state.diagnostic) };
 }
 async function view(orgId: number) {
   const { config } = await bridgeAccount(orgId);

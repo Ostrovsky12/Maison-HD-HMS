@@ -54,7 +54,6 @@ import type {
   GetMonthlyReportParams,
   GetOccupancyAnalyticsParams,
   GetPosterOrderBridgeCatalog200,
-  GetPosterOrderBridgeOrder200,
   GetPricingPreviewParams,
   GetUnitsAvailabilityParams,
   Guest,
@@ -103,6 +102,7 @@ import type {
   OtaSyncResult,
   PayInvoiceRequest,
   Payment,
+  PosterDispatchResponse,
   PosterMenuImportInput,
   PosterOrderBridgeInput,
   PosterOrderBridgeView,
@@ -113,7 +113,6 @@ import type {
   RunNightAuditBody,
   SearchGuests200,
   SearchGuestsParams,
-  SendPosterOrderBridgeOrder200,
   SuccessResponse,
   TvWeatherInput,
   Unit,
@@ -542,8 +541,8 @@ export const getGetPosterOrderBridgeOrderUrl = (id: number) => {
 export const getPosterOrderBridgeOrder = async (
   id: number,
   options?: RequestInit,
-): Promise<GetPosterOrderBridgeOrder200> => {
-  return customFetch<GetPosterOrderBridgeOrder200>(
+): Promise<PosterDispatchResponse> => {
+  return customFetch<PosterDispatchResponse>(
     getGetPosterOrderBridgeOrderUrl(id),
     {
       ...options,
@@ -627,8 +626,8 @@ export const getSendPosterOrderBridgeOrderUrl = (id: number) => {
 export const sendPosterOrderBridgeOrder = async (
   id: number,
   options?: RequestInit,
-): Promise<SendPosterOrderBridgeOrder200> => {
-  return customFetch<SendPosterOrderBridgeOrder200>(
+): Promise<PosterDispatchResponse> => {
+  return customFetch<PosterDispatchResponse>(
     getSendPosterOrderBridgeOrderUrl(id),
     {
       ...options,

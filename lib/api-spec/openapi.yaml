@@ -124,7 +124,7 @@ paths:
           description: Persisted order dispatch status; never a print or payment confirmation
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema: { $ref: "#/components/schemas/PosterDispatchResponse" }
   /poster/order-bridge/orders/{id}/send:
     post:
       operationId: sendPosterOrderBridgeOrder
@@ -136,7 +136,7 @@ paths:
           description: Dispatch result; uncertain writes are held for manual review, not retried
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema: { $ref: "#/components/schemas/PosterDispatchResponse" }
   /tv/properties/weather:
     get:
       operationId: listTvPropertyWeather
@@ -2531,6 +2531,37 @@ components:
         import_ingredients: { type: boolean }
         import_dishes: { type: boolean }
         import_recipes: { type: boolean }
+    PosterDispatchDiagnostic:
+      type: object
+      additionalProperties: false
+      required: [operation, outcome, recommendation]
+      properties:
+        operation:
+          type: string
+          enum: [unknown, menu.getProducts, dash.getTransaction, spots.getSpots, spots.getTableHallTables, access.getTablets, access.getEmployees, transactions.createTransaction, transactions.changeComment, transactions.addTransactionProduct, transactions.changeTransactionProductCount]
+        outcome: { type: string, enum: [rejected, uncertain, unavailable] }
+        httpStatus: { type: integer, minimum: 100, maximum: 599 }
+        providerCode: { type: integer, minimum: 1, maximum: 999999999 }
+        recommendation: { type: string, maxLength: 500 }
+    PosterDispatchState:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [pending, synced, blocked, review, closed_remote, disabled] }
+        remoteOrderId: { type: integer }
+        message: { type: string }
+        lastSync: { type: string }
+        diagnostic: { $ref: "#/components/schemas/PosterDispatchDiagnostic" }
+    PosterDispatchResponse:
+      type: object
+      required: [enabled, state, printSupported]
+      properties:
+        enabled: { type: boolean }
+        state:
+          anyOf:
+            - { $ref: "#/components/schemas/PosterDispatchState" }
+            - { type: "null" }
+        printSupported: { type: boolean }
     PosterOrderBridgeInput:
       type: object
       required: [enabled, spotId, tabletId, waiterId, tableMap, productMap]
