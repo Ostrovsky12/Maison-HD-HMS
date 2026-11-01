@@ -19,6 +19,12 @@ For DOGODA Resort, the user confirmed that the current menu and prices are in Po
 
 **How to apply:** Confirm the authoritative source and import direction before updating dishes or quoting test totals. Do not configure tests against the old prices or assume menu import also exports the catalogue to Poster.
 
+For menu-and-price refreshes, keep ingredients and stock import separate rather than requiring them for the menu.
+
+**Why:** The user confirmed that the menu was available after disabling ingredient import following a pre-write import failure. This confirms the menu-only path, not the exact failing provider method or correctness of every imported price.
+
+**How to apply:** Use menu-only refresh for QR/Waiter preparation; validate prices and mappings separately. Investigate stock import independently if it is requested.
+
 Keep the open-order bridge opt-in, separate from printing and payment/fiscalization. Do not create production test orders without agreeing a specific test with the user.
 
 **Why:** The user prioritized QR ordering and Mobile Waiter first, and did not authorize live test sales. Poster Web API submission does not establish terminal printing; its newer Orders API documents closing behavior rather than a safe open-bill replacement.
