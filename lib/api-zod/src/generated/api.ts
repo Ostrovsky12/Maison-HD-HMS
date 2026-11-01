@@ -7,6 +7,98 @@
  */
 import * as zod from "zod";
 
+export const listTvPropertyWeatherResponsePropertiesItemWeatherLocationMax = 255;
+
+export const listTvPropertyWeatherResponsePropertiesItemWeatherLatitudeMin =
+  -90;
+export const listTvPropertyWeatherResponsePropertiesItemWeatherLatitudeMax = 90;
+
+export const listTvPropertyWeatherResponsePropertiesItemWeatherLongitudeMin =
+  -180;
+export const listTvPropertyWeatherResponsePropertiesItemWeatherLongitudeMax = 180;
+
+export const ListTvPropertyWeatherResponse = zod.object({
+  properties: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      weather: zod.object({
+        location: zod
+          .string()
+          .max(listTvPropertyWeatherResponsePropertiesItemWeatherLocationMax)
+          .optional(),
+        latitude: zod
+          .number()
+          .min(listTvPropertyWeatherResponsePropertiesItemWeatherLatitudeMin)
+          .max(listTvPropertyWeatherResponsePropertiesItemWeatherLatitudeMax)
+          .optional(),
+        longitude: zod
+          .number()
+          .min(listTvPropertyWeatherResponsePropertiesItemWeatherLongitudeMin)
+          .max(listTvPropertyWeatherResponsePropertiesItemWeatherLongitudeMax)
+          .optional(),
+      }),
+    }),
+  ),
+});
+
+export const UpdateTvPropertyWeatherParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const updateTvPropertyWeatherBodyLocationMax = 255;
+
+export const updateTvPropertyWeatherBodyLatitudeMin = -90;
+export const updateTvPropertyWeatherBodyLatitudeMax = 90;
+
+export const updateTvPropertyWeatherBodyLongitudeMin = -180;
+export const updateTvPropertyWeatherBodyLongitudeMax = 180;
+
+export const UpdateTvPropertyWeatherBody = zod.object({
+  location: zod.string().max(updateTvPropertyWeatherBodyLocationMax).optional(),
+  latitude: zod
+    .number()
+    .min(updateTvPropertyWeatherBodyLatitudeMin)
+    .max(updateTvPropertyWeatherBodyLatitudeMax)
+    .optional(),
+  longitude: zod
+    .number()
+    .min(updateTvPropertyWeatherBodyLongitudeMin)
+    .max(updateTvPropertyWeatherBodyLongitudeMax)
+    .optional(),
+});
+
+export const updateTvPropertyWeatherResponsePropertyWeatherLocationMax = 255;
+
+export const updateTvPropertyWeatherResponsePropertyWeatherLatitudeMin = -90;
+export const updateTvPropertyWeatherResponsePropertyWeatherLatitudeMax = 90;
+
+export const updateTvPropertyWeatherResponsePropertyWeatherLongitudeMin = -180;
+export const updateTvPropertyWeatherResponsePropertyWeatherLongitudeMax = 180;
+
+export const UpdateTvPropertyWeatherResponse = zod.object({
+  property: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    weather: zod.object({
+      location: zod
+        .string()
+        .max(updateTvPropertyWeatherResponsePropertyWeatherLocationMax)
+        .optional(),
+      latitude: zod
+        .number()
+        .min(updateTvPropertyWeatherResponsePropertyWeatherLatitudeMin)
+        .max(updateTvPropertyWeatherResponsePropertyWeatherLatitudeMax)
+        .optional(),
+      longitude: zod
+        .number()
+        .min(updateTvPropertyWeatherResponsePropertyWeatherLongitudeMin)
+        .max(updateTvPropertyWeatherResponsePropertyWeatherLongitudeMax)
+        .optional(),
+    }),
+  }),
+});
+
 /**
  * @summary Health check
  */

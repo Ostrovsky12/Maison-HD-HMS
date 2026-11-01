@@ -26,6 +26,9 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function ensureSchema() {
+  // Apply independently: an unrelated failure in the legacy multi-statement
+  // bootstrap must not roll back this additive change for existing properties.
+  await db.execute(sql`ALTER TABLE IF EXISTS properties ADD COLUMN IF NOT EXISTS tv_weather JSONB NOT NULL DEFAULT '{}'::jsonb`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS organizations (
       id SERIAL PRIMARY KEY,
@@ -60,6 +63,7 @@ async function ensureSchema() {
       description TEXT,
       address TEXT,
       settings JSONB,
+      tv_weather JSONB NOT NULL DEFAULT '{}'::jsonb,
       is_active BOOLEAN NOT NULL DEFAULT true,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL,
       updated_at TIMESTAMP DEFAULT NOW() NOT NULL

@@ -12,6 +12,7 @@ export const propertiesTable = pgTable("properties", {
   name: text("name").notNull(),
   type: propertyTypeEnum("type").notNull().default("hotel"),
   address: text("address"),
+  tvWeather: jsonb("tv_weather").$type<{ location?: string; latitude?: number; longitude?: number }>().notNull().default({}),
   description: text("description"),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").default(0),

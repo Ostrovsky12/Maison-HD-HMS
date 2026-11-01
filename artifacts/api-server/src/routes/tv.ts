@@ -9,9 +9,21 @@ import { sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { randomUUID } from "node:crypto";
 import { getTvWeather } from "../services/tv-weather.js";
+import { effectiveWeather, weatherMode, parseWeatherConfig } from "../services/tv-weather-config.js";
+import { UpdateTvPropertyWeatherBody } from "@workspace/api-zod";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
+
+async function screenProperty(orgId: number, unitId: number | null) {
+  if (!unitId || !orgId) return null;
+  const [property] = await db.select({
+    id: propertiesTable.id, name: propertiesTable.name, weather: propertiesTable.tvWeather,
+  }).from(propertiesTable)
+    .innerJoin(unitsTable, eq(unitsTable.propertyId, propertiesTable.id))
+    .where(and(eq(unitsTable.id, unitId), eq(propertiesTable.organizationId, orgId))).limit(1);
+  return property || null;
+}
 
 // ── SEED ──────────────────────────────────────────────────────────────────────
 async function seedTvScreens(orgId: number) {
@@ -57,6 +69,32 @@ async function seedTvScreens(orgId: number) {
 
 // ── STAFF ROUTES ──────────────────────────────────────────────────────────────
 
+router.get("/properties/weather", requireAuth, async (req: any, res): Promise<void> => {
+  const orgId = getOrg(req);
+  if (!orgId) { res.status(403).json({ error: "Організацію не визначено" }); return; }
+  const properties = await db.select({
+    id: propertiesTable.id, name: propertiesTable.name, weather: propertiesTable.tvWeather,
+  }).from(propertiesTable).where(eq(propertiesTable.organizationId, orgId)).orderBy(asc(propertiesTable.id));
+  res.json({ properties });
+});
+
+router.patch("/properties/:id/weather", requireAuth, async (req: any, res): Promise<void> => {
+  const orgId = getOrg(req);
+  if (!orgId) { res.status(403).json({ error: "Організацію не визначено" }); return; }
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) { res.status(400).json({ error: "Некоректний об’єкт" }); return; }
+  const parsed = UpdateTvPropertyWeatherBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "Некоректна погодна локація" }); return; }
+  let weather;
+  try { weather = parseWeatherConfig(parsed.data); }
+  catch (error: any) { res.status(400).json({ error: error.message }); return; }
+  const [property] = await db.update(propertiesTable).set({ tvWeather: weather, updatedAt: new Date() })
+    .where(and(eq(propertiesTable.id, id), eq(propertiesTable.organizationId, orgId)))
+    .returning({ id: propertiesTable.id, name: propertiesTable.name, weather: propertiesTable.tvWeather });
+  if (!property) { res.status(404).json({ error: "Об’єкт не знайдено" }); return; }
+  res.json({ property });
+});
+
 router.get("/stats", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
@@ -94,7 +132,12 @@ router.get("/screens", requireAuth, async (req: any, res) => {
       .leftJoin(unitsTable, eq(tvScreensTable.unitId, unitsTable.id))
       .where(eq(tvScreensTable.organizationId, orgId))
       .orderBy(asc(tvScreensTable.createdAt));
-    res.json({ screens });
+    const enriched = await Promise.all(screens.map(async screen => {
+      const property = await screenProperty(orgId, screen.unitId);
+      return { ...screen, propertyId: property?.id ?? null, propertyName: property?.name ?? null,
+        weatherMode: weatherMode(screen.contentConfig), effectiveWeather: effectiveWeather(screen.contentConfig, property?.weather) };
+    }));
+    res.json({ screens: enriched });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -144,7 +187,7 @@ router.post("/screens", requireAuth, async (req: any, res) => {
       contentConfig: {
         slideInterval: 8000,
         enabledSlides: ["welcome", "weather", "services", "food", "activities", "events", "upsell", "info"],
-        hotelInfo: {}, activities: [], offers: [], promotionalVideos: [], weather: {},
+        hotelInfo: {}, activities: [], offers: [], promotionalVideos: [], weather: {}, weatherMode: "inherit",
       },
     }).returning();
     res.status(201).json({ screen: created });
@@ -159,7 +202,16 @@ router.patch("/screens/:id", requireAuth, async (req: any, res) => {
     if (req.body.isActive !== undefined) allowed.isActive = req.body.isActive;
     if (req.body.displayName !== undefined) allowed.displayName = req.body.displayName;
     if (req.body.branding !== undefined) allowed.branding = req.body.branding;
-    if (req.body.contentConfig !== undefined) allowed.contentConfig = req.body.contentConfig;
+    if (req.body.contentConfig !== undefined) {
+      const config = req.body.contentConfig;
+      if (!config || typeof config !== "object" || Array.isArray(config)
+        || (config.weatherMode !== undefined && !["inherit", "override"].includes(config.weatherMode))) {
+        return res.status(400).json({ error: "Некоректні погодні налаштування" });
+      }
+      try {
+        allowed.contentConfig = { ...config, ...(config.weather !== undefined ? { weather: parseWeatherConfig(config.weather) } : {}) };
+      } catch (error: any) { return res.status(400).json({ error: error.message }); }
+    }
     if (Object.keys(allowed).length === 0) return res.json({ ok: true });
     await db.update(tvScreensTable).set(allowed)
       .where(and(eq(tvScreensTable.id, id), eq(tvScreensTable.organizationId, orgId)));
@@ -248,7 +300,8 @@ router.get("/display/:roomCode", async (req, res) => {
       : `/maison-hd/guest-app`;
     const config = (screen.contentConfig || {}) as any;
     const info = config.hotelInfo || {};
-    const weather = await getTvWeather(orgId, config.weather || {});
+    const property = await screenProperty(orgId, screen.unitId);
+    const weather = await getTvWeather(orgId, effectiveWeather(config, property?.weather));
 
     res.json({
       screen: { roomCode, displayName: screen.displayName, unitName, floor, branding: screen.branding, contentConfig: screen.contentConfig },

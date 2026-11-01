@@ -49,6 +49,57 @@ tags:
     description: DOGODA Guest Nature Guide
 
 paths:
+  /tv/properties/weather:
+    get:
+      operationId: listTvPropertyWeather
+      tags: [TV]
+      responses:
+        "200":
+          description: Weather defaults for properties in the authenticated organization
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [properties]
+                properties:
+                  properties:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TvPropertyWeather"
+        "403":
+          description: Organization is required
+  /tv/properties/{id}/weather:
+    patch:
+      operationId: updateTvPropertyWeather
+      tags: [TV]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TvWeatherInput"
+      responses:
+        "200":
+          description: Saved weather default
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [property]
+                properties:
+                  property:
+                    $ref: "#/components/schemas/TvPropertyWeather"
+        "400":
+          description: Invalid location or coordinates
+        "403":
+          description: Organization is required
+        "404":
+          description: Property not found in this organization
   /healthz:
     get:
       operationId: healthCheck
@@ -2375,6 +2426,20 @@ components:
       bearerFormat: JWT
 
   schemas:
+    TvWeatherInput:
+      type: object
+      properties:
+        location: { type: string, maxLength: 255 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+    TvPropertyWeather:
+      type: object
+      required: [id, name, weather]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        weather:
+          $ref: "#/components/schemas/TvWeatherInput"
     HealthStatus:
       type: object
       properties:

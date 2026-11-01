@@ -1,8 +1,4 @@
-type WeatherConfig = {
-  location?: string;
-  latitude?: number;
-  longitude?: number;
-};
+import type { WeatherConfig } from "./tv-weather-config.js";
 
 export type TvWeather = {
   status: "live" | "stale" | "unavailable";

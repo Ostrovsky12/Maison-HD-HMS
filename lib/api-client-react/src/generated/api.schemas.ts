@@ -5,6 +5,27 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export interface TvWeatherInput {
+  /** @maxLength 255 */
+  location?: string;
+  /**
+   * @minimum -90
+   * @maximum 90
+   */
+  latitude?: number;
+  /**
+   * @minimum -180
+   * @maximum 180
+   */
+  longitude?: number;
+}
+
+export interface TvPropertyWeather {
+  id: number;
+  name: string;
+  weather: TvWeatherInput;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -1462,6 +1483,14 @@ export interface GuideAdminStats {
   pendingReview: number;
   approved: number;
 }
+
+export type ListTvPropertyWeather200 = {
+  properties: TvPropertyWeather[];
+};
+
+export type UpdateTvPropertyWeather200 = {
+  property: TvPropertyWeather;
+};
 
 export type GetUnitsAvailabilityParams = {
   checkIn: string;

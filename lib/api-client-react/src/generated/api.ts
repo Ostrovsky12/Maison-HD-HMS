@@ -85,6 +85,7 @@ import type {
   ListNotificationsParams,
   ListPaymentsParams,
   ListRatesParams,
+  ListTvPropertyWeather200,
   ListUnitCategoriesParams,
   ListUnitsParams,
   LoginRequest,
@@ -106,6 +107,7 @@ import type {
   SearchGuests200,
   SearchGuestsParams,
   SuccessResponse,
+  TvWeatherInput,
   Unit,
   UnitAvailabilityResponse,
   UnitCategorySummary,
@@ -115,6 +117,7 @@ import type {
   UpdateInvoiceRequest,
   UpdateOrganizationRequest,
   UpdateStatusRequest,
+  UpdateTvPropertyWeather200,
   UpdateUnitHousekeepingStatusRequest,
   UpdateUnitRequest,
   UpdateUserRequest,
@@ -133,6 +136,158 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getListTvPropertyWeatherUrl = () => {
+  return `/api/tv/properties/weather`;
+};
+
+export const listTvPropertyWeather = async (
+  options?: RequestInit,
+): Promise<ListTvPropertyWeather200> => {
+  return customFetch<ListTvPropertyWeather200>(getListTvPropertyWeatherUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListTvPropertyWeatherQueryKey = () => {
+  return [`/api/tv/properties/weather`] as const;
+};
+
+export const getListTvPropertyWeatherQueryOptions = <
+  TData = Awaited<ReturnType<typeof listTvPropertyWeather>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listTvPropertyWeather>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListTvPropertyWeatherQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listTvPropertyWeather>>
+  > = ({ signal }) => listTvPropertyWeather({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listTvPropertyWeather>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListTvPropertyWeatherQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listTvPropertyWeather>>
+>;
+export type ListTvPropertyWeatherQueryError = ErrorType<void>;
+
+export function useListTvPropertyWeather<
+  TData = Awaited<ReturnType<typeof listTvPropertyWeather>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listTvPropertyWeather>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListTvPropertyWeatherQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getUpdateTvPropertyWeatherUrl = (id: number) => {
+  return `/api/tv/properties/${id}/weather`;
+};
+
+export const updateTvPropertyWeather = async (
+  id: number,
+  tvWeatherInput: TvWeatherInput,
+  options?: RequestInit,
+): Promise<UpdateTvPropertyWeather200> => {
+  return customFetch<UpdateTvPropertyWeather200>(
+    getUpdateTvPropertyWeatherUrl(id),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(tvWeatherInput),
+    },
+  );
+};
+
+export const getUpdateTvPropertyWeatherMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateTvPropertyWeather>>,
+    TError,
+    { id: number; data: BodyType<TvWeatherInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateTvPropertyWeather>>,
+  TError,
+  { id: number; data: BodyType<TvWeatherInput> },
+  TContext
+> => {
+  const mutationKey = ["updateTvPropertyWeather"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateTvPropertyWeather>>,
+    { id: number; data: BodyType<TvWeatherInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateTvPropertyWeather(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateTvPropertyWeatherMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateTvPropertyWeather>>
+>;
+export type UpdateTvPropertyWeatherMutationBody = BodyType<TvWeatherInput>;
+export type UpdateTvPropertyWeatherMutationError = ErrorType<void>;
+
+export const useUpdateTvPropertyWeather = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateTvPropertyWeather>>,
+    TError,
+    { id: number; data: BodyType<TvWeatherInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateTvPropertyWeather>>,
+  TError,
+  { id: number; data: BodyType<TvWeatherInput> },
+  TContext
+> => {
+  return useMutation(getUpdateTvPropertyWeatherMutationOptions(options));
+};
 
 /**
  * @summary Health check

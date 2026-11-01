@@ -25,6 +25,7 @@ export const tvScreensTable = pgTable("tv_screens", {
     activities?: Array<{ icon?: string; name?: string; description?: string; hours?: string; price?: string; tag?: string }>;
     offers?: Array<{ icon?: string; title?: string; description?: string; price?: string; originalPrice?: string; tag?: string; cta?: string }>;
     promotionalVideos?: Array<{ url: string; title?: string }>;
+    weatherMode?: "inherit" | "override";
     weather?: {
       location?: string;
       latitude?: number;

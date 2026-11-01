@@ -47,6 +47,7 @@ const emptyEditor = {
     offers: [] as any[],
     promotionalVideos: [] as Array<{ url: string; title?: string }>,
     weather: { location: "", latitude: "", longitude: "" },
+    weatherMode: "inherit",
   },
 };
 
@@ -62,12 +63,57 @@ export default function HotelTvPage() {
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState({ unitId: "", displayName: "" });
   const [availableUnits, setAvailableUnits] = useState<any[]>([]);
+  const [properties, setProperties] = useState<any[]>([]);
+  const [weatherProperty, setWeatherProperty] = useState<any>(null);
+  const [propertyWeather, setPropertyWeather] = useState({ location: "", latitude: "", longitude: "" });
+  const [savingWeather, setSavingWeather] = useState(false);
   const { toast } = useToast();
 
   const loadStats = async () => { const r = await apiFetch("/stats"); if (r.ok) setStats(await r.json()); };
   const loadScreens = async () => { const r = await apiFetch("/screens"); if (r.ok) { const d = await r.json(); setScreens(d.screens || []); } };
 
-  useEffect(() => { loadStats(); loadScreens(); }, []);
+  const loadProperties = async () => {
+    const r = await apiFetch("/properties/weather");
+    if (!r.ok) throw new Error("Не вдалося завантажити погодні налаштування об’єктів");
+    setProperties((await r.json()).properties || []);
+  };
+  useEffect(() => {
+    loadStats(); loadScreens();
+    const refreshProperties = () => loadProperties().catch(error => toast({ title: error.message, variant: "destructive" }));
+    refreshProperties();
+    const refresh = () => { loadScreens(); refreshProperties(); };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
+
+  const openPropertyWeather = (property: any) => {
+    setWeatherProperty(property);
+    setPropertyWeather({
+      location: property.weather?.location || "",
+      latitude: property.weather?.latitude == null ? "" : String(property.weather.latitude),
+      longitude: property.weather?.longitude == null ? "" : String(property.weather.longitude),
+    });
+  };
+
+  const savePropertyWeather = async () => {
+    if (!weatherProperty) return;
+    setSavingWeather(true);
+    try {
+      const weather = {
+        location: propertyWeather.location,
+        ...(propertyWeather.latitude !== "" ? { latitude: Number(propertyWeather.latitude) } : {}),
+        ...(propertyWeather.longitude !== "" ? { longitude: Number(propertyWeather.longitude) } : {}),
+      };
+      const r = await apiFetch(`/properties/${weatherProperty.id}/weather`, { method: "PATCH", body: JSON.stringify(weather) });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error || "Не вдалося зберегти погоду");
+      await Promise.all([loadProperties(), loadScreens()]);
+      setWeatherProperty(null);
+      toast({ title: "Погодну локацію об’єкта збережено для всіх TV без перевизначення" });
+    } catch (error: any) {
+      toast({ title: error.message || "Не вдалося зберегти погоду", variant: "destructive" });
+    } finally { setSavingWeather(false); }
+  };
 
   const toggleScreen = async (id: number, isActive: boolean) => {
     setToggling(id);
@@ -91,6 +137,7 @@ export default function HotelTvPage() {
         offers: screen.contentConfig?.offers || [],
         promotionalVideos: screen.contentConfig?.promotionalVideos || [],
         weather: { ...emptyEditor.contentConfig.weather, ...(screen.contentConfig?.weather || {}) },
+        weatherMode: screen.weatherMode || "inherit",
       },
     });
   };
@@ -103,7 +150,10 @@ export default function HotelTvPage() {
     setSaving(true);
     const r = await apiFetch(`/screens/${editing.id}`, {
       method: "PATCH",
-      body: JSON.stringify(editor),
+      body: JSON.stringify({
+        ...editor,
+        contentConfig: { ...editor.contentConfig, ...(editor.contentConfig.weatherMode === "inherit" ? { weather: {} } : {}) },
+      }),
     });
     if (r.ok) {
       await loadScreens();
@@ -236,6 +286,45 @@ export default function HotelTvPage() {
             <Plus className="h-4 w-4 mr-2" />Додати TV-екран
           </Button>
         </div>
+
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <h2 className="font-semibold">Спільна погода для об’єкта розміщення</h2>
+            <p className="text-sm text-muted-foreground">Нові та наявні TV без власного перевизначення автоматично використовують локацію свого об’єкта. Зміни з’являться під час наступного оновлення TV.</p>
+            {!properties.length && <p className="text-sm text-muted-foreground">Об’єктів немає або налаштування ще завантажуються.</p>}
+            {properties.map(property => <div key={property.id} className="flex items-center justify-between gap-3 border rounded-lg p-3">
+              <div><p className="font-medium">{property.name}</p>
+                <p className="text-sm text-muted-foreground">{property.weather?.location
+                  || (property.weather?.latitude != null && property.weather?.longitude != null
+                    ? `${property.weather.latitude}, ${property.weather.longitude}` : "Погодну локацію не задано")}</p>
+              </div>
+              <Button variant="outline" onClick={() => openPropertyWeather(property)}>Налаштувати погоду</Button>
+            </div>)}
+          </CardContent>
+        </Card>
+
+        <Dialog open={!!weatherProperty} onOpenChange={open => { if (!open && !savingWeather) setWeatherProperty(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Погода — {weatherProperty?.name}</DialogTitle>
+              <DialogDescription>Спільна локація для TV цього об’єкта. Координати мають пріоритет. Очистіть усі поля, щоб видалити спільну локацію.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={e => { e.preventDefault(); savePropertyWeather(); }} className="space-y-4">
+              <div><Label htmlFor="property-weather-location">Населений пункт</Label>
+                <Input id="property-weather-location" maxLength={255} value={propertyWeather.location}
+                  onChange={e => setPropertyWeather(old => ({ ...old, location: e.target.value }))} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label htmlFor="property-weather-lat">Широта</Label>
+                  <Input id="property-weather-lat" type="number" min="-90" max="90" step="any" value={propertyWeather.latitude}
+                    onChange={e => setPropertyWeather(old => ({ ...old, latitude: e.target.value }))} /></div>
+                <div><Label htmlFor="property-weather-lon">Довгота</Label>
+                  <Input id="property-weather-lon" type="number" min="-180" max="180" step="any" value={propertyWeather.longitude}
+                    onChange={e => setPropertyWeather(old => ({ ...old, longitude: e.target.value }))} /></div>
+              </div>
+              <DialogFooter><Button type="submit" disabled={savingWeather}>{savingWeather ? "Збереження…" : "Зберегти для об’єкта"}</Button></DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         {/* Stats */}
         {stats && (
@@ -496,8 +585,19 @@ export default function HotelTvPage() {
                 <div className="rounded-2xl border bg-slate-50 p-4 space-y-3">
                   <div>
                     <Label className="text-base">Локація для погоди</Label>
-                    <p className="text-xs text-muted-foreground mt-1">Вкажіть назву населеного пункту або точні координати. Координати мають пріоритет.</p>
+                    <div className="flex items-center justify-between gap-3 mt-2">
+                      <Label htmlFor="tv-weather-override">Власна локація цього TV</Label>
+                      <Switch id="tv-weather-override" checked={editor.contentConfig.weatherMode === "override"}
+                        onCheckedChange={on => setEditor((old: any) => ({ ...old, contentConfig: { ...old.contentConfig, weatherMode: on ? "override" : "inherit" } }))} />
+                    </div>
+                    {editor.contentConfig.weatherMode === "inherit"
+                      ? <p className="text-sm text-muted-foreground mt-2">Успадковує: {editing?.propertyName || "Об’єкт не прив’язаний"} — {(() => {
+                        const weather = properties.find(p => p.id === editing?.propertyId)?.weather;
+                        return weather?.location || (weather?.latitude != null && weather?.longitude != null ? `${weather.latitude}, ${weather.longitude}` : "Локацію об’єкта не задано");
+                      })()}</p>
+                      : <p className="text-xs text-muted-foreground mt-1">Вкажіть назву населеного пункту або точні координати. Координати мають пріоритет.</p>}
                   </div>
+                  {editor.contentConfig.weatherMode === "override" && <>
                   <Input
                     value={editor.contentConfig.weather.location}
                     onChange={e => setWeather("location", e.target.value)}
@@ -515,6 +615,7 @@ export default function HotelTvPage() {
                         onChange={e => setWeather("longitude", e.target.value)} placeholder="24.412" />
                     </div>
                   </div>
+                  </>}
                 </div>
               </TabsContent>
 
