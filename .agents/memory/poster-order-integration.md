@@ -43,9 +43,9 @@ For menu-and-price refreshes, keep ingredients and stock import separate rather 
 
 Keep the open-order bridge opt-in, separate from printing and payment/fiscalization. Do not create production test orders without agreeing a specific test with the user.
 
-**Why:** The user prioritized QR ordering and Mobile Waiter first, and did not authorize live test sales. Poster Web API submission does not establish terminal printing; its newer Orders API documents closing behavior rather than a safe open-bill replacement.
+**Why:** The user prioritized QR ordering and Mobile Waiter first, and did not authorize unrestricted live test sales. Poster Web API submission does not establish terminal printing; its newer Orders API documents closing behavior rather than a safe open-bill replacement. The live documentation marks `transactions.createTransaction` deprecated, whereas its GitHub Markdown omits that label and differs in documented parameters.
 
-**How to apply:** Publishing must not activate real order writes. Validate the venue's supported open-bill API and terminal module before enabling. Do not claim printing, bidirectional POS edits, or online-payment closure based solely on successful Web API submission.
+**How to apply:** Publishing must not activate real order writes. Validate the venue's supported open-bill API and terminal module before enabling, checking the current documentation site as well as repository examples. Do not infer the cause of an ambiguous provider code solely from a deprecation label, and never substitute the newer order-closing endpoint for an unpaid shared bill. Do not claim printing, bidirectional POS edits, or online-payment closure based solely on successful Web API submission.
 
 Do not permit simultaneous editing of a managed bill in Maison HD and on the POS until a terminal-side synchronization mechanism provides stronger coordination.
 
