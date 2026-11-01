@@ -17,9 +17,17 @@ For the DOGODA workflow, the user confirmed that the current menu and prices are
 
 The user identified **«Котеджний комплекс ДОГОДА»** as the organization for this QR/Waiter integration workflow, not **«Заміський комплекс DOGODA Resort»**.
 
+The user identified Poster hall **«Будинки»** for the intended №1 and №4 service points. Do not substitute same-numbered tables in «Кафе», «Басейн», or the local «Основний зал».
+
 **Why:** The user corrected the assumption that the stored Maison HD menu was ready for testing: it contained old dishes/prices and needed the new menu first. They explicitly identified Poster as the current source. Similarly branded DOGODA organizations are distinct tenants; a successful import was observed in a different organization from the one previously assumed for testing.
 
 **How to apply:** Confirm the authoritative source, import direction, and selected organization before updating dishes or quoting test totals. Resolve table identities within that organization; duplicate table numbers are not unique identities. Do not configure tests against the old prices or assume menu import also exports the catalogue to Poster.
+
+**Poster hall lookup:** The official floor-section list method is `spots.getSpotTablesHalls`; `spots.getTableHallTables` supplies the tables and their hall IDs. Resolve names with the former and constrain mappings by venue and hall, not table number alone.
+
+**Why:** The provider returns repeated №1/№4 across several halls, while guessing `spots.getTableHalls` did not return a supported catalogue.
+
+**How to apply:** Use the official hall catalogue before proposing mappings; never turn a missing hall-name field on a table into an assumed «Основний зал».
 
 For menu-and-price refreshes, keep ingredients and stock import separate rather than requiring them for the menu.
 
