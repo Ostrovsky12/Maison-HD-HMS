@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "db:migrate-prro": "tsx ./src/migrate-prro.ts",
+    "test:prro-migrations": "tsx --test ./src/prro-migrations.test.ts",
     "hello": "tsx ./src/hello.ts",
     "seed": "tsx ./src/seed.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "catalog:",
+    "@types/pg": "^8.18.0",
     "tsx": "catalog:"
   }
 }

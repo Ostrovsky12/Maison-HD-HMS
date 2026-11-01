@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts",
-    "./migrate": "./src/migrate.ts"
+    "./migrate": "./src/migrate.ts",
+    "./provision": "./src/provision.ts"
   },
   "scripts": {
     "push": "drizzle-kit push --config ./drizzle.config.ts",

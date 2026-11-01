@@ -4,6 +4,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { sql } from "drizzle-orm";
 import { organizationsTable } from "./organizations";
 import { legalEntitiesTable } from "./legal-entities";
 import { usersTable } from "./users";
@@ -42,6 +43,9 @@ export const prroShiftsTable = pgTable("prro_shifts", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => ({
   registerStatusIdx: index("prro_shifts_register_status_idx").on(table.organizationId, table.registerId, table.status),
+  oneActiveUq: uniqueIndex("prro_shifts_one_active_per_register_uq")
+    .on(table.organizationId, table.registerId)
+    .where(sql`${table.status} IN ('opening', 'open', 'closing')`),
 }));
 
 export const fiscalDocumentsTable = pgTable("fiscal_documents", {

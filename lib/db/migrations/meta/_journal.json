@@ -43,6 +43,14 @@
       "when": 1774425329809,
       "tag": "0005_tv_property_weather",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774425329810,
+      "tag": "0006_prro_legacy_adoption",
+      "scope": "prro",
+      "breakpoints": true
     }
   ]
 }
