@@ -11,6 +11,12 @@ The user wants QR menus at tables, houses, and hotel rooms to let guests order a
 
 ## Safe staging and live testing
 
+The user reports having only the live Poster account, with no separate test account.
+
+**Why:** The user explicitly answered that only a production account is available.
+
+**How to apply:** Do not assume a sandbox exists or use another Maison HD tenant as one. Read-only research and mocked tests do not authorize new live orders; obtain separate approval for a specific live scenario.
+
 Refresh the menu and prices from the user's confirmed current source before configuring or testing QR/Waiter order transfer. Existing menu items are not proof that the menu is current.
 
 For the DOGODA workflow, the user confirmed that the current menu and prices are in Poster; import from Poster into Maison HD, not the reverse. Resolve the selected organization separately rather than inferring it from the DOGODA brand name.
