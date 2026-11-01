@@ -82,6 +82,8 @@ export const fbOrdersTable = pgTable("fb_orders", {
   paidAmount: numeric("paid_amount", { precision: 10, scale: 2 }).default("0"),
   notes: text("notes"),
   staffNotes: text("staff_notes"),
+  // Durable Poster dispatch journal, including uncertain-outcome holds.
+  posterSync: jsonb("poster_sync"),
   openedAt: timestamp("opened_at").notNull().defaultNow(),
   closedAt: timestamp("closed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

@@ -9,6 +9,7 @@ import { organizationsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { parsePosterAnalytics, posterDates } from "../lib/poster-analytics.js";
+import orderBridgeRouter from "./poster-order-bridge.js";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
@@ -21,6 +22,7 @@ router.use(requireAuth, (req: any, res, next) => {
   }
   next();
 });
+router.use("/order-bridge", orderBridgeRouter);
 
 // Helper: get org's Poster config from enabledModules
 async function getPosterConfig(orgId: number): Promise<{ apiKey?: string; accountId?: string; verified?: boolean; lastSync?: string; syncedData?: any } | null> {
@@ -148,7 +150,13 @@ router.post("/sync", requireAuth, async (req: any, res) => {
       return res.status(502).json({ ok: false, error: e.message, syncError: e.message });
     }
     const lastSync = new Date().toISOString();
-    await savePosterConfig(orgId, { ...config, verified: true, lastSync, syncedData });
+    // Analytics updates must not overwrite concurrently changed order mappings
+    // or re-enable a bridge that an operator has just disabled.
+    await db.update(organizationsTable).set({
+      enabledModules: sql`jsonb_set(coalesce(${organizationsTable.enabledModules}, '{}'::jsonb), '{posterConfig}',
+        coalesce(${organizationsTable.enabledModules}->'posterConfig','{}'::jsonb) ||
+        ${JSON.stringify({ verified: true, lastSync, syncedData })}::jsonb)`,
+    }).where(eq(organizationsTable.id, orgId));
     return res.json({ ok: true, connected: true, ...syncedData, lastSync, syncError: null });
   } catch { return res.status(500).json({ error: "Не вдалося зберегти звіт Poster. Попередній звіт не замінено." }); }
 });

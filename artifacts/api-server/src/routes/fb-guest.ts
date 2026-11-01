@@ -8,6 +8,7 @@ import { requireAuth } from "../lib/auth.js";
 import { generateLiqPayForm, verifyLiqPayCallbackWithKey, parseLiqPayData, sendLiqPayP2P } from "../lib/liqpay.js";
 import { decrypt } from "../lib/encrypt.js";
 import rateLimit from "express-rate-limit";
+import { isPosterManagedOrder } from "../lib/poster-order-bridge.js";
 
 const router = Router();
 
@@ -311,14 +312,18 @@ router.post("/public/guest-orders", orderLimiter, async (req, res) => {
     return res.status(400).json({ error: "items required" });
   }
 
+  const client = await pool.connect();
+  let transaction = false;
   try {
+    await client.query("BEGIN");
+    transaction = true;
     let orgId: number;
     let resolvedTableId = tableId || null;
     let resolvedOutletId = outletId || null;
 
     if (outletSlug && !outletId) {
       // Resolve outletId from slug
-      const { rows } = await pool.query(
+      const { rows } = await client.query(
         `SELECT id, organization_id FROM fb_outlets WHERE slug = $1 AND is_active = true LIMIT 1`,
         [outletSlug],
       );
@@ -326,7 +331,7 @@ router.post("/public/guest-orders", orderLimiter, async (req, res) => {
       resolvedOutletId = rows[0].id;
       orgId = rows[0].organization_id;
     } else if (resolvedTableId) {
-      const { rows: tableRows } = await pool.query(
+      const { rows: tableRows } = await client.query(
         `SELECT ft.id, ft.number, ft.organization_id, ft.group_id,
                 tg.is_minibar, tg.is_24h, tg.open_time, tg.close_time
          FROM fb_tables ft
@@ -356,36 +361,57 @@ router.post("/public/guest-orders", orderLimiter, async (req, res) => {
     // Also resolve outletId if provided directly (without slug)
     if (outletId && !resolvedOutletId) resolvedOutletId = outletId;
 
+    if (resolvedOutletId) {
+      const outlet = (await client.query("SELECT id FROM fb_outlets WHERE id=$1 AND organization_id=$2 AND is_active=true", [resolvedOutletId, orgId!])).rows[0];
+      if (!outlet) throw new Error("Точку продажу не знайдено в цьому закладі.");
+    }
+    let sharedOrder: any;
+    if (resolvedTableId) {
+      const table = (await client.query("SELECT * FROM fb_tables WHERE id=$1 AND organization_id=$2 AND is_active=true FOR UPDATE",
+        [resolvedTableId, orgId!])).rows[0];
+      if (!table) throw new Error("Стіл не належить цьому закладу.");
+      if (table.status === "occupied" && table.current_order_id) {
+        sharedOrder = (await client.query(`SELECT * FROM fb_orders WHERE id=$1 AND organization_id=$2
+          AND table_id=$3 AND status NOT IN ('billed','cancelled') FOR UPDATE`,
+        [table.current_order_id, orgId!, resolvedTableId])).rows[0];
+        if (sharedOrder && Number(sharedOrder.paid_amount || 0) > 0) throw new Error("Рахунок уже оплачується. Зверніться до офіціанта.");
+      }
+    }
     const safeTipPct = Math.max(0, Math.min(100, parseFloat(tipPct) || 0));
-    const { rows: orderRows } = await pool.query(
+    const { rows: orderRows } = sharedOrder ? { rows: [sharedOrder] } : await client.query(
       `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, status, notes, tip_pct, outlet_id, opened_at)
        VALUES ($1, $2, 'dine_in', $3, $4, 'new_guest', $5, $6, $7, NOW())
        RETURNING *`,
       [orgId!, resolvedTableId, guestName || "Гість (QR)", parseInt(guestCount) || 1, notes || null, safeTipPct, resolvedOutletId],
     );
     const order = orderRows[0];
+    if (sharedOrder && typeof notes === "string" && notes.trim()) {
+      await client.query("UPDATE fb_orders SET notes=concat_ws(E'\\n',NULLIF(notes,''),$3) WHERE id=$1 AND organization_id=$2",
+        [order.id, orgId!, notes.trim().slice(0, 2000)]);
+    }
 
     if (resolvedTableId) {
-      await pool.query(
+      await client.query(
         `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2`,
         [order.id, resolvedTableId],
       );
     }
 
     for (const item of items) {
-      const { rows: itemRows } = await pool.query(
-        `SELECT name, price FROM fb_items WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+      const { rows: itemRows } = await client.query(
+        `SELECT name, price FROM fb_items WHERE id = $1 AND organization_id = $2 AND is_available=true AND coalesce(is_stop_list,false)=false LIMIT 1`,
         [item.itemId, orgId],
       );
-      if (!itemRows[0]) continue;
+      if (!itemRows[0]) throw new Error("Одна зі страв недоступна. Оновіть меню.");
       const { name, price } = itemRows[0];
-      const qty = parseInt(item.quantity) || 1;
+      const qty = Number(item.quantity ?? 1);
+      if (!Number.isInteger(qty) || qty < 1 || qty > 100) throw new Error("Некоректна кількість страв.");
       // Sum modifier price deltas
       const mods: Array<{ groupId: number; groupName: string; optionId: number; optionName: string; priceDelta: number }> = Array.isArray(item.modifiers) ? item.modifiers : [];
       const modDelta = mods.reduce((s, m) => s + (parseFloat(String(m.priceDelta)) || 0), 0);
       const unitPrice = (parseFloat(price) + modDelta).toFixed(2);
       const total = (parseFloat(unitPrice) * qty).toFixed(2);
-      await pool.query(
+      await client.query(
         `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, status, modifiers)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)`,
         [order.id, item.itemId, orgId, name, unitPrice, qty, total, item.notes || null,
@@ -393,17 +419,23 @@ router.post("/public/guest-orders", orderLimiter, async (req, res) => {
       );
     }
 
-    await pool.query(
+    await client.query(
       `UPDATE fb_orders SET total_amount = (
-         SELECT COALESCE(SUM(total_price::numeric), 0) FROM fb_order_items WHERE order_id = $1
+         SELECT COALESCE(SUM(total_price::numeric), 0) FROM fb_order_items WHERE order_id = $1 AND status != 'cancelled'
        ) WHERE id = $1`,
       [order.id],
     );
 
-    const { rows: finalRows } = await pool.query(`SELECT * FROM fb_orders WHERE id = $1`, [order.id]);
-    res.json({ order: finalRows[0] });
+    const { rows: finalRows } = await client.query(`SELECT * FROM fb_orders WHERE id = $1 AND organization_id=$2`, [order.id, orgId!]);
+    await client.query("COMMIT");
+    transaction = false;
+    return res.json({ order: finalRows[0] });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return res.status(400).json({ error: "Не вдалося прийняти замовлення. Перевірте доступність страв або зверніться до офіціанта." });
+  } finally {
+    // Early validation responses must also release/rollback the transaction.
+    if (transaction) await client.query("ROLLBACK").catch(() => {});
+    client.release();
   }
 });
 
@@ -438,6 +470,9 @@ router.post("/public/liqpay-checkout", paymentLimiter, async (req, res) => {
     );
     if (!orderRows[0]) return res.status(404).json({ error: "No open order for this table" });
     const order = orderRows[0];
+    if (await isPosterManagedOrder(orgId, order.id)) {
+      return res.status(409).json({ error: "Цей рахунок обслуговує Poster. Для оплати зверніться до офіціанта. Онлайн-оплата через Poster ще не підключена." });
+    }
 
     const safeTipPct = Math.max(0, Math.min(50, parseFloat(tipPct) || parseFloat(order.tip_pct) || 0));
     const base = parseFloat(order.total_amount) || 0;

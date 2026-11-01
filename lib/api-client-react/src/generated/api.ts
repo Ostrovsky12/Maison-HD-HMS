@@ -52,6 +52,8 @@ import type {
   GetDashboardAnalyticsParams,
   GetMonthlyReportParams,
   GetOccupancyAnalyticsParams,
+  GetPosterOrderBridgeCatalog200,
+  GetPosterOrderBridgeOrder200,
   GetPricingPreviewParams,
   GetUnitsAvailabilityParams,
   Guest,
@@ -100,12 +102,15 @@ import type {
   OtaSyncResult,
   PayInvoiceRequest,
   Payment,
+  PosterOrderBridgeInput,
+  PosterOrderBridgeView,
   PricingPreview,
   Property,
   Rate,
   RunNightAuditBody,
   SearchGuests200,
   SearchGuestsParams,
+  SendPosterOrderBridgeOrder200,
   SuccessResponse,
   TvWeatherInput,
   Unit,
@@ -136,6 +141,394 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getGetPosterOrderBridgeUrl = () => {
+  return `/api/poster/order-bridge`;
+};
+
+export const getPosterOrderBridge = async (
+  options?: RequestInit,
+): Promise<PosterOrderBridgeView> => {
+  return customFetch<PosterOrderBridgeView>(getGetPosterOrderBridgeUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPosterOrderBridgeQueryKey = () => {
+  return [`/api/poster/order-bridge`] as const;
+};
+
+export const getGetPosterOrderBridgeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPosterOrderBridge>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterOrderBridge>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPosterOrderBridgeQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPosterOrderBridge>>
+  > = ({ signal }) => getPosterOrderBridge({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterOrderBridge>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPosterOrderBridgeQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPosterOrderBridge>>
+>;
+export type GetPosterOrderBridgeQueryError = ErrorType<unknown>;
+
+export function useGetPosterOrderBridge<
+  TData = Awaited<ReturnType<typeof getPosterOrderBridge>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterOrderBridge>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPosterOrderBridgeQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getUpdatePosterOrderBridgeUrl = () => {
+  return `/api/poster/order-bridge`;
+};
+
+export const updatePosterOrderBridge = async (
+  posterOrderBridgeInput: PosterOrderBridgeInput,
+  options?: RequestInit,
+): Promise<PosterOrderBridgeView> => {
+  return customFetch<PosterOrderBridgeView>(getUpdatePosterOrderBridgeUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterOrderBridgeInput),
+  });
+};
+
+export const getUpdatePosterOrderBridgeMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePosterOrderBridge>>,
+    TError,
+    { data: BodyType<PosterOrderBridgeInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePosterOrderBridge>>,
+  TError,
+  { data: BodyType<PosterOrderBridgeInput> },
+  TContext
+> => {
+  const mutationKey = ["updatePosterOrderBridge"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePosterOrderBridge>>,
+    { data: BodyType<PosterOrderBridgeInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updatePosterOrderBridge(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePosterOrderBridgeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePosterOrderBridge>>
+>;
+export type UpdatePosterOrderBridgeMutationBody =
+  BodyType<PosterOrderBridgeInput>;
+export type UpdatePosterOrderBridgeMutationError = ErrorType<unknown>;
+
+export const useUpdatePosterOrderBridge = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePosterOrderBridge>>,
+    TError,
+    { data: BodyType<PosterOrderBridgeInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePosterOrderBridge>>,
+  TError,
+  { data: BodyType<PosterOrderBridgeInput> },
+  TContext
+> => {
+  return useMutation(getUpdatePosterOrderBridgeMutationOptions(options));
+};
+
+export const getGetPosterOrderBridgeCatalogUrl = () => {
+  return `/api/poster/order-bridge/catalog`;
+};
+
+export const getPosterOrderBridgeCatalog = async (
+  options?: RequestInit,
+): Promise<GetPosterOrderBridgeCatalog200> => {
+  return customFetch<GetPosterOrderBridgeCatalog200>(
+    getGetPosterOrderBridgeCatalogUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetPosterOrderBridgeCatalogQueryKey = () => {
+  return [`/api/poster/order-bridge/catalog`] as const;
+};
+
+export const getGetPosterOrderBridgeCatalogQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPosterOrderBridgeCatalog>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterOrderBridgeCatalog>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPosterOrderBridgeCatalogQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPosterOrderBridgeCatalog>>
+  > = ({ signal }) =>
+    getPosterOrderBridgeCatalog({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterOrderBridgeCatalog>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPosterOrderBridgeCatalogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPosterOrderBridgeCatalog>>
+>;
+export type GetPosterOrderBridgeCatalogQueryError = ErrorType<unknown>;
+
+export function useGetPosterOrderBridgeCatalog<
+  TData = Awaited<ReturnType<typeof getPosterOrderBridgeCatalog>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterOrderBridgeCatalog>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPosterOrderBridgeCatalogQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getGetPosterOrderBridgeOrderUrl = (id: number) => {
+  return `/api/poster/order-bridge/orders/${id}`;
+};
+
+export const getPosterOrderBridgeOrder = async (
+  id: number,
+  options?: RequestInit,
+): Promise<GetPosterOrderBridgeOrder200> => {
+  return customFetch<GetPosterOrderBridgeOrder200>(
+    getGetPosterOrderBridgeOrderUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetPosterOrderBridgeOrderQueryKey = (id: number) => {
+  return [`/api/poster/order-bridge/orders/${id}`] as const;
+};
+
+export const getGetPosterOrderBridgeOrderQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPosterOrderBridgeOrder>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPosterOrderBridgeOrder>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPosterOrderBridgeOrderQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPosterOrderBridgeOrder>>
+  > = ({ signal }) =>
+    getPosterOrderBridgeOrder(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterOrderBridgeOrder>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPosterOrderBridgeOrderQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPosterOrderBridgeOrder>>
+>;
+export type GetPosterOrderBridgeOrderQueryError = ErrorType<unknown>;
+
+export function useGetPosterOrderBridgeOrder<
+  TData = Awaited<ReturnType<typeof getPosterOrderBridgeOrder>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPosterOrderBridgeOrder>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPosterOrderBridgeOrderQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSendPosterOrderBridgeOrderUrl = (id: number) => {
+  return `/api/poster/order-bridge/orders/${id}/send`;
+};
+
+export const sendPosterOrderBridgeOrder = async (
+  id: number,
+  options?: RequestInit,
+): Promise<SendPosterOrderBridgeOrder200> => {
+  return customFetch<SendPosterOrderBridgeOrder200>(
+    getSendPosterOrderBridgeOrderUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getSendPosterOrderBridgeOrderMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendPosterOrderBridgeOrder>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendPosterOrderBridgeOrder>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["sendPosterOrderBridgeOrder"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendPosterOrderBridgeOrder>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return sendPosterOrderBridgeOrder(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendPosterOrderBridgeOrderMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendPosterOrderBridgeOrder>>
+>;
+
+export type SendPosterOrderBridgeOrderMutationError = ErrorType<unknown>;
+
+export const useSendPosterOrderBridgeOrder = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendPosterOrderBridgeOrder>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendPosterOrderBridgeOrder>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getSendPosterOrderBridgeOrderMutationOptions(options));
+};
 
 export const getListTvPropertyWeatherUrl = () => {
   return `/api/tv/properties/weather`;

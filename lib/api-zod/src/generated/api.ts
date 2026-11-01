@@ -7,6 +7,58 @@
  */
 import * as zod from "zod";
 
+export const GetPosterOrderBridgeResponse = zod.object({
+  config: zod.record(zod.string(), zod.unknown()).optional(),
+  localTables: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  localItems: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  printSupported: zod.boolean().optional(),
+});
+
+export const updatePosterOrderBridgeBodySpotIdMin = 0;
+
+export const updatePosterOrderBridgeBodyTabletIdMin = 0;
+
+export const updatePosterOrderBridgeBodyWaiterIdMin = 0;
+
+export const UpdatePosterOrderBridgeBody = zod.object({
+  enabled: zod.boolean(),
+  spotId: zod.number().min(updatePosterOrderBridgeBodySpotIdMin),
+  tabletId: zod.number().min(updatePosterOrderBridgeBodyTabletIdMin),
+  waiterId: zod.number().min(updatePosterOrderBridgeBodyWaiterIdMin),
+  tableMap: zod.record(zod.string(), zod.number().min(1)),
+  productMap: zod.record(zod.string(), zod.number().min(1)),
+});
+
+export const UpdatePosterOrderBridgeResponse = zod.object({
+  config: zod.record(zod.string(), zod.unknown()).optional(),
+  localTables: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  localItems: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  printSupported: zod.boolean().optional(),
+});
+
+export const GetPosterOrderBridgeCatalogResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+export const GetPosterOrderBridgeOrderParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetPosterOrderBridgeOrderResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+export const SendPosterOrderBridgeOrderParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const SendPosterOrderBridgeOrderResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
 export const listTvPropertyWeatherResponsePropertiesItemWeatherLocationMax = 255;
 
 export const listTvPropertyWeatherResponsePropertiesItemWeatherLatitudeMin =

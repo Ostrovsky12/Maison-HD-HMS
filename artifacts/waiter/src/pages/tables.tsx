@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, RefreshCw, ChefHat, Plus, UtensilsCrossed, ArrowRight, Users } from "lucide-react";
+import { LogOut, RefreshCw, ChefHat, Plus, UtensilsCrossed, ArrowRight, Users, BedDouble, ShoppingBag } from "lucide-react";
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   open:       { label: "Відкрите",   color: "text-blue-600 bg-blue-50"   },
@@ -16,14 +16,20 @@ export default function Tables() {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["waiter-tables"],
-    queryFn: () => apiFetch("/fb/tables"),
+  const { data, isLoading, refetch, isFetching, error } = useQuery({
+    queryKey: ["waiter-open-orders"],
+    queryFn: () => apiFetch("/fb/orders?open=true"),
     refetchInterval: 15000,
   });
 
-  const allTables: any[] = data?.tables || [];
-  const activeTables = allTables.filter(t => t.status === "occupied" && t.current_order_id);
+  const raw: any[] = Array.isArray(data) ? data : (data?.orders || []);
+  const activeTables = raw.filter(o => o && o.id && o.status !== "billed" && o.status !== "closed" && o.status !== "cancelled");
+
+  function describe(o: any) {
+    if (o.tableNumber != null && o.tableNumber !== "") return { badge: `#${o.tableNumber}`, title: `Стіл №${o.tableNumber}${o.tableLocation ? ` · ${o.tableLocation}` : ""}`, icon: null };
+    if (o.roomNumber) return { badge: String(o.roomNumber), title: `Номер ${o.roomNumber}`, icon: BedDouble };
+    return { badge: "", title: o.orderType === "takeaway" ? "З собою" : `Замовлення №${o.id}`, icon: ShoppingBag };
+  }
 
   function openOrder(orderId: number) {
     setLocation(`/order/${orderId}`);
@@ -76,6 +82,11 @@ export default function Tables() {
             <RefreshCw className="w-7 h-7 animate-spin" />
             <p className="text-sm">Завантаження...</p>
           </div>
+        ) : error ? (
+          <div className="rounded-xl border border-red-200 p-4 text-sm text-red-700">
+            Не вдалося завантажити замовлення.
+            <button className="ml-2 underline" onClick={() => refetch()}>Повторити</button>
+          </div>
         ) : activeTables.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-56 gap-4 text-center">
             <div className="w-20 h-20 rounded-3xl bg-blue-50 flex items-center justify-center">
@@ -89,24 +100,27 @@ export default function Tables() {
         ) : (
           <div className="space-y-3">
             {activeTables.map(t => {
-              const st = STATUS_LABEL[t.order_status] || STATUS_LABEL.open;
+              const st = STATUS_LABEL[t.status] || STATUS_LABEL.open;
+              const d = describe(t);
+              const Icon = d.icon;
               return (
                 <button
                   key={t.id}
-                  onClick={() => openOrder(t.current_order_id)}
+                  onClick={() => openOrder(t.id)}
+                  data-testid={`card-order-${t.id}`}
                   className="w-full bg-card border border-border rounded-2xl p-4 text-left active:scale-[0.98] transition-transform shadow-sm hover:shadow-md"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
-                        <span className="text-blue-700 font-black text-base">#{t.table_number}</span>
+                        {Icon ? <Icon className="w-6 h-6 text-blue-700" /> : <span className="text-blue-700 font-black text-base">{d.badge}</span>}
                       </div>
                       <div>
-                        <div className="font-bold text-base">Стіл №{t.table_number}</div>
-                        {t.current_guest && (
+                        <div className="font-bold text-base">{d.title}</div>
+                        {t.guestName && (
                           <div className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
                             <Users className="w-3.5 h-3.5" />
-                            {t.current_guest}
+                            {t.guestName}
                           </div>
                         )}
                         <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full mt-1 ${st.color}`}>
@@ -115,9 +129,9 @@ export default function Tables() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {t.current_total && (
+                      {t.totalAmount != null && (
                         <span className="font-black text-lg text-foreground">
-                          {Number(t.current_total).toFixed(0)} ₴
+                          {Number(t.totalAmount).toFixed(0)} ₴
                         </span>
                       )}
                       <ArrowRight className="w-5 h-5 text-muted-foreground" />

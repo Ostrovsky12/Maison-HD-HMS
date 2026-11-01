@@ -56,6 +56,7 @@ export default function NewOrder() {
     },
     onSuccess: (d) => {
       qc.invalidateQueries({ queryKey: ["waiter-tables"] });
+      qc.invalidateQueries({ queryKey: ["waiter-open-orders"] });
       setLocation(`/menu/${d.order.id}`);
     },
   });

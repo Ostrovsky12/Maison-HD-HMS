@@ -5,6 +5,35 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export type PosterOrderBridgeInputTableMap = { [key: string]: number };
+
+export type PosterOrderBridgeInputProductMap = { [key: string]: number };
+
+export interface PosterOrderBridgeInput {
+  enabled: boolean;
+  /** @minimum 0 */
+  spotId: number;
+  /** @minimum 0 */
+  tabletId: number;
+  /** @minimum 0 */
+  waiterId: number;
+  tableMap: PosterOrderBridgeInputTableMap;
+  productMap: PosterOrderBridgeInputProductMap;
+}
+
+export type PosterOrderBridgeViewConfig = { [key: string]: unknown };
+
+export type PosterOrderBridgeViewLocalTablesItem = { [key: string]: unknown };
+
+export type PosterOrderBridgeViewLocalItemsItem = { [key: string]: unknown };
+
+export interface PosterOrderBridgeView {
+  config?: PosterOrderBridgeViewConfig;
+  localTables?: PosterOrderBridgeViewLocalTablesItem[];
+  localItems?: PosterOrderBridgeViewLocalItemsItem[];
+  printSupported?: boolean;
+}
+
 export interface TvWeatherInput {
   /** @maxLength 255 */
   location?: string;
@@ -1483,6 +1512,12 @@ export interface GuideAdminStats {
   pendingReview: number;
   approved: number;
 }
+
+export type GetPosterOrderBridgeCatalog200 = { [key: string]: unknown };
+
+export type GetPosterOrderBridgeOrder200 = { [key: string]: unknown };
+
+export type SendPosterOrderBridgeOrder200 = { [key: string]: unknown };
 
 export type ListTvPropertyWeather200 = {
   properties: TvPropertyWeather[];

@@ -5,9 +5,26 @@ import { eq, and, desc, asc, sql, gte, lte, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { allocatePositiveFiscalItems, orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
 import { submitDocument } from "./prro.js";
+import { isPosterManagedOrder } from "../lib/poster-order-bridge.js";
 
 const router = Router();
 const getOrg = (req: any): number => req.user?.organizationId;
+
+// Phase-one bridge owns open orders only. Never independently pay/fiscalize,
+// split, merge or close a managed bill while its Poster account remains open.
+router.use("/orders/:id", requireAuth, async (req: any, res, next) => {
+  const destructive = req.method === "DELETE"
+    || (req.method === "POST" && /^\/(pay|return|split|merge)\/?$/.test(req.path))
+    || (req.method === "PATCH" && (["billed", "cancelled"].includes(req.body?.status) || req.body?.paidAmount !== undefined));
+  if (!destructive) return next();
+  try {
+    if (await isPosterManagedOrder(getOrg(req), Number(req.params.id))
+      || (req.body?.sourceOrderId && await isPosterManagedOrder(getOrg(req), Number(req.body.sourceOrderId)))) {
+      return res.status(409).json({ error: "Рахунок пов’язаний із Poster. Оплату, закриття та поділ виконуйте на касі Poster до підключення синхронізації оплат." });
+    }
+    return next();
+  } catch { return res.status(503).json({ error: "Не вдалося перевірити зв’язок із Poster. Операцію не виконано." }); }
+});
 
 // ── resolveOrgId — auto-creates org if user has none (mirrors acc-ledger.ts) ─
 async function resolveOrgId(req: any): Promise<number> {
@@ -765,16 +782,31 @@ router.get("/orders/:id", requireAuth, async (req: any, res) => {
 
 // ─── Create order ─────────────────────────────────────────────────────────────
 router.post("/orders", requireAuth, async (req: any, res) => {
+  const client = await pool.connect();
+  let transaction = false;
   try {
     const orgId = getOrg(req);
-    const db_ = (db as any).$client;
     const { tableId, orderType, guestName, roomNumber, guestCount, notes, bookingId, outletId } = req.body;
-    const waiterUserId = (req as any).user?.id || null;
+    await client.query("BEGIN");
+    transaction = true;
+    if (tableId) {
+      const table = (await client.query("SELECT * FROM fb_tables WHERE id=$1 AND organization_id=$2 AND is_active=true FOR UPDATE", [tableId, orgId])).rows[0];
+      if (!table) return res.status(404).json({ error: "Стіл не знайдено в цьому закладі." });
+      if (table.status === "occupied" && table.current_order_id) {
+        const existing = (await client.query("SELECT * FROM fb_orders WHERE id=$1 AND organization_id=$2 AND table_id=$3 AND status NOT IN ('billed','cancelled') FOR UPDATE",
+          [table.current_order_id, orgId, tableId])).rows[0];
+        if (existing) {
+          if (Number(existing.paid_amount || 0) > 0) return res.status(409).json({ error: "Рахунок уже оплачується." });
+          await client.query("COMMIT"); transaction = false;
+          return res.json({ order: existing, reused: true });
+        }
+      }
+    }
+    if (outletId && !(await client.query("SELECT id FROM fb_outlets WHERE id=$1 AND organization_id=$2", [outletId, orgId])).rows.length) {
+      return res.status(404).json({ error: "Точку продажу не знайдено." });
+    }
 
-    // ensure outlet_id column exists (idempotent migration)
-    await db_.query(`ALTER TABLE fb_orders ADD COLUMN IF NOT EXISTS outlet_id INT REFERENCES fb_outlets(id) ON DELETE SET NULL`).catch(() => {});
-
-    const { rows: [order] } = await db_.query(
+    const { rows: [order] } = await client.query(
       `INSERT INTO fb_orders
          (organization_id, table_id, order_type, guest_name, room_number,
           guest_count, notes, booking_id, outlet_id)
@@ -787,14 +819,19 @@ router.post("/orders", requireAuth, async (req: any, res) => {
 
     if (tableId) {
       // Scope the table update to the same org to prevent cross-tenant write
-      await db_.query(
+      await client.query(
         `UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2 AND organization_id = $3`,
         [order.id, tableId, orgId]
       );
     }
 
-    res.json({ order });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    await client.query("COMMIT"); transaction = false;
+    return res.json({ order });
+  } catch { return res.status(500).json({ error: "Не вдалося створити замовлення." }); }
+  finally {
+    if (transaction) await client.query("ROLLBACK").catch(() => {});
+    client.release();
+  }
 });
 
 // ─── Update order status ──────────────────────────────────────────────────────
@@ -837,15 +874,20 @@ router.patch("/orders/:id", requireAuth, async (req: any, res) => {
 
 // ─── Add item to order ────────────────────────────────────────────────────────
 router.post("/orders/:id/items", requireAuth, async (req: any, res) => {
+  const client = await pool.connect();
+  let transaction = false;
   try {
     const orgId = getOrg(req);
     const orderId = parseInt(req.params.id);
     const { itemId, quantity, notes } = req.body;
-    const db_ = (db as any).$client;
+    await client.query("BEGIN"); transaction = true;
+    const order = (await client.query("SELECT * FROM fb_orders WHERE id=$1 AND organization_id=$2 FOR UPDATE", [orderId, orgId])).rows[0];
+    if (!order) return res.status(404).json({ error: "Замовлення не знайдено." });
+    if (["billed", "cancelled"].includes(order.status) || Number(order.paid_amount || 0) > 0) return res.status(409).json({ error: "Не можна доповнювати закритий або оплачений рахунок." });
 
     let name: string, price: string;
     if (itemId) {
-      const { rows } = await db_.query(
+      const { rows } = await client.query(
         `SELECT name, price FROM fb_items WHERE id = $1 AND organization_id = $2`,
         [parseInt(itemId), orgId]
       );
@@ -855,30 +897,36 @@ router.post("/orders/:id/items", requireAuth, async (req: any, res) => {
       name = req.body.name; price = req.body.price;
     }
 
-    const qty = parseFloat(quantity) || 1;
+    const qty = Number(quantity ?? 1);
+    if (!Number.isInteger(qty) || qty <= 0 || qty > 100 || !name || !Number.isFinite(Number(price)) || Number(price) < 0) return res.status(400).json({ error: "Перевірте назву, ціну та кількість страви." });
     const total = (parseFloat(price) * qty).toFixed(2);
 
-    const { rows: [orderItem] } = await db_.query(
+    const { rows: [orderItem] } = await client.query(
       `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [orderId, itemId || null, orgId, name, price, qty, total, notes || null]
     );
 
     // Recalc order total
-    const { rows: sumRows } = await db_.query(
+    const { rows: sumRows } = await client.query(
       `SELECT COALESCE(SUM(total_price),0)::numeric AS total FROM fb_order_items
        WHERE order_id = $1 AND status != 'cancelled'`,
       [orderId]
     );
     const newTotal = parseFloat(sumRows[0].total).toFixed(2);
     // Scope total update to org to prevent cross-tenant write
-    await db_.query(
+    await client.query(
       `UPDATE fb_orders SET total_amount = $1, updated_at = NOW() WHERE id = $2 AND organization_id = $3`,
       [newTotal, orderId, orgId]
     );
 
-    res.json({ item: orderItem, newTotal });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    await client.query("COMMIT"); transaction = false;
+    return res.json({ item: orderItem, newTotal });
+  } catch { return res.status(500).json({ error: "Не вдалося додати страву." }); }
+  finally {
+    if (transaction) await client.query("ROLLBACK").catch(() => {});
+    client.release();
+  }
 });
 
 // ─── Kitchen Display ──────────────────────────────────────────────────────────

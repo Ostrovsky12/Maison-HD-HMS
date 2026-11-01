@@ -49,6 +49,64 @@ tags:
     description: DOGODA Guest Nature Guide
 
 paths:
+  /poster/order-bridge:
+    get:
+      operationId: getPosterOrderBridge
+      tags: [integrations]
+      responses:
+        "200":
+          description: Tenant-scoped configuration and local mapping choices, no credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterOrderBridgeView" }
+    put:
+      operationId: updatePosterOrderBridge
+      tags: [integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterOrderBridgeInput" }
+      responses:
+        "200":
+          description: Configuration saved; enabling explicitly permits open-order writes only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterOrderBridgeView" }
+  /poster/order-bridge/catalog:
+    get:
+      operationId: getPosterOrderBridgeCatalog
+      tags: [integrations]
+      responses:
+        "200":
+          description: Read-only Poster locations, registers, employees and products
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /poster/order-bridge/orders/{id}:
+    get:
+      operationId: getPosterOrderBridgeOrder
+      tags: [integrations]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Persisted order dispatch status; never a print or payment confirmation
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /poster/order-bridge/orders/{id}/send:
+    post:
+      operationId: sendPosterOrderBridgeOrder
+      tags: [integrations]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Dispatch result; uncertain writes are held for manual review, not retried
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
   /tv/properties/weather:
     get:
       operationId: listTvPropertyWeather
@@ -2426,6 +2484,23 @@ components:
       bearerFormat: JWT
 
   schemas:
+    PosterOrderBridgeInput:
+      type: object
+      required: [enabled, spotId, tabletId, waiterId, tableMap, productMap]
+      properties:
+        enabled: { type: boolean }
+        spotId: { type: integer, minimum: 0 }
+        tabletId: { type: integer, minimum: 0 }
+        waiterId: { type: integer, minimum: 0 }
+        tableMap: { type: object, additionalProperties: { type: integer, minimum: 1 } }
+        productMap: { type: object, additionalProperties: { type: integer, minimum: 1 } }
+    PosterOrderBridgeView:
+      type: object
+      properties:
+        config: { type: object, additionalProperties: true }
+        localTables: { type: array, items: { type: object, additionalProperties: true } }
+        localItems: { type: array, items: { type: object, additionalProperties: true } }
+        printSupported: { type: boolean }
     TvWeatherInput:
       type: object
       properties:

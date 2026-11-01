@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, API } from "@/lib/api";
+import PosterOrderStatus from "@/components/poster-order-status";
 import { useAuth } from "@/hooks/use-auth";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -203,7 +204,7 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
         });
       }
       qc.invalidateQueries({ queryKey: ["waiter-order", orderId] });
-      qc.invalidateQueries({ queryKey: ["waiter-tables"] });
+      qc.invalidateQueries({ queryKey: ["waiter-open-orders"] });
     } finally { setSending(false); }
   }
 
@@ -216,7 +217,7 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
         body: JSON.stringify({ itemIds: Array.from(splitSelected) }),
       });
       qc.invalidateQueries({ queryKey: ["waiter-order", orderId] });
-      qc.invalidateQueries({ queryKey: ["waiter-tables"] });
+      qc.invalidateQueries({ queryKey: ["waiter-open-orders"] });
       setShowSplit(false);
       setSplitSelected(new Set());
       if (res?.newOrderId) {
@@ -234,7 +235,7 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
         body: JSON.stringify({ sourceOrderId: mergeTargetId }),
       });
       qc.invalidateQueries({ queryKey: ["waiter-order", orderId] });
-      qc.invalidateQueries({ queryKey: ["waiter-tables"] });
+      qc.invalidateQueries({ queryKey: ["waiter-open-orders"] });
       setShowMerge(false);
       setMergeTargetId(null);
     } finally { setMerging(false); }
@@ -438,6 +439,8 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
 
       {/* Bottom actions */}
       <div className="px-4 pb-6 pt-3 space-y-3 border-t bg-background safe-bottom">
+        <PosterOrderStatus orderId={Number(orderId)} />
+
         {/* Add items */}
         {order.status !== "billed" && order.status !== "cancelled" && (
           <button onClick={() => setLocation(`/menu/${orderId}`)}
