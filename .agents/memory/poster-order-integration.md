@@ -11,6 +11,12 @@ The user wants QR menus at tables, houses, and hotel rooms to let guests order a
 
 ## Safe staging and live testing
 
+Refresh the menu and prices from the user's confirmed current source before configuring or testing QR/Waiter order transfer. Existing menu items are not proof that the menu is current.
+
+**Why:** The user corrected the assumption that the stored Maison HD menu was ready for testing: it contained old dishes/prices and needed the new menu first.
+
+**How to apply:** Confirm the authoritative source and import direction before updating dishes or quoting test totals. Do not configure tests against the old prices or assume menu import also exports the catalogue to Poster.
+
 Keep the open-order bridge opt-in, separate from printing and payment/fiscalization. Do not create production test orders without agreeing a specific test with the user.
 
 **Why:** The user prioritized QR ordering and Mobile Waiter first, and did not authorize live test sales. Poster Web API submission does not establish terminal printing; its newer Orders API documents closing behavior rather than a safe open-bill replacement.
