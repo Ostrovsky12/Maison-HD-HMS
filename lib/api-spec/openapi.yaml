@@ -49,6 +49,36 @@ tags:
     description: DOGODA Guest Nature Guide
 
 paths:
+  /fb/import/poster/preview:
+    post:
+      operationId: previewPosterMenuImport
+      tags: [integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterMenuImportInput" }
+      responses:
+        "200":
+          description: Read-only catalogue preview, using saved tenant credentials when omitted
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /fb/import/poster/execute:
+    post:
+      operationId: executePosterMenuImport
+      tags: [integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterMenuImportInput" }
+      responses:
+        "200":
+          description: Explicit import result; credentials are never returned
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
   /poster/order-bridge:
     get:
       operationId: getPosterOrderBridge
@@ -2484,6 +2514,23 @@ components:
       bearerFormat: JWT
 
   schemas:
+    PosterMenuImportInput:
+      type: object
+      properties:
+        account: { type: string }
+        token: { type: string, writeOnly: true }
+        orgId: { type: integer, minimum: 1 }
+        options:
+          $ref: "#/components/schemas/PosterMenuImportOptions"
+    PosterMenuImportOptions:
+      type: object
+      properties:
+        overwrite_existing: { type: boolean }
+        skip_no_price: { type: boolean }
+        import_photos: { type: boolean }
+        import_ingredients: { type: boolean }
+        import_dishes: { type: boolean }
+        import_recipes: { type: boolean }
     PosterOrderBridgeInput:
       type: object
       required: [enabled, spotId, tabletId, waiterId, tableMap, productMap]

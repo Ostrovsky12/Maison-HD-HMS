@@ -5,6 +5,23 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export interface PosterMenuImportOptions {
+  overwrite_existing?: boolean;
+  skip_no_price?: boolean;
+  import_photos?: boolean;
+  import_ingredients?: boolean;
+  import_dishes?: boolean;
+  import_recipes?: boolean;
+}
+
+export interface PosterMenuImportInput {
+  account?: string;
+  token?: string;
+  /** @minimum 1 */
+  orgId?: number;
+  options?: PosterMenuImportOptions;
+}
+
 export type PosterOrderBridgeInputTableMap = { [key: string]: number };
 
 export type PosterOrderBridgeInputProductMap = { [key: string]: number };
@@ -1512,6 +1529,10 @@ export interface GuideAdminStats {
   pendingReview: number;
   approved: number;
 }
+
+export type PreviewPosterMenuImport200 = { [key: string]: unknown };
+
+export type ExecutePosterMenuImport200 = { [key: string]: unknown };
 
 export type GetPosterOrderBridgeCatalog200 = { [key: string]: unknown };
 

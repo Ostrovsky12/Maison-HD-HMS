@@ -7,6 +7,48 @@
  */
 import * as zod from "zod";
 
+export const PreviewPosterMenuImportBody = zod.object({
+  account: zod.string().optional(),
+  token: zod.string().optional(),
+  orgId: zod.number().min(1).optional(),
+  options: zod
+    .object({
+      overwrite_existing: zod.boolean().optional(),
+      skip_no_price: zod.boolean().optional(),
+      import_photos: zod.boolean().optional(),
+      import_ingredients: zod.boolean().optional(),
+      import_dishes: zod.boolean().optional(),
+      import_recipes: zod.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const PreviewPosterMenuImportResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+export const ExecutePosterMenuImportBody = zod.object({
+  account: zod.string().optional(),
+  token: zod.string().optional(),
+  orgId: zod.number().min(1).optional(),
+  options: zod
+    .object({
+      overwrite_existing: zod.boolean().optional(),
+      skip_no_price: zod.boolean().optional(),
+      import_photos: zod.boolean().optional(),
+      import_ingredients: zod.boolean().optional(),
+      import_dishes: zod.boolean().optional(),
+      import_recipes: zod.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const ExecutePosterMenuImportResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
 export const GetPosterOrderBridgeResponse = zod.object({
   config: zod.record(zod.string(), zod.unknown()).optional(),
   localTables: zod.array(zod.record(zod.string(), zod.unknown())).optional(),

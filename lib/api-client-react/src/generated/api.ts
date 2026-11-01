@@ -45,6 +45,7 @@ import type {
   DashboardAnalytics,
   ErrorEnvelope,
   ErrorResponse,
+  ExecutePosterMenuImport200,
   Forecast,
   GenerateForecastParams,
   GenerateForecastResponse,
@@ -102,8 +103,10 @@ import type {
   OtaSyncResult,
   PayInvoiceRequest,
   Payment,
+  PosterMenuImportInput,
   PosterOrderBridgeInput,
   PosterOrderBridgeView,
+  PreviewPosterMenuImport200,
   PricingPreview,
   Property,
   Rate,
@@ -141,6 +144,174 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getPreviewPosterMenuImportUrl = () => {
+  return `/api/fb/import/poster/preview`;
+};
+
+export const previewPosterMenuImport = async (
+  posterMenuImportInput: PosterMenuImportInput,
+  options?: RequestInit,
+): Promise<PreviewPosterMenuImport200> => {
+  return customFetch<PreviewPosterMenuImport200>(
+    getPreviewPosterMenuImportUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(posterMenuImportInput),
+    },
+  );
+};
+
+export const getPreviewPosterMenuImportMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewPosterMenuImport>>,
+    TError,
+    { data: BodyType<PosterMenuImportInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewPosterMenuImport>>,
+  TError,
+  { data: BodyType<PosterMenuImportInput> },
+  TContext
+> => {
+  const mutationKey = ["previewPosterMenuImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewPosterMenuImport>>,
+    { data: BodyType<PosterMenuImportInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return previewPosterMenuImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewPosterMenuImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewPosterMenuImport>>
+>;
+export type PreviewPosterMenuImportMutationBody =
+  BodyType<PosterMenuImportInput>;
+export type PreviewPosterMenuImportMutationError = ErrorType<unknown>;
+
+export const usePreviewPosterMenuImport = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewPosterMenuImport>>,
+    TError,
+    { data: BodyType<PosterMenuImportInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewPosterMenuImport>>,
+  TError,
+  { data: BodyType<PosterMenuImportInput> },
+  TContext
+> => {
+  return useMutation(getPreviewPosterMenuImportMutationOptions(options));
+};
+
+export const getExecutePosterMenuImportUrl = () => {
+  return `/api/fb/import/poster/execute`;
+};
+
+export const executePosterMenuImport = async (
+  posterMenuImportInput: PosterMenuImportInput,
+  options?: RequestInit,
+): Promise<ExecutePosterMenuImport200> => {
+  return customFetch<ExecutePosterMenuImport200>(
+    getExecutePosterMenuImportUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(posterMenuImportInput),
+    },
+  );
+};
+
+export const getExecutePosterMenuImportMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof executePosterMenuImport>>,
+    TError,
+    { data: BodyType<PosterMenuImportInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof executePosterMenuImport>>,
+  TError,
+  { data: BodyType<PosterMenuImportInput> },
+  TContext
+> => {
+  const mutationKey = ["executePosterMenuImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof executePosterMenuImport>>,
+    { data: BodyType<PosterMenuImportInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return executePosterMenuImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ExecutePosterMenuImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof executePosterMenuImport>>
+>;
+export type ExecutePosterMenuImportMutationBody =
+  BodyType<PosterMenuImportInput>;
+export type ExecutePosterMenuImportMutationError = ErrorType<unknown>;
+
+export const useExecutePosterMenuImport = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof executePosterMenuImport>>,
+    TError,
+    { data: BodyType<PosterMenuImportInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof executePosterMenuImport>>,
+  TError,
+  { data: BodyType<PosterMenuImportInput> },
+  TContext
+> => {
+  return useMutation(getExecutePosterMenuImportMutationOptions(options));
+};
 
 export const getGetPosterOrderBridgeUrl = () => {
   return `/api/poster/order-bridge`;

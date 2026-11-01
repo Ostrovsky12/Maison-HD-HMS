@@ -2,32 +2,63 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { PreviewPosterMenuImportBody, ExecutePosterMenuImportBody } from "@workspace/api-zod";
 
 const router = Router();
 router.use(requireAuth);
+router.use((req: any, res, next) => {
+  if (!["owner", "manager", "admin", "super_admin"].includes(req.user?.role)) {
+    res.status(403).json({ error: "Імпорт меню доступний керівнику закладу." });
+    return;
+  }
+  next();
+});
 
 function getOrgId(req: any, body?: any): number | null {
-  if (req.user.organizationId) return req.user.organizationId;
+  if (Number.isInteger(req.user.organizationId) && req.user.organizationId > 0) return req.user.organizationId;
   const fromBody = body?.orgId ?? req.body?.orgId;
-  if (fromBody) return Number(fromBody);
+  if (req.user.role === "super_admin" && Number.isInteger(Number(fromBody)) && Number(fromBody) > 0) return Number(fromBody);
   return null;
 }
 
+async function importSource(req: any, body: any) {
+  const orgId = getOrgId(req, body);
+  if (!orgId) throw new Error("Відкрийте імпорт від імені конкретного закладу.");
+  if (body.token?.trim()) {
+    if (!body.account?.trim()) throw new Error("Вкажіть назву акаунту Poster.");
+    return { orgId, account: body.account.trim(), token: body.token.trim() };
+  }
+  const result = await db.execute(sql`SELECT enabled_modules->'posterConfig' AS config FROM organizations WHERE id=${orgId}`);
+  const config: any = (result.rows[0] as any)?.config;
+  if (!config?.apiKey) throw new Error("Для цього закладу немає збереженого підключення Poster. Підключіть його в Інтеграціях.");
+  return { orgId, account: String(config.accountId || "Poster"), token: String(config.apiKey) };
+}
+
 // ─── Poster API helper ────────────────────────────────────────────────────────
-async function posterFetch(account: string, method: string, token: string): Promise<any> {
-  const url = `https://${account}.joinposter.com/api/${method}?token=${token}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+async function posterFetch(_account: string, method: string, token: string): Promise<any> {
+  // Saved accountId is a display label, not necessarily a Poster subdomain.
+  const url = new URL(`https://joinposter.com/api/${method}`);
+  url.searchParams.set("token", token);
+  let res: Response;
+  try { res = await fetch(url, { signal: AbortSignal.timeout(20000) }); }
+  catch { throw new Error("Не вдалося отримати меню з Poster. Спробуйте ще раз пізніше."); }
   if (!res.ok) throw new Error(`Poster API HTTP ${res.status} for ${method}`);
-  const json: any = await res.json();
-  if (json.error) throw new Error(`Poster: ${json.message || json.error}`);
+  let json: any;
+  try { json = await res.json(); } catch { throw new Error("Poster повернув некоректну відповідь."); }
+  if (!json || json.error || (json.error_code !== undefined && Number(json.error_code) !== 0) || !Array.isArray(json.response)) {
+    throw new Error("Poster не підтвердив доступ до довідника. Перевірте підключення й дозволи.");
+  }
   return json.response;
 }
 
 // ─── Price helper (Poster stores in kopecks) ──────────────────────────────────
 function posterPrice(raw: any): number {
   if (!raw) return 0;
-  const val = typeof raw === "object" ? Object.values(raw)[0] : raw;
-  return Math.round(parseFloat(String(val))) / 100;
+  const values = typeof raw === "object" ? Object.values(raw) : [raw];
+  const prices = [...new Set(values.map(v => Number(v)))];
+  if (prices.some(p => !Number.isFinite(p) || p < 0)) throw new Error("Poster повернув некоректну ціну. Імпорт зупинено.");
+  if (prices.length > 1) throw new Error("У Poster різні ціни для кількох закладів. Спочатку потрібно визначити заклад-джерело; першу ціну навмання не використовуємо.");
+  return Math.round(prices[0] || 0) / 100;
 }
 
 function productCategoryId(p: any): string {
@@ -50,8 +81,9 @@ function normaliseUnit(raw: string | null | undefined): string {
 // ─── STEP 1: Preview ─────────────────────────────────────────────────────────
 router.post("/preview", async (req, res) => {
   try {
-    const { account, token } = req.body;
-    if (!account || !token) return res.status(400).json({ error: "account і token обов'язкові" });
+    const parsed = PreviewPosterMenuImportBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ error: "Некоректні параметри імпорту." });
+    const { account, token } = await importSource(req, parsed.data);
 
     // Fetch all entity types from Poster in parallel
     const [rawCats, rawProducts, rawDishes, rawIngredients, rawWorkshops] = await Promise.allSettled([
@@ -61,6 +93,9 @@ router.post("/preview", async (req, res) => {
       posterFetch(account, "menu.getIngredients", token),
       posterFetch(account, "menu.getWorkshops", token),
     ]);
+    if (rawCats.status !== "fulfilled" || rawProducts.status !== "fulfilled") {
+      throw new Error("Не вдалося завантажити категорії та товари Poster. Порожній успішний імпорт не виконано.");
+    }
 
     const cats: any[] = rawCats.status === "fulfilled" && Array.isArray(rawCats.value) ? rawCats.value : [];
     const products: any[] = rawProducts.status === "fulfilled" && Array.isArray(rawProducts.value) ? rawProducts.value : [];
@@ -145,7 +180,7 @@ router.post("/preview", async (req, res) => {
     // Ingredient categories (unique)
     const ingCategories = [...new Set(ingList.map(i => i.category).filter(Boolean))];
 
-    res.json({
+    return res.json({
       account,
       categories,
       items,
@@ -166,27 +201,17 @@ router.post("/preview", async (req, res) => {
       },
     });
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "Не вдалось підключитись до Poster" });
+    return res.status(400).json({ error: e.message || "Не вдалось підключитись до Poster" });
   }
 });
 
 // ─── STEP 2: Execute import ───────────────────────────────────────────────────
 router.post("/execute", async (req, res) => {
   try {
-    const { account, token, options = {} } = req.body as {
-      account: string; token: string;
-      options: {
-        overwrite_existing?: boolean;
-        skip_no_price?: boolean;
-        import_photos?: boolean;
-        import_ingredients?: boolean;
-        import_dishes?: boolean;
-        import_recipes?: boolean;
-      };
-    };
-    if (!account || !token) return res.status(400).json({ error: "account і token обов'язкові" });
-    const orgId = getOrgId(req, req.body);
-    if (!orgId) return res.status(400).json({ error: "Не вдалось визначити організацію." });
+    const parsed = ExecutePosterMenuImportBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ error: "Некоректні параметри імпорту." });
+    const { account, token, orgId } = await importSource(req, parsed.data);
+    const options = parsed.data.options || {};
 
     // Fetch everything from Poster (including storage quantities)
     const fetches = await Promise.allSettled([
@@ -196,10 +221,17 @@ router.post("/execute", async (req, res) => {
       options.import_ingredients ? posterFetch(account, "menu.getIngredients", token) : Promise.resolve([]),
       options.import_ingredients ? posterFetch(account, "storage.getIngredients", token) : Promise.resolve([]),
     ]);
+    const required = [0, 1, ...(options.import_dishes ? [2] : []), ...(options.import_ingredients ? [3, 4] : [])];
+    if (required.some(i => fetches[i].status !== "fulfilled")) {
+      throw new Error("Не вдалося завантажити вибрані довідники Poster. Дані Maison HD не змінено.");
+    }
 
     const cats: any[] = fetches[0].status === "fulfilled" && Array.isArray(fetches[0].value) ? fetches[0].value : [];
     const products: any[] = fetches[1].status === "fulfilled" && Array.isArray(fetches[1].value) ? fetches[1].value : [];
     const dishes: any[] = fetches[2].status === "fulfilled" && Array.isArray(fetches[2].value) ? fetches[2].value : [];
+    // Validate all selected sale prices before the first local write.
+    for (const p of products) posterPrice(p.price);
+    for (const d of dishes) posterPrice(d.price);
     const rawIngredients: any[] = fetches[3].status === "fulfilled" && Array.isArray(fetches[3].value) ? fetches[3].value : [];
     // Build stock quantity map from storage: poster_ingredient_id → quantity
     const storageItems: any[] = fetches[4].status === "fulfilled" && Array.isArray(fetches[4].value) ? fetches[4].value : [];
@@ -286,7 +318,7 @@ router.post("/execute", async (req, res) => {
         await db.execute(sql`
           UPDATE fb_items SET price = ${price}, image_url = COALESCE(${photoUrl}, image_url),
             category_id = COALESCE(${catId}, category_id), is_available = true, updated_at = NOW()
-          WHERE id = ${existing.id}
+          WHERE id = ${existing.id} AND organization_id = ${orgId}
         `);
         stats.items_updated++;
       } else {
@@ -446,10 +478,10 @@ router.post("/execute", async (req, res) => {
       }
     }
 
-    res.json({ success: true, stats });
+    return res.json({ success: true, stats });
   } catch (e: any) {
     console.error("[Poster execute error]", e);
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 

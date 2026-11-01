@@ -82,11 +82,12 @@ function Steps({ current }: { current: number }) {
 function StepConnect({ onNext }: { onNext: (account: string, token: string, data: PreviewData) => void }) {
   const [account, setAccount] = useState("");
   const [token, setToken] = useState("");
+  const [manual, setManual] = useState(false);
   const { toast } = useToast();
 
   const preview = useMutation({
-    mutationFn: () => api("/preview", { account: account.trim(), token: token.trim() }),
-    onSuccess: (data) => onNext(account.trim(), token.trim(), data),
+    mutationFn: () => api("/preview", manual ? { account: account.trim(), token: token.trim() } : {}),
+    onSuccess: (data) => onNext(manual ? account.trim() : "", manual ? token.trim() : "", data),
     onError: (e: any) => toast({ title: "Помилка підключення", description: e.message, variant: "destructive" }),
   });
 
@@ -101,7 +102,13 @@ function StepConnect({ onNext }: { onNext: (account: string, token: string, data
           </div>
         </div>
 
-        <div>
+        {!manual && (
+          <div className="space-y-3" data-testid="poster-saved-import">
+            <p className="text-sm text-muted-foreground">Використаємо збережене підключення Poster поточного закладу. Токен повторно вводити не потрібно.</p>
+            <p className="text-sm">Спочатку відкриється попередній перегляд. Меню та ціни Maison HD зміняться лише після окремого запуску імпорту.</p>
+          </div>
+        )}
+        {manual && <><div>
           <Label>Обліковий запис Poster</Label>
           <div className="flex items-center mt-1 rounded-md border overflow-hidden">
             <span className="px-3 text-sm text-muted-foreground bg-muted border-r h-9 flex items-center shrink-0">https://</span>
@@ -129,8 +136,12 @@ function StepConnect({ onNext }: { onNext: (account: string, token: string, data
           </p>
         </div>
 
-        <Button className="w-full" onClick={() => preview.mutate()} disabled={!account.trim() || !token.trim() || preview.isPending}>
+        </>}
+        <Button className="w-full" data-testid="button-preview-poster-menu" onClick={() => preview.mutate()} disabled={(manual && (!account.trim() || !token.trim())) || preview.isPending}>
           {preview.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Підключення...</> : <><ArrowRight className="w-4 h-4 mr-2" /> Підключитись та переглянути</>}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setManual(v => !v)} disabled={preview.isPending}>
+          {manual ? "Використати збережене підключення" : "Вказати інше підключення вручну"}
         </Button>
       </div>
 
@@ -310,9 +321,9 @@ function StepOptions({ data, onNext, onBack }: { data: PreviewData; onNext: (opt
   const [overwrite, setOverwrite] = useState(false);
   const [skipNoPrice, setSkipNoPrice] = useState(false);
   const [importPhotos, setImportPhotos] = useState(true);
-  const [importIngredients, setImportIngredients] = useState(data.stats.ingredients_count > 0);
+  const [importIngredients, setImportIngredients] = useState(false);
   const [importDishes, setImportDishes] = useState(data.stats.dishes_count > 0);
-  const [importRecipes, setImportRecipes] = useState(data.stats.dishes_with_recipes > 0);
+  const [importRecipes, setImportRecipes] = useState(false);
 
   const noPrice = data.items.filter(i => i.price === 0).length;
 
@@ -390,6 +401,7 @@ function StepOptions({ data, onNext, onBack }: { data: PreviewData; onNext: (opt
                 <div>
                   <div className="text-sm font-medium">Оновити вже наявні позиції</div>
                   <div className="text-xs text-muted-foreground">Якщо в HMS вже є позиція з такою ж назвою — оновити ціну та фото.</div>
+                  <div className="text-xs text-amber-700 mt-1">Для актуалізації старих цін увімкніть цю опцію. Перейменовані страви можуть додатися окремо; відсутні в Poster позиції автоматично не видаляються.</div>
                 </div>
               </div>
 
