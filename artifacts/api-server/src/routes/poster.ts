@@ -5,16 +5,25 @@
  */
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { organizationsTable, unitsTable, propertiesTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { organizationsTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { parsePosterAnalytics, posterDates } from "../lib/poster-analytics.js";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
 const POSTER_BASE = "https://joinposter.com/api";
 
+router.use(requireAuth, (req: any, res, next) => {
+  if (!Number.isInteger(getOrg(req)) || getOrg(req) <= 0) {
+    res.status(403).json({ error: "Відкрийте інтеграцію від імені конкретного закладу." });
+    return;
+  }
+  next();
+});
+
 // Helper: get org's Poster config from enabledModules
-async function getPosterConfig(orgId: number): Promise<{ apiKey?: string; accountId?: string; lastSync?: string; syncedData?: any } | null> {
+async function getPosterConfig(orgId: number): Promise<{ apiKey?: string; accountId?: string; verified?: boolean; lastSync?: string; syncedData?: any } | null> {
   const [org] = await db.select({ enabledModules: organizationsTable.enabledModules })
     .from(organizationsTable).where(eq(organizationsTable.id, orgId)).limit(1);
   if (!org) return null;
@@ -24,44 +33,34 @@ async function getPosterConfig(orgId: number): Promise<{ apiKey?: string; accoun
 
 // Helper: save Poster config
 async function savePosterConfig(orgId: number, config: any) {
-  const [org] = await db.select({ enabledModules: organizationsTable.enabledModules })
-    .from(organizationsTable).where(eq(organizationsTable.id, orgId)).limit(1);
-  const mods: any = org?.enabledModules || {};
-  await db.update(organizationsTable)
-    .set({ enabledModules: { ...mods, posterConfig: config } })
-    .where(eq(organizationsTable.id, orgId));
+  const updated = await db.update(organizationsTable)
+    .set({ enabledModules: sql`jsonb_set(coalesce(${organizationsTable.enabledModules}, '{}'::jsonb), '{posterConfig}', ${JSON.stringify(config)}::jsonb)` })
+    .where(eq(organizationsTable.id, orgId)).returning({ id: organizationsTable.id });
+  if (!updated.length) throw new Error("Заклад не знайдено. Підключення не збережено.");
 }
 
 // Helper: call Poster API
 async function posterCall(token: string, method: string, params: Record<string, string> = {}) {
   const qs = new URLSearchParams({ token, ...params });
   const url = `${POSTER_BASE}/${method}?${qs}`;
-  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  let r: Response;
+  try {
+    r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  } catch {
+    throw new Error("Не вдалося зв’язатися з Poster. Спробуйте ще раз пізніше.");
+  }
   if (!r.ok) throw new Error(`Poster API error: ${r.status}`);
-  const data = await r.json();
-  if (data.error) throw new Error(`Poster: ${data.error}`);
-  return data.response || data;
+  let data: any;
+  try { data = await r.json(); } catch { throw new Error("Poster повернув некоректну відповідь."); }
+  if (data.error || (data.error_code !== undefined && Number(data.error_code) !== 0)) {
+    throw new Error("Poster відхилив запит. Перевірте токен доступу та дозволи інтеграції.");
+  }
+  if (data.response === undefined) throw new Error("Poster повернув непідтримуваний формат відповіді.");
+  return data.response;
 }
 
-// Demo revenue data (used when no API key or for testing)
-function demoRevenue(days = 30) {
-  const result: any[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    const isWeekend = d.getDay() === 5 || d.getDay() === 6 || d.getDay() === 0;
-    const base = isWeekend ? 12000 : 7500;
-    const revenue = Math.round(base + (Math.random() - 0.5) * 3000);
-    result.push({
-      date: dateStr,
-      revenue,
-      transactions: Math.round(revenue / 250),
-      avgCheck: 250 + Math.round(Math.random() * 100),
-    });
-  }
-  return result;
-}
+const liveCache = (config: Awaited<ReturnType<typeof getPosterConfig>>) =>
+  config?.apiKey && config.syncedData?.source === "live" ? config.syncedData : null;
 
 // GET /poster/status — check connection status
 router.get("/status", requireAuth, async (req: any, res) => {
@@ -71,14 +70,15 @@ router.get("/status", requireAuth, async (req: any, res) => {
     if (!config?.apiKey) {
       return res.json({ connected: false, lastSync: null, lastRevenue: null });
     }
-    res.json({
+    return res.json({
       connected: true,
+      verified: config.verified === true,
       accountId: config.accountId,
-      lastSync: config.lastSync,
-      lastRevenue: config.syncedData?.totalRevenue || null,
-      lastTransactions: config.syncedData?.totalTransactions || null,
+      lastSync: liveCache(config) ? config.lastSync : null,
+      lastRevenue: liveCache(config)?.totalRevenue ?? null,
+      lastTransactions: liveCache(config)?.totalTransactions ?? null,
     });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch { return res.status(500).json({ error: "Не вдалося завантажити стан підключення Poster." }); }
 });
 
 // POST /poster/connect — save API key and test connection
@@ -86,24 +86,22 @@ router.post("/connect", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const { apiKey, accountId } = req.body;
-    if (!apiKey) return res.status(400).json({ error: "apiKey required" });
+    if (typeof apiKey !== "string" || !apiKey.trim()) return res.status(400).json({ error: "Вкажіть токен доступу." });
+    if (accountId !== undefined && typeof accountId !== "string") return res.status(400).json({ error: "Некоректна назва акаунту." });
 
     // Test the connection
     let verified = false;
     let accountName = accountId || "Poster аккаунт";
     try {
-      const info = await posterCall(apiKey, "auth.checkToken");
-      if (info) {
-        verified = true;
-        accountName = info.name || info.account?.name || accountName;
-      }
+      const info = await posterCall(apiKey.trim(), "spots.getSpots");
+      if (!Array.isArray(info)) throw new Error("Некоректна відповідь Poster.");
+      verified = true;
     } catch (e) {
-      // If token check fails, still save but mark as unverified
-      verified = false;
+      return res.status(502).json({ ok: false, error: "Не вдалося перевірити доступ до Poster. Перевірте токен і дозволи або спробуйте пізніше. Попереднє підключення не змінено." });
     }
 
     const config = {
-      apiKey,
+      apiKey: apiKey.trim(),
       accountId: accountId || accountName,
       connected: true,
       verified,
@@ -113,24 +111,22 @@ router.post("/connect", requireAuth, async (req: any, res) => {
     };
     await savePosterConfig(orgId, config);
 
-    res.json({ ok: true, verified, accountName });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.json({ ok: true, verified, accountName });
+  } catch { return res.status(500).json({ error: "Не вдалося зберегти підключення. Перевірте, що заклад існує, та спробуйте ще раз." }); }
 });
 
 // DELETE /poster/disconnect
 router.delete("/disconnect", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
-    const [org] = await db.select({ enabledModules: organizationsTable.enabledModules })
-      .from(organizationsTable).where(eq(organizationsTable.id, orgId)).limit(1);
-    const mods: any = org?.enabledModules || {};
-    delete mods.posterConfig;
-    await db.update(organizationsTable).set({ enabledModules: mods }).where(eq(organizationsTable.id, orgId));
-    res.json({ ok: true });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    await db.update(organizationsTable)
+      .set({ enabledModules: sql`coalesce(${organizationsTable.enabledModules}, '{}'::jsonb) - 'posterConfig'` })
+      .where(eq(organizationsTable.id, orgId));
+    return res.json({ ok: true });
+  } catch { return res.status(500).json({ error: "Не вдалося відключити Poster." }); }
 });
 
-// POST /poster/sync — sync revenue from Poster API (or use demo data)
+// POST /poster/sync — only persist successful, real Poster reports.
 router.post("/sync", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
@@ -138,61 +134,23 @@ router.post("/sync", requireAuth, async (req: any, res) => {
     const dateFrom = (req.body.dateFrom as string) || (() => { const d = new Date(); d.setDate(d.getDate() - 29); return d.toISOString().slice(0, 10); })();
     const dateTo = (req.body.dateTo as string) || new Date().toISOString().slice(0, 10);
 
-    let dailyRevenue: any[] = [];
-    let totalRevenue = 0;
-    let totalTransactions = 0;
-    let source = "demo";
-    let syncError: string | null = null;
-
-    if (config?.apiKey) {
-      try {
-        // Try to fetch real Poster data
-        const dateFromPoster = dateFrom.replace(/-/g, "");
-        const dateToPoster = dateTo.replace(/-/g, "");
-        const analytics = await posterCall(config.apiKey, "dash.getAnalytics", {
-          dateFrom: dateFromPoster, dateTo: dateToPoster,
-        });
-
-        if (Array.isArray(analytics) && analytics.length > 0) {
-          dailyRevenue = analytics.map((a: any) => ({
-            date: `${a.date.slice(0, 4)}-${a.date.slice(4, 6)}-${a.date.slice(6, 8)}`,
-            revenue: parseFloat(a.revenue || 0) / 100, // Poster stores in kopecks
-            transactions: parseInt(a.visitors || 0),
-            avgCheck: parseFloat(a.average_receipt || 0) / 100,
-          }));
-          totalRevenue = dailyRevenue.reduce((s, d) => s + d.revenue, 0);
-          totalTransactions = dailyRevenue.reduce((s, d) => s + d.transactions, 0);
-          source = "live";
-        } else if (Array.isArray(analytics) && analytics.length === 0) {
-          // Empty period — still live data, just no revenue
-          dailyRevenue = [];
-          source = "live";
-        } else {
-          throw new Error(`Неочікуваний формат відповіді Poster: ${JSON.stringify(analytics).slice(0, 200)}`);
-        }
-      } catch (e: any) {
-        syncError = e.message || "Помилка Poster API";
-        dailyRevenue = demoRevenue(30);
-        totalRevenue = dailyRevenue.reduce((s, d) => s + d.revenue, 0);
-        totalTransactions = dailyRevenue.reduce((s, d) => s + d.transactions, 0);
-        source = "demo";
-      }
-    } else {
-      dailyRevenue = demoRevenue(30);
-      totalRevenue = dailyRevenue.reduce((s, d) => s + d.revenue, 0);
-      totalTransactions = dailyRevenue.reduce((s, d) => s + d.transactions, 0);
+    if (!config?.apiKey) return res.status(409).json({ ok: false, error: "Спочатку підключіть Poster." });
+    try { posterDates(dateFrom, dateTo); } catch (e: any) {
+      return res.status(400).json({ ok: false, error: e.message });
     }
-
-    const avgCheck = totalTransactions > 0 ? Math.round(totalRevenue / totalTransactions) : 0;
-    const syncedData = { dailyRevenue, totalRevenue: Math.round(totalRevenue), totalTransactions, avgCheck, dateFrom, dateTo, source };
-
-    // Save synced data
-    if (config) {
-      await savePosterConfig(orgId, { ...config, lastSync: new Date().toISOString(), syncedData });
+    let syncedData;
+    try {
+      const analytics = await posterCall(config.apiKey, "dash.getAnalytics", {
+        dateFrom: dateFrom.replace(/-/g, ""), dateTo: dateTo.replace(/-/g, ""), interpolate: "day", select: "revenue",
+      });
+      syncedData = parsePosterAnalytics(analytics, dateFrom, dateTo);
+    } catch (e: any) {
+      return res.status(502).json({ ok: false, error: e.message, syncError: e.message });
     }
-
-    res.json({ ok: true, source, totalRevenue: Math.round(totalRevenue), totalTransactions, avgCheck, dailyRevenue, dateFrom, dateTo, syncError });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    const lastSync = new Date().toISOString();
+    await savePosterConfig(orgId, { ...config, verified: true, lastSync, syncedData });
+    return res.json({ ok: true, connected: true, ...syncedData, lastSync, syncError: null });
+  } catch { return res.status(500).json({ error: "Не вдалося зберегти звіт Poster. Попередній звіт не замінено." }); }
 });
 
 // GET /poster/revenue — get cached synced revenue
@@ -200,21 +158,19 @@ router.get("/revenue", requireAuth, async (req: any, res) => {
   try {
     const orgId = getOrg(req);
     const config = await getPosterConfig(orgId);
-    if (!config?.syncedData) {
-      // Return demo preview even if not connected
-      const demo = demoRevenue(30);
+    if (!liveCache(config)) {
       return res.json({
-        connected: false,
-        source: "demo",
-        totalRevenue: demo.reduce((s, d) => s + d.revenue, 0),
-        totalTransactions: demo.reduce((s, d) => s + d.transactions, 0),
-        avgCheck: Math.round(demo.reduce((s, d) => s + d.avgCheck, 0) / demo.length),
-        dailyRevenue: demo,
+        connected: !!config?.apiKey,
+        source: "unavailable",
+        totalRevenue: null,
+        totalTransactions: null,
+        avgCheck: null,
+        dailyRevenue: [],
         lastSync: null,
       });
     }
-    res.json({ connected: !!config?.apiKey, ...config.syncedData, lastSync: config.lastSync });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    return res.json({ connected: true, ...liveCache(config), lastSync: config?.lastSync });
+  } catch { return res.status(500).json({ error: "Не вдалося завантажити збережений звіт Poster." }); }
 });
 
 // POST /poster/room-charge — create room charge in HMS from Poster order
@@ -227,7 +183,7 @@ router.post("/room-charge", requireAuth, async (req: any, res) => {
     // In a real implementation this would add a charge to the booking
     // For now, return success with a reference number
     const chargeRef = `PC-${Date.now().toString(36).toUpperCase()}`;
-    res.json({
+    return res.json({
       ok: true,
       chargeRef,
       bookingId,
@@ -236,7 +192,7 @@ router.post("/room-charge", requireAuth, async (req: any, res) => {
       posterOrderId,
       createdAt: new Date().toISOString(),
     });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
 export default router;

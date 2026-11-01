@@ -265,24 +265,31 @@ function PosterTab() {
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [revenue, setRevenue] = useState<any>(null);
+  const [posterError, setPosterError] = useState<string | null>(null);
+
+  const posterRequest = async (path: string, opts: RequestInit = {}) => {
+    const r = await authFetch(path, opts);
+    const data = await r.json();
+    if (!r.ok || data.ok === false) throw new Error(data.error || data.syncError || "Не вдалося виконати запит до Poster.");
+    return data;
+  };
 
   const loadStatus = async () => {
     setLoading(true);
     try {
-      const r = await authFetch("/poster/status");
-      const d = await r.json();
+      const d = await posterRequest("/poster/status");
       setStatus(d);
-      if (d.connected) loadRevenue();
-    } catch {}
+      if (d.connected) await loadRevenue();
+      else setRevenue(null);
+    } catch (e: any) { setPosterError(e.message || "Не вдалося завантажити стан підключення."); }
     setLoading(false);
   };
 
   const loadRevenue = async () => {
     try {
-      const r = await authFetch("/poster/revenue");
-      const d = await r.json();
-      setRevenue(d);
-    } catch {}
+      const d = await posterRequest("/poster/revenue");
+      setRevenue(d.source === "live" ? d : null);
+    } catch (e: any) { setPosterError(e.message || "Не вдалося завантажити звіт."); }
   };
 
   useEffect(() => { loadStatus(); }, []);
@@ -290,50 +297,57 @@ function PosterTab() {
   const handleConnect = async () => {
     if (!apiKey.trim()) return;
     setConnecting(true);
+    setPosterError(null);
     try {
-      const r = await authFetch("/poster/connect", { method: "POST", body: JSON.stringify({ apiKey: apiKey.trim(), accountId: accountId.trim() || undefined }) });
-      const d = await r.json();
+      const d = await posterRequest("/poster/connect", { method: "POST", body: JSON.stringify({ apiKey: apiKey.trim(), accountId: accountId.trim() || undefined }) });
       if (d.ok) {
-        toast({ title: d.verified ? "Poster підключено та перевірено" : "API ключ збережено (не вдалось перевірити — demo режим)" });
+        toast({ title: d.verified ? "Poster підключено та перевірено" : "Токен збережено, доступ ще не перевірено" });
         setApiKey(""); setAccountId("");
         await loadStatus();
         await handleSync();
       } else toast({ title: "Помилка підключення", description: d.error, variant: "destructive" });
-    } catch { toast({ title: "Помилка мережі", variant: "destructive" }); }
+    } catch (e: any) {
+      setPosterError(e.message);
+      toast({ title: "Помилка підключення", description: e.message, variant: "destructive" });
+    }
     setConnecting(false);
   };
 
   const handleSync = async () => {
     setSyncing(true);
+    setPosterError(null);
     try {
-      const r = await authFetch("/poster/sync", { method: "POST", body: JSON.stringify({}) });
-      const d = await r.json();
+      const d = await posterRequest("/poster/sync", { method: "POST", body: JSON.stringify({}) });
+      if (d.source !== "live") throw new Error(d.syncError || "Сервер не повернув підтверджені дані Poster.");
       setRevenue(d);
-      if (d.source === "live") {
-        toast({ title: "Дані синхронізовано з Poster" });
-      } else if (d.syncError) {
-        toast({ title: "Помилка Poster API — показано демо-дані", description: d.syncError, variant: "destructive" });
-      } else {
-        toast({ title: "Показано демо-дані (API ключ не підключено)" });
-      }
-    } catch { toast({ title: "Помилка синхронізації", variant: "destructive" }); }
+      setStatus((previous: any) => ({ ...previous, connected: true, verified: true, lastSync: d.lastSync }));
+      toast({ title: "Дані синхронізовано з Poster" });
+    } catch (e: any) {
+      setPosterError(e.message);
+      toast({ title: "Синхронізацію не виконано", description: e.message, variant: "destructive" });
+    }
     setSyncing(false);
   };
 
   const handleDisconnect = async () => {
     try {
-      await authFetch("/poster/disconnect", { method: "DELETE" });
+      await posterRequest("/poster/disconnect", { method: "DELETE" });
       setStatus({ connected: false }); setRevenue(null);
+      setPosterError(null);
       toast({ title: "Poster відключено" });
-    } catch { toast({ title: "Помилка", variant: "destructive" }); }
+    } catch (e: any) { setPosterError(e.message); toast({ title: "Помилка", description: e.message, variant: "destructive" }); }
   };
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
 
-  const isDemo = revenue?.source === "demo" || !status?.connected;
-
   return (
     <div className="space-y-5">
+      {posterError && (
+        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <p className="flex items-center gap-2"><AlertCircle className="h-4 w-4 shrink-0" />{posterError}</p>
+          <p className="mt-1 text-xs">{revenue ? "Показано останній успішно отриманий звіт. Він може бути застарілим." : "Підтверджених показників немає. Демонстраційні суми не відображаються."}</p>
+        </div>
+      )}
       {/* Status / Connect card */}
       <Card className="shadow-sm">
         <CardHeader>
@@ -349,8 +363,8 @@ function PosterTab() {
             </div>
             {status?.connected ? (
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5 text-sm text-emerald-600 font-medium">
-                  <CheckCircle2 className="w-4 h-4" /> Підключено
+                <span className={`flex items-center gap-1.5 text-sm font-medium ${status.verified ? "text-emerald-600" : "text-amber-600"}`}>
+                  <CheckCircle2 className="w-4 h-4" /> {status.verified ? "Доступ перевірено" : "Токен збережено"}
                 </span>
                 <Button size="sm" variant="outline" onClick={handleDisconnect} className="gap-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 border-red-200">
                   <Unplug className="w-3.5 h-3.5" /> Відключити
@@ -415,35 +429,22 @@ function PosterTab() {
                   {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlugZap className="w-4 h-4" />}
                   Підключити Poster
                 </Button>
-                <Button variant="outline" onClick={handleSync} disabled={syncing} className="gap-2">
-                  {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                  Демо дані
-                </Button>
               </div>
             </div>
           )}
         </CardContent>
       </Card>
 
+      {!revenue && status?.connected && !posterError && (
+        <p className="text-sm text-muted-foreground">Звіт ще не отримано. Натисніть «Синхронізувати», щоб завантажити фактичні показники Poster.</p>
+      )}
+
       {/* Revenue Preview */}
-      {revenue && (
+      {revenue?.source === "live" && (
         <>
-          {isDemo && (
-            <div className="flex flex-col gap-1 text-xs bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
-              <div className="flex items-center gap-2 text-amber-600">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                {revenue?.syncError
-                  ? "Poster API недоступний — показано демо-дані"
-                  : "Демо-дані — підключіть Poster API для відображення реальної виручки"}
-              </div>
-              {revenue?.syncError && (
-                <p className="text-amber-700 font-mono pl-5">{revenue.syncError}</p>
-              )}
-            </div>
-          )}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
-              { label: "Виручка (30 днів)", value: `${Math.round((revenue.totalRevenue || 0)).toLocaleString("uk-UA")} ₴`, icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50" },
+              { label: "Виручка (30 днів)", value: `${(revenue.totalRevenue || 0).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₴`, icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50" },
               { label: "Транзакцій", value: (revenue.totalTransactions || 0).toLocaleString("uk-UA"), icon: ShoppingBag, color: "text-blue-600", bg: "bg-blue-50" },
               { label: "Середній чек", value: `${(revenue.avgCheck || 0).toLocaleString("uk-UA")} ₴`, icon: BarChart3, color: "text-violet-600", bg: "bg-violet-50" },
             ].map(item => (
@@ -467,7 +468,7 @@ function PosterTab() {
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Щоденна виручка ресторану</CardTitle>
-              <CardDescription>Останні 30 днів · {isDemo ? "Демо дані" : "З Poster POS"}</CardDescription>
+              <CardDescription>{revenue.dateFrom} — {revenue.dateTo} · З Poster POS</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-end gap-1 h-28">
