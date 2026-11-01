@@ -29,6 +29,12 @@ The user identified Poster hall **«Будинки»** for the intended №1 and
 
 **How to apply:** Use the official hall catalogue before proposing mappings; never turn a missing hall-name field on a table into an assumed «Основний зал».
 
+Retain sanitized provider error codes and the operation name when a Poster write is rejected; do not reduce every rejection to an indistinguishable generic error.
+
+**Why:** A real create-order test was rejected even though the catalogue reads succeeded and the documented endpoint and parameter names matched. Discarding the provider code prevented distinguishing permission, register, and request-validation failures without another write.
+
+**How to apply:** Keep numeric provider codes, HTTP status, and a fixed operation identifier; never expose bearer URLs, tokens, raw bodies, or arbitrary provider messages. Preserve the distinction between explicit rejection and an uncertain outcome, and do not blindly replay writes to obtain diagnostics.
+
 For menu-and-price refreshes, keep ingredients and stock import separate rather than requiring them for the menu.
 
 **Why:** The user confirmed that the menu was available after disabling ingredient import following a pre-write import failure. This confirms the menu-only path, not the exact failing provider method or correctness of every imported price.
