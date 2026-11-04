@@ -71,3 +71,17 @@ mtime_ms = 1789801178372
 storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:b611ff1f-342c-4c82-a9e7-87ef30a9353c/98cbda4a-ba4b-4d96-b776-d8bcdc2a072d/5778369d-b6da-4e87-a66a-7023d845908f"
 storage_version_token = "1789801183101565"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "1cwOFzLs4yTLa_IF4ZdT1"
+uri = "file://docs/maison-hd-booking-servio-spec.html"
+type = "html"
+title = "Технічне завдання — Maison HD Booking + Servio"
+description = "Повне ТЗ першої версії: 17 розділів із функціями модуля, інтеграцією Servio, кабінетом готелю, платежами, захистом від дублів, етапами та критеріями приймання. HTML-документ для перегляду, друку або збереження у PDF через браузер."
+logical_id = "5aa8ac7a-a4c0-4090-9a5c-0d88f9d2ac27"
+content_hash = "sha256:162ddf70d6c94b4e3fc63e82768165ddbe28000ecee294d6de346a1e2daee49d"
+size = 38206
+mtime_ms = 1793768582362
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:b611ff1f-342c-4c82-a9e7-87ef30a9353c/5aa8ac7a-a4c0-4090-9a5c-0d88f9d2ac27/4d9f85ff-e474-4bc0-914b-56346f9301b1"
+storage_version_token = "1793768604960496"
+content_type = "text/html"
