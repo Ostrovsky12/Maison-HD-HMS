@@ -3,8 +3,8 @@ import { PlayCircle } from "lucide-react";
 import { parseVideo } from "@/lib/booking-media";
 
 /** Click-to-load video. Nothing is fetched or played until the guest asks. */
-export function UnitVideo({ url, title, unitId }: { url: string; title: string; unitId: number }) {
-  const [open, setOpen] = useState(false);
+export function UnitVideo({ url, title, unitId, initiallyOpen = false }: { url: string; title: string; unitId: number; initiallyOpen?: boolean }) {
+  const [open, setOpen] = useState(initiallyOpen);
   const src = parseVideo(url);
   if (!src) return null;
 

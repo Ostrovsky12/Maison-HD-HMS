@@ -5,7 +5,10 @@ import { UnitCard, type PublicUnit } from "@/components/booking/unit-card";
 import { SearchBar } from "@/components/booking/search-bar";
 import { NonRefundableConsent } from "@/components/booking/nonrefundable-consent";
 import { PaymentStatusView } from "@/components/booking/payment-status-view";
-import { photoList } from "@/lib/booking-media";
+import { photoList, resolvePhotoUrl } from "@/lib/booking-media";
+import { normalizeAppearance, type BookingAppearanceValue, type CatalogItem } from "@/lib/booking-appearance";
+import { DogodaTheme } from "@/components/booking/dogoda/dogoda-theme";
+import { DogodaShowcase } from "@/components/booking/dogoda/dogoda-showcase";
 import {
   captureReturnFromUrl, clearPending, clearReturn, loadPending, loadReturn, parseTariffPolicy, redirectToLiqPay, savePending,
   type PendingCheckout, type ReturnRef,
@@ -54,7 +57,8 @@ function setMeta(title: string, desc: string) {
   m.setAttribute("content", desc);
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, ap }: { children: React.ReactNode; ap?: BookingAppearanceValue | null }) {
+  if (ap) return <DogodaTheme appearance={ap}>{children}</DogodaTheme>;
   return <div className="min-h-[100dvh] bg-[#f6f4f0] text-stone-900 antialiased">{children}</div>;
 }
 
@@ -62,12 +66,18 @@ const inputCls = "w-full h-12 rounded-xl border border-stone-300 bg-white px-3.5
 
 export default function BookingPublicPage() {
   const { slug = "" } = useParams<{ slug: string }>();
-  const q = useGetPublicBookingEngine(slug);
+  const isPreviewUrl = useMemo(() => { try { return new URLSearchParams(window.location.search).get("preview") === "1"; } catch { return false; } }, []);
+  const q = useGetPublicBookingEngine(slug, isPreviewUrl ? { preview: true } : undefined);
   const data = q.data as unknown as Record<string, any> | undefined;
   const cfg = (data?.config ?? {}) as Record<string, unknown>;
   const orgName = s(data?.organization?.name);
   const name = s(cfg.displayName) || orgName || "Бронювання";
-  const accent = /^#[0-9a-fA-F]{6}$/.test(s(cfg.accentColor)) ? s(cfg.accentColor) : "#1f4e5f";
+  const ap: BookingAppearanceValue | null = cfg.appearance && typeof cfg.appearance === "object" && (cfg.appearance as Record<string, unknown>).preset === "dogoda" ? normalizeAppearance(cfg.appearance) : null;
+  const previewLocked = data?.preview === true && data?.salesEnabled === false;
+  const catalog: CatalogItem[] = useMemo(() => (Array.isArray(data?.accommodationCatalog) ? data!.accommodationCatalog : []).map((c: any) => ({
+    id: s(c?.id), name: s(c?.name), category: s(c?.category), description: s(c?.description), photos: photoList(c?.photos), videoUrl: s(c?.videoUrl),
+  })).filter((c: CatalogItem) => c.id && c.name), [data]);
+  const accent = ap ? ap.buttonColor : /^#[0-9a-fA-F]{6}$/.test(s(cfg.accentColor)) ? s(cfg.accentColor) : "#1f4e5f";
   const properties: { id: number; name: string }[] = Array.isArray(data?.properties) ? data!.properties : [];
   const policy = useMemo(() => parseTariffPolicy(data?.tariffPolicy), [data]);
 
@@ -116,6 +126,7 @@ export default function BookingPublicPage() {
   const nrAgree = !!consentKey && nrAgreedKey === consentKey;
 
   const search = async () => {
+    if (previewLocked) { setSearchErr("Приватний перегляд: пошук і бронювання вимкнені, поки продажі закриті."); return; }
     setSearchErr(null); setStale(null); setChosen(null); setSubmitErr(null); setNrAgreedKey(null);
     if (!(checkOut > checkIn)) { setSearchErr("Дата виїзду має бути пізніше дати заїзду"); return; }
     if (checkIn < ymd(today)) { setSearchErr("Дата заїзду не може бути в минулому"); return; }
@@ -143,7 +154,7 @@ export default function BookingPublicPage() {
 
   /** Starts (or retries) LiqPay checkout for an already created booking. Never creates a new reservation. */
   const startCheckout = async (pc: PendingCheckout) => {
-    if (redirecting) return;
+    if (redirecting || previewLocked) return;
     setRedirecting(true); setCheckoutErr(null);
     try {
       let r: Response;
@@ -179,7 +190,7 @@ export default function BookingPublicPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chosen || !policy || !canSubmit || inflight.current) return;
+    if (previewLocked || !chosen || !policy || !canSubmit || inflight.current) return;
     inflight.current = true; setSubmitting(true); setSubmitErr(null);
     const payload = {
       slug, bookingEngine: true, unitId: chosen.id, checkIn, checkOut,
@@ -275,7 +286,7 @@ export default function BookingPublicPage() {
 
   if (returnRef) {
     return (
-      <Shell>{header}
+      <Shell ap={ap}>{header}
         <main className="max-w-6xl mx-auto px-5 py-10 md:py-16">
           <PaymentStatusView api={API} slug={slug} ref_={returnRef} accent={accent} base={BASE}
             onDismiss={() => { clearReturn(slug); setReturnRef(null); if (pending && pending.bookingId === returnRef.bookingId) abandonPending(); }} />
@@ -284,11 +295,49 @@ export default function BookingPublicPage() {
     );
   }
 
+  const heroPhoto = ap ? resolvePhotoUrl(ap.heroPhotoUrl) ?? catalog.find((c) => c.photos[0])?.photos[0] ?? null : null;
+
   return (
-    <Shell>
+    <Shell ap={ap}>
+      {previewLocked && (
+        <div role="status" className="sticky top-0 z-40 px-5 py-2.5 text-center text-sm" style={{ background: "#292D05", color: "#FFF4E5" }} data-testid="banner-private-preview">
+          Приватний перегляд для команди. Продажі закриті: пошук, бронювання й оплата вимкнені. Медіа можна переглядати.
+        </div>
+      )}
       {header}
 
-      {/* Hero */}
+      {ap ? (
+        <>
+          <section className="relative overflow-hidden" aria-labelledby="dg-hero-title">
+            <div className="max-w-6xl mx-auto px-5 pt-10 md:pt-16 pb-24 md:pb-28 grid md:grid-cols-[1.05fr_1fr] gap-10 items-center">
+              <div>
+                <p className="dg-hand dg-rise text-3xl md:text-4xl" style={{ color: "var(--dg-button)" }}>slow down</p>
+                <h1 id="dg-hero-title" className="dg-rise dg-rise-2 text-[44px] leading-[0.98] md:text-7xl tracking-tight mt-2" data-testid="text-dogoda-title">{name}</h1>
+                {desc && <p className="dg-rise dg-rise-3 dg-muted text-base md:text-lg mt-5 max-w-xl whitespace-pre-line line-clamp-5">{desc}</p>}
+                <div className="dg-rise dg-rise-3 mt-7 flex flex-wrap gap-2 text-sm">
+                  <span className="rounded-full border dg-line px-4 py-2 inline-flex items-center gap-2"><Clock className="w-4 h-4" aria-hidden />Заїзд з {s(cfg.checkInTime, "14:00")}</span>
+                  <span className="rounded-full border dg-line px-4 py-2 inline-flex items-center gap-2"><Clock className="w-4 h-4" aria-hidden />Виїзд до {s(cfg.checkOutTime, "12:00")}</span>
+                  {policy && <span className="rounded-full px-4 py-2 inline-flex items-center gap-2 dg-surface"><CreditCard className="w-4 h-4" aria-hidden />Неповоротний тариф, 100% онлайн-оплата</span>}
+                </div>
+              </div>
+              {heroPhoto ? (
+                <div className="dg-rise dg-rise-2 relative dg-grain aspect-[4/5] md:aspect-[5/6] rounded-t-[999px] rounded-b-[32px] overflow-hidden">
+                  <img src={heroPhoto} alt={`${name}: фото`} className="absolute inset-0 w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div aria-hidden className="hidden md:block aspect-[5/6] rounded-t-[999px] rounded-b-[32px] relative dg-grain" style={{ background: "linear-gradient(180deg, color-mix(in srgb, var(--dg-muted) 55%, var(--dg-bg)), var(--dg-text))" }}>
+                  <p className="dg-hand absolute bottom-8 left-0 right-0 text-center text-4xl" style={{ color: "var(--dg-bg)" }}>dogoda</p>
+                </div>
+              )}
+            </div>
+          </section>
+          {ap.showGallery && <DogodaShowcase items={catalog} />}
+          <div className="max-w-6xl mx-auto px-5 pt-10" id="dg-search">
+            <p className="dg-hand text-2xl" style={{ color: "var(--dg-button)" }}>pick your dates</p>
+            <h2 className="text-3xl md:text-4xl tracking-tight mb-16 md:mb-20">Вільні дати й ціни</h2>
+          </div>
+        </>
+      ) : (
       <section className="relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${accent} 0%, ${accent}e6 55%, #1c1917 140%)` }}>
         <div className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)", backgroundSize: "22px 22px" }} />
         <div className="relative max-w-6xl mx-auto px-5 pt-10 pb-24 md:pt-14 md:pb-28 text-white">
@@ -303,6 +352,7 @@ export default function BookingPublicPage() {
           </div>
         </div>
       </section>
+      )}
 
       <div className="max-w-6xl mx-auto px-4 md:px-5 -mt-12 md:-mt-14 relative z-10">
         <SearchBar properties={properties} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}

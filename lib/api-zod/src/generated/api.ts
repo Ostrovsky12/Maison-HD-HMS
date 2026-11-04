@@ -45,6 +45,18 @@ export const saveBookingEngineSettingsBodyDescriptionMax = 2000;
 export const saveBookingEngineSettingsBodyAccentColorRegExp = new RegExp(
   "^#[0-9a-fA-F]{6}$",
 );
+export const saveBookingEngineSettingsBodyAppearanceBackgroundColorRegExp =
+  new RegExp("^#[0-9a-fA-F]{6}$");
+export const saveBookingEngineSettingsBodyAppearanceSurfaceColorRegExp =
+  new RegExp("^#[0-9a-fA-F]{6}$");
+export const saveBookingEngineSettingsBodyAppearanceTextColorRegExp =
+  new RegExp("^#[0-9a-fA-F]{6}$");
+export const saveBookingEngineSettingsBodyAppearanceMutedColorRegExp =
+  new RegExp("^#[0-9a-fA-F]{6}$");
+export const saveBookingEngineSettingsBodyAppearanceButtonColorRegExp =
+  new RegExp("^#[0-9a-fA-F]{6}$");
+export const saveBookingEngineSettingsBodyAppearanceHeroPhotoUrlMax = 1000;
+
 export const saveBookingEngineSettingsBodyLogoUrlMax = 1000;
 
 export const saveBookingEngineSettingsBodyPhoneMax = 60;
@@ -86,6 +98,31 @@ export const SaveBookingEngineSettingsBody = zod.object({
   accentColor: zod
     .string()
     .regex(saveBookingEngineSettingsBodyAccentColorRegExp),
+  appearance: zod
+    .object({
+      preset: zod.enum(["standard", "dogoda"]),
+      backgroundColor: zod
+        .string()
+        .regex(saveBookingEngineSettingsBodyAppearanceBackgroundColorRegExp),
+      surfaceColor: zod
+        .string()
+        .regex(saveBookingEngineSettingsBodyAppearanceSurfaceColorRegExp),
+      textColor: zod
+        .string()
+        .regex(saveBookingEngineSettingsBodyAppearanceTextColorRegExp),
+      mutedColor: zod
+        .string()
+        .regex(saveBookingEngineSettingsBodyAppearanceMutedColorRegExp),
+      buttonColor: zod
+        .string()
+        .regex(saveBookingEngineSettingsBodyAppearanceButtonColorRegExp),
+      font: zod.enum(["brand", "system"]),
+      heroPhotoUrl: zod
+        .string()
+        .max(saveBookingEngineSettingsBodyAppearanceHeroPhotoUrlMax),
+      showGallery: zod.boolean(),
+    })
+    .optional(),
   logoUrl: zod.string().max(saveBookingEngineSettingsBodyLogoUrlMax),
   phone: zod.string().max(saveBookingEngineSettingsBodyPhoneMax),
   email: zod.string().max(saveBookingEngineSettingsBodyEmailMax),
@@ -1087,6 +1124,15 @@ export const CheckoutBookingServioGuestReservationResponse = zod.object({
 
 export const GetPublicBookingEngineParams = zod.object({
   slug: zod.coerce.string(),
+});
+
+export const GetPublicBookingEngineQueryParams = zod.object({
+  preview: zod.coerce
+    .boolean()
+    .optional()
+    .describe(
+      "Private read-only preview for the same tenant owner or administrator",
+    ),
 });
 
 export const GetPublicBookingEngineResponse = zod.record(

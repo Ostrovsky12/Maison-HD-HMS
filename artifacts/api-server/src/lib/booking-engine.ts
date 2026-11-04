@@ -1,7 +1,31 @@
 import { pool } from "@workspace/db";
-import type { BookingServioStatus } from "@workspace/api-zod";
+import type { BookingServioStatus, BookingAppearance } from "@workspace/api-zod";
 
 export type BookingUnitMedia = { photos: string[]; videoUrl: string; description: string };
+
+/** Brand entitlement is the tenant's stable slug, never its editable display name. */
+export function dogodaBrandAvailable(org: { slug?: string }): boolean {
+  return org.slug === "dogoda";
+}
+
+export function bookingAppearance(value: unknown, dogoda: boolean): BookingAppearance {
+  const raw = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+  const color = (key: string, fallback: string) =>
+    typeof raw[key] === "string" && /^#[0-9a-fA-F]{6}$/.test(raw[key]) ? raw[key] as string : fallback;
+  return {
+    preset: dogoda && raw.preset !== "standard" ? "dogoda" : "standard",
+    backgroundColor: color("backgroundColor", "#FFDDB2"),
+    surfaceColor: color("surfaceColor", "#FFF4E5"),
+    textColor: color("textColor", "#292D05"),
+    mutedColor: color("mutedColor", "#A19958"),
+    buttonColor: color("buttonColor", "#DF7D3C"),
+    font: raw.font === "system" ? "system" : "brand",
+    heroPhotoUrl: typeof raw.heroPhotoUrl === "string" && raw.heroPhotoUrl.length <= 1000
+      && validBookingMediaUrl(raw.heroPhotoUrl) ? raw.heroPhotoUrl : "",
+    showGallery: raw.showGallery !== false,
+  };
+}
 
 export function validBookingMediaUrl(value: string): boolean {
   if (value.startsWith("/")) {
@@ -37,6 +61,7 @@ export type BookingEngineConfig = {
   checkInTime: string; checkOutTime: string; terms: string; privacy: string;
   servioBaseUrl: string; servioHotelId: string; servioToken?: string; updatedAt?: string;
   unitMedia?: Record<string, BookingUnitMedia>;
+  appearance?: BookingAppearance;
   servioCategoryMedia?: Record<string, Record<string, { media: BookingUnitMedia; revision: number }>>;
   servioVerification?: { fingerprint: string; result: BookingServioStatus };
   liqpayVerification?: Record<string, { fingerprint: string; status: string; checkedAt: string; mode: string; code: string }>;
@@ -51,6 +76,10 @@ export function engineConfig(org: any): BookingEngineConfig {
     terms: "", privacy: "", servioBaseUrl: "", servioHotelId: "",
     ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}),
     unitMedia: bookingUnitMedia(raw?.unitMedia),
+    // Some internal callers intentionally select no slug: preserve their stored
+    // appearance without injecting a default that could overwrite DOGODA later.
+    ...(typeof org.slug === "string"
+      ? { appearance: bookingAppearance(raw?.appearance, dogodaBrandAvailable(org)) } : {}),
   };
 }
 
@@ -72,7 +101,8 @@ export function publicEngineConfig(config: BookingEngineConfig, visibleUnitIds: 
   const visible = new Set(visibleUnitIds.map(String));
   const unitMedia = Object.fromEntries(Object.entries(bookingUnitMedia(config.unitMedia)).filter(([id]) => visible.has(id)));
   return { provider, published, displayName, description, accentColor, logoUrl, phone, email,
-    checkInTime, checkOutTime, terms, privacy, unitMedia };
+    checkInTime, checkOutTime, terms, privacy, unitMedia,
+    appearance: config.appearance ?? bookingAppearance(undefined, false) };
 }
 
 /** Existing legacy /book remains available until a tenant explicitly configures this product.

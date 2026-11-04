@@ -24,3 +24,5 @@
 - [Sandbox network diagnostics](sandbox-network-diagnostics.md) — missing AbortSignal can look like upstream failure when broad catches hide reference errors
 - [Fiscal migration boundary](fiscal-migration-boundary.md) — journaled changes target dev; managed production receives Publish diffs and startup only verifies compatibility.
 - [Generated contract validation](generated-contract-validation.md) — runtime schemas can work while TypeScript reads stale declarations after an upstream library build failure.
+- [DOGODA booking brand](dogoda-booking-brand.md) — guest-page brandbook styling is DOGODA-only and configurable, never a platform-wide redesign.
+- [Canvas action contract](canvas-runtime-actions.md) — live actions use type and nested shape; automatic placement needs names and shapeIds.

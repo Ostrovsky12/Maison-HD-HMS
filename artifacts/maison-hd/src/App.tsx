@@ -374,7 +374,9 @@ function PushSubscriber() {
 
 function ConditionalHelp() {
   const { data: user } = useGetMe();
-  if (!user) return null;
+  const [location] = useLocation();
+  // DOGODA's guest page is not an admin workspace, including its private preview.
+  if (!user || /^\/booking\/dogoda(?:\/|$|\?)/.test(location)) return null;
   return <HelpAssistant />;
 }
 

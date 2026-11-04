@@ -84,6 +84,7 @@ import type {
   GetPosterOrderBridgeCatalog200,
   GetPricingPreviewParams,
   GetPublicBookingEngine200,
+  GetPublicBookingEngineParams,
   GetUnitsAvailabilityParams,
   Guest,
   GuestDetail,
@@ -1489,16 +1490,32 @@ export const useCheckoutBookingServioGuestReservation = <
   );
 };
 
-export const getGetPublicBookingEngineUrl = (slug: string) => {
-  return `/api/public/booking-engine/${slug}`;
+export const getGetPublicBookingEngineUrl = (
+  slug: string,
+  params?: GetPublicBookingEngineParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/public/booking-engine/${slug}?${stringifiedParams}`
+    : `/api/public/booking-engine/${slug}`;
 };
 
 export const getPublicBookingEngine = async (
   slug: string,
+  params?: GetPublicBookingEngineParams,
   options?: RequestInit,
 ): Promise<GetPublicBookingEngine200> => {
   return customFetch<GetPublicBookingEngine200>(
-    getGetPublicBookingEngineUrl(slug),
+    getGetPublicBookingEngineUrl(slug, params),
     {
       ...options,
       method: "GET",
@@ -1506,8 +1523,14 @@ export const getPublicBookingEngine = async (
   );
 };
 
-export const getGetPublicBookingEngineQueryKey = (slug: string) => {
-  return [`/api/public/booking-engine/${slug}`] as const;
+export const getGetPublicBookingEngineQueryKey = (
+  slug: string,
+  params?: GetPublicBookingEngineParams,
+) => {
+  return [
+    `/api/public/booking-engine/${slug}`,
+    ...(params ? [params] : []),
+  ] as const;
 };
 
 export const getGetPublicBookingEngineQueryOptions = <
@@ -1515,6 +1538,7 @@ export const getGetPublicBookingEngineQueryOptions = <
   TError = ErrorType<unknown>,
 >(
   slug: string,
+  params?: GetPublicBookingEngineParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getPublicBookingEngine>>,
@@ -1527,12 +1551,12 @@ export const getGetPublicBookingEngineQueryOptions = <
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
   const queryKey =
-    queryOptions?.queryKey ?? getGetPublicBookingEngineQueryKey(slug);
+    queryOptions?.queryKey ?? getGetPublicBookingEngineQueryKey(slug, params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getPublicBookingEngine>>
   > = ({ signal }) =>
-    getPublicBookingEngine(slug, { signal, ...requestOptions });
+    getPublicBookingEngine(slug, params, { signal, ...requestOptions });
 
   return {
     queryKey,
@@ -1556,6 +1580,7 @@ export function useGetPublicBookingEngine<
   TError = ErrorType<unknown>,
 >(
   slug: string,
+  params?: GetPublicBookingEngineParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getPublicBookingEngine>>,
@@ -1565,7 +1590,11 @@ export function useGetPublicBookingEngine<
     request?: SecondParameter<typeof customFetch>;
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetPublicBookingEngineQueryOptions(slug, options);
+  const queryOptions = getGetPublicBookingEngineQueryOptions(
+    slug,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

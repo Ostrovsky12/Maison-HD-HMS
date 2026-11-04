@@ -293,6 +293,10 @@ paths:
           name: slug
           required: true
           schema: { type: string }
+        - in: query
+          name: preview
+          description: Private read-only preview for the same tenant owner or administrator
+          schema: { type: boolean }
       responses:
         "200":
           description: Published module branding and real local properties
@@ -3212,6 +3216,19 @@ components:
         categories:
           type: array
           items: { $ref: "#/components/schemas/BookingServioCategory" }
+    BookingAppearance:
+      type: object
+      required: [preset, backgroundColor, surfaceColor, textColor, mutedColor, buttonColor, font, heroPhotoUrl, showGallery]
+      properties:
+        preset: { type: string, enum: [standard, dogoda] }
+        backgroundColor: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+        surfaceColor: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+        textColor: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+        mutedColor: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+        buttonColor: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+        font: { type: string, enum: [brand, system] }
+        heroPhotoUrl: { type: string, maxLength: 1000 }
+        showGallery: { type: boolean }
     BookingEngineInput:
       type: object
       required: [provider, published, displayName, description, accentColor, logoUrl, phone, email, checkInTime, checkOutTime, terms, privacy, servioBaseUrl, servioHotelId]
@@ -3221,6 +3238,7 @@ components:
         displayName: { type: string, minLength: 1, maxLength: 120 }
         description: { type: string, maxLength: 2000 }
         accentColor: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+        appearance: { $ref: "#/components/schemas/BookingAppearance" }
         logoUrl: { type: string, maxLength: 1000 }
         phone: { type: string, maxLength: 60 }
         email: { type: string, maxLength: 180 }

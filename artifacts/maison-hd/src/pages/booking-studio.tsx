@@ -12,6 +12,8 @@ import {
 import type { BookingEngineInput } from "@workspace/api-client-react";
 import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-media-editor";
 import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
+import { BookingAppearanceEditor } from "@/components/booking/dogoda/booking-appearance-editor";
+import { normalizeAppearance, type BookingAppearanceValue } from "@/lib/booking-appearance";
 import { LiqpaySettings } from "@/components/booking/liqpay-settings";
 import { ServioCategoryMedia } from "@/components/booking/servio-category-media";
 import { ServioCheck } from "@/components/booking/servio-check";
@@ -30,7 +32,7 @@ import {
 } from "lucide-react";
 
 type Provider = "maison" | "servio";
-type FormState = Omit<BookingEngineInput, "servioToken" | "clearServioToken" | "provider" | "unitMedia"> & { provider: Provider; unitMedia: UnitMediaMap };
+type FormState = Omit<BookingEngineInput, "servioToken" | "clearServioToken" | "provider" | "unitMedia" | "appearance"> & { provider: Provider; unitMedia: UnitMediaMap; appearance: BookingAppearanceValue };
 
 const str = (v: unknown, d = "") => (typeof v === "string" ? v : d);
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -53,8 +55,9 @@ function normalizeConfig(c: Record<string, unknown> | undefined) {
     servioBaseUrl: str(cfg.servioBaseUrl),
     servioHotelId: str(cfg.servioHotelId),
     unitMedia: normalizeUnitMedia(cfg.unitMedia),
+    appearance: normalizeAppearance(cfg.appearance),
   };
-  return { form, hasServioToken: cfg.hasServioToken === true, updatedAt: str(cfg.updatedAt) };
+  return { form, dogodaBrandAvailable: cfg.dogodaBrandAvailable === true, hasServioToken: cfg.hasServioToken === true, updatedAt: str(cfg.updatedAt) };
 }
 
 function errMessage(e: unknown): string {
@@ -154,7 +157,12 @@ export default function BookingStudioPage() {
     const bad = Object.entries(form.unitMedia).find(([, m]) => videoUrlError(m.videoUrl) || m.photos.some((ph) => !isAllowedPhoto(ph)));
     if (bad) { setSaveError(`Контент номера #${bad[0]} містить недопустиме посилання на фото або відео`); return; }
     if (mediaUploading) { setSaveError("Дочекайтеся завершення завантаження файлів"); return; }
-    const payload: BookingEngineInput = { ...form, ...override };
+    const ap = form.appearance;
+    if ([ap.backgroundColor, ap.surfaceColor, ap.textColor, ap.mutedColor, ap.buttonColor].some((c) => !/^#[0-9a-fA-F]{6}$/.test(c))) { setSaveError("Кольори оформлення мають бути у форматі #RRGGBB"); return; }
+    if (ap.heroPhotoUrl.trim() && !isAllowedPhoto(ap.heroPhotoUrl)) { setSaveError("Фото обкладинки: лише HTTPS або завантажене фото"); return; }
+    const full = { ...form, ...override };
+    const { appearance: _ap, ...rest } = full;
+    const payload: BookingEngineInput = norm.dogodaBrandAvailable ? full : rest;
     if (token.trim()) payload.servioToken = token.trim();
     if (clearToken) payload.clearServioToken = true;
     setSaveError(null);
@@ -379,6 +387,14 @@ export default function BookingStudioPage() {
             </Section>
           </div>
         </div>
+
+        {norm.dogodaBrandAvailable && (
+          <Section n="05a" title="Оформлення DOGODA" hint="Фірмовий стиль публічної сторінки. Зберігається кнопкою «Зберегти».">
+            <BookingAppearanceEditor value={form.appearance} onChange={(a) => set("appearance", a)}
+              disabled={!["owner", "admin", "super_admin"].includes(String(me.data?.role ?? ""))}
+              previewUrl={publicUrl ? `${publicUrl}?preview=1` : ""} onCopy={(t) => copy(t, "Посилання перегляду")} />
+          </Section>
+        )}
 
         <Section n="06a" title="Контент номерів і будинків" hint="Фото, відео та повний опис на публічній сторінці">
           {norm.form.provider === "servio" && form.provider === "servio" ? (

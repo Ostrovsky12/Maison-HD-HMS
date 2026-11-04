@@ -1,0 +1,47 @@
+/* DOGODA-only scope. Every selector is prefixed with .dogoda-root — no global regressions. */
+.dogoda-root {
+  background: var(--dg-bg);
+  color: var(--dg-text);
+  font-family: var(--dg-font);
+  -webkit-font-smoothing: antialiased;
+}
+.dogoda-root.dg-font-brand { --dg-font: "DOGODA Orchidea", ui-serif, Georgia, serif; }
+.dogoda-root.dg-font-system { --dg-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+.dogoda-root h1, .dogoda-root h2, .dogoda-root h3, .dogoda-root h4, .dogoda-root h5, .dogoda-root h6 {
+  font-family: var(--dg-font);
+}
+.dogoda-root .dg-hand { font-family: "DOGODA Ernie", var(--dg-font); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.dogoda-root .dg-muted { color: color-mix(in srgb, var(--dg-text) 55%, var(--dg-muted)); }
+.dogoda-root .dg-surface { background: var(--dg-surface); }
+.dogoda-root .dg-btn { background: var(--dg-button); color: var(--dg-text); }
+.dogoda-root button.text-white[style] { color: var(--dg-text); }
+.dogoda-root .dg-line { border-color: color-mix(in srgb, var(--dg-muted) 45%, transparent); }
+
+/* Re-tint the shared generic booking UI only inside DOGODA */
+.dogoda-root .bg-white { background-color: var(--dg-surface); }
+.dogoda-root .bg-white\/60, .dogoda-root .bg-white\/70, .dogoda-root .bg-white\/90 { background-color: color-mix(in srgb, var(--dg-surface) 80%, transparent); }
+.dogoda-root .border-stone-200, .dogoda-root .border-stone-300 { border-color: color-mix(in srgb, var(--dg-muted) 40%, transparent); }
+.dogoda-root .text-stone-500, .dogoda-root .text-stone-600 { color: color-mix(in srgb, var(--dg-text) 62%, var(--dg-muted)); }
+.dogoda-root .text-stone-900, .dogoda-root .text-stone-800, .dogoda-root .text-stone-700 { color: var(--dg-text); }
+.dogoda-root .bg-stone-900 { background-color: var(--dg-text); }
+.dogoda-root .bg-stone-200 { background-color: color-mix(in srgb, var(--dg-muted) 30%, var(--dg-bg)); }
+.dogoda-root .font-mono { font-family: var(--dg-font); font-variant-numeric: tabular-nums; }
+.dogoda-root .rounded-3xl { border-radius: 28px; }
+.dogoda-root :focus-visible { outline: 2px solid var(--dg-button); outline-offset: 3px; }
+.dogoda-root input:focus, .dogoda-root textarea:focus, .dogoda-root select:focus { border-color: var(--dg-text); }
+
+.dogoda-root .dg-grain::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .18; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='.5'/></svg>");
+}
+.dogoda-root .dg-rise { animation: dg-rise .9s cubic-bezier(.2,.7,.2,1) both; }
+.dogoda-root .dg-rise-2 { animation-delay: .12s; }
+.dogoda-root .dg-rise-3 { animation-delay: .24s; }
+@keyframes dg-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.dogoda-root .dg-card-img { transition: transform .9s cubic-bezier(.2,.7,.2,1); }
+.dogoda-root .dg-card:hover .dg-card-img { transform: scale(1.035); }
+@media (prefers-reduced-motion: reduce) {
+  .dogoda-root .dg-rise, .dogoda-root .dg-card-img { animation: none; transition: none; }
+  .dogoda-root .dg-card:hover .dg-card-img { transform: none; }
+  .dogoda-root * { scroll-behavior: auto !important; }
+}

@@ -410,6 +410,40 @@ export interface BookingServioStatus {
   categories: BookingServioCategory[];
 }
 
+export type BookingAppearancePreset =
+  (typeof BookingAppearancePreset)[keyof typeof BookingAppearancePreset];
+
+export const BookingAppearancePreset = {
+  standard: "standard",
+  dogoda: "dogoda",
+} as const;
+
+export type BookingAppearanceFont =
+  (typeof BookingAppearanceFont)[keyof typeof BookingAppearanceFont];
+
+export const BookingAppearanceFont = {
+  brand: "brand",
+  system: "system",
+} as const;
+
+export interface BookingAppearance {
+  preset: BookingAppearancePreset;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  backgroundColor: string;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  surfaceColor: string;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  textColor: string;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  mutedColor: string;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  buttonColor: string;
+  font: BookingAppearanceFont;
+  /** @maxLength 1000 */
+  heroPhotoUrl: string;
+  showGallery: boolean;
+}
+
 export type BookingEngineInputProvider =
   (typeof BookingEngineInputProvider)[keyof typeof BookingEngineInputProvider];
 
@@ -432,6 +466,7 @@ export interface BookingEngineInput {
   description: string;
   /** @pattern ^#[0-9a-fA-F]{6}$ */
   accentColor: string;
+  appearance?: BookingAppearance;
   /** @maxLength 1000 */
   logoUrl: string;
   /** @maxLength 60 */
@@ -2087,6 +2122,13 @@ export interface GuideAdminStats {
 }
 
 export type GetBookingEngineOverview200 = { [key: string]: unknown };
+
+export type GetPublicBookingEngineParams = {
+  /**
+   * Private read-only preview for the same tenant owner or administrator
+   */
+  preview?: boolean;
+};
 
 export type GetPublicBookingEngine200 = { [key: string]: unknown };
 

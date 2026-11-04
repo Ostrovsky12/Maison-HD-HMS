@@ -5,6 +5,7 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+import type { BookingAppearance } from "./bookingAppearance";
 import type { BookingEngineInputProvider } from "./bookingEngineInputProvider";
 import type { BookingEngineInputUnitMedia } from "./bookingEngineInputUnitMedia";
 
@@ -20,6 +21,7 @@ export interface BookingEngineInput {
   description: string;
   /** @pattern ^#[0-9a-fA-F]{6}$ */
   accentColor: string;
+  appearance?: BookingAppearance;
   /** @maxLength 1000 */
   logoUrl: string;
   /** @maxLength 60 */

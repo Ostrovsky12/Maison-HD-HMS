@@ -19,7 +19,7 @@ vi.mock("../lib/auth.js", () => ({
     roles.includes(req.user.role) ? next() : res.status(403).json({ error: "Forbidden" }),
 }));
 import router, { publicEngineRouter } from "../routes/booking-engine.js";
-import { engineConfig, engineIssues, engineQuote, engineSalesGuard, publicEngineConfig, validBookingDates, bookingUnitMedia, validBookingMediaUrl } from "../lib/booking-engine.js";
+import { engineConfig, engineIssues, engineQuote, engineSalesGuard, publicEngineConfig, validBookingDates, bookingUnitMedia, validBookingMediaUrl, bookingAppearance } from "../lib/booking-engine.js";
 import { servioFingerprint } from "../lib/servio-connection.js";
 
 const app = express();
@@ -54,6 +54,111 @@ beforeEach(() => {
     if (sql.startsWith("UPDATE organizations")) { org.booking_engine_config = JSON.parse(values[1]); return { rows: [] }; }
     if (sql.includes("FROM bookings")) return { rows: [] };
     throw new Error("Unexpected fixture SQL");
+  });
+});
+
+describe("DOGODA guest appearance and private read-only preview", () => {
+  it("enables the brand only for the exact DOGODA tenant, never an editable hotel name", () => {
+    expect(engineConfig({ ...org, slug: "dogoda" }).appearance).toMatchObject({
+      preset: "dogoda", textColor: "#292D05", mutedColor: "#A19958",
+      backgroundColor: "#FFDDB2", buttonColor: "#DF7D3C", font: "brand",
+    });
+    expect(engineConfig({ ...org, name: "DOGODA" }).appearance?.preset).toBe("standard");
+    expect(engineConfig({ ...org, slug: "another", booking_engine_config: { appearance: { preset: "dogoda" } } }).appearance?.preset).toBe("standard");
+  });
+  it("preserves stored appearance for internal callers that do not select the tenant slug", () => {
+    const appearance = { ...bookingAppearance(undefined, true), backgroundColor: "#FFEEDD" };
+    const { slug: _slug, ...internalOrg } = { ...org, booking_engine_config: { ...ready(), appearance } };
+    expect(engineConfig(internalOrg).appearance).toEqual(appearance);
+    expect(engineConfig({ id: 7, name: "Hotel", booking_engine_config: ready() }).appearance).toBeUndefined();
+  });
+  it("saves and reloads custom tenant colors, typography, hero and gallery visibility", async () => {
+    org.slug = "dogoda";
+    const appearance = { ...bookingAppearance(undefined, true), backgroundColor: "#FFEEDD", font: "system",
+      heroPhotoUrl: "https://example.invalid/saved-hero.jpg", showGallery: false };
+    const saved = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
+      .send({ ...ready(), appearance });
+    expect(saved.status).toBe(200);
+    const reloaded = await request(app).get("/api/booking-engine/settings").set("Authorization", "Bearer test");
+    expect(reloaded.body.config).toMatchObject({ appearance, dogodaBrandAvailable: true });
+    expect(org.booking_engine_config.published).toBe(false);
+  });
+  it("preserves previous appearance on an older client's general settings save", async () => {
+    org.slug = "dogoda";
+    org.booking_engine_config.appearance = { ...bookingAppearance(undefined, true), buttonColor: "#765432" };
+    const saved = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send(ready());
+    expect(saved.status).toBe(200);
+    expect(org.booking_engine_config.appearance.buttonColor).toBe("#765432");
+  });
+  it("rejects another tenant selecting DOGODA and managers changing the design", async () => {
+    const appearance = bookingAppearance(undefined, true);
+    expect((await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
+      .send({ ...ready(), appearance })).status).toBe(403);
+    org.slug = "dogoda";
+    expect((await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").set("x-test-role", "manager")
+      .send({ ...ready(), appearance: { ...appearance, textColor: "#123456" } })).status).toBe(403);
+  });
+  it.each(["javascript:alert(1)", "http://example.invalid/a.jpg", "//elsewhere/a.jpg", "/objects/../secret", "https://user:password@example.invalid/a.jpg"])("rejects unsafe hero photo %s", async heroPhotoUrl => {
+    org.slug = "dogoda";
+    const response = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
+      .send({ ...ready(), appearance: { ...bookingAppearance(undefined, true), heroPhotoUrl } });
+    expect(response.status).toBe(400);
+  });
+  it("rejects arbitrary CSS colors and unapproved fonts", async () => {
+    org.slug = "dogoda";
+    for (const invalid of [{ textColor: "red; background:url(x)" }, { font: "Unapproved Font" }]) {
+      expect((await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
+        .send({ ...ready(), appearance: { ...bookingAppearance(undefined, true), ...invalid } })).status).toBe(400);
+    }
+  });
+  it("allows preview only to the same tenant owner/admin and makes no mutation", async () => {
+    org.slug = "dogoda"; org.booking_engine_config.provider = "servio";
+    const preview = "/api/public/booking-engine/dogoda?preview=true";
+    expect((await request(app).get(preview)).status).toBe(401);
+    expect((await request(app).get(preview).set("Authorization", "Bearer test").set("x-test-role", "manager")).status).toBe(403);
+    expect((await request(app).get(preview).set("Authorization", "Bearer test").set("x-test-org", "99")).status).toBe(404);
+    const result = await request(app).get(preview).set("Authorization", "Bearer test");
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ preview: true, salesEnabled: false, config: { appearance: { preset: "dogoda" } } });
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(fixture.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
+    expect((await request(app).get("/api/public/booking-engine/dogoda")).status).toBe(503);
+    expect((await request(app).get("/api/public/booking-engine/dogoda?preview=false")).status).toBe(503);
+  });
+  it("returns only the verified Servio category media in preview, not local rooms or credentials", async () => {
+    const { servioFingerprint } = await import("../lib/servio-connection.js");
+    const { servioCategorySource } = await import("../lib/servio-category-media.js");
+    org.slug = "dogoda";
+    const config = { ...ready(), provider: "servio", servioBaseUrl: "https://example.servio.support/ReservationService_1_10",
+      servioHotelId: "7", servioToken: "test-only-opaque" } as any;
+    config.servioVerification = { fingerprint: servioFingerprint(config),
+      result: { status: "connected", code: "CONNECTED", message: "Ready", pingOk: true, checkedAt: "2026-01-01T00:00:00.000Z",
+        hotelId: 7, categories: [{ id: 11, name: "Servio category", hotelId: 7 }] } };
+    config.servioCategoryMedia = { [servioCategorySource(config)!]: { "7:11": {
+      revision: 2, media: { photos: ["https://example.invalid/category.jpg"], videoUrl: "https://example.invalid/tour.mp4", description: "Saved description" },
+    } } };
+    org.booking_engine_config = config;
+    const response = await request(app).get("/api/public/booking-engine/dogoda?preview=1").set("Authorization", "Bearer test");
+    expect(response.status).toBe(200);
+    expect(response.body.accommodationCatalog).toEqual([{
+      id: "servio:7:11", name: "Servio category", category: "Категорія розміщення",
+      photos: ["https://example.invalid/category.jpg"], videoUrl: "https://example.invalid/tour.mp4", description: "Saved description",
+    }]);
+    expect(JSON.stringify(response.body)).not.toContain("test-only-opaque");
+    expect(response.body.config).not.toHaveProperty("servioVerification");
+    expect(response.body.config).not.toHaveProperty("servioBaseUrl");
+  });
+  it("exposes only visible local room media, while standard tenants keep standard branding", async () => {
+    org.booking_engine_config.published = true;
+    org.booking_engine_config.unitMedia = { "11": { photos: ["https://example.invalid/visible.jpg"], videoUrl: "", description: "Saved" },
+      "99": { photos: ["https://example.invalid/hidden.jpg"], videoUrl: "", description: "Hidden" } };
+    const response = await request(app).get("/api/public/booking-engine/test-hotel");
+    expect(response.body.config.appearance.preset).toBe("standard");
+    expect(response.body.accommodationCatalog).toEqual([expect.objectContaining({
+      id: "unit:11", name: "House", photos: ["https://example.invalid/visible.jpg"], description: "Saved",
+    })]);
+    expect(JSON.stringify(response.body)).not.toContain("hidden.jpg");
+    expect(response.body.salesEnabled).toBe(true);
   });
 });
 

@@ -1,0 +1,4 @@
+/* Scoped to the DOGODA current-state extraction. No global selectors. */
+.dg-current { background: #f6f4f0; color: #1c1917; min-height: 100dvh; padding: 24px; }
+.dg-current .dg-demo-note { font: 600 11px/1.4 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; color: #a8a29e; margin-bottom: 16px; }
+.dg-current .dg-demo-photo { background: linear-gradient(135deg,#d6d3d1,#a8a29e); }
