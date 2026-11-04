@@ -79,6 +79,32 @@ export interface BookingLiqpaySettings {
   callbackConfigured: boolean;
 }
 
+export interface BookingServioCategory {
+  id: number;
+  name: string;
+  hotelId: number;
+}
+
+export type BookingServioStatusStatus =
+  (typeof BookingServioStatusStatus)[keyof typeof BookingServioStatusStatus];
+
+export const BookingServioStatusStatus = {
+  not_checked: "not_checked",
+  connected: "connected",
+  partial: "partial",
+  failed: "failed",
+} as const;
+
+export interface BookingServioStatus {
+  status: BookingServioStatusStatus;
+  code: string;
+  message: string;
+  pingOk: boolean;
+  /** @nullable */
+  checkedAt: string | null;
+  categories: BookingServioCategory[];
+}
+
 export type BookingEngineInputProvider =
   (typeof BookingEngineInputProvider)[keyof typeof BookingEngineInputProvider];
 

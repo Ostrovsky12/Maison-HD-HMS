@@ -32,6 +32,7 @@ import type {
   BookingLiqpayCheckInput,
   BookingLiqpayInput,
   BookingLiqpaySettings,
+  BookingServioStatus,
   CancelBookingBody,
   CheckBookingLiqpayConnection200,
   CompleteHousekeepingTaskBody,
@@ -305,6 +306,153 @@ export const useSaveBookingEngineSettings = <
   TContext
 > => {
   return useMutation(getSaveBookingEngineSettingsMutationOptions(options));
+};
+
+export const getGetBookingServioStatusUrl = () => {
+  return `/api/booking-engine/servio`;
+};
+
+export const getBookingServioStatus = async (
+  options?: RequestInit,
+): Promise<BookingServioStatus> => {
+  return customFetch<BookingServioStatus>(getGetBookingServioStatusUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBookingServioStatusQueryKey = () => {
+  return [`/api/booking-engine/servio`] as const;
+};
+
+export const getGetBookingServioStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookingServioStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingServioStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBookingServioStatusQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookingServioStatus>>
+  > = ({ signal }) => getBookingServioStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingServioStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBookingServioStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookingServioStatus>>
+>;
+export type GetBookingServioStatusQueryError = ErrorType<unknown>;
+
+export function useGetBookingServioStatus<
+  TData = Awaited<ReturnType<typeof getBookingServioStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingServioStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBookingServioStatusQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getCheckBookingServioConnectionUrl = () => {
+  return `/api/booking-engine/servio`;
+};
+
+export const checkBookingServioConnection = async (
+  options?: RequestInit,
+): Promise<BookingServioStatus> => {
+  return customFetch<BookingServioStatus>(
+    getCheckBookingServioConnectionUrl(),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getCheckBookingServioConnectionMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkBookingServioConnection>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof checkBookingServioConnection>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["checkBookingServioConnection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof checkBookingServioConnection>>,
+    void
+  > = () => {
+    return checkBookingServioConnection(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CheckBookingServioConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof checkBookingServioConnection>>
+>;
+
+export type CheckBookingServioConnectionMutationError = ErrorType<void>;
+
+export const useCheckBookingServioConnection = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkBookingServioConnection>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof checkBookingServioConnection>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getCheckBookingServioConnectionMutationOptions(options));
 };
 
 export const getGetBookingEngineOverviewUrl = () => {

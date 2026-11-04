@@ -6,12 +6,14 @@ import {
   useGetBookingEngineOverview,
   getGetBookingEngineSettingsQueryKey,
   getGetBookingEngineOverviewQueryKey,
+  getGetBookingServioStatusQueryKey,
   useGetMe,
 } from "@workspace/api-client-react";
 import type { BookingEngineInput } from "@workspace/api-client-react";
 import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-media-editor";
 import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
 import { LiqpaySettings } from "@/components/booking/liqpay-settings";
+import { ServioCheck } from "@/components/booking/servio-check";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -161,6 +163,7 @@ export default function BookingStudioPage() {
         qc.setQueryData(settingsKey, res);
         qc.invalidateQueries({ queryKey: settingsKey });
         qc.invalidateQueries({ queryKey: overviewKey });
+        qc.invalidateQueries({ queryKey: getGetBookingServioStatusQueryKey() });
         toast({ title: "Налаштування збережено" });
       },
       onError: (e) => { const m = errMessage(e); setSaveError(m); toast({ title: "Не збережено", description: m, variant: "destructive" }); },
@@ -279,10 +282,10 @@ export default function BookingStudioPage() {
         </div>
 
         {isServio && (
-          <Section n="02a" title="Servio — конфігурація" hint="Дані зберігаються, але запити до Servio не надсилаються">
+          <Section n="02a" title="Servio — конфігурація" hint="Збережіть реквізити й запустіть безпечну перевірку доступу">
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex gap-2 mb-4" data-testid="text-servio-status">
               <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>API не перевірено; продажі Servio недоступні. Публікація з цим джерелом заблокована.</span>
+              <span>Продажі Servio ще недоступні. Перевірка нижче підтверджує лише Ping і читання категорій, а не повний цикл бронювання.</span>
             </div>
             <div className="grid md:grid-cols-2 gap-4">
               <Field label="Базова адреса API"><Input data-testid="input-servio-url" value={form.servioBaseUrl} onChange={(e) => set("servioBaseUrl", e.target.value)} placeholder="https://..." /></Field>
@@ -297,6 +300,8 @@ export default function BookingStudioPage() {
                 </label>
               )}
             </div>
+            <ServioCheck key={organizationId ?? "none"} organizationId={organizationId}
+              role={me.data?.role} dirty={dirty || save.isPending} hasToken={norm.hasServioToken} />
           </Section>
         )}
 

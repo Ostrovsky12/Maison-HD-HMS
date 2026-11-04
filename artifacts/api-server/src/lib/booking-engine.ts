@@ -1,4 +1,5 @@
 import { pool } from "@workspace/db";
+import type { BookingServioStatus } from "@workspace/api-zod";
 
 export type BookingUnitMedia = { photos: string[]; videoUrl: string; description: string };
 
@@ -36,6 +37,7 @@ export type BookingEngineConfig = {
   checkInTime: string; checkOutTime: string; terms: string; privacy: string;
   servioBaseUrl: string; servioHotelId: string; servioToken?: string; updatedAt?: string;
   unitMedia?: Record<string, BookingUnitMedia>;
+  servioVerification?: { fingerprint: string; result: BookingServioStatus };
   liqpayVerification?: Record<string, { fingerprint: string; status: string; checkedAt: string; mode: string; code: string }>;
 };
 

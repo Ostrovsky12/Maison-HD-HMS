@@ -161,6 +161,36 @@ export const SaveBookingEngineSettingsResponse = zod.object({
     .optional(),
 });
 
+export const GetBookingServioStatusResponse = zod.object({
+  status: zod.enum(["not_checked", "connected", "partial", "failed"]),
+  code: zod.string(),
+  message: zod.string(),
+  pingOk: zod.boolean(),
+  checkedAt: zod.string().nullable(),
+  categories: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      hotelId: zod.number(),
+    }),
+  ),
+});
+
+export const CheckBookingServioConnectionResponse = zod.object({
+  status: zod.enum(["not_checked", "connected", "partial", "failed"]),
+  code: zod.string(),
+  message: zod.string(),
+  pingOk: zod.boolean(),
+  checkedAt: zod.string().nullable(),
+  categories: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      hotelId: zod.number(),
+    }),
+  ),
+});
+
 export const GetBookingEngineOverviewResponse = zod.record(
   zod.string(),
   zod.unknown(),

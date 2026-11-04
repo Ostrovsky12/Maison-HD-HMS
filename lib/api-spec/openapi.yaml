@@ -73,6 +73,29 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BookingEngineView" }
+  /booking-engine/servio:
+    get:
+      operationId: getBookingServioStatus
+      tags: [BookingEngine]
+      responses:
+        "200":
+          description: Current connection check for the saved Servio account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioStatus" }
+    post:
+      operationId: checkBookingServioConnection
+      tags: [BookingEngine]
+      responses:
+        "200":
+          description: Read-only Ping and category access check
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioStatus" }
+        "400": { description: Missing or invalid saved configuration }
+        "403": { description: Administrator access required }
+        "409": { description: Configuration changed during the check }
+        "429": { description: Too many checks }
   /booking-engine/overview:
     get:
       operationId: getBookingEngineOverview
@@ -2772,6 +2795,25 @@ components:
           type: array
           items: { $ref: '#/components/schemas/BookingLiqpaySeller' }
         callbackConfigured: { type: boolean }
+    BookingServioCategory:
+      type: object
+      required: [id, name, hotelId]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        hotelId: { type: integer }
+    BookingServioStatus:
+      type: object
+      required: [status, code, message, pingOk, checkedAt, categories]
+      properties:
+        status: { type: string, enum: [not_checked, connected, partial, failed] }
+        code: { type: string }
+        message: { type: string }
+        pingOk: { type: boolean }
+        checkedAt: { type: [string, "null"] }
+        categories:
+          type: array
+          items: { $ref: "#/components/schemas/BookingServioCategory" }
     BookingEngineInput:
       type: object
       required: [provider, published, displayName, description, accentColor, logoUrl, phone, email, checkInTime, checkOutTime, terms, privacy, servioBaseUrl, servioHotelId]

@@ -7,6 +7,7 @@ import { engineConfig, engineIssues, publicEngineConfig, validBookingMediaUrl } 
 import { ObjectStorageService } from "../lib/objectStorage.js";
 import { BOOKING_TARIFF_POLICY } from "../lib/booking-tariff.js";
 import bookingLiqpaySettings from "./booking-liqpay-settings.js";
+import bookingServio from "./booking-servio.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("super_admin", "owner", "manager", "admin"));
@@ -18,6 +19,7 @@ router.use((req: any, res, next) => {
   next();
 });
 router.use("/liqpay", bookingLiqpaySettings);
+router.use("/servio", bookingServio);
 
 async function view(orgId: number, client: any = pool) {
   const { rows } = await client.query(
@@ -29,7 +31,7 @@ async function view(orgId: number, client: any = pool) {
     JOIN properties p ON p.id=u.property_id
     WHERE p.organization_id=$1 AND u.status='active' AND coalesce(u.is_hidden,false)=false
       AND u.base_price IS NOT NULL AND u.base_price>=0`, [orgId])).rows[0]?.count || 0;
-  const { servioToken, liqpayVerification: _internalPaymentChecks, ...safe } = config;
+  const { servioToken, servioVerification: _internalServioCheck, liqpayVerification: _internalPaymentChecks, ...safe } = config;
   const issues = engineIssues(config, properties.length, Number(active));
   const units = (await client.query(`SELECT u.id,u.name,u.description,u.property_id AS "propertyId",p.name AS "propertyName"
     FROM units u JOIN properties p ON p.id=u.property_id WHERE p.organization_id=$1 ORDER BY p.id,u.id`, [orgId])).rows;
@@ -99,6 +101,12 @@ router.put("/settings", async (req: any, res): Promise<void> => {
     if (!rows[0]) { await client.query("ROLLBACK"); res.status(404).json({ error: "Готель не знайдено." }); return; }
     const old = engineConfig(rows[0]);
     const { servioToken, clearServioToken, unitMedia, ...editable } = input;
+    if (!["super_admin", "owner", "admin"].includes(req.user.role)
+      && (servioToken?.trim() || clearServioToken || old.servioBaseUrl !== editable.servioBaseUrl
+        || old.servioHotelId !== editable.servioHotelId || old.provider !== editable.provider)) {
+      await client.query("ROLLBACK");
+      res.status(403).json({ error: "Змінювати підключення PMS може лише власник або адміністратор." }); return;
+    }
     if (editable.provider === "servio" && unitMedia
       && JSON.stringify(unitMedia) !== JSON.stringify(old.unitMedia ?? {})) {
       await client.query("ROLLBACK");
@@ -123,6 +131,7 @@ router.put("/settings", async (req: any, res): Promise<void> => {
     }
     const config = { ...editable, displayName: editable.displayName.trim(), updatedAt: new Date().toISOString(),
       liqpayVerification: old.liqpayVerification,
+      servioVerification: old.servioVerification,
       unitMedia: unitMedia ?? old.unitMedia ?? {},
       servioToken: clearServioToken ? undefined : servioToken?.trim() ? encrypt(servioToken.trim())! : old.servioToken };
     // Saving a new upstream identity cannot retain a different account's bearer token.

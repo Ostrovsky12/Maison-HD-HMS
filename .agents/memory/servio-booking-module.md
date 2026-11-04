@@ -42,3 +42,15 @@ Booking-module sales use 100% online prepayment and a non-refundable tariff with
 **Why:** The user explicitly requires 100% payment through the module and says guests often do not read the rules. They want the conditions prominent immediately before payment, in a modern experience between Booking.com and Airbnb rather than a plain form.
 
 **How to apply:** Show the full amount and the no-refund/no-date-change conditions beside the payment action. Require a separate, unchecked acknowledgement, not merely generic terms acceptance; retain the accepted wording/version and time. Preserve legally required exceptions rather than implying statutory rights can be waived. Never substitute payment on arrival or a partial percentage, and never infer a successful payment merely from the provider's return URL.
+
+Treat Servio's supplied request examples as protocol evidence, not production data to replay.
+
+**Why:** The user explicitly called the vendor's request example critically important. The supplied HAR demonstrates a POST Ping with scalar JSON `123` and an HTTP 200 scalar `123` response; a GET of the service root is not an equivalent connectivity test. The payment screenshot contains illustrative identifiers, not authorization to submit a payment.
+
+**How to apply:** Follow the documented operation-specific payloads. Verify the tenant's HTTPS endpoint independently of the example's HTTP/IP endpoint. Separate Ping success from category access, availability, rates, reservation confirmation and payment reconciliation. Never copy sample reservation, bill or transaction identifiers into live writes, and never assume a separately supplied password is the API AccessToken.
+
+The password supplied by Servio is used for API requests, not merely cabinet login.
+
+**Why:** The user explicitly clarified its purpose.
+
+**How to apply:** Treat it as an integration credential. Confirm its exact header or request-field mapping before changing authentication; its purpose alone does not establish that it replaces AccessToken.
