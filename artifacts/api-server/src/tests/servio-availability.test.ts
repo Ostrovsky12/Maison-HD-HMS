@@ -101,7 +101,32 @@ describe("Servio read-only availability and pricing", () => {
     expect(response).toMatchObject({ status: "partial", currency: null, categories: [{ id: 11, freeRooms: 2, rates: [] }] });
     expect(JSON.stringify(response)).not.toContain("fixture-secret");
   });
-  it.each([NaN, -1, "100", 0.001, null])("rejects invalid actual prices %j instead of falling back to rack rate", async amount => {
+  it.each([
+    ["100", 100], ["100.10", 100.1], ["100.1000", 100.1], [" 100.10 ", 100.1],
+    ["0", 0], ["0.00", 0], ["0.01", 0.01], ["10000000.00", 10000000],
+  ])("accepts the actual monetary decimal string %j without using rack prices", async (raw, expected) => {
+    const p = prices();
+    Object.assign(p.PriceLists[0].RoomTypes[0].Services[0].PriceDates[0], { Price: raw });
+    const response = await search(available(), p).result;
+    expect(response).toMatchObject({ status: "complete", currency: "грн" });
+    const actual = response.categories[0].rates[0];
+    expect(actual.charges[0].amount).toBe(expected);
+    expect(actual.total).toBe((Math.round(Number(expected) * 100) + 10525) / 100);
+  });
+  it("normalizes all service amounts from numeric strings while preserving exact cent totals", async () => {
+    const p = prices();
+    Object.assign(p.PriceLists[0], { IsNonReturnRate: true, IsSpecRate: false });
+    for (const service of p.PriceLists[0].RoomTypes[0].Services)
+      for (const date of service.PriceDates) Object.assign(date, { Price: String(date.Price) });
+    const response = await search(available(), p).result;
+    expect(response).toMatchObject({ status: "complete", currency: "грн" });
+    expect(response.categories[0].rates[0]).toMatchObject({ total: 205.35, nonRefundable: true, specialRate: false });
+    expect(response.categories[0].rates[0].charges.every(charge => typeof charge.amount === "number")).toBe(true);
+  });
+  it.each([NaN, -1, "not-a-price", 0.001, null, undefined, "", " ", true, false,
+    "100,10", "1 000.00", "1,000.00", "100 грн", "1e2", "0x64", "+100", "-1",
+    "100.001", "NaN", "Infinity", "10000000.01", "99999999.99", "1".repeat(41),
+  ])("rejects invalid actual prices %j instead of falling back to rack rate", async amount => {
     const p = prices(); p.PriceLists[0].RoomTypes[0].Services[0].PriceDates[0].Price = amount as any;
     expect(await search(available(), p).result).toMatchObject({ status: "partial", categories: [{ rates: [] }] });
   });

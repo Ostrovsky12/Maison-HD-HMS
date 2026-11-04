@@ -59,6 +59,21 @@ const bit = (raw: unknown) => {
   return raw === 1;
 };
 
+function money(raw: unknown): number {
+  let amount = raw;
+  if (typeof raw === "string" && raw.length <= 40) {
+    const decimal = raw.trim();
+    // The vendor specifies a decimal dot. Accept only unambiguous decimal
+    // strings, including harmless trailing zeros, never parseFloat/coercion
+    // of blanks, booleans, currency suffixes or localized separators.
+    if (/^\d{1,8}(?:\.\d{1,2}0*)?$/.test(decimal)) amount = Number(decimal);
+  }
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0 || amount > 10_000_000
+    || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.00001)
+    throw new ServioShapeError("число або десятковий рядок із крапкою: сума 0–10000000, до двох значущих десяткових знаків", raw);
+  return amount;
+}
+
 export function validServioSearch(input: BookingServioSearchInput): boolean {
   const nights = (Date.parse(input.checkOut) - Date.parse(input.checkIn)) / 86400000;
   return validBookingDates(input.checkIn, input.checkOut) && nights <= 31
@@ -134,10 +149,7 @@ function rate(room: Json, list: Json, nights: number, freeRooms: number, input: 
         || !Number.isFinite(Date.parse(day)) || new Date(day).toISOString().slice(0, 10) !== day
          || day < input.checkIn || day > input.checkOut)
         at("Date", () => { throw new ServioShapeError("коректна дата YYYY-MM-DD або YYYY-MM-DD HH:mm:ss у межах обраного проживання", price.Date); });
-      const amount = price.Price;
-      if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0 || amount > 10_000_000
-         || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.00001)
-        at("Price", () => { throw new ServioShapeError("невід’ємна скінченна сума до 10000000, до двох десяткових знаків", amount); });
+      const amount = at("Price", () => money(price.Price));
       return { serviceId, serviceName, date, amount };
     })));
   })));

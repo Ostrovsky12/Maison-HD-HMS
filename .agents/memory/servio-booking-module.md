@@ -69,6 +69,8 @@ Provider protocol errors need privacy-safe field-level diagnostics, not only a g
 
 Servio's published field types can differ from a deployed hotel's serialization.
 
-**Why:** Its documentation describes tariff flags as integer 0/1, but the user's production diagnostic showed `IsNonReturnRate` arriving as a JSON boolean. This is direct compatibility evidence, not a reason to weaken all validation.
+**Why:** Its documentation describes tariff flags as integer 0/1 and prices as doubles, but the user's production diagnostics showed `IsNonReturnRate` arriving as a JSON boolean and service `Price` as a string. This is direct compatibility evidence, not a reason to weaken all validation.
 
 **How to apply:** Accept documented numeric flags and the observed boolean representation explicitly, preserving false. Do not coerce strings, null or missing flags; validate other fields independently rather than assuming the whole response matches the documentation.
+
+For monetary fields, accept validated decimal-dot numeric strings as well as numbers. Preserve cent precision and reject blank, localized, currency-suffixed or otherwise ambiguous strings; do not use permissive parseFloat or invent a zero amount.
