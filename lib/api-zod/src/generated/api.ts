@@ -836,6 +836,119 @@ export const CancelBookingServioReservationResponse = zod.object({
   acknowledgementText: zod.string(),
 });
 
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaPhotosItemMax = 1000;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaPhotosMax = 30;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaVideoUrlMax = 1000;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDescriptionMax = 10000;
+
+export const GetBookingServioCategoryMediaResponse = zod.object({
+  ready: zod.boolean(),
+  message: zod.string(),
+  sourceId: zod.string().nullable(),
+  categories: zod.array(
+    zod.object({
+      hotelId: zod.number(),
+      categoryId: zod.number(),
+      name: zod.string(),
+      media: zod.object({
+        photos: zod
+          .array(
+            zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaPhotosItemMax,
+              ),
+          )
+          .max(
+            getBookingServioCategoryMediaResponseCategoriesItemMediaPhotosMax,
+          ),
+        videoUrl: zod
+          .string()
+          .max(
+            getBookingServioCategoryMediaResponseCategoriesItemMediaVideoUrlMax,
+          ),
+        description: zod
+          .string()
+          .max(
+            getBookingServioCategoryMediaResponseCategoriesItemMediaDescriptionMax,
+          ),
+      }),
+      revision: zod.number(),
+    }),
+  ),
+});
+
+export const saveBookingServioCategoryMediaBodySourceIdMin = 64;
+export const saveBookingServioCategoryMediaBodySourceIdMax = 64;
+
+export const saveBookingServioCategoryMediaBodyExpectedRevisionMin = 0;
+
+export const saveBookingServioCategoryMediaBodyMediaPhotosItemMax = 1000;
+
+export const saveBookingServioCategoryMediaBodyMediaPhotosMax = 30;
+
+export const saveBookingServioCategoryMediaBodyMediaVideoUrlMax = 1000;
+
+export const saveBookingServioCategoryMediaBodyMediaDescriptionMax = 10000;
+
+export const SaveBookingServioCategoryMediaBody = zod.object({
+  sourceId: zod
+    .string()
+    .min(saveBookingServioCategoryMediaBodySourceIdMin)
+    .max(saveBookingServioCategoryMediaBodySourceIdMax),
+  hotelId: zod.number().min(1),
+  categoryId: zod.number().min(1),
+  expectedRevision: zod
+    .number()
+    .min(saveBookingServioCategoryMediaBodyExpectedRevisionMin),
+  media: zod.object({
+    photos: zod
+      .array(
+        zod.string().max(saveBookingServioCategoryMediaBodyMediaPhotosItemMax),
+      )
+      .max(saveBookingServioCategoryMediaBodyMediaPhotosMax),
+    videoUrl: zod
+      .string()
+      .max(saveBookingServioCategoryMediaBodyMediaVideoUrlMax),
+    description: zod
+      .string()
+      .max(saveBookingServioCategoryMediaBodyMediaDescriptionMax),
+  }),
+});
+
+export const saveBookingServioCategoryMediaResponseMediaPhotosItemMax = 1000;
+
+export const saveBookingServioCategoryMediaResponseMediaPhotosMax = 30;
+
+export const saveBookingServioCategoryMediaResponseMediaVideoUrlMax = 1000;
+
+export const saveBookingServioCategoryMediaResponseMediaDescriptionMax = 10000;
+
+export const SaveBookingServioCategoryMediaResponse = zod.object({
+  hotelId: zod.number(),
+  categoryId: zod.number(),
+  name: zod.string(),
+  media: zod.object({
+    photos: zod
+      .array(
+        zod
+          .string()
+          .max(saveBookingServioCategoryMediaResponseMediaPhotosItemMax),
+      )
+      .max(saveBookingServioCategoryMediaResponseMediaPhotosMax),
+    videoUrl: zod
+      .string()
+      .max(saveBookingServioCategoryMediaResponseMediaVideoUrlMax),
+    description: zod
+      .string()
+      .max(saveBookingServioCategoryMediaResponseMediaDescriptionMax),
+  }),
+  revision: zod.number(),
+});
+
 export const IssueBookingServioGuestLinkParams = zod.object({
   id: zod.coerce.string().uuid(),
 });

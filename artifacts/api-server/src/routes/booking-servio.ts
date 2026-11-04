@@ -10,8 +10,10 @@ import { checkServioConnection, servioBaseUrl, servioHotelId, servioFingerprint,
 import { searchServioAvailability, validServioSearch } from "../lib/servio-availability.js";
 import bookingServioPreflight from "./booking-servio-preflight.js";
 import bookingServioReservations from "./booking-servio-reservations.js";
+import bookingServioCategoryMedia from "./booking-servio-category-media.js";
 
 const router = Router();
+router.use("/category-media", bookingServioCategoryMedia);
 router.use("/preflight", bookingServioPreflight);
 router.use("/reservations", bookingServioReservations);
 const editors = requireRole("super_admin", "owner", "admin");

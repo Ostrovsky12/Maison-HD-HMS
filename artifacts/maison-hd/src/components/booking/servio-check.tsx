@@ -44,11 +44,11 @@ export function ServioCheck({ organizationId, role, dirty, hasToken }: {
             <table className="w-full text-xs" data-testid="table-servio-categories">
               <thead><tr className="text-left border-t"><th className="p-2">ID категорії</th><th className="p-2">Назва</th><th className="p-2">HotelID</th></tr></thead>
               <tbody>{result.categories.map(category => (
-                <tr key={category.id} className="border-t"><td className="p-2">{category.id}</td><td className="p-2 break-words">{category.name}</td><td className="p-2">{category.hotelId}</td></tr>
+                <tr key={`${category.hotelId}:${category.id}`} className="border-t"><td className="p-2">{category.id}</td><td className="p-2 break-words">{category.name}</td><td className="p-2">{category.hotelId}</td></tr>
               ))}</tbody>
             </table>
           </div>
-          <p className="px-3 py-2 text-xs text-stone-500">Категорії ще не прив’язані до медіа чи локальних номерів Maison HD.</p>
+          <p className="px-3 py-2 text-xs text-stone-500">Фото й описи категорій налаштовуються нижче, окремо від локальних номерів Maison HD.</p>
         </div>
       )}
       {error && !dirty && <p role="alert" className="text-sm text-red-700">{errorData?.error || "Не вдалося виконати запит. Спробуйте ще раз."}</p>}

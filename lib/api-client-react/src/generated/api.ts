@@ -32,6 +32,9 @@ import type {
   BookingLiqpayCheckInput,
   BookingLiqpayInput,
   BookingLiqpaySettings,
+  BookingServioCategoryMediaInput,
+  BookingServioCategoryMediaItem,
+  BookingServioCategoryMediaList,
   BookingServioCheckout,
   BookingServioCheckoutInput,
   BookingServioGuestCheckoutInput,
@@ -1032,6 +1035,163 @@ export const useCancelBookingServioReservation = <
   TContext
 > => {
   return useMutation(getCancelBookingServioReservationMutationOptions(options));
+};
+
+export const getGetBookingServioCategoryMediaUrl = () => {
+  return `/api/booking-engine/servio/category-media`;
+};
+
+export const getBookingServioCategoryMedia = async (
+  options?: RequestInit,
+): Promise<BookingServioCategoryMediaList> => {
+  return customFetch<BookingServioCategoryMediaList>(
+    getGetBookingServioCategoryMediaUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetBookingServioCategoryMediaQueryKey = () => {
+  return [`/api/booking-engine/servio/category-media`] as const;
+};
+
+export const getGetBookingServioCategoryMediaQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookingServioCategoryMedia>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingServioCategoryMedia>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBookingServioCategoryMediaQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookingServioCategoryMedia>>
+  > = ({ signal }) =>
+    getBookingServioCategoryMedia({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingServioCategoryMedia>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBookingServioCategoryMediaQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookingServioCategoryMedia>>
+>;
+export type GetBookingServioCategoryMediaQueryError = ErrorType<unknown>;
+
+export function useGetBookingServioCategoryMedia<
+  TData = Awaited<ReturnType<typeof getBookingServioCategoryMedia>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingServioCategoryMedia>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBookingServioCategoryMediaQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSaveBookingServioCategoryMediaUrl = () => {
+  return `/api/booking-engine/servio/category-media`;
+};
+
+export const saveBookingServioCategoryMedia = async (
+  bookingServioCategoryMediaInput: BookingServioCategoryMediaInput,
+  options?: RequestInit,
+): Promise<BookingServioCategoryMediaItem> => {
+  return customFetch<BookingServioCategoryMediaItem>(
+    getSaveBookingServioCategoryMediaUrl(),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bookingServioCategoryMediaInput),
+    },
+  );
+};
+
+export const getSaveBookingServioCategoryMediaMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveBookingServioCategoryMedia>>,
+    TError,
+    { data: BodyType<BookingServioCategoryMediaInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof saveBookingServioCategoryMedia>>,
+  TError,
+  { data: BodyType<BookingServioCategoryMediaInput> },
+  TContext
+> => {
+  const mutationKey = ["saveBookingServioCategoryMedia"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof saveBookingServioCategoryMedia>>,
+    { data: BodyType<BookingServioCategoryMediaInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return saveBookingServioCategoryMedia(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SaveBookingServioCategoryMediaMutationResult = NonNullable<
+  Awaited<ReturnType<typeof saveBookingServioCategoryMedia>>
+>;
+export type SaveBookingServioCategoryMediaMutationBody =
+  BodyType<BookingServioCategoryMediaInput>;
+export type SaveBookingServioCategoryMediaMutationError = ErrorType<void>;
+
+export const useSaveBookingServioCategoryMedia = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveBookingServioCategoryMedia>>,
+    TError,
+    { data: BodyType<BookingServioCategoryMediaInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof saveBookingServioCategoryMedia>>,
+  TError,
+  { data: BodyType<BookingServioCategoryMediaInput> },
+  TContext
+> => {
+  return useMutation(getSaveBookingServioCategoryMediaMutationOptions(options));
 };
 
 export const getIssueBookingServioGuestLinkUrl = (id: string) => {

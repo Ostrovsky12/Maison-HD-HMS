@@ -13,6 +13,7 @@ import type { BookingEngineInput } from "@workspace/api-client-react";
 import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-media-editor";
 import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
 import { LiqpaySettings } from "@/components/booking/liqpay-settings";
+import { ServioCategoryMedia } from "@/components/booking/servio-category-media";
 import { ServioCheck } from "@/components/booking/servio-check";
 import { ServioReservationJournal } from "@/components/booking/servio-reservations";
 import { ServioAvailability } from "@/components/booking/servio-availability";
@@ -269,7 +270,7 @@ export default function BookingStudioPage() {
                   onClick={() => { set("provider", p); if (p === "servio") set("published", false); }}
                   className={`text-left rounded-xl border px-3 py-2.5 transition-colors ${form.provider === p ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"}`}>
                   <p className="text-sm font-medium">{p === "maison" ? "Maison HD" : "Servio"}</p>
-                  <p className="text-[11px] text-stone-500">{p === "maison" ? "Локальні номери і тарифи" : "Лише конфігурація"}</p>
+                  <p className="text-[11px] text-stone-500">{p === "maison" ? "Локальні номери і тарифи" : "Категорії й тарифи з PMS"}</p>
                 </button>
               ))}
             </div>
@@ -380,14 +381,14 @@ export default function BookingStudioPage() {
         </div>
 
         <Section n="06a" title="Контент номерів і будинків" hint="Фото, відео та повний опис на публічній сторінці">
-          {servioLocked ? (
+          {norm.form.provider === "servio" && form.provider === "servio" ? (
+            <ServioCategoryMedia key={`servio-media:${organizationId ?? "none"}`} organizationId={organizationId}
+              role={(me.data as { role?: string } | undefined)?.role} dirty={dirty || save.isPending} accent={accent}
+              onUploadingChange={setMediaUploading} />
+          ) : servioLocked ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex gap-2" data-testid="text-media-servio-locked">
               <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
-              <div className="space-y-1">
-                <p className="font-medium">Редагування медіа недоступне для джерела Servio.</p>
-                <p>Фото й описи прив'язуватимуться до стабільних ідентифікаторів номерів Servio після підключення інтеграції. Зіставлення за назвами чи локальними номерами Maison HD не виконується, щоб уникнути конфліктів під час синхронізації. Збережений раніше контент не видаляється.</p>
-                {form.provider !== norm.form.provider && <p className="text-xs">Збережіть або поверніть джерело Maison HD, щоб продовжити.</p>}
-              </div>
+              <p>Змінено джерело бронювань. Збережіть налаштування або поверніть попереднє джерело, щоб редагувати контент.</p>
             </div>
           ) : (
             <UnitMediaEditor units={studioUnits} value={form.unitMedia}

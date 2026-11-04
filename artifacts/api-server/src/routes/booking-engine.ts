@@ -10,6 +10,7 @@ import { ObjectStorageService } from "../lib/objectStorage.js";
 import { BOOKING_TARIFF_POLICY } from "../lib/booking-tariff.js";
 import bookingLiqpaySettings from "./booking-liqpay-settings.js";
 import bookingServio from "./booking-servio.js";
+import { servioCategoryMediaList } from "../lib/servio-category-media.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("super_admin", "owner", "manager", "admin"));
@@ -60,8 +61,9 @@ router.post("/media-upload", async (req: any, res): Promise<void> => {
   }
   const org = (await pool.query("SELECT id,name,booking_engine_config FROM organizations WHERE id=$1 AND is_active=true", [req.user.organizationId])).rows[0];
   if (!org) { res.status(404).json({ error: "Готель не знайдено." }); return; }
-  if (engineConfig(org).provider === "servio") {
-    res.status(409).json({ error: "Спершу потрібна перевірена прив’язка номерів Servio. Локальні номери не підмінятимуть його номерний фонд." }); return;
+  if (engineConfig(org).provider === "servio" && (!["super_admin", "owner", "admin"].includes(req.user.role)
+    || !servioCategoryMediaList(engineConfig(org)).ready)) {
+    res.status(409).json({ error: "Завантаження доступне власнику або адміністратору після перевірки категорій Servio. Прив’язка локальних номерів не потрібна." }); return;
   }
   try {
     const storage = new ObjectStorageService();
@@ -138,6 +140,7 @@ router.put("/settings", async (req: any, res): Promise<void> => {
       liqpayVerification: old.liqpayVerification,
       servioVerification: old.servioVerification,
       unitMedia: unitMedia ?? old.unitMedia ?? {},
+      servioCategoryMedia: old.servioCategoryMedia,
       servioToken: clearServioToken ? undefined : servioToken?.trim() ? encrypt(servioToken.trim())! : old.servioToken };
     // Saving a new upstream identity cannot retain a different account's bearer token.
     if (!servioToken?.trim() && upstreamChanged) {

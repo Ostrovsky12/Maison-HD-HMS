@@ -20,6 +20,7 @@ vi.mock("../lib/auth.js", () => ({
 }));
 import router, { publicEngineRouter } from "../routes/booking-engine.js";
 import { engineConfig, engineIssues, engineQuote, engineSalesGuard, publicEngineConfig, validBookingDates, bookingUnitMedia, validBookingMediaUrl } from "../lib/booking-engine.js";
+import { servioFingerprint } from "../lib/servio-connection.js";
 
 const app = express();
 app.use(express.json());
@@ -92,12 +93,33 @@ describe("configuration and tenant isolation", () => {
     expect(res.status).toBe(400);
     expect(fixture.upload).not.toHaveBeenCalled();
   });
-  it("blocks uploads for Servio until stable inventory mapping exists", async () => {
+  it("blocks uploads for Servio until the independent category catalog has been verified", async () => {
     org.booking_engine_config.provider = "servio";
     const res = await request(app).post("/api/booking-engine/media-upload").set("Authorization", "Bearer test")
       .send({ name: "house.jpg", size: 1234, contentType: "image/jpeg" });
     expect(res.status).toBe(409);
     expect(fixture.upload).not.toHaveBeenCalled();
+  });
+  it("uploads media for verified Servio categories without mapping or creating local units", async () => {
+    const config = org.booking_engine_config;
+    Object.assign(config, { provider: "servio", servioToken: "opaque-token",
+      servioBaseUrl: "https://example.servio.support/ReservationService_1_10", servioHotelId: "7" });
+    config.servioVerification = { fingerprint: servioFingerprint(config), result: {
+      status: "connected", code: "ok", message: "Connected", pingOk: true, checkedAt: new Date().toISOString(),
+      categories: [{ hotelId: 7, id: 11, name: "House" }],
+    } };
+    const response = await request(app).post("/api/booking-engine/media-upload").set("Authorization", "Bearer test")
+      .send({ name: "category.jpg", size: 1234, contentType: "image/jpeg" });
+    expect(response.status).toBe(200);
+    expect(fixture.upload).toHaveBeenCalledTimes(1);
+    expect(fixture.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
+  });
+  it("preserves independently saved Servio category media when general branding settings are saved", async () => {
+    const independent = { source: { "7:11": { media: { photos: [], videoUrl: "", description: "Category" }, revision: 2 } } };
+    org.booking_engine_config.servioCategoryMedia = independent;
+    const response = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send(ready());
+    expect(response.status).toBe(200);
+    expect(org.booking_engine_config.servioCategoryMedia).toEqual(independent);
   });
   it("does not bind local media to an unconnected Servio inventory", async () => {
     const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send({

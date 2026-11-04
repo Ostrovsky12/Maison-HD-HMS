@@ -172,6 +172,45 @@ export interface BookingServioCheckoutInput {
   tariffPolicyVersion: string;
 }
 
+export interface BookingUnitMedia {
+  /** @maxItems 30 */
+  photos: string[];
+  /** @maxLength 1000 */
+  videoUrl: string;
+  /** @maxLength 10000 */
+  description: string;
+}
+
+export interface BookingServioCategoryMediaItem {
+  hotelId: number;
+  categoryId: number;
+  name: string;
+  media: BookingUnitMedia;
+  revision: number;
+}
+
+export interface BookingServioCategoryMediaList {
+  ready: boolean;
+  message: string;
+  sourceId: string | null;
+  categories: BookingServioCategoryMediaItem[];
+}
+
+export interface BookingServioCategoryMediaInput {
+  /**
+   * @minLength 64
+   * @maxLength 64
+   */
+  sourceId: string;
+  /** @minimum 1 */
+  hotelId: number;
+  /** @minimum 1 */
+  categoryId: number;
+  /** @minimum 0 */
+  expectedRevision: number;
+  media: BookingUnitMedia;
+}
+
 export interface BookingServioGuestLinkInput {
   authorizeGuestAccess: boolean;
 }
@@ -378,15 +417,6 @@ export const BookingEngineInputProvider = {
   maison: "maison",
   servio: "servio",
 } as const;
-
-export interface BookingUnitMedia {
-  /** @maxItems 30 */
-  photos: string[];
-  /** @maxLength 1000 */
-  videoUrl: string;
-  /** @maxLength 10000 */
-  description: string;
-}
 
 export type BookingEngineInputUnitMedia = { [key: string]: BookingUnitMedia };
 

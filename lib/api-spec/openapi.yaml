@@ -205,6 +205,31 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BookingServioReservation" }
+  /booking-engine/servio/category-media:
+    get:
+      operationId: getBookingServioCategoryMedia
+      tags: [BookingEngine]
+      responses:
+        "200":
+          description: Verified Servio categories with independently stored booking media
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioCategoryMediaList" }
+    put:
+      operationId: saveBookingServioCategoryMedia
+      tags: [BookingEngine]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingServioCategoryMediaInput" }
+      responses:
+        "200":
+          description: Saved one category without changing accommodation inventory
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioCategoryMediaItem" }
+        "409": { description: "Connection, category or saved revision changed" }
   /booking-engine/servio/reservations/{id}/guest-link:
     post:
       operationId: issueBookingServioGuestLink
@@ -2996,6 +3021,34 @@ components:
         expectedTotal: { type: number, exclusiveMinimum: 0, maximum: 10000000 }
         agreeNonRefundable: { type: boolean }
         tariffPolicyVersion: { type: string }
+    BookingServioCategoryMediaItem:
+      type: object
+      required: [hotelId, categoryId, name, media, revision]
+      properties:
+        hotelId: { type: integer }
+        categoryId: { type: integer }
+        name: { type: string }
+        media: { $ref: "#/components/schemas/BookingUnitMedia" }
+        revision: { type: integer }
+    BookingServioCategoryMediaList:
+      type: object
+      required: [ready, message, sourceId, categories]
+      properties:
+        ready: { type: boolean }
+        message: { type: string }
+        sourceId: { type: string, nullable: true }
+        categories:
+          type: array
+          items: { $ref: "#/components/schemas/BookingServioCategoryMediaItem" }
+    BookingServioCategoryMediaInput:
+      type: object
+      required: [sourceId, hotelId, categoryId, expectedRevision, media]
+      properties:
+        sourceId: { type: string, minLength: 64, maxLength: 64 }
+        hotelId: { type: integer, minimum: 1 }
+        categoryId: { type: integer, minimum: 1 }
+        expectedRevision: { type: integer, minimum: 0 }
+        media: { $ref: "#/components/schemas/BookingUnitMedia" }
     BookingServioGuestLinkInput:
       type: object
       required: [authorizeGuestAccess]
