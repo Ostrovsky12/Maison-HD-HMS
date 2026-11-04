@@ -73,6 +73,7 @@ function money(raw: unknown): number {
     throw new ServioShapeError("число або десятковий рядок із крапкою: сума 0–10000000, до двох значущих десяткових знаків", raw);
   return amount;
 }
+export { money as servioMoney };
 
 export function validServioSearch(input: BookingServioSearchInput): boolean {
   const nights = (Date.parse(input.checkOut) - Date.parse(input.checkIn)) / 86400000;

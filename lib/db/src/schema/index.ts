@@ -1,3 +1,4 @@
+export * from "./servio-booking-attempts";
 export * from "./organizations";
 export * from "./users";
 export * from "./properties";

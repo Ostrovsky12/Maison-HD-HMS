@@ -5,6 +5,7 @@ import {
 import type { BookingServioSearchResult, BookingServioPreflight, BookingServioPreflightInput } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { ServioReservationCreate, servioBaseChecksPass } from "./servio-reservations";
 import { AlertTriangle, CheckCircle2, CircleHelp, Loader2, RefreshCw, ShieldAlert, ShieldCheck, XCircle } from "lucide-react";
 
 const fmtDate = (s: string) => {
@@ -164,6 +165,11 @@ export function ServioPreflight({ organizationId, result, canRun }: {
             </div>
           )}
         </div>
+        {shown && !pending && input && shown.total !== null && shown.total > 0 && servioBaseChecksPass(shown.checks) && (
+          <ServioReservationCreate key={sig} organizationId={organizationId} input={input} expectedTotal={shown.total}
+            currency={shown.currency} policyVersion={shown.policyVersion} acknowledgementText={shown.acknowledgementText}
+            testKeys={seller?.verification.mode !== "live"} />
+        )}
       </div>
     </div>
   );

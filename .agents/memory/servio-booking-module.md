@@ -7,6 +7,12 @@ The user wants the existing Maison HD online-booking functionality to become a m
 
 The intended audience is both the user's own complex and other hotels; the user explicitly selected «Для обох варіантів».
 
+Продовжувати реалізацію між проміжними кроками, а не пропонувати користувачу Republish після кожного кроку.
+
+**Why:** Користувач прямо заперечив: «Давай далі, чого ж я буду репабліш після кожного кроку робити».
+
+**How to apply:** Перевіряти проміжні зміни в робочому середовищі та продовжувати узгоджений ланцюжок; не вимагати публікації як передумови наступного кроку.
+
 **Why:** The user explicitly described this goal and cost concern, approved preparing the specification, and then asked to build the application. This does not authorize replacing the property's PMS or modifying live reservations for tests.
 
 The user reports that Servio charges a percentage for each booking and that this becomes a significant expense. They have already asked Servio the integration/access question.

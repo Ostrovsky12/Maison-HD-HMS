@@ -14,6 +14,7 @@ import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-medi
 import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
 import { LiqpaySettings } from "@/components/booking/liqpay-settings";
 import { ServioCheck } from "@/components/booking/servio-check";
+import { ServioReservationJournal } from "@/components/booking/servio-reservations";
 import { ServioAvailability } from "@/components/booking/servio-availability";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -301,14 +302,17 @@ export default function BookingStudioPage() {
                 </label>
               )}
             </div>
-            <ServioCheck key={organizationId ?? "none"} organizationId={organizationId}
+            <ServioCheck key={`servio-check:${organizationId ?? "none"}`} organizationId={organizationId}
               role={me.data?.role} dirty={dirty || save.isPending} hasToken={norm.hasServioToken} />
-            <ServioAvailability key={organizationId ?? "none"} organizationId={organizationId}
+            <ServioAvailability key={`servio-availability:${organizationId ?? "none"}`} organizationId={organizationId}
               role={me.data?.role} dirty={dirty || save.isPending} hasToken={norm.hasServioToken} />
           </Section>
         )}
+        {norm.form.provider === "servio" && ["owner", "admin", "super_admin"].includes(String(me.data?.role ?? "")) && (
+          <ServioReservationJournal key={`servio-journal:${organizationId ?? "none"}`} organizationId={organizationId} />
+        )}
 
-        <LiqpaySettings key={organizationId ?? "none"} organizationId={organizationId} role={(me.data as { role?: string } | undefined)?.role} />
+        <LiqpaySettings key={`liqpay-settings:${organizationId ?? "none"}`} organizationId={organizationId} role={(me.data as { role?: string } | undefined)?.role} />
 
         <div className="grid lg:grid-cols-[1fr_380px] gap-6 items-start">
           <div className="space-y-6">

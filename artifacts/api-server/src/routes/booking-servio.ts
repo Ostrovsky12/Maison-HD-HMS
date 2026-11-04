@@ -9,9 +9,11 @@ import { engineConfig } from "../lib/booking-engine.js";
 import { checkServioConnection, servioBaseUrl, servioHotelId, servioFingerprint, uncheckedServio } from "../lib/servio-connection.js";
 import { searchServioAvailability, validServioSearch } from "../lib/servio-availability.js";
 import bookingServioPreflight from "./booking-servio-preflight.js";
+import bookingServioReservations from "./booking-servio-reservations.js";
 
 const router = Router();
 router.use("/preflight", bookingServioPreflight);
+router.use("/reservations", bookingServioReservations);
 const editors = requireRole("super_admin", "owner", "admin");
 const limiter = rateLimit({ windowMs: 60_000, max: 3, standardHeaders: true, legacyHeaders: false });
 const searchLimiter = rateLimit({ windowMs: 60_000, max: 6, standardHeaders: true, legacyHeaders: false });

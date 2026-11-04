@@ -538,6 +538,280 @@ export const GetBookingEngineOverviewResponse = zod.record(
   zod.unknown(),
 );
 
+export const ListBookingServioReservationsResponseItem = zod.object({
+  id: zod.string(),
+  requestId: zod.string(),
+  state: zod.enum([
+    "creating",
+    "billing",
+    "bill_ready",
+    "awaiting_payment",
+    "confirming",
+    "confirmed",
+    "review",
+    "failed",
+    "cancelling",
+    "cancelled",
+  ]),
+  message: zod.string(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+  categoryName: zod.string(),
+  rateName: zod.string(),
+  checkIn: zod.string(),
+  checkOut: zod.string(),
+  total: zod.number().nullable(),
+  currency: zod.string(),
+  account: zod.string().nullable(),
+  mode: zod.enum(["test", "live"]),
+  policyVersion: zod.string(),
+  acknowledgementText: zod.string(),
+});
+export const ListBookingServioReservationsResponse = zod.array(
+  ListBookingServioReservationsResponseItem,
+);
+
+export const createBookingServioReservationBodyOneOneCheckInRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const createBookingServioReservationBodyOneOneCheckOutRegExp =
+  new RegExp("^\\d{4}-\\d{2}-\\d{2}$");
+export const createBookingServioReservationBodyOneOneAdultsMax = 20;
+
+export const createBookingServioReservationBodyOneOneChildAgesItemMin = 0;
+export const createBookingServioReservationBodyOneOneChildAgesItemMax = 17;
+
+export const createBookingServioReservationBodyOneOneChildAgesMax = 10;
+
+export const createBookingServioReservationBodyOneOneCompanyIdMin = 0;
+export const createBookingServioReservationBodyOneOneCompanyIdMax = 2147483647;
+
+export const createBookingServioReservationBodyOneOneCompanyCodeIdMin = 0;
+export const createBookingServioReservationBodyOneOneCompanyCodeIdMax = 2147483647;
+
+export const createBookingServioReservationBodyOneOneConditionIdMin = 0;
+export const createBookingServioReservationBodyOneOneConditionIdMax = 2147483647;
+
+export const createBookingServioReservationBodyOneTwoCategoryIdMax = 2147483647;
+
+export const createBookingServioReservationBodyOneTwoPriceListIdMax = 2147483647;
+
+export const createBookingServioReservationBodyOneTwoRateConditionIdMin = 0;
+export const createBookingServioReservationBodyOneTwoRateConditionIdMax = 2147483647;
+
+export const createBookingServioReservationBodyOneTwoPropertyIdMax = 2147483647;
+
+export const createBookingServioReservationBodyTwoFirstNameMax = 50;
+
+export const createBookingServioReservationBodyTwoLastNameMax = 50;
+
+export const createBookingServioReservationBodyTwoPhoneMin = 7;
+export const createBookingServioReservationBodyTwoPhoneMax = 30;
+
+export const createBookingServioReservationBodyTwoEmailMax = 200;
+
+export const createBookingServioReservationBodyTwoExpectedTotalExclusiveMin = 0;
+export const createBookingServioReservationBodyTwoExpectedTotalMax = 10000000;
+
+export const CreateBookingServioReservationBody = zod
+  .object({
+    checkIn: zod
+      .string()
+      .regex(createBookingServioReservationBodyOneOneCheckInRegExp),
+    checkOut: zod
+      .string()
+      .regex(createBookingServioReservationBodyOneOneCheckOutRegExp),
+    adults: zod
+      .number()
+      .min(1)
+      .max(createBookingServioReservationBodyOneOneAdultsMax),
+    childAges: zod
+      .array(
+        zod
+          .number()
+          .min(createBookingServioReservationBodyOneOneChildAgesItemMin)
+          .max(createBookingServioReservationBodyOneOneChildAgesItemMax),
+      )
+      .max(createBookingServioReservationBodyOneOneChildAgesMax),
+    useExtraBed: zod.boolean(),
+    companyId: zod
+      .number()
+      .min(createBookingServioReservationBodyOneOneCompanyIdMin)
+      .max(createBookingServioReservationBodyOneOneCompanyIdMax),
+    companyCodeId: zod
+      .number()
+      .min(createBookingServioReservationBodyOneOneCompanyCodeIdMin)
+      .max(createBookingServioReservationBodyOneOneCompanyCodeIdMax),
+    conditionId: zod
+      .number()
+      .min(createBookingServioReservationBodyOneOneConditionIdMin)
+      .max(createBookingServioReservationBodyOneOneConditionIdMax),
+  })
+  .and(
+    zod.object({
+      categoryId: zod
+        .number()
+        .min(1)
+        .max(createBookingServioReservationBodyOneTwoCategoryIdMax),
+      priceListId: zod
+        .number()
+        .min(1)
+        .max(createBookingServioReservationBodyOneTwoPriceListIdMax),
+      rateConditionId: zod
+        .number()
+        .min(createBookingServioReservationBodyOneTwoRateConditionIdMin)
+        .max(createBookingServioReservationBodyOneTwoRateConditionIdMax),
+      propertyId: zod
+        .number()
+        .min(1)
+        .max(createBookingServioReservationBodyOneTwoPropertyIdMax),
+    }),
+  )
+  .and(
+    zod.object({
+      requestId: zod.string().uuid(),
+      firstName: zod
+        .string()
+        .min(1)
+        .max(createBookingServioReservationBodyTwoFirstNameMax),
+      lastName: zod
+        .string()
+        .min(1)
+        .max(createBookingServioReservationBodyTwoLastNameMax),
+      phone: zod
+        .string()
+        .min(createBookingServioReservationBodyTwoPhoneMin)
+        .max(createBookingServioReservationBodyTwoPhoneMax),
+      email: zod
+        .string()
+        .email()
+        .max(createBookingServioReservationBodyTwoEmailMax),
+      expectedTotal: zod
+        .number()
+        .gt(createBookingServioReservationBodyTwoExpectedTotalExclusiveMin)
+        .max(createBookingServioReservationBodyTwoExpectedTotalMax),
+      authorizeProviderWrite: zod.boolean(),
+      agreeTerms: zod.boolean(),
+      agreeNonRefundable: zod.boolean(),
+      tariffPolicyVersion: zod.string(),
+    }),
+  );
+
+export const CreateBookingServioReservationResponse = zod.object({
+  id: zod.string(),
+  requestId: zod.string(),
+  state: zod.enum([
+    "creating",
+    "billing",
+    "bill_ready",
+    "awaiting_payment",
+    "confirming",
+    "confirmed",
+    "review",
+    "failed",
+    "cancelling",
+    "cancelled",
+  ]),
+  message: zod.string(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+  categoryName: zod.string(),
+  rateName: zod.string(),
+  checkIn: zod.string(),
+  checkOut: zod.string(),
+  total: zod.number().nullable(),
+  currency: zod.string(),
+  account: zod.string().nullable(),
+  mode: zod.enum(["test", "live"]),
+  policyVersion: zod.string(),
+  acknowledgementText: zod.string(),
+});
+
+export const CheckoutBookingServioReservationParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const checkoutBookingServioReservationBodyExpectedTotalExclusiveMin = 0;
+export const checkoutBookingServioReservationBodyExpectedTotalMax = 10000000;
+
+export const CheckoutBookingServioReservationBody = zod.object({
+  expectedTotal: zod
+    .number()
+    .gt(checkoutBookingServioReservationBodyExpectedTotalExclusiveMin)
+    .max(checkoutBookingServioReservationBodyExpectedTotalMax),
+  agreeNonRefundable: zod.boolean(),
+  tariffPolicyVersion: zod.string(),
+});
+
+export const CheckoutBookingServioReservationResponse = zod.object({
+  reservation: zod.object({
+    id: zod.string(),
+    requestId: zod.string(),
+    state: zod.enum([
+      "creating",
+      "billing",
+      "bill_ready",
+      "awaiting_payment",
+      "confirming",
+      "confirmed",
+      "review",
+      "failed",
+      "cancelling",
+      "cancelled",
+    ]),
+    message: zod.string(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    categoryName: zod.string(),
+    rateName: zod.string(),
+    checkIn: zod.string(),
+    checkOut: zod.string(),
+    total: zod.number().nullable(),
+    currency: zod.string(),
+    account: zod.string().nullable(),
+    mode: zod.enum(["test", "live"]),
+    policyVersion: zod.string(),
+    acknowledgementText: zod.string(),
+  }),
+  url: zod.string(),
+  data: zod.string(),
+  signature: zod.string(),
+});
+
+export const CancelBookingServioReservationParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const CancelBookingServioReservationResponse = zod.object({
+  id: zod.string(),
+  requestId: zod.string(),
+  state: zod.enum([
+    "creating",
+    "billing",
+    "bill_ready",
+    "awaiting_payment",
+    "confirming",
+    "confirmed",
+    "review",
+    "failed",
+    "cancelling",
+    "cancelled",
+  ]),
+  message: zod.string(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+  categoryName: zod.string(),
+  rateName: zod.string(),
+  checkIn: zod.string(),
+  checkOut: zod.string(),
+  total: zod.number().nullable(),
+  currency: zod.string(),
+  account: zod.string().nullable(),
+  mode: zod.enum(["test", "live"]),
+  policyVersion: zod.string(),
+  acknowledgementText: zod.string(),
+});
+
 export const GetPublicBookingEngineParams = zod.object({
   slug: zod.coerce.string(),
 });

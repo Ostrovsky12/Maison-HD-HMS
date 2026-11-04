@@ -132,6 +132,98 @@ export type BookingServioPreflightInput = BookingServioSearchInput & {
   propertyId: number;
 };
 
+export type BookingServioReservationInput = BookingServioPreflightInput & {
+  requestId: string;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  firstName: string;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  lastName: string;
+  /**
+   * @minLength 7
+   * @maxLength 30
+   */
+  phone: string;
+  /** @maxLength 200 */
+  email: string;
+  /**
+   * @maximum 10000000
+   * @exclusiveMinimum 0
+   */
+  expectedTotal: number;
+  authorizeProviderWrite: boolean;
+  agreeTerms: boolean;
+  agreeNonRefundable: boolean;
+  tariffPolicyVersion: string;
+};
+
+export interface BookingServioCheckoutInput {
+  /**
+   * @maximum 10000000
+   * @exclusiveMinimum 0
+   */
+  expectedTotal: number;
+  agreeNonRefundable: boolean;
+  tariffPolicyVersion: string;
+}
+
+export type BookingServioReservationState =
+  (typeof BookingServioReservationState)[keyof typeof BookingServioReservationState];
+
+export const BookingServioReservationState = {
+  creating: "creating",
+  billing: "billing",
+  bill_ready: "bill_ready",
+  awaiting_payment: "awaiting_payment",
+  confirming: "confirming",
+  confirmed: "confirmed",
+  review: "review",
+  failed: "failed",
+  cancelling: "cancelling",
+  cancelled: "cancelled",
+} as const;
+
+export type BookingServioReservationMode =
+  (typeof BookingServioReservationMode)[keyof typeof BookingServioReservationMode];
+
+export const BookingServioReservationMode = {
+  test: "test",
+  live: "live",
+} as const;
+
+export interface BookingServioReservation {
+  id: string;
+  requestId: string;
+  state: BookingServioReservationState;
+  message: string;
+  createdAt: string;
+  updatedAt: string;
+  categoryName: string;
+  rateName: string;
+  checkIn: string;
+  checkOut: string;
+  /** @nullable */
+  total: number | null;
+  currency: string;
+  /** @nullable */
+  account: string | null;
+  mode: BookingServioReservationMode;
+  policyVersion: string;
+  acknowledgementText: string;
+}
+
+export interface BookingServioCheckout {
+  reservation: BookingServioReservation;
+  url: string;
+  data: string;
+  signature: string;
+}
+
 export type BookingServioPreflightCheckStatus =
   (typeof BookingServioPreflightCheckStatus)[keyof typeof BookingServioPreflightCheckStatus];
 

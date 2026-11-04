@@ -32,10 +32,13 @@ export const uncheckedServio: BookingServioStatus = {
 
 type ReadMethod = "Ping" | "GetRoomTypesList" | "GetRooms" | "GetPrices";
 export type ServioReadRequest = (base: string, token: string, method: ReadMethod, body: unknown) => Promise<unknown>;
+type WriteMethod = "AddRoomReservation" | "SetReservationBill" | "SetReservationType" | "CancelReservation";
+export type ServioWriteRequest = (base: string, token: string, method: WriteMethod, body: unknown) => Promise<unknown>;
 
 // Use node:https, not fetch: this server also runs on a Node version without
 // global AbortSignal. Bound response size and wall-clock time; never log bodies.
-export const servioReadRequest: ServioReadRequest = (base, token, method, body) => new Promise((resolve, reject) => {
+const servioRequest = (base: string, token: string, method: ReadMethod | WriteMethod, body: unknown): Promise<unknown> => new Promise((resolve, reject) => {
+  base = servioBaseUrl(base);
   const data = JSON.stringify(body);
   const request = https.request(`${base}/${method}`, {
     method: "POST",
@@ -68,6 +71,8 @@ export const servioReadRequest: ServioReadRequest = (base, token, method, body) 
   });
   request.end(data);
 });
+export const servioReadRequest: ServioReadRequest = servioRequest;
+export const servioWriteRequest: ServioWriteRequest = servioRequest;
 
 const messages: Record<string, string> = {
   access_denied: "Servio відхилив доступ. Перевірте AccessToken і права цього підключення.",

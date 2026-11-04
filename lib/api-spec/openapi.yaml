@@ -146,6 +146,65 @@ paths:
           content:
             application/json:
               schema: { type: object, additionalProperties: true }
+  /booking-engine/servio/reservations:
+    get:
+      operationId: listBookingServioReservations
+      tags: [BookingEngine]
+      responses:
+        "200":
+          description: Latest controlled Servio booking attempts for the authenticated tenant
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/BookingServioReservation" }
+    post:
+      operationId: createBookingServioReservation
+      tags: [BookingEngine]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingServioReservationInput" }
+      responses:
+        "200":
+          description: Persisted booking attempt, including explicit uncertain-outcome states
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioReservation" }
+        "400": { description: Invalid input or tariff }
+        "403": { description: Explicit administrator authorization required }
+        "409": { description: "Changed selection, price or configuration" }
+  /booking-engine/servio/reservations/{id}/checkout:
+    post:
+      operationId: checkoutBookingServioReservation
+      tags: [BookingEngine]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingServioCheckoutInput" }
+      responses:
+        "200":
+          description: Signed LiqPay form for exactly the final Servio bill
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioCheckout" }
+        "409": { description: Booking is not payable or consent amount changed }
+  /booking-engine/servio/reservations/{id}/cancel:
+    post:
+      operationId: cancelBookingServioReservation
+      tags: [BookingEngine]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Cancellation before any payment link was issued; uncertain cancellation needs manual review
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioReservation" }
   /public/booking-engine/{slug}:
     get:
       operationId: getPublicBookingEngine
@@ -2860,6 +2919,57 @@ components:
             priceListId: { type: integer, minimum: 1, maximum: 2147483647 }
             rateConditionId: { type: integer, minimum: 0, maximum: 2147483647 }
             propertyId: { type: integer, minimum: 1, maximum: 2147483647 }
+    BookingServioReservationInput:
+      allOf:
+        - $ref: "#/components/schemas/BookingServioPreflightInput"
+        - type: object
+          required: [requestId, firstName, lastName, phone, email, expectedTotal, authorizeProviderWrite, agreeTerms, agreeNonRefundable, tariffPolicyVersion]
+          properties:
+            requestId: { type: string, format: uuid }
+            firstName: { type: string, minLength: 1, maxLength: 50 }
+            lastName: { type: string, minLength: 1, maxLength: 50 }
+            phone: { type: string, minLength: 7, maxLength: 30 }
+            email: { type: string, format: email, maxLength: 200 }
+            expectedTotal: { type: number, exclusiveMinimum: 0, maximum: 10000000 }
+            authorizeProviderWrite: { type: boolean }
+            agreeTerms: { type: boolean }
+            agreeNonRefundable: { type: boolean }
+            tariffPolicyVersion: { type: string }
+    BookingServioCheckoutInput:
+      type: object
+      required: [expectedTotal, agreeNonRefundable, tariffPolicyVersion]
+      properties:
+        expectedTotal: { type: number, exclusiveMinimum: 0, maximum: 10000000 }
+        agreeNonRefundable: { type: boolean }
+        tariffPolicyVersion: { type: string }
+    BookingServioReservation:
+      type: object
+      required: [id, requestId, state, message, createdAt, updatedAt, categoryName, rateName, checkIn, checkOut, total, currency, account, mode, policyVersion, acknowledgementText]
+      properties:
+        id: { type: string }
+        requestId: { type: string }
+        state: { type: string, enum: [creating, billing, bill_ready, awaiting_payment, confirming, confirmed, review, failed, cancelling, cancelled] }
+        message: { type: string }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        categoryName: { type: string }
+        rateName: { type: string }
+        checkIn: { type: string }
+        checkOut: { type: string }
+        total: { type: ["number", "null"] }
+        currency: { type: string }
+        account: { type: ["string", "null"] }
+        mode: { type: string, enum: [test, live] }
+        policyVersion: { type: string }
+        acknowledgementText: { type: string }
+    BookingServioCheckout:
+      type: object
+      required: [reservation, url, data, signature]
+      properties:
+        reservation: { $ref: "#/components/schemas/BookingServioReservation" }
+        url: { type: string }
+        data: { type: string }
+        signature: { type: string }
     BookingServioPreflightCheck:
       type: object
       required: [code, status, message]
