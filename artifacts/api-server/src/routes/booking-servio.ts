@@ -1,15 +1,52 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { pool } from "@workspace/db";
-import { GetBookingServioStatusResponse, CheckBookingServioConnectionResponse } from "@workspace/api-zod";
+import { GetBookingServioStatusResponse, CheckBookingServioConnectionResponse,
+  SearchBookingServioAvailabilityBody, SearchBookingServioAvailabilityResponse } from "@workspace/api-zod";
 import { requireRole } from "../lib/auth.js";
 import { decrypt } from "../lib/encrypt.js";
 import { engineConfig } from "../lib/booking-engine.js";
 import { checkServioConnection, servioBaseUrl, servioHotelId, servioFingerprint, uncheckedServio } from "../lib/servio-connection.js";
+import { searchServioAvailability, validServioSearch } from "../lib/servio-availability.js";
 
 const router = Router();
 const editors = requireRole("super_admin", "owner", "admin");
 const limiter = rateLimit({ windowMs: 60_000, max: 3, standardHeaders: true, legacyHeaders: false });
+const searchLimiter = rateLimit({ windowMs: 60_000, max: 6, standardHeaders: true, legacyHeaders: false });
+
+router.post("/availability", editors, searchLimiter, async (req: any, res): Promise<void> => {
+  const parsed = SearchBookingServioAvailabilityBody.safeParse(req.body);
+  if (!parsed.success || !validServioSearch(parsed.data)) {
+    res.status(400).json({ error: "Перевірте дати (1–31 ніч), кількість дорослих (1–20) та вік кожної дитини (0–17). CompanyID і CompanyCodeID мають бути або обидва 0, або обидва надані Servio; умова договору без компанії має бути 0." }); return;
+  }
+  const orgId = req.user.organizationId;
+  const org = (await pool.query("SELECT name,booking_engine_config FROM organizations WHERE id=$1 AND is_active=true", [orgId])).rows[0];
+  if (!org) { res.status(404).json({ error: "Готель не знайдено." }); return; }
+  const config = engineConfig(org), fingerprint = servioFingerprint(config);
+  const searchIdentity = JSON.stringify([fingerprint, config.checkInTime, config.checkOutTime]);
+  const verified = config.servioVerification?.fingerprint === fingerprint
+    ? GetBookingServioStatusResponse.safeParse(config.servioVerification.result) : null;
+  if (config.provider !== "servio" || !config.servioToken || !verified?.success
+    || verified.data.status !== "connected" || !verified.data.categories.length) {
+    res.status(400).json({ error: "Спочатку успішно перевірте з’єднання і категорії для поточних реквізитів Servio." }); return;
+  }
+  let base: string, hotelId: number, token: string | null;
+  try { base = servioBaseUrl(config.servioBaseUrl); hotelId = servioHotelId(config.servioHotelId); token = decrypt(config.servioToken); }
+  catch { res.status(400).json({ error: "Перевірте збережені реквізити Servio." }); return; }
+  if (!token || /[\r\n]/.test(token)) {
+    res.status(400).json({ error: "Не вдалося прочитати AccessToken. Збережіть його заново." }); return;
+  }
+  const result = await searchServioAvailability({
+    base, token, hotelId, checkInTime: config.checkInTime, checkOutTime: config.checkOutTime,
+  }, parsed.data, verified.data.categories);
+  const current = (await pool.query("SELECT name,booking_engine_config FROM organizations WHERE id=$1 AND is_active=true", [orgId])).rows[0];
+  const currentConfig = current ? engineConfig(current) : null;
+  if (!currentConfig || JSON.stringify([servioFingerprint(currentConfig), currentConfig.checkInTime, currentConfig.checkOutTime]) !== searchIdentity) {
+    res.status(409).json({ error: "Підключення Servio змінилося під час запиту. Оновіть сторінку та повторіть перевірку." }); return;
+  }
+  req.log.info({ organizationId: orgId, status: result.status, code: result.code }, "Servio availability diagnostic completed");
+  res.json(SearchBookingServioAvailabilityResponse.parse(result));
+});
 
 router.get("/", async (req: any, res): Promise<void> => {
   const org = (await pool.query("SELECT name,booking_engine_config FROM organizations WHERE id=$1 AND is_active=true", [req.user.organizationId])).rows[0];

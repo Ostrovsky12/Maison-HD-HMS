@@ -1,7 +1,7 @@
 import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const f = vi.hoisted(() => ({ query: vi.fn(), connect: vi.fn(), check: vi.fn() }));
+const f = vi.hoisted(() => ({ query: vi.fn(), connect: vi.fn(), check: vi.fn(), search: vi.fn() }));
 vi.mock("@workspace/db", () => ({ pool: { query: f.query, connect: f.connect } }));
 vi.mock("../lib/auth.js", () => ({
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => roles.includes(req.user.role) ? next() : res.status(403).json({ error: "Forbidden" }),
@@ -9,6 +9,9 @@ vi.mock("../lib/auth.js", () => ({
 vi.mock("express-rate-limit", () => ({ default: () => (_req: any, _res: any, next: any) => next() }));
 vi.mock("../lib/servio-connection.js", async importOriginal => ({
   ...await importOriginal<typeof import("../lib/servio-connection.js")>(), checkServioConnection: f.check,
+}));
+vi.mock("../lib/servio-availability.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../lib/servio-availability.js")>(), searchServioAvailability: f.search,
 }));
 import router from "../routes/booking-servio.js";
 import { encrypt } from "../lib/encrypt.js";
@@ -88,5 +91,46 @@ describe("tenant-owned Servio checks", () => {
     changed = true;
     expect((await request(app).post("/servio")).status).toBe(409);
     expect(f.query.mock.calls.some(([sql]) => sql.startsWith("UPDATE"))).toBe(false);
+  });
+});
+
+const searchInput = { checkIn: "2026-12-01", checkOut: "2026-12-03", adults: 2, childAges: [], useExtraBed: false, companyId: 0, companyCodeId: 0, conditionId: 0 };
+describe("tenant-owned read-only availability route", () => {
+  function verified() {
+    config.servioVerification = { fingerprint: servioFingerprint(config), result };
+    f.search.mockResolvedValue({
+      status: "complete", code: "no_categories", message: "No inventory", checkedAt: "2026-11-01T00:00:00Z",
+      query: searchInput, hotelId: 7, currency: null, categories: [],
+    });
+  }
+  it("uses the session's saved connection, ignores injected credentials, and never writes", async () => {
+    verified();
+    const response = await request(app).post("/servio/availability").send({ ...searchInput, hotelId: 999, organizationId: 999, token: "attacker" });
+    expect(response.status).toBe(200);
+    expect(f.search).toHaveBeenCalledWith(expect.objectContaining({ hotelId: 7, token: "fixture-token" }), searchInput, result.categories);
+    expect(f.query.mock.calls.every(([sql, values]) => sql.startsWith("SELECT") && values[0] === 7)).toBe(true);
+    expect(f.connect).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.body)).not.toMatch(/fixture-token|fingerprint|attacker/);
+  });
+  it.each(["manager", "staff"])("denies %s before querying the provider", async role => {
+    verified();
+    expect((await request(app).post("/servio/availability").set("x-role", role).send(searchInput)).status).toBe(403);
+    expect(f.search).not.toHaveBeenCalled();
+  });
+  it("requires a successful connection check for the current credentials", async () => {
+    verified(); config.servioHotelId = "8";
+    expect((await request(app).post("/servio/availability").send(searchInput)).status).toBe(400);
+    expect(f.search).not.toHaveBeenCalled();
+  });
+  it("rejects invalid dates before any database or provider call", async () => {
+    expect((await request(app).post("/servio/availability").send({ ...searchInput, checkOut: searchInput.checkIn })).status).toBe(400);
+    expect(f.query).not.toHaveBeenCalled();
+    expect(f.search).not.toHaveBeenCalled();
+  });
+  it("rejects a result if the upstream account changed during the search", async () => {
+    verified();
+    f.query.mockResolvedValueOnce({ rows: [{ name: "Test", booking_engine_config: { ...config } }] })
+      .mockResolvedValueOnce({ rows: [{ name: "Test", booking_engine_config: { ...config, servioHotelId: "8" } }] });
+    expect((await request(app).post("/servio/availability").send(searchInput)).status).toBe(409);
   });
 });

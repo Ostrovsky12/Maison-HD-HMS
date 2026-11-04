@@ -30,7 +30,7 @@ export const uncheckedServio: BookingServioStatus = {
   pingOk: false, checkedAt: null, categories: [],
 };
 
-type ReadMethod = "Ping" | "GetRoomTypesList";
+type ReadMethod = "Ping" | "GetRoomTypesList" | "GetRooms" | "GetPrices";
 export type ServioReadRequest = (base: string, token: string, method: ReadMethod, body: unknown) => Promise<unknown>;
 
 // Use node:https, not fetch: this server also runs on a Node version without

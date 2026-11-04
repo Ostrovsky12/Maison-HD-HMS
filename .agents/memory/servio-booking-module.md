@@ -54,3 +54,9 @@ The password supplied by Servio is used for API requests, not merely cabinet log
 **Why:** The user explicitly clarified its purpose.
 
 **How to apply:** Treat it as an integration credential. Confirm its exact header or request-field mapping before changing authentication; its purpose alone does not establish that it replaces AccessToken.
+
+A Servio availability/price diagnostic is not a final payable quote or an inventory hold.
+
+**Why:** The vendor describes separate availability, pricing and bill-formation operations; bill formation can recalculate taxes. Category access alone proves neither room availability nor sale eligibility.
+
+**How to apply:** Preserve the returned currency and service/date charges rather than substituting local prices, rack rates or a nightly average. Preserve partial failures without inventing zero prices or zero inventory. Unknown or missing sale restrictions must remain unverified, not implicitly cleared. Before any future checkout, revalidate availability and obtain authoritative final charges. Keep CompanyID and CompanyCodeID distinct; never infer one from the other.

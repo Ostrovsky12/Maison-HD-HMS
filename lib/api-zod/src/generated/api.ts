@@ -191,6 +191,154 @@ export const CheckBookingServioConnectionResponse = zod.object({
   ),
 });
 
+export const searchBookingServioAvailabilityBodyCheckInRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const searchBookingServioAvailabilityBodyCheckOutRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const searchBookingServioAvailabilityBodyAdultsMax = 20;
+
+export const searchBookingServioAvailabilityBodyChildAgesItemMin = 0;
+export const searchBookingServioAvailabilityBodyChildAgesItemMax = 17;
+
+export const searchBookingServioAvailabilityBodyChildAgesMax = 10;
+
+export const searchBookingServioAvailabilityBodyCompanyIdMin = 0;
+export const searchBookingServioAvailabilityBodyCompanyIdMax = 2147483647;
+
+export const searchBookingServioAvailabilityBodyCompanyCodeIdMin = 0;
+export const searchBookingServioAvailabilityBodyCompanyCodeIdMax = 2147483647;
+
+export const searchBookingServioAvailabilityBodyConditionIdMin = 0;
+export const searchBookingServioAvailabilityBodyConditionIdMax = 2147483647;
+
+export const SearchBookingServioAvailabilityBody = zod.object({
+  checkIn: zod.string().regex(searchBookingServioAvailabilityBodyCheckInRegExp),
+  checkOut: zod
+    .string()
+    .regex(searchBookingServioAvailabilityBodyCheckOutRegExp),
+  adults: zod.number().min(1).max(searchBookingServioAvailabilityBodyAdultsMax),
+  childAges: zod
+    .array(
+      zod
+        .number()
+        .min(searchBookingServioAvailabilityBodyChildAgesItemMin)
+        .max(searchBookingServioAvailabilityBodyChildAgesItemMax),
+    )
+    .max(searchBookingServioAvailabilityBodyChildAgesMax),
+  useExtraBed: zod.boolean(),
+  companyId: zod
+    .number()
+    .min(searchBookingServioAvailabilityBodyCompanyIdMin)
+    .max(searchBookingServioAvailabilityBodyCompanyIdMax),
+  companyCodeId: zod
+    .number()
+    .min(searchBookingServioAvailabilityBodyCompanyCodeIdMin)
+    .max(searchBookingServioAvailabilityBodyCompanyCodeIdMax),
+  conditionId: zod
+    .number()
+    .min(searchBookingServioAvailabilityBodyConditionIdMin)
+    .max(searchBookingServioAvailabilityBodyConditionIdMax),
+});
+
+export const searchBookingServioAvailabilityResponseQueryCheckInRegExp =
+  new RegExp("^\\d{4}-\\d{2}-\\d{2}$");
+export const searchBookingServioAvailabilityResponseQueryCheckOutRegExp =
+  new RegExp("^\\d{4}-\\d{2}-\\d{2}$");
+export const searchBookingServioAvailabilityResponseQueryAdultsMax = 20;
+
+export const searchBookingServioAvailabilityResponseQueryChildAgesItemMin = 0;
+export const searchBookingServioAvailabilityResponseQueryChildAgesItemMax = 17;
+
+export const searchBookingServioAvailabilityResponseQueryChildAgesMax = 10;
+
+export const searchBookingServioAvailabilityResponseQueryCompanyIdMin = 0;
+export const searchBookingServioAvailabilityResponseQueryCompanyIdMax = 2147483647;
+
+export const searchBookingServioAvailabilityResponseQueryCompanyCodeIdMin = 0;
+export const searchBookingServioAvailabilityResponseQueryCompanyCodeIdMax = 2147483647;
+
+export const searchBookingServioAvailabilityResponseQueryConditionIdMin = 0;
+export const searchBookingServioAvailabilityResponseQueryConditionIdMax = 2147483647;
+
+export const SearchBookingServioAvailabilityResponse = zod.object({
+  status: zod.enum(["complete", "partial", "failed"]),
+  code: zod.string(),
+  message: zod.string(),
+  checkedAt: zod.string(),
+  query: zod.object({
+    checkIn: zod
+      .string()
+      .regex(searchBookingServioAvailabilityResponseQueryCheckInRegExp),
+    checkOut: zod
+      .string()
+      .regex(searchBookingServioAvailabilityResponseQueryCheckOutRegExp),
+    adults: zod
+      .number()
+      .min(1)
+      .max(searchBookingServioAvailabilityResponseQueryAdultsMax),
+    childAges: zod
+      .array(
+        zod
+          .number()
+          .min(searchBookingServioAvailabilityResponseQueryChildAgesItemMin)
+          .max(searchBookingServioAvailabilityResponseQueryChildAgesItemMax),
+      )
+      .max(searchBookingServioAvailabilityResponseQueryChildAgesMax),
+    useExtraBed: zod.boolean(),
+    companyId: zod
+      .number()
+      .min(searchBookingServioAvailabilityResponseQueryCompanyIdMin)
+      .max(searchBookingServioAvailabilityResponseQueryCompanyIdMax),
+    companyCodeId: zod
+      .number()
+      .min(searchBookingServioAvailabilityResponseQueryCompanyCodeIdMin)
+      .max(searchBookingServioAvailabilityResponseQueryCompanyCodeIdMax),
+    conditionId: zod
+      .number()
+      .min(searchBookingServioAvailabilityResponseQueryConditionIdMin)
+      .max(searchBookingServioAvailabilityResponseQueryConditionIdMax),
+  }),
+  hotelId: zod.number(),
+  currency: zod.string().nullable(),
+  categories: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      freeRooms: zod.number(),
+      mainPlaces: zod.number(),
+      nearestDate: zod.string().nullable(),
+      rates: zod.array(
+        zod.object({
+          priceListId: zod.number(),
+          name: zod.string(),
+          conditionId: zod.number(),
+          nonRefundable: zod.boolean(),
+          specialRate: zod.boolean(),
+          total: zod.number(),
+          charges: zod.array(
+            zod.object({
+              serviceId: zod.number(),
+              serviceName: zod.string(),
+              date: zod.string(),
+              amount: zod.number(),
+            }),
+          ),
+          restrictions: zod.array(
+            zod.object({
+              code: zod.string(),
+              message: zod.string(),
+              blocksSale: zod.boolean(),
+            }),
+          ),
+          saleAllowed: zod.boolean().nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+
 export const GetBookingEngineOverviewResponse = zod.record(
   zod.string(),
   zod.unknown(),

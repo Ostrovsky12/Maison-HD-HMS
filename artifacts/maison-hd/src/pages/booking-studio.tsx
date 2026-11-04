@@ -14,6 +14,7 @@ import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-medi
 import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
 import { LiqpaySettings } from "@/components/booking/liqpay-settings";
 import { ServioCheck } from "@/components/booking/servio-check";
+import { ServioAvailability } from "@/components/booking/servio-availability";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -301,6 +302,8 @@ export default function BookingStudioPage() {
               )}
             </div>
             <ServioCheck key={organizationId ?? "none"} organizationId={organizationId}
+              role={me.data?.role} dirty={dirty || save.isPending} hasToken={norm.hasServioToken} />
+            <ServioAvailability key={organizationId ?? "none"} organizationId={organizationId}
               role={me.data?.role} dirty={dirty || save.isPending} hasToken={norm.hasServioToken} />
           </Section>
         )}

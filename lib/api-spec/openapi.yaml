@@ -96,6 +96,26 @@ paths:
         "403": { description: Administrator access required }
         "409": { description: Configuration changed during the check }
         "429": { description: Too many checks }
+  /booking-engine/servio/availability:
+    post:
+      operationId: searchBookingServioAvailability
+      tags: [BookingEngine]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingServioSearchInput" }
+      responses:
+        "200":
+          description: Read-only Servio availability and price diagnostic snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioSearchResult" }
+        "400": { description: Invalid search or unverified saved connection }
+        "403": { description: Administrator access required }
+        "404": { description: Organization not found }
+        "409": { description: Connection changed during the search }
+        "429": { description: Too many searches }
   /booking-engine/overview:
     get:
       operationId: getBookingEngineOverview
@@ -2795,6 +2815,79 @@ components:
           type: array
           items: { $ref: '#/components/schemas/BookingLiqpaySeller' }
         callbackConfigured: { type: boolean }
+    BookingServioSearchInput:
+      type: object
+      required: [checkIn, checkOut, adults, childAges, useExtraBed, companyId, companyCodeId, conditionId]
+      properties:
+        checkIn: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        checkOut: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        adults: { type: integer, minimum: 1, maximum: 20 }
+        childAges:
+          type: array
+          maxItems: 10
+          items: { type: integer, minimum: 0, maximum: 17 }
+        useExtraBed: { type: boolean }
+        companyId: { type: integer, minimum: 0, maximum: 2147483647 }
+        companyCodeId: { type: integer, minimum: 0, maximum: 2147483647 }
+        conditionId: { type: integer, minimum: 0, maximum: 2147483647 }
+    BookingServioCharge:
+      type: object
+      required: [serviceId, serviceName, date, amount]
+      properties:
+        serviceId: { type: integer }
+        serviceName: { type: string }
+        date: { type: string }
+        amount: { type: number }
+    BookingServioRestriction:
+      type: object
+      required: [code, message, blocksSale]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        blocksSale: { type: boolean }
+    BookingServioRate:
+      type: object
+      required: [priceListId, name, conditionId, nonRefundable, specialRate, total, charges, restrictions, saleAllowed]
+      properties:
+        priceListId: { type: integer }
+        name: { type: string }
+        conditionId: { type: integer }
+        nonRefundable: { type: boolean }
+        specialRate: { type: boolean }
+        total: { type: number }
+        charges:
+          type: array
+          items: { $ref: "#/components/schemas/BookingServioCharge" }
+        restrictions:
+          type: array
+          items: { $ref: "#/components/schemas/BookingServioRestriction" }
+        saleAllowed: { type: ["boolean", "null"] }
+    BookingServioAvailableCategory:
+      type: object
+      required: [id, name, freeRooms, mainPlaces, nearestDate, rates]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        freeRooms: { type: integer }
+        mainPlaces: { type: integer }
+        nearestDate: { type: ["string", "null"] }
+        rates:
+          type: array
+          items: { $ref: "#/components/schemas/BookingServioRate" }
+    BookingServioSearchResult:
+      type: object
+      required: [status, code, message, checkedAt, query, hotelId, currency, categories]
+      properties:
+        status: { type: string, enum: [complete, partial, failed] }
+        code: { type: string }
+        message: { type: string }
+        checkedAt: { type: string }
+        query: { $ref: "#/components/schemas/BookingServioSearchInput" }
+        hotelId: { type: integer }
+        currency: { type: ["string", "null"] }
+        categories:
+          type: array
+          items: { $ref: "#/components/schemas/BookingServioAvailableCategory" }
     BookingServioCategory:
       type: object
       required: [id, name, hotelId]

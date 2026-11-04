@@ -79,6 +79,93 @@ export interface BookingLiqpaySettings {
   callbackConfigured: boolean;
 }
 
+export interface BookingServioSearchInput {
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  checkIn: string;
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  checkOut: string;
+  /**
+   * @minimum 1
+   * @maximum 20
+   */
+  adults: number;
+  /** @maxItems 10 */
+  childAges: number[];
+  useExtraBed: boolean;
+  /**
+   * @minimum 0
+   * @maximum 2147483647
+   */
+  companyId: number;
+  /**
+   * @minimum 0
+   * @maximum 2147483647
+   */
+  companyCodeId: number;
+  /**
+   * @minimum 0
+   * @maximum 2147483647
+   */
+  conditionId: number;
+}
+
+export interface BookingServioCharge {
+  serviceId: number;
+  serviceName: string;
+  date: string;
+  amount: number;
+}
+
+export interface BookingServioRestriction {
+  code: string;
+  message: string;
+  blocksSale: boolean;
+}
+
+export interface BookingServioRate {
+  priceListId: number;
+  name: string;
+  conditionId: number;
+  nonRefundable: boolean;
+  specialRate: boolean;
+  total: number;
+  charges: BookingServioCharge[];
+  restrictions: BookingServioRestriction[];
+  /** @nullable */
+  saleAllowed: boolean | null;
+}
+
+export interface BookingServioAvailableCategory {
+  id: number;
+  name: string;
+  freeRooms: number;
+  mainPlaces: number;
+  /** @nullable */
+  nearestDate: string | null;
+  rates: BookingServioRate[];
+}
+
+export type BookingServioSearchResultStatus =
+  (typeof BookingServioSearchResultStatus)[keyof typeof BookingServioSearchResultStatus];
+
+export const BookingServioSearchResultStatus = {
+  complete: "complete",
+  partial: "partial",
+  failed: "failed",
+} as const;
+
+export interface BookingServioSearchResult {
+  status: BookingServioSearchResultStatus;
+  code: string;
+  message: string;
+  checkedAt: string;
+  query: BookingServioSearchInput;
+  hotelId: number;
+  /** @nullable */
+  currency: string | null;
+  categories: BookingServioAvailableCategory[];
+}
+
 export interface BookingServioCategory {
   id: number;
   name: string;
