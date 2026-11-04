@@ -5,6 +5,80 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export interface BookingLiqpayInput {
+  /** @minimum 1 */
+  propertyId: number;
+  /** @minimum 1 */
+  legalEntityId: number;
+  /**
+   * @minLength 8
+   * @maxLength 256
+   */
+  publicKey: string;
+  /**
+   * @minLength 8
+   * @maxLength 256
+   */
+  secretKey?: string;
+}
+
+export interface BookingLiqpayCheckInput {
+  /** @minimum 1 */
+  legalEntityId: number;
+}
+
+export type BookingLiqpayVerificationStatus =
+  (typeof BookingLiqpayVerificationStatus)[keyof typeof BookingLiqpayVerificationStatus];
+
+export const BookingLiqpayVerificationStatus = {
+  connected: "connected",
+  failed: "failed",
+  not_checked: "not_checked",
+} as const;
+
+/**
+ * @nullable
+ */
+export type BookingLiqpayVerificationMode =
+  | (typeof BookingLiqpayVerificationMode)[keyof typeof BookingLiqpayVerificationMode]
+  | null;
+
+export const BookingLiqpayVerificationMode = {
+  test: "test",
+  live: "live",
+} as const;
+
+export interface BookingLiqpayVerification {
+  status: BookingLiqpayVerificationStatus;
+  /** @nullable */
+  checkedAt: string | null;
+  /** @nullable */
+  mode: BookingLiqpayVerificationMode;
+  /** @nullable */
+  code: string | null;
+}
+
+export interface BookingLiqpaySeller {
+  id: number;
+  name: string;
+  publicKey: string;
+  hasSecretKey: boolean;
+  verification: BookingLiqpayVerification;
+}
+
+export interface BookingLiqpayProperty {
+  id: number;
+  name: string;
+  /** @nullable */
+  legalEntityId: number | null;
+}
+
+export interface BookingLiqpaySettings {
+  properties: BookingLiqpayProperty[];
+  legalEntities: BookingLiqpaySeller[];
+  callbackConfigured: boolean;
+}
+
 export type BookingEngineInputProvider =
   (typeof BookingEngineInputProvider)[keyof typeof BookingEngineInputProvider];
 
@@ -1923,6 +1997,10 @@ export type BookingEngineLiqpayCallbackBody = {
   /** @maxLength 30000 */
   data: string;
   signature: string;
+};
+
+export type CheckBookingLiqpayConnection200 = BookingLiqpayVerification & {
+  message: string;
 };
 
 export type ListGuideLocationsParams = {

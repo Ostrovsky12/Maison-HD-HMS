@@ -11,6 +11,7 @@ import {
 import type { BookingEngineInput } from "@workspace/api-client-react";
 import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-media-editor";
 import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
+import { LiqpaySettings } from "@/components/booking/liqpay-settings";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -298,6 +299,8 @@ export default function BookingStudioPage() {
             </div>
           </Section>
         )}
+
+        <LiqpaySettings key={organizationId ?? "none"} organizationId={organizationId} role={(me.data as { role?: string } | undefined)?.role} />
 
         <div className="grid lg:grid-cols-[1fr_380px] gap-6 items-start">
           <div className="space-y-6">

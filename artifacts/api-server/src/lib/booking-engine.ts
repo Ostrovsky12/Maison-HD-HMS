@@ -36,6 +36,7 @@ export type BookingEngineConfig = {
   checkInTime: string; checkOutTime: string; terms: string; privacy: string;
   servioBaseUrl: string; servioHotelId: string; servioToken?: string; updatedAt?: string;
   unitMedia?: Record<string, BookingUnitMedia>;
+  liqpayVerification?: Record<string, { fingerprint: string; status: string; checkedAt: string; mode: string; code: string }>;
 };
 
 export function engineConfig(org: any): BookingEngineConfig {

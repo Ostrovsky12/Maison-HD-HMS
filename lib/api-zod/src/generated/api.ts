@@ -3089,6 +3089,99 @@ export const BookingEngineLiqpayCallbackBody = zod.object({
   signature: zod.string(),
 });
 
+export const GetBookingLiqpaySettingsResponse = zod.object({
+  properties: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      legalEntityId: zod.number().nullable(),
+    }),
+  ),
+  legalEntities: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      publicKey: zod.string(),
+      hasSecretKey: zod.boolean(),
+      verification: zod.object({
+        status: zod.enum(["connected", "failed", "not_checked"]),
+        checkedAt: zod.string().nullable(),
+        mode: zod
+          .union([zod.literal("test"), zod.literal("live"), zod.literal(null)])
+          .nullable(),
+        code: zod.string().nullable(),
+      }),
+    }),
+  ),
+  callbackConfigured: zod.boolean(),
+});
+
+export const saveBookingLiqpaySettingsBodyPublicKeyMin = 8;
+export const saveBookingLiqpaySettingsBodyPublicKeyMax = 256;
+
+export const saveBookingLiqpaySettingsBodySecretKeyMin = 8;
+export const saveBookingLiqpaySettingsBodySecretKeyMax = 256;
+
+export const SaveBookingLiqpaySettingsBody = zod.object({
+  propertyId: zod.number().min(1),
+  legalEntityId: zod.number().min(1),
+  publicKey: zod
+    .string()
+    .min(saveBookingLiqpaySettingsBodyPublicKeyMin)
+    .max(saveBookingLiqpaySettingsBodyPublicKeyMax),
+  secretKey: zod
+    .string()
+    .min(saveBookingLiqpaySettingsBodySecretKeyMin)
+    .max(saveBookingLiqpaySettingsBodySecretKeyMax)
+    .optional(),
+});
+
+export const SaveBookingLiqpaySettingsResponse = zod.object({
+  properties: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      legalEntityId: zod.number().nullable(),
+    }),
+  ),
+  legalEntities: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      publicKey: zod.string(),
+      hasSecretKey: zod.boolean(),
+      verification: zod.object({
+        status: zod.enum(["connected", "failed", "not_checked"]),
+        checkedAt: zod.string().nullable(),
+        mode: zod
+          .union([zod.literal("test"), zod.literal("live"), zod.literal(null)])
+          .nullable(),
+        code: zod.string().nullable(),
+      }),
+    }),
+  ),
+  callbackConfigured: zod.boolean(),
+});
+
+export const CheckBookingLiqpayConnectionBody = zod.object({
+  legalEntityId: zod.number().min(1),
+});
+
+export const CheckBookingLiqpayConnectionResponse = zod
+  .object({
+    status: zod.enum(["connected", "failed", "not_checked"]),
+    checkedAt: zod.string().nullable(),
+    mode: zod
+      .union([zod.literal("test"), zod.literal("live"), zod.literal(null)])
+      .nullable(),
+    code: zod.string().nullable(),
+  })
+  .and(
+    zod.object({
+      message: zod.string(),
+    }),
+  );
+
 /**
  * @summary Upload accommodation presentation media without changing PMS inventory
  */

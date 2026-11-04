@@ -65,6 +65,7 @@ describe("100% non-refundable checkout", () => {
     expect(payload.server_url).toContain("/hotel/liqpay-callback");
     expect(res.body.checkoutUrl).toBe("https://www.liqpay.ua/api/3/checkout");
     expect(JSON.stringify(res.body)).not.toContain("test-only-private");
+    expect(f.query.mock.calls.some(([sql]) => sql.includes("FOR SHARE OF p,le"))).toBe(true);
   });
   it("reuses a single merchant/order identity for retries", async () => {
     const first = await checkout(); const second = await checkout();

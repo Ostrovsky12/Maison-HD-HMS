@@ -56,7 +56,7 @@ export function bookingCheckoutRouter(fiscalize: (orderId: string, bookingId: nu
       if (booking.status !== "pending" || !booking.draft_expires_at || new Date(booking.draft_expires_at).getTime() <= Date.now()) {
         await client.query("ROLLBACK"); res.status(410).json({ error: "Час на оплату минув. Не оплачуйте старе посилання; оновіть пошук.", status: "expired" }); return;
       }
-      const merchant = await bookingMerchant(Number(booking.organization_id), Number(booking.unit_id), client);
+      const merchant = await bookingMerchant(Number(booking.organization_id), Number(booking.unit_id), client, true);
       if (!merchant?.liqpay_public_key || !merchant?.liqpay_private_key) {
         await client.query("ROLLBACK"); res.status(503).json({ error: "Готель ще не налаштував онлайн-оплату цього об’єкта. Оплата при заїзді недоступна." }); return;
       }

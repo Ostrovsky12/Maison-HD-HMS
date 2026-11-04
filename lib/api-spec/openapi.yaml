@@ -2353,6 +2353,59 @@ paths:
         '200': { description: Callback accepted or successful payment recorded idempotently. }
         '400': { description: "Signature, seller, order, amount or currency mismatch." }
         '503': { description: Payment recording must be retried. }
+  /booking-engine/liqpay:
+    get:
+      tags: [BookingEngine]
+      operationId: getBookingLiqpaySettings
+      responses:
+        '200':
+          description: Tenant-owned payment configuration without secret keys.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingLiqpaySettings' }
+    put:
+      tags: [BookingEngine]
+      operationId: saveBookingLiqpaySettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingLiqpayInput' }
+      responses:
+        '200':
+          description: Saved encrypted merchant keys and property assignment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingLiqpaySettings' }
+        '400': { description: Invalid keys. }
+        '403': { description: Owner or administrator required. }
+        '404': { description: Property or seller not found in this organization. }
+        '409': { description: Resolve outstanding payments before changing merchant keys. }
+  /booking-engine/liqpay/check:
+    post:
+      tags: [BookingEngine]
+      operationId: checkBookingLiqpayConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingLiqpayCheckInput' }
+      responses:
+        '200':
+          description: Read-only LiqPay authentication result without making a payment.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/BookingLiqpayVerification' }
+                  - type: object
+                    required: [message]
+                    properties:
+                      message: { type: string }
+        '400': { description: Save both merchant keys first. }
+        '403': { description: Owner or administrator required. }
+        '404': { description: Seller not found in this organization. }
+        '409': { description: Keys changed during the check. }
   /booking-engine/media-upload:
     post:
       tags: [BookingEngine]
@@ -2671,6 +2724,54 @@ components:
       bearerFormat: JWT
 
   schemas:
+    BookingLiqpayInput:
+      type: object
+      required: [propertyId, legalEntityId, publicKey]
+      properties:
+        propertyId: { type: integer, minimum: 1 }
+        legalEntityId: { type: integer, minimum: 1 }
+        publicKey: { type: string, minLength: 8, maxLength: 256 }
+        secretKey: { type: string, minLength: 8, maxLength: 256 }
+    BookingLiqpayCheckInput:
+      type: object
+      required: [legalEntityId]
+      properties:
+        legalEntityId: { type: integer, minimum: 1 }
+    BookingLiqpayVerification:
+      type: object
+      required: [status, checkedAt, mode, code]
+      properties:
+        status: { type: string, enum: [connected, failed, not_checked] }
+        checkedAt: { type: [string, 'null'] }
+        mode: { type: [string, 'null'], enum: [test, live, null] }
+        code: { type: [string, 'null'] }
+    BookingLiqpaySeller:
+      type: object
+      required: [id, name, publicKey, hasSecretKey, verification]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        publicKey: { type: string }
+        hasSecretKey: { type: boolean }
+        verification: { $ref: '#/components/schemas/BookingLiqpayVerification' }
+    BookingLiqpayProperty:
+      type: object
+      required: [id, name, legalEntityId]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        legalEntityId: { type: [integer, 'null'] }
+    BookingLiqpaySettings:
+      type: object
+      required: [properties, legalEntities, callbackConfigured]
+      properties:
+        properties:
+          type: array
+          items: { $ref: '#/components/schemas/BookingLiqpayProperty' }
+        legalEntities:
+          type: array
+          items: { $ref: '#/components/schemas/BookingLiqpaySeller' }
+        callbackConfigured: { type: boolean }
     BookingEngineInput:
       type: object
       required: [provider, published, displayName, description, accentColor, logoUrl, phone, email, checkInTime, checkOutTime, terms, privacy, servioBaseUrl, servioHotelId]

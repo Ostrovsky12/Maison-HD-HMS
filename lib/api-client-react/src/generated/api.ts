@@ -29,7 +29,11 @@ import type {
   BookingEngineInput,
   BookingEngineLiqpayCallbackBody,
   BookingEngineView,
+  BookingLiqpayCheckInput,
+  BookingLiqpayInput,
+  BookingLiqpaySettings,
   CancelBookingBody,
+  CheckBookingLiqpayConnection200,
   CompleteHousekeepingTaskBody,
   CreateAddonRequest,
   CreateBookingEngineCheckout200,
@@ -9274,6 +9278,240 @@ export const useBookingEngineLiqpayCallback = <
   TContext
 > => {
   return useMutation(getBookingEngineLiqpayCallbackMutationOptions(options));
+};
+
+export const getGetBookingLiqpaySettingsUrl = () => {
+  return `/api/booking-engine/liqpay`;
+};
+
+export const getBookingLiqpaySettings = async (
+  options?: RequestInit,
+): Promise<BookingLiqpaySettings> => {
+  return customFetch<BookingLiqpaySettings>(getGetBookingLiqpaySettingsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBookingLiqpaySettingsQueryKey = () => {
+  return [`/api/booking-engine/liqpay`] as const;
+};
+
+export const getGetBookingLiqpaySettingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookingLiqpaySettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingLiqpaySettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBookingLiqpaySettingsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookingLiqpaySettings>>
+  > = ({ signal }) => getBookingLiqpaySettings({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingLiqpaySettings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBookingLiqpaySettingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookingLiqpaySettings>>
+>;
+export type GetBookingLiqpaySettingsQueryError = ErrorType<unknown>;
+
+export function useGetBookingLiqpaySettings<
+  TData = Awaited<ReturnType<typeof getBookingLiqpaySettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingLiqpaySettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBookingLiqpaySettingsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSaveBookingLiqpaySettingsUrl = () => {
+  return `/api/booking-engine/liqpay`;
+};
+
+export const saveBookingLiqpaySettings = async (
+  bookingLiqpayInput: BookingLiqpayInput,
+  options?: RequestInit,
+): Promise<BookingLiqpaySettings> => {
+  return customFetch<BookingLiqpaySettings>(getSaveBookingLiqpaySettingsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bookingLiqpayInput),
+  });
+};
+
+export const getSaveBookingLiqpaySettingsMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveBookingLiqpaySettings>>,
+    TError,
+    { data: BodyType<BookingLiqpayInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof saveBookingLiqpaySettings>>,
+  TError,
+  { data: BodyType<BookingLiqpayInput> },
+  TContext
+> => {
+  const mutationKey = ["saveBookingLiqpaySettings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof saveBookingLiqpaySettings>>,
+    { data: BodyType<BookingLiqpayInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return saveBookingLiqpaySettings(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SaveBookingLiqpaySettingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof saveBookingLiqpaySettings>>
+>;
+export type SaveBookingLiqpaySettingsMutationBody =
+  BodyType<BookingLiqpayInput>;
+export type SaveBookingLiqpaySettingsMutationError = ErrorType<void>;
+
+export const useSaveBookingLiqpaySettings = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveBookingLiqpaySettings>>,
+    TError,
+    { data: BodyType<BookingLiqpayInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof saveBookingLiqpaySettings>>,
+  TError,
+  { data: BodyType<BookingLiqpayInput> },
+  TContext
+> => {
+  return useMutation(getSaveBookingLiqpaySettingsMutationOptions(options));
+};
+
+export const getCheckBookingLiqpayConnectionUrl = () => {
+  return `/api/booking-engine/liqpay/check`;
+};
+
+export const checkBookingLiqpayConnection = async (
+  bookingLiqpayCheckInput: BookingLiqpayCheckInput,
+  options?: RequestInit,
+): Promise<CheckBookingLiqpayConnection200> => {
+  return customFetch<CheckBookingLiqpayConnection200>(
+    getCheckBookingLiqpayConnectionUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bookingLiqpayCheckInput),
+    },
+  );
+};
+
+export const getCheckBookingLiqpayConnectionMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkBookingLiqpayConnection>>,
+    TError,
+    { data: BodyType<BookingLiqpayCheckInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof checkBookingLiqpayConnection>>,
+  TError,
+  { data: BodyType<BookingLiqpayCheckInput> },
+  TContext
+> => {
+  const mutationKey = ["checkBookingLiqpayConnection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof checkBookingLiqpayConnection>>,
+    { data: BodyType<BookingLiqpayCheckInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return checkBookingLiqpayConnection(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CheckBookingLiqpayConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof checkBookingLiqpayConnection>>
+>;
+export type CheckBookingLiqpayConnectionMutationBody =
+  BodyType<BookingLiqpayCheckInput>;
+export type CheckBookingLiqpayConnectionMutationError = ErrorType<void>;
+
+export const useCheckBookingLiqpayConnection = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkBookingLiqpayConnection>>,
+    TError,
+    { data: BodyType<BookingLiqpayCheckInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof checkBookingLiqpayConnection>>,
+  TError,
+  { data: BodyType<BookingLiqpayCheckInput> },
+  TContext
+> => {
+  return useMutation(getCheckBookingLiqpayConnectionMutationOptions(options));
 };
 
 /**
