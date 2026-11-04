@@ -104,6 +104,41 @@ describe("Servio read-only availability and pricing", () => {
     delete (p.PriceLists[0].RoomTypes[0] as any).SaleRestrictions;
     expect((await search(available(), p).result).categories[0].rates[0].saleAllowed).toBeNull();
   });
+  it("reports the exact static field path, without disclosing provider values", async () => {
+    const p = prices();
+    (p.PriceLists[0].RoomTypes[0].Services[0].PriceDates[0] as any).Price = "private-value-do-not-return";
+    const response = await search(available(), p).result;
+    expect(response).toMatchObject({ status: "partial", code: "prices_unexpected_response", currency: null });
+    expect(response.message).toContain("PriceLists[0].RoomTypes[0].Services[0].PriceDates[0].Price");
+    expect(response.message).toContain("отримано рядок");
+    expect(JSON.stringify(response)).not.toContain("private-value-do-not-return");
+    expect(response.categories[0]).toMatchObject({ freeRooms: 2, rates: [] });
+  });
+  it.each([
+    ["ValuteShort", (p: any) => { delete p.ValuteShort; }],
+    ["PriceLists[0].IsSpecRate", (p: any) => { delete p.PriceLists[0].IsSpecRate; }],
+    ["PriceLists[0].RoomTypes[0].Services[0].PriceDates[0].Date", (p: any) => { p.PriceLists[0].RoomTypes[0].Services[0].PriceDates[0].Date = "private-date"; }],
+  ])("locates %s protocol errors", async (path, change) => {
+    const p = prices(); change(p);
+    expect((await search(available(), p).result).message).toContain(`Поле ${path}:`);
+  });
+  it("does not discard valid charges because optional prepayment metadata is incomplete", async () => {
+    const p = prices();
+    delete (p.PriceLists[0].RoomTypes[0].SaleRestrictions.MinPay as any).Days;
+    const response = await search(available(), p).result;
+    expect(response).toMatchObject({ status: "complete", currency: "грн" });
+    expect(response.categories[0].rates[0]).toMatchObject({
+      total: 205.35, saleAllowed: null,
+      restrictions: expect.arrayContaining([expect.objectContaining({ code: "MinPay", message: expect.stringContaining("MinPay.Days") })]),
+    });
+  });
+  it("keeps an explicit sales block even when another restriction cannot be parsed", async () => {
+    const p = prices();
+    p.PriceLists[0].RoomTypes[0].SaleRestrictions.ClosedToSale.HasRestrictions = true;
+    (p.PriceLists[0].RoomTypes[0].SaleRestrictions as any).MinStay = { HasRestrictions: true, Days: null };
+    const response = await search(available(), p).result;
+    expect(response.categories[0].rates[0]).toMatchObject({ total: 205.35, saleAllowed: false });
+  });
   it("unknown restrictions do not silently become saleable", async () => {
     const p = prices();
     (p.PriceLists[0].RoomTypes[0].SaleRestrictions as any).MaxStay = { Days: 1 };

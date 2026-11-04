@@ -274,7 +274,9 @@ export function ServioAvailability({ organizationId, role, dirty, hasToken }: {
                     <span className="ml-auto text-xs text-stone-700">Вільно: <b className="font-mono">{cat.freeRooms}</b> · Основних місць: <b className="font-mono">{cat.mainPlaces}</b></span>
                     {cat.nearestDate && <span className="w-full text-[11px] text-stone-500">Найближча дата: {fmtDate(cat.nearestDate.slice(0, 10))}</span>}
                   </div>
-                  {cat.rates.length === 0 ? <p className="px-3 pb-2 text-[11px] text-stone-500">Тарифів не повернуто.</p>
+                  {cat.rates.length === 0 ? <p className="px-3 pb-2 text-[11px] text-stone-500">{result.code.startsWith("prices_")
+                    ? "Тарифи не вдалося перевірити. Дивіться причину вище."
+                    : "Servio не повернув тарифів для цієї категорії."}</p>
                     : <ul>{cat.rates.map((r, i) => <RateRow key={`${r.priceListId}-${r.conditionId}-${i}`} id={`${cat.id}-${i}`} rate={r} currency={result.currency} partial={result.currency === null} />)}</ul>}
                 </li>
               ))}</ul>

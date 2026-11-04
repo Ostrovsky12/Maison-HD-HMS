@@ -60,3 +60,9 @@ A Servio availability/price diagnostic is not a final payable quote or an invent
 **Why:** The vendor describes separate availability, pricing and bill-formation operations; bill formation can recalculate taxes. Category access alone proves neither room availability nor sale eligibility.
 
 **How to apply:** Preserve the returned currency and service/date charges rather than substituting local prices, rack rates or a nightly average. Preserve partial failures without inventing zero prices or zero inventory. Unknown or missing sale restrictions must remain unverified, not implicitly cleared. Before any future checkout, revalidate availability and obtain authoritative final charges. Keep CompanyID and CompanyCodeID distinct; never infer one from the other.
+
+Provider protocol errors need privacy-safe field-level diagnostics, not only a generic unexpected-response label.
+
+**Why:** A real Servio availability response succeeded while pricing was rejected; a screenshot of the generic error could not establish which field or type differed. Synthetic success fixtures cannot establish compatibility with a particular hotel’s service.
+
+**How to apply:** Report static parser paths and expected/actual type names without raw provider values, payloads, arbitrary keys or credentials. Do not claim live pricing compatibility until a real response has validated. Keep monetary validation independent from optional restriction metadata: unverified conditions must block eligibility, not erase otherwise validated charges.
