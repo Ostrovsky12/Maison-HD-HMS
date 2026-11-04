@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BookingEngineInputProvider } from "./bookingEngineInputProvider";
+import type { BookingEngineInputUnitMedia } from "./bookingEngineInputUnitMedia";
 
 export interface BookingEngineInput {
   provider: BookingEngineInputProvider;
@@ -40,4 +41,5 @@ export interface BookingEngineInput {
   /** @maxLength 2000 */
   servioToken?: string;
   clearServioToken?: boolean;
+  unitMedia?: BookingEngineInputUnitMedia;
 }

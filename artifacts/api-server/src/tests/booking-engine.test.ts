@@ -2,9 +2,13 @@ import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ query: vi.fn(), connect: vi.fn(), encrypt: vi.fn() }));
+const fixture = vi.hoisted(() => ({ query: vi.fn(), connect: vi.fn(), encrypt: vi.fn(), upload: vi.fn() }));
 vi.mock("@workspace/db", () => ({ pool: { query: fixture.query, connect: fixture.connect } }));
 vi.mock("../lib/encrypt.js", () => ({ encrypt: fixture.encrypt }));
+vi.mock("../lib/objectStorage.js", () => ({ ObjectStorageService: class {
+  getObjectEntityUploadURL = fixture.upload;
+  normalizeObjectEntityPath() { return "/objects/uploads/qa-only"; }
+} }));
 vi.mock("../lib/auth.js", () => ({
   requireAuth: (req: any, res: any, next: any) => {
     if (!req.headers.authorization) { res.status(401).json({ error: "Unauthorized" }); return; }
@@ -15,7 +19,7 @@ vi.mock("../lib/auth.js", () => ({
     roles.includes(req.user.role) ? next() : res.status(403).json({ error: "Forbidden" }),
 }));
 import router, { publicEngineRouter } from "../routes/booking-engine.js";
-import { engineConfig, engineIssues, engineQuote, engineSalesGuard, publicEngineConfig, validBookingDates } from "../lib/booking-engine.js";
+import { engineConfig, engineIssues, engineQuote, engineSalesGuard, publicEngineConfig, validBookingDates, bookingUnitMedia, validBookingMediaUrl } from "../lib/booking-engine.js";
 
 const app = express();
 app.use(express.json());
@@ -38,12 +42,14 @@ beforeEach(() => {
   vi.clearAllMocks(); units = 2;
   org = { id: 1, name: "Test hotel", slug: "test-hotel", is_active: true, booking_engine_config: ready() };
   fixture.encrypt.mockImplementation(() => "enc:opaque-test-value");
+  fixture.upload.mockResolvedValue("https://storage.example.invalid/upload");
   fixture.connect.mockResolvedValue({ query: fixture.query, release: vi.fn() });
   fixture.query.mockImplementation(async (sql: string, values: any[] = []) => {
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
     if (sql.includes("FROM organizations")) return { rows: values[0] === 2 ? [] : [{ ...org }] };
     if (sql.includes("FROM properties WHERE")) return { rows: [{ id: 10, name: "Property" }] };
     if (sql.includes("count(*)::int AS count")) return { rows: [{ count: units }] };
+    if (sql.includes("FROM units u")) return { rows: [{ id: 11, name: "House", propertyId: 10, propertyName: "Property" }] };
     if (sql.startsWith("UPDATE organizations")) { org.booking_engine_config = JSON.parse(values[1]); return { rows: [] }; }
     if (sql.includes("FROM bookings")) return { rows: [] };
     throw new Error("Unexpected fixture SQL");
@@ -51,6 +57,91 @@ beforeEach(() => {
 });
 
 describe("configuration and tenant isolation", () => {
+  it("provides an authorized direct upload without changing accommodation inventory", async () => {
+    const res = await request(app).post("/api/booking-engine/media-upload").set("Authorization", "Bearer test")
+      .send({ name: "house.jpg", size: 1234, contentType: "image/jpeg" });
+    expect(res.status).toBe(200);
+    expect(res.body.objectPath).toBe("/objects/uploads/qa-only");
+    expect(fixture.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
+  });
+  it("rejects unauthenticated media uploads", async () => {
+    const res = await request(app).post("/api/booking-engine/media-upload").send({ name: "house.jpg", size: 1234, contentType: "image/jpeg" });
+    expect(res.status).toBe(401);
+    expect(fixture.upload).not.toHaveBeenCalled();
+  });
+  it.each([
+    { name: "bad.svg", size: 100, contentType: "image/svg+xml" },
+    { name: "bad.html", size: 100, contentType: "text/html" },
+    { name: "big.jpg", size: 16 * 1024 * 1024, contentType: "image/jpeg" },
+    { name: "big.mp4", size: 251 * 1024 * 1024, contentType: "video/mp4" },
+  ])("rejects unsafe or oversized uploads %j", async body => {
+    const res = await request(app).post("/api/booking-engine/media-upload").set("Authorization", "Bearer test").send(body);
+    expect(res.status).toBe(400);
+    expect(fixture.upload).not.toHaveBeenCalled();
+  });
+  it("blocks uploads for Servio until stable inventory mapping exists", async () => {
+    org.booking_engine_config.provider = "servio";
+    const res = await request(app).post("/api/booking-engine/media-upload").set("Authorization", "Bearer test")
+      .send({ name: "house.jpg", size: 1234, contentType: "image/jpeg" });
+    expect(res.status).toBe(409);
+    expect(fixture.upload).not.toHaveBeenCalled();
+  });
+  it("does not bind local media to an unconnected Servio inventory", async () => {
+    const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send({
+      ...ready(), provider: "servio", unitMedia: { "11": { photos: ["https://example.com/house.jpg"], videoUrl: "", description: "" } },
+    });
+    expect(res.status).toBe(409);
+    expect(fixture.query.mock.calls.some(([sql]) => sql.startsWith("UPDATE organizations"))).toBe(false);
+  });
+  it("saves and reloads owned accommodation galleries, video and full description", async () => {
+    const unitMedia = { "11": { photos: ["https://example.com/house.jpg"], videoUrl: "https://example.com/tour.mp4", description: "Full house description" } };
+    const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send({ ...ready(), unitMedia });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.config.unitMedia).toEqual(unitMedia);
+    const reload = await request(app).get("/api/booking-engine/settings").set("Authorization", "Bearer test");
+    expect(reload.body.config.unitMedia).toEqual(unitMedia);
+    expect(reload.body.units[0].name).toBe("House");
+  });
+  it("preserves saved media for older clients that omit the new optional field", async () => {
+    org.booking_engine_config.unitMedia = { "11": { photos: ["https://example.com/house.jpg"], videoUrl: "", description: "Saved" } };
+    const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send(ready());
+    expect(res.status).toBe(200);
+    expect(res.body.config.unitMedia["11"].description).toBe("Saved");
+  });
+  it("allows explicit removal of a gallery without silently restoring old media", async () => {
+    org.booking_engine_config.unitMedia = { "11": { photos: ["https://example.com/house.jpg"], videoUrl: "", description: "Saved" } };
+    const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send({ ...ready(), unitMedia: {} });
+    expect(res.status).toBe(200);
+    expect(res.body.config.unitMedia).toEqual({});
+  });
+  it("rejects another tenant's accommodation IDs without persisting", async () => {
+    const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send({ ...ready(),
+      unitMedia: { "999": { photos: ["https://example.com/foreign.jpg"], videoUrl: "", description: "" } } });
+    expect(res.status).toBe(403);
+    expect(fixture.query.mock.calls.some(([sql]) => sql.startsWith("UPDATE organizations"))).toBe(false);
+  });
+  it.each(["javascript:alert(1)", "data:image/png;base64,abc", "http://example.com/a.jpg", "//evil.example/a.jpg", "https://user:password@example.com/a.jpg"])("rejects unsafe media URL %s", async url => {
+    const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test").send({ ...ready(),
+      unitMedia: { "11": { photos: [url], videoUrl: "", description: "" } } });
+    expect(res.status).toBe(400);
+    expect(fixture.query).not.toHaveBeenCalled();
+  });
+  it("publishes media only for visible accommodations, never hidden or foreign IDs", async () => {
+    org.booking_engine_config.published = true;
+    org.booking_engine_config.unitMedia = {
+      "11": { photos: ["https://example.com/visible.jpg"], videoUrl: "", description: "Visible" },
+      "999": { photos: ["https://example.com/hidden.jpg"], videoUrl: "", description: "Hidden" },
+    };
+    const res = await request(app).get("/api/public/booking-engine/test-hotel");
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body.config.unitMedia)).toEqual(["11"]);
+    expect(JSON.stringify(res.body)).not.toContain("hidden.jpg");
+  });
+  it("sanitizes legacy malformed media and accepts public object paths", () => {
+    expect(validBookingMediaUrl("/objects/public/house.jpg")).toBe(true);
+    expect(bookingUnitMedia({ "11": { photos: ["javascript:alert(1)", "https://example.com/a.jpg", "https://example.com/a.jpg"], videoUrl: "data:text/html,evil", description: "Real" } }))
+      .toEqual({ "11": { photos: ["https://example.com/a.jpg"], videoUrl: "", description: "Real" } });
+  });
   it("starts as an unpublished local module", () => {
     const config = engineConfig({ name: "Hotel" });
     expect(config.published).toBe(false);

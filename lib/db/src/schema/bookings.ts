@@ -98,6 +98,7 @@ export const bookingsTable = pgTable("bookings", {
   // Notes
   notes: text("notes"),
   internalNotes: text("internal_notes"),
+  bookingPolicyReceipt: jsonb("booking_policy_receipt"),
   tags: jsonb("tags").$type<string[]>().default([]),
 
   // Group booking (multiple units in one reservation)

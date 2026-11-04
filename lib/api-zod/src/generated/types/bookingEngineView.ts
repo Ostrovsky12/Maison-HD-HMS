@@ -9,10 +9,12 @@ import type { BookingEngineViewConfig } from "./bookingEngineViewConfig";
 import type { BookingEngineViewOrganization } from "./bookingEngineViewOrganization";
 import type { BookingEngineViewPropertiesItem } from "./bookingEngineViewPropertiesItem";
 import type { BookingEngineViewReadiness } from "./bookingEngineViewReadiness";
+import type { BookingEngineViewUnitsItem } from "./bookingEngineViewUnitsItem";
 
 export interface BookingEngineView {
   organization: BookingEngineViewOrganization;
   config: BookingEngineViewConfig;
   readiness: BookingEngineViewReadiness;
   properties: BookingEngineViewPropertiesItem[];
+  units?: BookingEngineViewUnitsItem[];
 }

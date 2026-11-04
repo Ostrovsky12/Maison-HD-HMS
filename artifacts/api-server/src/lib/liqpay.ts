@@ -56,7 +56,8 @@ export function verifyLiqPayCallbackWithKey(data: string, signature: string, pri
     .createHash("sha1")
     .update(privateKey + data + privateKey)
     .digest("base64");
-  return expected === signature;
+  const actual = Buffer.from(String(signature)), target = Buffer.from(expected);
+  return actual.length === target.length && crypto.timingSafeEqual(actual, target);
 }
 
 export function parseLiqPayData(data: string): Record<string, any> {

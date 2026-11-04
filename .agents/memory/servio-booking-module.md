@@ -30,3 +30,15 @@ Preserve the booking module's modern visual presentation, with photo galleries, 
 **Why:** The user objected to the replacement with a simplified text-card booking page and explicitly said the module previously had a modern design with photo galleries, video and descriptions.
 
 **How to apply:** Treat the existing visual experience and accommodation media as requirements when changing booking behavior. Locate the actual prior implementation and media sources rather than treating a simplified new page or an older placeholder card as the approved design.
+
+Accommodation photos, video and descriptions are an independent presentation layer, not a replacement for Servio inventory.
+
+**Why:** The user clarified that no screenshot of the earlier module exists; the priority is the ability to add this content without conflicting with Servio's room inventory during synchronization.
+
+**How to apply:** Bind PMS presentation content through stable provider identifiers and explicit mappings, never guessed room-name matches. Synchronization must preserve hotel-authored media and must not let media editing change PMS categories, capacities, availability or rates. Until verified Servio inventory mapping exists, keep its media editing blocked rather than attaching content to unrelated local rooms.
+
+Booking-module sales use 100% online prepayment and a non-refundable tariff with no date changes.
+
+**Why:** The user explicitly requires 100% payment through the module and says guests often do not read the rules. They want the conditions prominent immediately before payment, in a modern experience between Booking.com and Airbnb rather than a plain form.
+
+**How to apply:** Show the full amount and the no-refund/no-date-change conditions beside the payment action. Require a separate, unchecked acknowledgement, not merely generic terms acceptance; retain the accepted wording/version and time. Preserve legally required exceptions rather than implying statutory rights can be waived. Never substitute payment on arrival or a partial percentage, and never infer a successful payment merely from the provider's return URL.

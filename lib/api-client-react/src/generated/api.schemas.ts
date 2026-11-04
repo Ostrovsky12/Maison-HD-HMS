@@ -13,6 +13,17 @@ export const BookingEngineInputProvider = {
   servio: "servio",
 } as const;
 
+export interface BookingUnitMedia {
+  /** @maxItems 30 */
+  photos: string[];
+  /** @maxLength 1000 */
+  videoUrl: string;
+  /** @maxLength 10000 */
+  description: string;
+}
+
+export type BookingEngineInputUnitMedia = { [key: string]: BookingUnitMedia };
+
 export interface BookingEngineInput {
   provider: BookingEngineInputProvider;
   published: boolean;
@@ -46,6 +57,7 @@ export interface BookingEngineInput {
   /** @maxLength 2000 */
   servioToken?: string;
   clearServioToken?: boolean;
+  unitMedia?: BookingEngineInputUnitMedia;
 }
 
 export type BookingEngineViewOrganization = {
@@ -67,11 +79,20 @@ export type BookingEngineViewPropertiesItem = {
   name: string;
 };
 
+export type BookingEngineViewUnitsItem = {
+  id: number;
+  name: string;
+  propertyId: number;
+  propertyName: string;
+  description?: string | null;
+};
+
 export interface BookingEngineView {
   organization: BookingEngineViewOrganization;
   config: BookingEngineViewConfig;
   readiness: BookingEngineViewReadiness;
   properties: BookingEngineViewPropertiesItem[];
+  units?: BookingEngineViewUnitsItem[];
 }
 
 export interface PosterMenuImportOptions {
@@ -1824,6 +1845,84 @@ export type ListIntegrationLogsParams = {
 export type GetMonthlyReportParams = {
   year?: number;
   month?: number;
+};
+
+export type CreateBookingEngineCheckoutBody = {
+  /** @minimum 1 */
+  bookingId: number;
+  guestAccessCode: string;
+  agreeNonRefundable: boolean;
+  tariffPolicyVersion: string;
+};
+
+export type CreateBookingEngineCheckout200Currency =
+  (typeof CreateBookingEngineCheckout200Currency)[keyof typeof CreateBookingEngineCheckout200Currency];
+
+export const CreateBookingEngineCheckout200Currency = {
+  UAH: "UAH",
+} as const;
+
+export type CreateBookingEngineCheckout200Status =
+  (typeof CreateBookingEngineCheckout200Status)[keyof typeof CreateBookingEngineCheckout200Status];
+
+export const CreateBookingEngineCheckout200Status = {
+  awaiting_payment: "awaiting_payment",
+} as const;
+
+export type CreateBookingEngineCheckout200 = {
+  data: string;
+  signature: string;
+  amount: number;
+  currency: CreateBookingEngineCheckout200Currency;
+  checkoutUrl: string;
+  status: CreateBookingEngineCheckout200Status;
+  bookingRef: string;
+};
+
+export type GetBookingEnginePaymentStatusParams = {
+  bookingId: number;
+  code: string;
+};
+
+export type GetBookingEnginePaymentStatus200Status =
+  (typeof GetBookingEnginePaymentStatus200Status)[keyof typeof GetBookingEnginePaymentStatus200Status];
+
+export const GetBookingEnginePaymentStatus200Status = {
+  awaiting_payment: "awaiting_payment",
+  paid: "paid",
+  review: "review",
+  expired: "expired",
+} as const;
+
+export type GetBookingEnginePaymentStatus200PaymentStatus =
+  (typeof GetBookingEnginePaymentStatus200PaymentStatus)[keyof typeof GetBookingEnginePaymentStatus200PaymentStatus];
+
+export const GetBookingEnginePaymentStatus200PaymentStatus = {
+  unpaid: "unpaid",
+  partial: "partial",
+  paid: "paid",
+} as const;
+
+export type GetBookingEnginePaymentStatus200Currency =
+  (typeof GetBookingEnginePaymentStatus200Currency)[keyof typeof GetBookingEnginePaymentStatus200Currency];
+
+export const GetBookingEnginePaymentStatus200Currency = {
+  UAH: "UAH",
+} as const;
+
+export type GetBookingEnginePaymentStatus200 = {
+  status: GetBookingEnginePaymentStatus200Status;
+  paymentStatus: GetBookingEnginePaymentStatus200PaymentStatus;
+  bookingRef: string;
+  totalAmount: number;
+  paidAmount: number;
+  currency: GetBookingEnginePaymentStatus200Currency;
+};
+
+export type BookingEngineLiqpayCallbackBody = {
+  /** @maxLength 30000 */
+  data: string;
+  signature: string;
 };
 
 export type ListGuideLocationsParams = {

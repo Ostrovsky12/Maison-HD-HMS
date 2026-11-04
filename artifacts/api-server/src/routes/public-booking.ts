@@ -16,8 +16,11 @@ import { orchestrateFiscalization, isSubmissionEligible } from "../services/prro
 import { submitDocument } from "./prro.js";
 import { engineConfig, engineSalesGuard, engineQuote, validBookingDates } from "../lib/booking-engine.js";
 import { createHash } from "node:crypto";
+import { BOOKING_TARIFF_POLICY, acceptsBookingTariff, bookingMerchant } from "../lib/booking-tariff.js";
+import { bookingCheckoutRouter, bookingPaymentOrigin } from "./booking-checkout.js";
 
 const router = Router();
+router.use("/booking-engine", bookingCheckoutRouter(retryPublicBookingFiscalization));
 
 // ─── Rate limiters for public endpoints ──────────────────────────────────────
 const bookingCreateLimiter = rateLimit({
@@ -137,7 +140,7 @@ router.get("/availability", async (req, res) => {
     }
 
     // Resolve org from slug
-    const orgs = await db.select({ id: organizationsTable.id })
+    const orgs = await db.select({ id: organizationsTable.id, bookingEngineConfig: organizationsTable.bookingEngineConfig })
       .from(organizationsTable).where(eq(organizationsTable.slug, slug));
     if (!orgs.length) return res.status(404).json({ error: "Organization not found" });
     const orgId = orgs[0].id;
@@ -169,6 +172,9 @@ router.get("/availability", async (req, res) => {
       .where(and(
         inArray(unitsTable.propertyId, propIds),
         ne(bookingsTable.status, "cancelled" as any),
+        sql`NOT (coalesce(${bookingsTable}.utm_source,'')='maison_hd_booking' AND ${bookingsTable}.status::text='pending'
+          AND coalesce(${bookingsTable}.paid_amount,0)=0 AND ${bookingsTable}.draft_expires_at IS NOT NULL
+          AND ${bookingsTable}.draft_expires_at<NOW())`,
         lt(bookingsTable.checkIn, checkOut),
         gt(bookingsTable.checkOut, checkIn),
       ));
@@ -222,9 +228,13 @@ router.get("/availability", async (req, res) => {
       totalPrice: parseFloat(String(u.basePrice || 0)) * nights,
     }));
     if (engineMode) {
+      const media = engineConfig({ booking_engine_config: orgs[0].bookingEngineConfig }).unitMedia ?? {};
       const quoted = await Promise.all(result.map(async u => {
         const quote = await engineQuote(u.id, checkIn, checkOut, Number(guests));
-        return quote ? { ...u, basePrice: quote.nightlyRate, totalPrice: quote.totalPrice } : null;
+        const content = media[String(u.id)];
+        return quote ? { ...u, basePrice: quote.nightlyRate, totalPrice: quote.totalPrice,
+          photos: content?.photos ?? [], videoUrl: content?.videoUrl ?? "",
+          description: content?.description.trim() ? content.description : u.description } : null;
       }));
       result = quoted.filter((u): u is NonNullable<typeof u> => u !== null);
     }
@@ -247,6 +257,9 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
     const engineMode = req.body.bookingEngine === true;
     const salesBlock = await engineSalesGuard(String(slug), engineMode);
     if (salesBlock) return res.status(salesBlock.status).json({ error: salesBlock.error });
+    if (engineMode && !acceptsBookingTariff(req.body)) {
+      return res.status(400).json({ error: "Потрібна окрема згода з неповоротним тарифом, 100% передоплатою та відсутністю зміни дат." });
+    }
     if (engineMode && (!validBookingDates(String(checkIn), String(checkOut))
       || req.body.agreeTerms !== true
       || (!String(email || "").trim() && !String(phone || "").trim())
@@ -285,9 +298,12 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
     }
 
     // Verify org exists by slug
-    const [org] = await db.select({ id: organizationsTable.id })
+    const [org] = await db.select({ id: organizationsTable.id, name: organizationsTable.name, bookingEngineConfig: organizationsTable.bookingEngineConfig })
       .from(organizationsTable).where(eq(organizationsTable.slug, slug));
     if (!org) return res.status(404).json({ error: "Organization not found" });
+    if (!engineMode && org.bookingEngineConfig) {
+      return res.status(409).json({ error: "Скористайтеся новим модулем бронювання зі згодою на тариф і 100% передоплатою." });
+    }
 
     // Get unit info — and verify it belongs to a property in this org
     const [unit] = await db.select({
@@ -300,6 +316,12 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         eq(propertiesTable.organizationId, org.id),
       ));
     if (!unit) return res.status(404).json({ error: "Юніт не знайдено" });
+    if (engineMode) {
+      const merchant = await bookingMerchant(org.id, parsedUnitId, pool);
+      if (!merchant?.liqpay_public_key || !merchant?.liqpay_private_key || !bookingPaymentOrigin()) {
+        return res.status(503).json({ error: "Готель ще не налаштував онлайн-оплату цього об’єкта. Для цього тарифу потрібна 100% передоплата; оплата при заїзді недоступна." });
+      }
+    }
     if (unit.status && !["active", "available"].includes(unit.status as string)) {
       return res.status(409).json({ error: "Номер недоступний для бронювання" });
     }
@@ -376,6 +398,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       const quote = await engineQuote(parsedUnitId, checkIn, checkOut, totalGuests);
       if (!quote) return res.status(409).json({ error: "Обраний номер або тариф більше недоступний. Оновіть пошук." });
       totalAmount = quote.totalPrice;
+      if (totalAmount <= 0) return res.status(409).json({ error: "Для 100% передоплати потрібен коректний додатний тариф." });
       if (typeof req.body.expectedTotal !== "number" || Math.abs(req.body.expectedTotal - totalAmount) > 0.005) {
         return res.status(409).json({ error: "Вартість змінилася. Оновіть пошук і підтвердьте актуальну ціну.", code: "PRICE_CHANGED" });
       }
@@ -389,6 +412,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
     const requestFingerprint = engineMode ? createHash("sha256").update(JSON.stringify([
       parsedUnitId, checkIn, checkOut, totalGuests, firstName.trim(), lastName.trim(),
       normalizedEmail, normalizedPhone, req.body.expectedTotal, req.body.specialRequests || "",
+      BOOKING_TARIFF_POLICY.version,
     ])).digest("hex") : null;
 
     const client = await pool.connect();
@@ -421,6 +445,9 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         await client.query("ROLLBACK");
         return res.status(404).json({ error: "Юніт не знайдено" });
       }
+      if (engineMode) await client.query(`UPDATE bookings SET status='cancelled',updated_at=NOW()
+        WHERE unit_id=$1 AND utm_source='maison_hd_booking' AND status::text='pending' AND coalesce(paid_amount,0)=0
+          AND draft_expires_at IS NOT NULL AND draft_expires_at<NOW()`, [parsedUnitId]);
       if (engineMode) {
         const quote = await engineQuote(parsedUnitId, checkIn, checkOut, totalGuests, client);
         if (!quote || Math.abs(quote.totalPrice - totalAmount) > 0.005) {
@@ -525,6 +552,14 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       if (engineMode) {
         await client.query("UPDATE bookings SET utm_source='maison_hd_booking',utm_content=$2,utm_campaign=$3 WHERE id=$1",
           [booking.id, req.body.bookingRequestId, requestFingerprint]);
+        const brand = engineConfig({ name: org.name, booking_engine_config: org.bookingEngineConfig });
+        const receipt = {
+          ...BOOKING_TARIFF_POLICY, acceptedAt: new Date().toISOString(), bookingRequestId: req.body.bookingRequestId,
+          termsText: brand.terms, privacyText: brand.privacy,
+          unitId: parsedUnitId, checkIn, checkOut, guestsCount: totalGuests, amountMinor: Math.round(totalAmount * 100), currency: "UAH",
+        };
+        await client.query("UPDATE bookings SET booking_policy_receipt=$2::jsonb,draft_expires_at=NOW()+INTERVAL '30 minutes' WHERE id=$1",
+          [booking.id, JSON.stringify(receipt)]);
       }
       await client.query("COMMIT");
     } catch (error) {
@@ -613,6 +648,10 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
 // ─── POST /liqpay/:bookingId — generate payment form (public, guestAccessCode required) ──
 router.post("/liqpay/:bookingId", async (req, res) => {
   try {
+    const source = (await pool.query("SELECT utm_source FROM bookings WHERE id=$1", [Number(req.params.bookingId)])).rows[0];
+    if (source?.utm_source === "maison_hd_booking") {
+      return res.status(409).json({ error: "Для цього бронювання потрібна згода з неповоротним тарифом та оплата через його модуль." });
+    }
     if (!process.env.LIQPAY_PUBLIC_KEY || !process.env.LIQPAY_PRIVATE_KEY) {
       return res.status(503).json({
         error: "liqpay_not_configured",
@@ -682,7 +721,7 @@ router.post("/liqpay/:bookingId", async (req, res) => {
 
 async function retryPublicBookingFiscalization(liqpayOrderId: string, bookingId: number) {
   const paymentLookup = await pool.query(
-    `SELECT p.id, p.amount, b.organization_id, b.legal_entity_id,
+    `SELECT p.id, p.amount, b.organization_id, coalesce(p.legal_entity_id,b.legal_entity_id) AS legal_entity_id,
             pr.legal_entity_id AS property_legal_entity_id
        FROM payments p
        JOIN bookings b ON b.id = p.booking_id

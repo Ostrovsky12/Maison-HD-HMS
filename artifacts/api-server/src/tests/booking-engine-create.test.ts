@@ -8,6 +8,9 @@ vi.mock("@workspace/db", async (importOriginal) => ({
   ...await import("./__mocks__/workspace-db-schema.js"),
 }));
 vi.mock("express-rate-limit", () => ({ default: () => (_req: any, _res: any, next: any) => next() }));
+vi.mock("drizzle-orm", async (importOriginal) => ({
+  ...await importOriginal<any>(), lt: vi.fn(), gt: vi.fn(),
+}));
 vi.mock("../lib/notify.js", () => ({
   sendGuestConfirmationEmail: vi.fn().mockResolvedValue(undefined),
   sendGuestConfirmationSms: vi.fn().mockResolvedValue(undefined),
@@ -24,11 +27,13 @@ const payload = () => ({
   unitId: 10, checkIn: "2030-05-10", checkOut: "2030-05-12",
   firstName: "Test", lastName: "Guest", email: "", phone: "+380000000000",
   adults: 2, children: 0, guestsCount: 2, expectedTotal: 2400, agreeTerms: true, specialRequests: "",
+  agreeNonRefundable: true, tariffPolicyVersion: "nonrefundable-100-v1",
 });
 let org: any, unit: any, saved: any, rate: any, conflict: boolean, loseCommit: boolean;
 
 beforeEach(() => {
   vi.clearAllMocks(); f.selections.length = 0; conflict = false; loseCommit = false; saved = null;
+  vi.stubEnv("PUBLIC_APP_ORIGIN", "https://booking.example.invalid");
   org = { id: 1, name: "Test Hotel", slug: "test", is_active: true,
     booking_engine_config: { provider: "maison", published: true } };
   unit = { id: 10, propertyId: 20, name: "Test Room", basePrice: "1200", capacity: 2, status: "active" };
@@ -44,9 +49,15 @@ beforeEach(() => {
   f.connect.mockResolvedValue({ query: f.query, release: vi.fn() });
   f.query.mockImplementation(async (sql: string, values: any[] = []) => {
     if (sql.includes("FROM organizations")) return { rows: [org] };
+    if (sql.includes("JOIN legal_entities")) return { rows: [{ id: 7, liqpay_public_key: "test-public", liqpay_private_key: "test-private" }] };
     if (sql.includes("LEFT JOIN LATERAL")) return { rows: [rate] };
     if (sql === "COMMIT" && loseCommit) { loseCommit = false; throw new Error("Commit acknowledgement lost"); }
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql) || sql.includes("pg_advisory_xact_lock")) return { rows: [] };
+    if (sql.startsWith("UPDATE bookings SET status=")) return { rows: [] };
+    if (sql.startsWith("UPDATE bookings SET booking_policy_receipt=")) {
+      saved.booking_policy_receipt = JSON.parse(values[1]); return { rows: [] };
+    }
+    if (sql.startsWith("SELECT utm_source")) return { rows: saved ? [{ utm_source: "maison_hd_booking" }] : [] };
     if (sql.startsWith("SELECT * FROM bookings")) return { rows: saved ? [{ ...saved }] : [] };
     if (sql.includes("SELECT id FROM units")) return { rows: [{ id: 10 }] };
     if (sql.includes("FROM bookings") && sql.includes("unit_id")) return { rows: conflict ? [{ id: 99 }] : [] };
@@ -69,6 +80,18 @@ function prepare() { f.selections.length = 0; f.selections.push([org], [unit], [
 function post(extra = {}) { prepare(); return request(app).post("/api/public/bookings").send({ ...payload(), ...extra }); }
 
 describe("new module booking submission", () => {
+  it("returns saved media and description alongside real quoted availability", async () => {
+    org.bookingEngineConfig = { ...org.booking_engine_config, unitMedia: {
+      "10": { photos: ["https://example.com/house.jpg"], videoUrl: "https://example.com/tour.mp4", description: "Full house description" },
+    } };
+    f.selections.push([org], [{ id: 20 }], [], [{ ...unit, description: "Inventory description", propertyName: "Test Hotel" }]);
+    const res = await request(app).get("/api/public/availability?slug=test&engine=1&propertyId=20&checkIn=2030-05-10&checkOut=2030-05-12&guests=2");
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.units[0].photos).toEqual(["https://example.com/house.jpg"]);
+    expect(res.body.units[0].videoUrl).toBe("https://example.com/tour.mp4");
+    expect(res.body.units[0].description).toBe("Full house description");
+    expect(res.body.units[0].totalPrice).toBe(2400);
+  });
   it("creates an actual local pending booking with server-calculated amount and durable request identity", async () => {
     const res = await post();
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -77,6 +100,10 @@ describe("new module booking submission", () => {
     expect(res.body.booking.guestAccessCode).toHaveLength(20);
     expect(saved.utm_content).toBe(payload().bookingRequestId);
     expect(saved.utm_campaign).toHaveLength(64);
+    expect(saved.booking_policy_receipt.prepaymentPercent).toBe(100);
+    expect(saved.booking_policy_receipt.acknowledgementText).toContain("повернення коштів і зміна дат не передбачені");
+    expect(saved.booking_policy_receipt.acceptedAt).toBeTruthy();
+    expect(saved.booking_policy_receipt.amountMinor).toBe(240000);
     expect(f.query.mock.calls.some(([sql]) => sql.includes("FOR SHARE"))).toBe(true);
   });
   it("replays the same result rather than inserting a duplicate", async () => {
@@ -122,8 +149,13 @@ describe("new module booking submission", () => {
     expect((await post()).status).toBe(403);
     expect(saved).toBeNull();
   });
+  it("cannot use the legacy payment form to bypass tariff consent", async () => {
+    await post();
+    const res = await request(app).post("/api/public/liqpay/100").send({ guestAccessCode: saved.guest_access_code });
+    expect(res.status).toBe(409);
+  });
   it.each([
-    { agreeTerms: false }, { bookingRequestId: "" }, { checkIn: "2030-02-30" },
+    { agreeTerms: false }, { agreeNonRefundable: false }, { tariffPolicyVersion: "old-policy" }, { bookingRequestId: "" }, { checkIn: "2030-02-30" },
     { email: "not-an-email" }, { phone: "", email: "" }, { guestsCount: 3 },
     { adults: 1.5 }, { children: 1 }, { addonIds: ["spa"] }, { promoCode: "FAKE" },
   ])("validates the complete contract before creating %j", async extra => {

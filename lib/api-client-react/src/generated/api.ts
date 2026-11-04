@@ -27,10 +27,13 @@ import type {
   BookingCalendarResponse,
   BookingDetail,
   BookingEngineInput,
+  BookingEngineLiqpayCallbackBody,
   BookingEngineView,
   CancelBookingBody,
   CompleteHousekeepingTaskBody,
   CreateAddonRequest,
+  CreateBookingEngineCheckout200,
+  CreateBookingEngineCheckoutBody,
   CreateBookingRequest,
   CreateGuestRequest,
   CreateHousekeepingTaskRequest,
@@ -52,6 +55,8 @@ import type {
   GenerateForecastParams,
   GenerateForecastResponse,
   GetBookingEngineOverview200,
+  GetBookingEnginePaymentStatus200,
+  GetBookingEnginePaymentStatusParams,
   GetBookingsCalendarParams,
   GetDashboardAnalyticsParams,
   GetMonthlyReportParams,
@@ -8989,6 +8994,373 @@ export function useGetAnalyticsSummary<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+export const getCreateBookingEngineCheckoutUrl = (slug: string) => {
+  return `/api/public/booking-engine/${slug}/checkout`;
+};
+
+export const createBookingEngineCheckout = async (
+  slug: string,
+  createBookingEngineCheckoutBody: CreateBookingEngineCheckoutBody,
+  options?: RequestInit,
+): Promise<CreateBookingEngineCheckout200> => {
+  return customFetch<CreateBookingEngineCheckout200>(
+    getCreateBookingEngineCheckoutUrl(slug),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createBookingEngineCheckoutBody),
+    },
+  );
+};
+
+export const getCreateBookingEngineCheckoutMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createBookingEngineCheckout>>,
+    TError,
+    { slug: string; data: BodyType<CreateBookingEngineCheckoutBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createBookingEngineCheckout>>,
+  TError,
+  { slug: string; data: BodyType<CreateBookingEngineCheckoutBody> },
+  TContext
+> => {
+  const mutationKey = ["createBookingEngineCheckout"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createBookingEngineCheckout>>,
+    { slug: string; data: BodyType<CreateBookingEngineCheckoutBody> }
+  > = (props) => {
+    const { slug, data } = props ?? {};
+
+    return createBookingEngineCheckout(slug, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateBookingEngineCheckoutMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createBookingEngineCheckout>>
+>;
+export type CreateBookingEngineCheckoutMutationBody =
+  BodyType<CreateBookingEngineCheckoutBody>;
+export type CreateBookingEngineCheckoutMutationError = ErrorType<void>;
+
+export const useCreateBookingEngineCheckout = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createBookingEngineCheckout>>,
+    TError,
+    { slug: string; data: BodyType<CreateBookingEngineCheckoutBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createBookingEngineCheckout>>,
+  TError,
+  { slug: string; data: BodyType<CreateBookingEngineCheckoutBody> },
+  TContext
+> => {
+  return useMutation(getCreateBookingEngineCheckoutMutationOptions(options));
+};
+
+export const getGetBookingEnginePaymentStatusUrl = (
+  slug: string,
+  params: GetBookingEnginePaymentStatusParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/public/booking-engine/${slug}/payment-status?${stringifiedParams}`
+    : `/api/public/booking-engine/${slug}/payment-status`;
+};
+
+export const getBookingEnginePaymentStatus = async (
+  slug: string,
+  params: GetBookingEnginePaymentStatusParams,
+  options?: RequestInit,
+): Promise<GetBookingEnginePaymentStatus200> => {
+  return customFetch<GetBookingEnginePaymentStatus200>(
+    getGetBookingEnginePaymentStatusUrl(slug, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetBookingEnginePaymentStatusQueryKey = (
+  slug: string,
+  params?: GetBookingEnginePaymentStatusParams,
+) => {
+  return [
+    `/api/public/booking-engine/${slug}/payment-status`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetBookingEnginePaymentStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookingEnginePaymentStatus>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  params: GetBookingEnginePaymentStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBookingEnginePaymentStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetBookingEnginePaymentStatusQueryKey(slug, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookingEnginePaymentStatus>>
+  > = ({ signal }) =>
+    getBookingEnginePaymentStatus(slug, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!slug,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingEnginePaymentStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBookingEnginePaymentStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookingEnginePaymentStatus>>
+>;
+export type GetBookingEnginePaymentStatusQueryError = ErrorType<void>;
+
+export function useGetBookingEnginePaymentStatus<
+  TData = Awaited<ReturnType<typeof getBookingEnginePaymentStatus>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  params: GetBookingEnginePaymentStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBookingEnginePaymentStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBookingEnginePaymentStatusQueryOptions(
+    slug,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getBookingEngineLiqpayCallbackUrl = (slug: string) => {
+  return `/api/public/booking-engine/${slug}/liqpay-callback`;
+};
+
+export const bookingEngineLiqpayCallback = async (
+  slug: string,
+  bookingEngineLiqpayCallbackBody: BookingEngineLiqpayCallbackBody,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getBookingEngineLiqpayCallbackUrl(slug), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bookingEngineLiqpayCallbackBody),
+  });
+};
+
+export const getBookingEngineLiqpayCallbackMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bookingEngineLiqpayCallback>>,
+    TError,
+    { slug: string; data: BodyType<BookingEngineLiqpayCallbackBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof bookingEngineLiqpayCallback>>,
+  TError,
+  { slug: string; data: BodyType<BookingEngineLiqpayCallbackBody> },
+  TContext
+> => {
+  const mutationKey = ["bookingEngineLiqpayCallback"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof bookingEngineLiqpayCallback>>,
+    { slug: string; data: BodyType<BookingEngineLiqpayCallbackBody> }
+  > = (props) => {
+    const { slug, data } = props ?? {};
+
+    return bookingEngineLiqpayCallback(slug, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BookingEngineLiqpayCallbackMutationResult = NonNullable<
+  Awaited<ReturnType<typeof bookingEngineLiqpayCallback>>
+>;
+export type BookingEngineLiqpayCallbackMutationBody =
+  BodyType<BookingEngineLiqpayCallbackBody>;
+export type BookingEngineLiqpayCallbackMutationError = ErrorType<void>;
+
+export const useBookingEngineLiqpayCallback = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bookingEngineLiqpayCallback>>,
+    TError,
+    { slug: string; data: BodyType<BookingEngineLiqpayCallbackBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof bookingEngineLiqpayCallback>>,
+  TError,
+  { slug: string; data: BodyType<BookingEngineLiqpayCallbackBody> },
+  TContext
+> => {
+  return useMutation(getBookingEngineLiqpayCallbackMutationOptions(options));
+};
+
+/**
+ * @summary Upload accommodation presentation media without changing PMS inventory
+ */
+export const getRequestBookingMediaUploadUrl = () => {
+  return `/api/booking-engine/media-upload`;
+};
+
+export const requestBookingMediaUpload = async (
+  uploadUrlRequest: UploadUrlRequest,
+  options?: RequestInit,
+): Promise<UploadUrlResponse> => {
+  return customFetch<UploadUrlResponse>(getRequestBookingMediaUploadUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(uploadUrlRequest),
+  });
+};
+
+export const getRequestBookingMediaUploadMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestBookingMediaUpload>>,
+    TError,
+    { data: BodyType<UploadUrlRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestBookingMediaUpload>>,
+  TError,
+  { data: BodyType<UploadUrlRequest> },
+  TContext
+> => {
+  const mutationKey = ["requestBookingMediaUpload"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestBookingMediaUpload>>,
+    { data: BodyType<UploadUrlRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestBookingMediaUpload(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestBookingMediaUploadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestBookingMediaUpload>>
+>;
+export type RequestBookingMediaUploadMutationBody = BodyType<UploadUrlRequest>;
+export type RequestBookingMediaUploadMutationError = ErrorType<void>;
+
+/**
+ * @summary Upload accommodation presentation media without changing PMS inventory
+ */
+export const useRequestBookingMediaUpload = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestBookingMediaUpload>>,
+    TError,
+    { data: BodyType<UploadUrlRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestBookingMediaUpload>>,
+  TError,
+  { data: BodyType<UploadUrlRequest> },
+  TContext
+> => {
+  return useMutation(getRequestBookingMediaUploadMutationOptions(options));
+};
 
 /**
  * @summary Request a presigned URL for file upload

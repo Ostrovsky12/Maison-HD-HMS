@@ -2270,6 +2270,114 @@ paths:
               schema:
                 $ref: "#/components/schemas/AnalyticsSummary"
 
+  /public/booking-engine/{slug}/checkout:
+    post:
+      tags: [BookingEngine]
+      operationId: createBookingEngineCheckout
+      parameters:
+        - { in: path, name: slug, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId, guestAccessCode, agreeNonRefundable, tariffPolicyVersion]
+              properties:
+                bookingId: { type: integer, minimum: 1 }
+                guestAccessCode: { type: string }
+                agreeNonRefundable: { type: boolean }
+                tariffPolicyVersion: { type: string }
+      responses:
+        '200':
+          description: Signed 100 percent checkout for the property's own merchant.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, signature, amount, currency, checkoutUrl, status, bookingRef]
+                properties:
+                  data: { type: string }
+                  signature: { type: string }
+                  amount: { type: number }
+                  currency: { type: string, enum: [UAH] }
+                  checkoutUrl: { type: string }
+                  status: { type: string, enum: [awaiting_payment] }
+                  bookingRef: { type: string }
+        '400': { description: Explicit current tariff consent is required. }
+        '404': { description: Booking or guest bearer code not found. }
+        '409': { description: Existing payment or changed checkout identity. }
+        '410': { description: Reservation payment window expired. }
+        '503': { description: Online payment is unavailable. }
+  /public/booking-engine/{slug}/payment-status:
+    get:
+      tags: [BookingEngine]
+      operationId: getBookingEnginePaymentStatus
+      parameters:
+        - { in: path, name: slug, required: true, schema: { type: string } }
+        - { in: query, name: bookingId, required: true, schema: { type: integer } }
+        - { in: query, name: code, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Persisted payment outcome; return URL flags are not proof of payment.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, paymentStatus, bookingRef, totalAmount, paidAmount, currency]
+                properties:
+                  status: { type: string, enum: [awaiting_payment, paid, review, expired] }
+                  paymentStatus: { type: string, enum: [unpaid, partial, paid] }
+                  bookingRef: { type: string }
+                  totalAmount: { type: number }
+                  paidAmount: { type: number }
+                  currency: { type: string, enum: [UAH] }
+        '404': { description: Booking or guest bearer code not found. }
+  /public/booking-engine/{slug}/liqpay-callback:
+    post:
+      tags: [BookingEngine]
+      operationId: bookingEngineLiqpayCallback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data, signature]
+              properties:
+                data: { type: string, maxLength: 30000 }
+                signature: { type: string }
+      parameters:
+        - { in: path, name: slug, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Callback accepted or successful payment recorded idempotently. }
+        '400': { description: "Signature, seller, order, amount or currency mismatch." }
+        '503': { description: Payment recording must be retried. }
+  /booking-engine/media-upload:
+    post:
+      tags: [BookingEngine]
+      operationId: requestBookingMediaUpload
+      security: [{ bearerAuth: [] }]
+      summary: Upload accommodation presentation media without changing PMS inventory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Upload URL for an authorized hotel operator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          description: Unsupported file type or size.
+        '403':
+          description: Hotel operator access required.
+        '409':
+          description: Servio inventory mapping is not yet verified.
   /storage/uploads/request-url:
     post:
       tags: [Storage]
@@ -2583,6 +2691,20 @@ components:
         servioHotelId: { type: string, maxLength: 50 }
         servioToken: { type: string, maxLength: 2000, writeOnly: true }
         clearServioToken: { type: boolean }
+        unitMedia:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/BookingUnitMedia"
+    BookingUnitMedia:
+      type: object
+      required: [photos, videoUrl, description]
+      properties:
+        photos:
+          type: array
+          maxItems: 30
+          items: { type: string, maxLength: 1000 }
+        videoUrl: { type: string, maxLength: 1000 }
+        description: { type: string, maxLength: 10000 }
     BookingEngineView:
       type: object
       required: [organization, config, readiness, properties]
@@ -2612,6 +2734,17 @@ components:
             properties:
               id: { type: integer }
               name: { type: string }
+        units:
+          type: array
+          items:
+            type: object
+            required: [id, name, propertyId, propertyName]
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              propertyId: { type: integer }
+              propertyName: { type: string }
+              description: { type: string, nullable: true }
     PosterMenuImportInput:
       type: object
       properties:

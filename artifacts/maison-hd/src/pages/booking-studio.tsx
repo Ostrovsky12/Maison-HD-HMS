@@ -9,6 +9,8 @@ import {
   useGetMe,
 } from "@workspace/api-client-react";
 import type { BookingEngineInput } from "@workspace/api-client-react";
+import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-media-editor";
+import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +24,7 @@ import {
 } from "lucide-react";
 
 type Provider = "maison" | "servio";
-type FormState = Omit<BookingEngineInput, "servioToken" | "clearServioToken" | "provider"> & { provider: Provider };
+type FormState = Omit<BookingEngineInput, "servioToken" | "clearServioToken" | "provider" | "unitMedia"> & { provider: Provider; unitMedia: UnitMediaMap };
 
 const str = (v: unknown, d = "") => (typeof v === "string" ? v : d);
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -44,6 +46,7 @@ function normalizeConfig(c: Record<string, unknown> | undefined) {
     privacy: str(cfg.privacy),
     servioBaseUrl: str(cfg.servioBaseUrl),
     servioHotelId: str(cfg.servioHotelId),
+    unitMedia: normalizeUnitMedia(cfg.unitMedia),
   };
   return { form, hasServioToken: cfg.hasServioToken === true, updatedAt: str(cfg.updatedAt) };
 }
@@ -110,6 +113,7 @@ export default function BookingStudioPage() {
   const [token, setToken] = useState("");
   const [clearToken, setClearToken] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [mediaUploading, setMediaUploading] = useState(false);
   const initialized = useRef<number | null>(null);
 
   useEffect(() => { document.title = "Студія онлайн-бронювання — Maison HD"; }, []);
@@ -141,6 +145,9 @@ export default function BookingStudioPage() {
 
   const submit = (override?: Partial<FormState>) => {
     if (!form || save.isPending) return;
+    const bad = Object.entries(form.unitMedia).find(([, m]) => videoUrlError(m.videoUrl) || m.photos.some((ph) => !isAllowedPhoto(ph)));
+    if (bad) { setSaveError(`Контент номера #${bad[0]} містить недопустиме посилання на фото або відео`); return; }
+    if (mediaUploading) { setSaveError("Дочекайтеся завершення завантаження файлів"); return; }
     const payload: BookingEngineInput = { ...form, ...override };
     if (token.trim()) payload.servioToken = token.trim();
     if (clearToken) payload.clearServioToken = true;
@@ -185,6 +192,10 @@ export default function BookingStudioPage() {
 
   const readiness = view.readiness ?? { canPublish: false, issues: [], servioSupported: false };
   const properties = Array.isArray(view.properties) ? view.properties : [];
+  const studioUnits: StudioUnit[] = (view.units ?? []).map((u) => ({
+    id: u.id, name: u.name, propertyId: u.propertyId, propertyName: u.propertyName ?? "", description: u.description ?? "",
+  }));
+  const servioLocked = form.provider === "servio" || norm.form.provider === "servio";
   const isServio = form.provider === "servio";
   const ov = overview.data as unknown as { stats?: Record<string, unknown>; bookings?: Record<string, unknown>[] } | undefined;
   const stats = ov?.stats ?? {};
@@ -205,7 +216,7 @@ export default function BookingStudioPage() {
             <span data-testid="status-published" className={`text-xs font-medium px-2.5 py-1 rounded-full border ${norm.form.published ? "bg-emerald-50 text-emerald-800 border-emerald-200" : "bg-stone-100 text-stone-600 border-stone-200"}`}>
               {norm.form.published ? "Опубліковано" : "Чернетка"}
             </span>
-            <Button data-testid="button-save" onClick={() => submit()} disabled={!dirty || save.isPending}>
+            <Button data-testid="button-save" onClick={() => submit()} disabled={!dirty || save.isPending || mediaUploading}>
               <Save className="w-4 h-4 mr-2" />{save.isPending ? "Збереження..." : "Зберегти"}
             </Button>
           </div>
@@ -352,6 +363,23 @@ export default function BookingStudioPage() {
             </Section>
           </div>
         </div>
+
+        <Section n="06a" title="Контент номерів і будинків" hint="Фото, відео та повний опис на публічній сторінці">
+          {servioLocked ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex gap-2" data-testid="text-media-servio-locked">
+              <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-medium">Редагування медіа недоступне для джерела Servio.</p>
+                <p>Фото й описи прив'язуватимуться до стабільних ідентифікаторів номерів Servio після підключення інтеграції. Зіставлення за назвами чи локальними номерами Maison HD не виконується, щоб уникнути конфліктів під час синхронізації. Збережений раніше контент не видаляється.</p>
+                {form.provider !== norm.form.provider && <p className="text-xs">Збережіть або поверніть джерело Maison HD, щоб продовжити.</p>}
+              </div>
+            </div>
+          ) : (
+            <UnitMediaEditor units={studioUnits} value={form.unitMedia}
+              onChange={(fn) => setForm((f) => (f ? { ...f, unitMedia: fn(f.unitMedia) } : f))}
+              onUploadingChange={setMediaUploading} accent={accent} />
+          )}
+        </Section>
 
         <Section n="07" title="Журнал прямих бронювань" hint="Усі бронювання з джерелом «direct» у Maison HD, не лише з цієї сторінки">
           <div className="flex justify-end -mt-12 mb-4">

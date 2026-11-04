@@ -59,6 +59,14 @@
       "tag": "0007_booking_engine_config",
       "scope": "booking-engine",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793770000000,
+      "tag": "0008_booking_policy_receipt",
+      "scope": "booking-engine",
+      "breakpoints": true
     }
   ]
 }

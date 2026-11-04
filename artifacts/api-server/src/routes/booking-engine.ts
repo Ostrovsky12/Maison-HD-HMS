@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
-import { SaveBookingEngineSettingsBody } from "@workspace/api-zod";
+import { SaveBookingEngineSettingsBody, RequestUploadUrlBody } from "@workspace/api-zod";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { encrypt } from "../lib/encrypt.js";
-import { engineConfig, engineIssues, publicEngineConfig } from "../lib/booking-engine.js";
+import { engineConfig, engineIssues, publicEngineConfig, validBookingMediaUrl } from "../lib/booking-engine.js";
+import { ObjectStorageService } from "../lib/objectStorage.js";
+import { BOOKING_TARIFF_POLICY } from "../lib/booking-tariff.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("super_admin", "owner", "manager", "admin"));
@@ -27,9 +29,11 @@ async function view(orgId: number, client: any = pool) {
       AND u.base_price IS NOT NULL AND u.base_price>=0`, [orgId])).rows[0]?.count || 0;
   const { servioToken, ...safe } = config;
   const issues = engineIssues(config, properties.length, Number(active));
+  const units = (await client.query(`SELECT u.id,u.name,u.description,u.property_id AS "propertyId",p.name AS "propertyName"
+    FROM units u JOIN properties p ON p.id=u.property_id WHERE p.organization_id=$1 ORDER BY p.id,u.id`, [orgId])).rows;
   return { organization: { id: org.id, name: org.name, slug: org.slug },
     config: { ...safe, hasServioToken: !!servioToken },
-    readiness: { canPublish: issues.length === 0, issues, servioSupported: false }, properties };
+    readiness: { canPublish: issues.length === 0, issues, servioSupported: false }, properties, units };
 }
 
 router.get("/settings", async (req: any, res): Promise<void> => {
@@ -38,10 +42,43 @@ router.get("/settings", async (req: any, res): Promise<void> => {
   res.json(result);
 });
 
+router.post("/media-upload", async (req: any, res): Promise<void> => {
+  const parsed = RequestUploadUrlBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "Перевірте файл для завантаження." }); return; }
+  const { name, size, contentType } = parsed.data;
+  const photo = ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(contentType);
+  const video = ["video/mp4", "video/webm", "video/quicktime"].includes(contentType);
+  if ((!photo && !video) || !Number.isSafeInteger(size) || size <= 0
+    || size > (photo ? 15 : 250) * 1024 * 1024 || !name.trim() || name.length > 255) {
+    res.status(400).json({ error: "Оберіть JPEG, PNG, WEBP або GIF до 15 МБ чи MP4, WEBM або MOV до 250 МБ." }); return;
+  }
+  const org = (await pool.query("SELECT id,name,booking_engine_config FROM organizations WHERE id=$1 AND is_active=true", [req.user.organizationId])).rows[0];
+  if (!org) { res.status(404).json({ error: "Готель не знайдено." }); return; }
+  if (engineConfig(org).provider === "servio") {
+    res.status(409).json({ error: "Спершу потрібна перевірена прив’язка номерів Servio. Локальні номери не підмінятимуть його номерний фонд." }); return;
+  }
+  try {
+    const storage = new ObjectStorageService();
+    const uploadURL = await storage.getObjectEntityUploadURL();
+    res.json({ uploadURL, objectPath: storage.normalizeObjectEntityPath(uploadURL), metadata: { name, size, contentType } });
+  } catch {
+    res.status(503).json({ error: "Сховище тимчасово недоступне. Спробуйте завантажити файл пізніше." });
+  }
+});
+
 router.put("/settings", async (req: any, res): Promise<void> => {
   const parsed = SaveBookingEngineSettingsBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Перевірте заповнення полів.", fields: parsed.error.issues.map(i => ({ field: i.path.join("."), message: i.message })) }); return; }
   const input = parsed.data;
+  if (input.unitMedia) {
+    const entries = Object.entries(input.unitMedia);
+    if (entries.length > 500 || entries.some(([id, media]) =>
+      !/^[1-9]\d{0,9}$/.test(id) || Number(id) > 2147483647
+      || media.photos.some(url => !validBookingMediaUrl(url))
+      || (!!media.videoUrl && !validBookingMediaUrl(media.videoUrl)))) {
+      res.status(400).json({ error: "Для фото й відео потрібні HTTPS-посилання або публічні файли сховища. Перевірте номери об’єктів." }); return;
+    }
+  }
   for (const key of ["logoUrl", "servioBaseUrl"] as const) {
     if (!input[key]) continue;
     try {
@@ -59,7 +96,21 @@ router.put("/settings", async (req: any, res): Promise<void> => {
       "SELECT id,name,phone,email,booking_engine_config FROM organizations WHERE id=$1 AND is_active=true FOR UPDATE", [req.user.organizationId]);
     if (!rows[0]) { await client.query("ROLLBACK"); res.status(404).json({ error: "Готель не знайдено." }); return; }
     const old = engineConfig(rows[0]);
-    const { servioToken, clearServioToken, ...editable } = input;
+    const { servioToken, clearServioToken, unitMedia, ...editable } = input;
+    if (editable.provider === "servio" && unitMedia
+      && JSON.stringify(unitMedia) !== JSON.stringify(old.unitMedia ?? {})) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ error: "Медіа для Servio можна редагувати лише після перевіреної прив’язки його номерного фонду. Локальні номери не використовуються замість Servio." }); return;
+    }
+    if (unitMedia && Object.keys(unitMedia).length) {
+      const ids = Object.keys(unitMedia).map(Number);
+      const owned = await client.query(`SELECT u.id FROM units u JOIN properties p ON p.id=u.property_id
+        WHERE p.organization_id=$1 AND u.id=ANY($2::int[])`, [req.user.organizationId, ids]);
+      const ownedIds = new Set(owned.rows.map((row: any) => Number(row.id)));
+      if (ids.some(id => !ownedIds.has(id))) {
+        await client.query("ROLLBACK"); res.status(403).json({ error: "Медіа можна змінювати лише для номерів і будинків вашого готелю." }); return;
+      }
+    }
     if (old.provider !== editable.provider || old.servioBaseUrl !== editable.servioBaseUrl || old.servioHotelId !== editable.servioHotelId) {
       const active = await client.query(`SELECT id FROM bookings WHERE organization_id=$1
         AND utm_source='maison_hd_booking' AND status::text NOT IN ('cancelled','checked_out') LIMIT 1`, [req.user.organizationId]);
@@ -69,6 +120,7 @@ router.put("/settings", async (req: any, res): Promise<void> => {
       }
     }
     const config = { ...editable, displayName: editable.displayName.trim(), updatedAt: new Date().toISOString(),
+      unitMedia: unitMedia ?? old.unitMedia ?? {},
       servioToken: clearServioToken ? undefined : servioToken?.trim() ? encrypt(servioToken.trim())! : old.servioToken };
     // Saving a new upstream identity cannot retain a different account's bearer token.
     if (!servioToken?.trim() && (old.servioBaseUrl !== config.servioBaseUrl || old.servioHotelId !== config.servioHotelId)) {
@@ -120,6 +172,9 @@ publicEngineRouter.get("/:slug", async (req, res): Promise<void> => {
   if (config.provider === "servio") { res.status(503).json({ error: "Онлайн-бронювання Servio ще не підключено." }); return; }
   if (!config.published) { res.status(404).json({ error: "Сторінка бронювання ще не опублікована." }); return; }
   const properties = (await pool.query("SELECT id,name FROM properties WHERE organization_id=$1 ORDER BY id", [org.id])).rows;
-  res.json({ organization: { name: org.name, slug: org.slug }, config: publicEngineConfig(config), properties, currency: "UAH" });
+  const visibleUnits = (await pool.query(`SELECT u.id FROM units u JOIN properties p ON p.id=u.property_id
+    WHERE p.organization_id=$1 AND u.status='active' AND coalesce(u.is_hidden,false)=false`, [org.id])).rows;
+  res.json({ organization: { name: org.name, slug: org.slug }, config: publicEngineConfig(config, visibleUnits.map((unit: any) => unit.id)), properties, currency: "UAH",
+    tariffPolicy: BOOKING_TARIFF_POLICY });
 });
 export default router;

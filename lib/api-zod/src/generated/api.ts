@@ -25,6 +25,17 @@ export const GetBookingEngineSettingsResponse = zod.object({
       name: zod.string(),
     }),
   ),
+  units: zod
+    .array(
+      zod.object({
+        id: zod.number(),
+        name: zod.string(),
+        propertyId: zod.number(),
+        propertyName: zod.string(),
+        description: zod.string().nullish(),
+      }),
+    )
+    .optional(),
 });
 
 export const saveBookingEngineSettingsBodyDisplayNameMax = 120;
@@ -55,6 +66,14 @@ export const saveBookingEngineSettingsBodyServioBaseUrlMax = 1000;
 export const saveBookingEngineSettingsBodyServioHotelIdMax = 50;
 
 export const saveBookingEngineSettingsBodyServioTokenMax = 2000;
+
+export const saveBookingEngineSettingsBodyUnitMediaPhotosItemMax = 1000;
+
+export const saveBookingEngineSettingsBodyUnitMediaPhotosMax = 30;
+
+export const saveBookingEngineSettingsBodyUnitMediaVideoUrlMax = 1000;
+
+export const saveBookingEngineSettingsBodyUnitMediaDescriptionMax = 10000;
 
 export const SaveBookingEngineSettingsBody = zod.object({
   provider: zod.enum(["maison", "servio"]),
@@ -89,6 +108,26 @@ export const SaveBookingEngineSettingsBody = zod.object({
     .max(saveBookingEngineSettingsBodyServioTokenMax)
     .optional(),
   clearServioToken: zod.boolean().optional(),
+  unitMedia: zod
+    .record(
+      zod.string(),
+      zod.object({
+        photos: zod
+          .array(
+            zod
+              .string()
+              .max(saveBookingEngineSettingsBodyUnitMediaPhotosItemMax),
+          )
+          .max(saveBookingEngineSettingsBodyUnitMediaPhotosMax),
+        videoUrl: zod
+          .string()
+          .max(saveBookingEngineSettingsBodyUnitMediaVideoUrlMax),
+        description: zod
+          .string()
+          .max(saveBookingEngineSettingsBodyUnitMediaDescriptionMax),
+      }),
+    )
+    .optional(),
 });
 
 export const SaveBookingEngineSettingsResponse = zod.object({
@@ -109,6 +148,17 @@ export const SaveBookingEngineSettingsResponse = zod.object({
       name: zod.string(),
     }),
   ),
+  units: zod
+    .array(
+      zod.object({
+        id: zod.number(),
+        name: zod.string(),
+        propertyId: zod.number(),
+        propertyName: zod.string(),
+        description: zod.string().nullish(),
+      }),
+    )
+    .optional(),
 });
 
 export const GetBookingEngineOverviewResponse = zod.record(
@@ -2987,6 +3037,78 @@ export const GetAnalyticsSummaryResponse = zod.object({
       createdAt: zod.date(),
     }),
   ),
+});
+
+export const CreateBookingEngineCheckoutParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const CreateBookingEngineCheckoutBody = zod.object({
+  bookingId: zod.number().min(1),
+  guestAccessCode: zod.string(),
+  agreeNonRefundable: zod.boolean(),
+  tariffPolicyVersion: zod.string(),
+});
+
+export const CreateBookingEngineCheckoutResponse = zod.object({
+  data: zod.string(),
+  signature: zod.string(),
+  amount: zod.number(),
+  currency: zod.enum(["UAH"]),
+  checkoutUrl: zod.string(),
+  status: zod.enum(["awaiting_payment"]),
+  bookingRef: zod.string(),
+});
+
+export const GetBookingEnginePaymentStatusParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetBookingEnginePaymentStatusQueryParams = zod.object({
+  bookingId: zod.coerce.number(),
+  code: zod.coerce.string(),
+});
+
+export const GetBookingEnginePaymentStatusResponse = zod.object({
+  status: zod.enum(["awaiting_payment", "paid", "review", "expired"]),
+  paymentStatus: zod.enum(["unpaid", "partial", "paid"]),
+  bookingRef: zod.string(),
+  totalAmount: zod.number(),
+  paidAmount: zod.number(),
+  currency: zod.enum(["UAH"]),
+});
+
+export const BookingEngineLiqpayCallbackParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const bookingEngineLiqpayCallbackBodyDataMax = 30000;
+
+export const BookingEngineLiqpayCallbackBody = zod.object({
+  data: zod.string().max(bookingEngineLiqpayCallbackBodyDataMax),
+  signature: zod.string(),
+});
+
+/**
+ * @summary Upload accommodation presentation media without changing PMS inventory
+ */
+
+export const RequestBookingMediaUploadBody = zod.object({
+  name: zod.string().min(1),
+  size: zod.number().min(1),
+  contentType: zod.string().min(1),
+});
+
+export const RequestBookingMediaUploadResponse = zod.object({
+  uploadURL: zod.string().url(),
+  objectPath: zod.string(),
+  metadata: zod
+    .object({
+      name: zod.string().min(1),
+      size: zod.number().min(1),
+      contentType: zod.string().min(1),
+    })
+    .optional(),
 });
 
 /**

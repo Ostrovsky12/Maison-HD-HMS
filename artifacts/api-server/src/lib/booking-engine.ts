@@ -1,10 +1,41 @@
 import { pool } from "@workspace/db";
 
+export type BookingUnitMedia = { photos: string[]; videoUrl: string; description: string };
+
+export function validBookingMediaUrl(value: string): boolean {
+  if (value.startsWith("/")) {
+    if (!/^\/(?:objects|api\/storage\/(?:objects|public-objects))\//.test(value)) return false;
+    try {
+      const decoded = decodeURIComponent(value);
+      return !/[\s\\?#]/.test(decoded) && decoded.split("/").every(part => part !== "." && part !== "..");
+    } catch { return false; }
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.hash;
+  } catch { return false; }
+}
+
+export function bookingUnitMedia(raw: unknown): Record<string, BookingUnitMedia> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).slice(0, 500).flatMap(([id, value]) => {
+    if (!/^[1-9]\d{0,9}$/.test(id) || Number(id) > 2147483647 || !value || typeof value !== "object") return [];
+    const media = value as Record<string, unknown>;
+    return [[id, {
+      photos: [...new Set((Array.isArray(media.photos) ? media.photos : [])
+        .filter((u): u is string => typeof u === "string" && u.length <= 1000 && validBookingMediaUrl(u)).slice(0, 30))],
+      videoUrl: typeof media.videoUrl === "string" && media.videoUrl.length <= 1000 && validBookingMediaUrl(media.videoUrl) ? media.videoUrl : "",
+      description: typeof media.description === "string" ? media.description.slice(0, 10000) : "",
+    }]];
+  }));
+}
+
 export type BookingEngineConfig = {
   provider: "maison" | "servio"; published: boolean; displayName: string;
   description: string; accentColor: string; logoUrl: string; phone: string; email: string;
   checkInTime: string; checkOutTime: string; terms: string; privacy: string;
   servioBaseUrl: string; servioHotelId: string; servioToken?: string; updatedAt?: string;
+  unitMedia?: Record<string, BookingUnitMedia>;
 };
 
 export function engineConfig(org: any): BookingEngineConfig {
@@ -15,6 +46,7 @@ export function engineConfig(org: any): BookingEngineConfig {
     email: org.email || "", checkInTime: "14:00", checkOutTime: "12:00",
     terms: "", privacy: "", servioBaseUrl: "", servioHotelId: "",
     ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}),
+    unitMedia: bookingUnitMedia(raw?.unitMedia),
   };
 }
 
@@ -30,11 +62,13 @@ export function engineIssues(config: BookingEngineConfig, properties: number, ac
   return issues;
 }
 
-export function publicEngineConfig(config: BookingEngineConfig) {
+export function publicEngineConfig(config: BookingEngineConfig, visibleUnitIds: number[] = []) {
   const { provider, published, displayName, description, accentColor, logoUrl, phone, email,
     checkInTime, checkOutTime, terms, privacy } = config;
+  const visible = new Set(visibleUnitIds.map(String));
+  const unitMedia = Object.fromEntries(Object.entries(bookingUnitMedia(config.unitMedia)).filter(([id]) => visible.has(id)));
   return { provider, published, displayName, description, accentColor, logoUrl, phone, email,
-    checkInTime, checkOutTime, terms, privacy };
+    checkInTime, checkOutTime, terms, privacy, unitMedia };
 }
 
 /** Existing legacy /book remains available until a tenant explicitly configures this product.
