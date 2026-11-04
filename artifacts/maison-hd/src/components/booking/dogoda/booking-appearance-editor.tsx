@@ -1,4 +1,5 @@
 import { Copy, ExternalLink, RotateCcw } from "lucide-react";
+import { DogodaLogo } from "./dogoda-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,6 +87,7 @@ export function BookingAppearanceEditor({ value: v, onChange, disabled, previewU
         style={{ background: v.backgroundColor, color: v.textColor }}>
         {hero && <img src={hero} alt="" className="w-full h-24 object-cover" />}
         <div className="p-4 space-y-3">
+          {isDogoda && <DogodaLogo background={v.backgroundColor} className="w-40 h-auto" />}
           <p className="text-lg" style={{ fontFamily: v.font === "brand" ? '"DOGODA Orchidea", serif' : "system-ui, sans-serif" }}>Пора видихнути</p>
           <div className="rounded-lg p-3 text-xs" style={{ background: v.surfaceColor }}>
             <span style={{ color: v.mutedColor }}>Будиночок · до 4 гостей</span>

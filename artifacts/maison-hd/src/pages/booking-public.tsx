@@ -9,6 +9,7 @@ import { photoList, resolvePhotoUrl } from "@/lib/booking-media";
 import { normalizeAppearance, type BookingAppearanceValue, type CatalogItem } from "@/lib/booking-appearance";
 import { DogodaTheme } from "@/components/booking/dogoda/dogoda-theme";
 import { DogodaShowcase } from "@/components/booking/dogoda/dogoda-showcase";
+import { DogodaLogo } from "@/components/booking/dogoda/dogoda-logo";
 import {
   captureReturnFromUrl, clearPending, clearReturn, loadPending, loadReturn, parseTariffPolicy, redirectToLiqPay, savePending,
   type PendingCheckout, type ReturnRef,
@@ -270,11 +271,11 @@ export default function BookingPublicPage() {
 
   const header = (
     <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-stone-200">
-      <div className="max-w-6xl mx-auto px-5 h-16 flex items-center justify-between gap-4">
+      <div className={`max-w-6xl mx-auto px-5 ${ap ? "h-24" : "h-16"} flex items-center justify-between gap-4`}>
         <div className="flex items-center gap-3 min-w-0">
-          {logo ? <img src={logo} alt="" className="h-9 w-9 rounded-xl object-cover" /> :
+          {ap ? <DogodaLogo background={ap.surfaceColor} customSrc={logo} className="h-16 w-auto max-w-[160px] shrink-0" /> : logo ? <img src={logo} alt="" className="h-9 w-9 rounded-xl object-cover" /> :
             <div className="h-9 w-9 rounded-xl flex items-center justify-center text-white font-semibold" style={{ background: accent }}>{name.slice(0, 1)}</div>}
-          <p className="font-semibold truncate" data-testid="text-hotel-name">{name}</p>
+          <p className={ap ? "sr-only" : "font-semibold truncate"} data-testid="text-hotel-name">{name}</p>
         </div>
         <div className="flex items-center gap-1 text-sm text-stone-700">
           {phone && <a href={`tel:${phone}`} className="flex items-center gap-1.5 rounded-full px-3 py-2 hover:bg-stone-100"><Phone className="w-4 h-4" /><span className="hidden md:inline">{phone}</span></a>}
@@ -326,7 +327,7 @@ export default function BookingPublicPage() {
                 </div>
               ) : (
                 <div aria-hidden className="hidden md:block aspect-[5/6] rounded-t-[999px] rounded-b-[32px] relative dg-grain" style={{ background: "linear-gradient(180deg, color-mix(in srgb, var(--dg-muted) 55%, var(--dg-bg)), var(--dg-text))" }}>
-                  <p className="dg-hand absolute bottom-8 left-0 right-0 text-center text-4xl" style={{ color: "var(--dg-bg)" }}>dogoda</p>
+                  <DogodaLogo background={ap.textColor} className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[72%] h-auto" />
                 </div>
               )}
             </div>
