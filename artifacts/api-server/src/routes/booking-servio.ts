@@ -30,8 +30,14 @@ router.post("/", editors, limiter, async (req: any, res): Promise<void> => {
     res.status(400).json({ error: "Спочатку збережіть джерело Servio та AccessToken." }); return;
   }
   let base: string, hotelId: number;
-  try { base = servioBaseUrl(config.servioBaseUrl); hotelId = servioHotelId(config.servioHotelId); }
-  catch { res.status(400).json({ error: "Потрібні числовий HotelID і HTTPS-адреса виду https://назва.servio.support/ReservationService_1_10 без додаткових параметрів." }); return; }
+  try { base = servioBaseUrl(config.servioBaseUrl); }
+  catch {
+    res.status(400).json({ error: "Некоректна адреса Servio. Потрібна HTTPS-адреса виду https://назва.servio.support/ReservationService_1_10 без додаткових параметрів.", field: "servioBaseUrl" }); return;
+  }
+  try { hotelId = servioHotelId(config.servioHotelId); }
+  catch {
+    res.status(400).json({ error: "Некоректний HotelID. Введіть ціле число від 1 до 2147483647, надане Servio.", field: "servioHotelId" }); return;
+  }
   let token: string | null;
   try { token = decrypt(config.servioToken); }
   catch { token = null; }

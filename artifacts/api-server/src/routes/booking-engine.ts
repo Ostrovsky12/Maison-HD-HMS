@@ -74,6 +74,8 @@ router.put("/settings", async (req: any, res): Promise<void> => {
   const parsed = SaveBookingEngineSettingsBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Перевірте заповнення полів.", fields: parsed.error.issues.map(i => ({ field: i.path.join("."), message: i.message })) }); return; }
   const input = parsed.data;
+  input.servioBaseUrl = input.servioBaseUrl.trim();
+  input.servioHotelId = input.servioHotelId.trim();
   if (input.unitMedia) {
     const entries = Object.entries(input.unitMedia);
     if (entries.length > 500 || entries.some(([id, media]) =>
@@ -101,9 +103,10 @@ router.put("/settings", async (req: any, res): Promise<void> => {
     if (!rows[0]) { await client.query("ROLLBACK"); res.status(404).json({ error: "Готель не знайдено." }); return; }
     const old = engineConfig(rows[0]);
     const { servioToken, clearServioToken, unitMedia, ...editable } = input;
+    const upstreamChanged = old.servioBaseUrl.trim() !== editable.servioBaseUrl
+      || old.servioHotelId.trim() !== editable.servioHotelId;
     if (!["super_admin", "owner", "admin"].includes(req.user.role)
-      && (servioToken?.trim() || clearServioToken || old.servioBaseUrl !== editable.servioBaseUrl
-        || old.servioHotelId !== editable.servioHotelId || old.provider !== editable.provider)) {
+      && (servioToken?.trim() || clearServioToken || upstreamChanged || old.provider !== editable.provider)) {
       await client.query("ROLLBACK");
       res.status(403).json({ error: "Змінювати підключення PMS може лише власник або адміністратор." }); return;
     }
@@ -121,7 +124,7 @@ router.put("/settings", async (req: any, res): Promise<void> => {
         await client.query("ROLLBACK"); res.status(403).json({ error: "Медіа можна змінювати лише для номерів і будинків вашого готелю." }); return;
       }
     }
-    if (old.provider !== editable.provider || old.servioBaseUrl !== editable.servioBaseUrl || old.servioHotelId !== editable.servioHotelId) {
+    if (old.provider !== editable.provider || upstreamChanged) {
       const active = await client.query(`SELECT id FROM bookings WHERE organization_id=$1
         AND utm_source='maison_hd_booking' AND status::text NOT IN ('cancelled','checked_out') LIMIT 1`, [req.user.organizationId]);
       if (active.rows.length) {
@@ -135,7 +138,7 @@ router.put("/settings", async (req: any, res): Promise<void> => {
       unitMedia: unitMedia ?? old.unitMedia ?? {},
       servioToken: clearServioToken ? undefined : servioToken?.trim() ? encrypt(servioToken.trim())! : old.servioToken };
     // Saving a new upstream identity cannot retain a different account's bearer token.
-    if (!servioToken?.trim() && (old.servioBaseUrl !== config.servioBaseUrl || old.servioHotelId !== config.servioHotelId)) {
+    if (!servioToken?.trim() && upstreamChanged) {
       delete config.servioToken;
     }
     const existing = await view(req.user.organizationId, client);

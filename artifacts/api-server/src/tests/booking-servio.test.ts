@@ -66,7 +66,22 @@ describe("tenant-owned Servio checks", () => {
   });
   it("rejects arbitrary URLs without transmitting a credential", async () => {
     config.servioBaseUrl = "https://attacker.invalid/ReservationService_1_10";
-    expect((await request(app).post("/servio")).status).toBe(400);
+    const response = await request(app).post("/servio");
+    expect(response.status).toBe(400);
+    expect(response.body.field).toBe("servioBaseUrl");
+    expect(f.check).not.toHaveBeenCalled();
+  });
+  it("accepts a saved HotelID with a trailing space without changing credentials", async () => {
+    config.servioHotelId = "7 ";
+    const response = await request(app).post("/servio");
+    expect(response.status).toBe(200);
+    expect(f.check).toHaveBeenCalledWith(config.servioBaseUrl, 7, "fixture-token");
+  });
+  it("identifies an invalid HotelID separately from the API address", async () => {
+    config.servioHotelId = "7x";
+    const response = await request(app).post("/servio");
+    expect(response.status).toBe(400);
+    expect(response.body.field).toBe("servioHotelId");
     expect(f.check).not.toHaveBeenCalled();
   });
   it("does not persist a result against changed credentials", async () => {

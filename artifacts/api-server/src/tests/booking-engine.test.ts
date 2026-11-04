@@ -57,6 +57,19 @@ beforeEach(() => {
 });
 
 describe("configuration and tenant isolation", () => {
+  it("trims copied Servio settings without clearing the same account's saved token", async () => {
+    const base = "https://example.servio.support/ReservationService_1_10";
+    org.booking_engine_config = { ...ready(), provider: "servio", servioBaseUrl: ` ${base} `, servioHotelId: "7 ", servioToken: "enc:existing-token" };
+    const response = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
+      .send({ ...ready(), provider: "servio", servioBaseUrl: ` ${base} `, servioHotelId: "7 " });
+    expect(response.status).toBe(200);
+    expect(org.booking_engine_config.servioBaseUrl).toBe(base);
+    expect(org.booking_engine_config.servioHotelId).toBe("7");
+    expect(org.booking_engine_config.servioToken).toBe("enc:existing-token");
+    expect(response.body.config.hasServioToken).toBe(true);
+    expect(response.body.config.servioToken).toBeUndefined();
+    expect(fixture.encrypt).not.toHaveBeenCalled();
+  });
   it("provides an authorized direct upload without changing accommodation inventory", async () => {
     const res = await request(app).post("/api/booking-engine/media-upload").set("Authorization", "Bearer test")
       .send({ name: "house.jpg", size: 1234, contentType: "image/jpeg" });

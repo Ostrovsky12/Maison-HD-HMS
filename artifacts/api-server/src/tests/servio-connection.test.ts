@@ -45,6 +45,12 @@ describe("Servio endpoint and saved-result boundary", () => {
     expect(servioBaseUrl(base + "/")).toBe(base);
     expect(servioHotelId("7")).toBe(7);
   });
+  it("ignores surrounding whitespace copied with the URL or HotelID", () => {
+    expect(servioBaseUrl(` \n${base}\t `)).toBe(base);
+    expect(servioHotelId(" 7 \n")).toBe(7);
+    expect(servioHotelId("7\u00a0")).toBe(7);
+    expect(() => servioHotelId("1 2")).toThrow();
+  });
   it.each([
     "http://example.servio.support/ReservationService_1_10",
     "https://127.0.0.1/ReservationService_1_10",

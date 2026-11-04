@@ -5,7 +5,7 @@ import type { BookingServioStatus } from "@workspace/api-zod";
 // Only the vendor's HTTPS hosting is supported. Never send a tenant token to an
 // arbitrary URL, IP, alternate port, redirect or endpoint supplied by a client.
 export function servioBaseUrl(raw: string): string {
-  const url = new URL(raw);
+  const url = new URL(raw.trim());
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
     || (url.port && url.port !== "443")
     || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.servio\.support$/i.test(url.hostname)
@@ -14,8 +14,9 @@ export function servioBaseUrl(raw: string): string {
 }
 
 export function servioHotelId(raw: string): number {
-  if (!/^[1-9]\d{0,9}$/.test(raw) || Number(raw) > 2147483647) throw new Error("invalid_hotel");
-  return Number(raw);
+  const value = raw.trim();
+  if (!/^[1-9]\d{0,9}$/.test(value) || Number(value) > 2147483647) throw new Error("invalid_hotel");
+  return Number(value);
 }
 
 export function servioFingerprint(config: { provider: string; servioBaseUrl: string; servioHotelId: string; servioToken?: string }) {
