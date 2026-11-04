@@ -24,3 +24,9 @@ Keep booking-module configuration separate from module-entitlement data.
 **Why:** Existing tenant entitlements may be an array whitelist. Converting that array to a configuration object can silently remove module restrictions. A new product must not broaden unrelated tenant access.
 
 **How to apply:** Add product configuration independently, preserve existing entitlements and default to unpublished sales. Servio drafts must not silently use the local Maison HD calendar.
+
+Preserve the booking module's modern visual presentation, with photo galleries, video and descriptions for houses and rooms.
+
+**Why:** The user objected to the replacement with a simplified text-card booking page and explicitly said the module previously had a modern design with photo galleries, video and descriptions.
+
+**How to apply:** Treat the existing visual experience and accommodation media as requirements when changing booking behavior. Locate the actual prior implementation and media sources rather than treating a simplified new page or an older placeholder card as the approved design.
