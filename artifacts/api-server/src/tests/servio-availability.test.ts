@@ -26,6 +26,33 @@ const search = (a: unknown, p: unknown, q = input) => {
   return { send, result: searchServioAvailability(connection, q, category, send) };
 };
 describe("Servio read-only availability and pricing", () => {
+  it.each([
+    [true, false, true, false],
+    [false, true, false, true],
+    [1, 0, true, false],
+    [0, 1, false, true],
+    [true, 1, true, true],
+    [0, false, false, false],
+  ])("accepts boolean and integer tariff flags (%j, %j)", async (nonReturn, special, expectedNonReturn, expectedSpecial) => {
+    const p = prices();
+    Object.assign(p.PriceLists[0], { IsNonReturnRate: nonReturn, IsSpecRate: special });
+    const response = await search(available(), p).result;
+    expect(response).toMatchObject({ status: "complete", currency: "грн" });
+    expect(response.categories[0].rates[0]).toMatchObject({
+      total: 205.35, nonRefundable: expectedNonReturn, specialRate: expectedSpecial,
+    });
+  });
+  it.each(["true", "false", "0", "1", 2, -1, null, undefined, {}, []])(
+    "does not coerce invalid tariff flags %j into a tariff policy", async value => {
+      for (const field of ["IsNonReturnRate", "IsSpecRate"]) {
+        const p = prices();
+        Object.assign(p.PriceLists[0], { [field]: value });
+        const response = await search(available(), p).result;
+        expect(response).toMatchObject({ status: "partial", code: "prices_unexpected_response", currency: null });
+        expect(response.message).toContain(`PriceLists[0].${field}`);
+        expect(response.categories[0].rates).toEqual([]);
+      }
+    });
   it("uses tenant hotel/time settings and exact child ages; sums actual service charges in cents", async () => {
     const { send, result } = search(available(), prices());
     const response = await result;

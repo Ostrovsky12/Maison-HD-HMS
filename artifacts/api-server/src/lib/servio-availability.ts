@@ -52,7 +52,10 @@ const success = (raw: unknown) => {
   return data;
 };
 const bit = (raw: unknown) => {
-  if (raw !== 0 && raw !== 1) throw new ServioShapeError("число 0 або 1", raw);
+  // Vendor documentation specifies integers, but deployed services also return
+  // JSON booleans. Do not coerce strings or treat missing flags as false.
+  if (typeof raw === "boolean") return raw;
+  if (raw !== 0 && raw !== 1) throw new ServioShapeError("true/false або число 0/1", raw);
   return raw === 1;
 };
 

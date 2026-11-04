@@ -66,3 +66,9 @@ Provider protocol errors need privacy-safe field-level diagnostics, not only a g
 **Why:** A real Servio availability response succeeded while pricing was rejected; a screenshot of the generic error could not establish which field or type differed. Synthetic success fixtures cannot establish compatibility with a particular hotel’s service.
 
 **How to apply:** Report static parser paths and expected/actual type names without raw provider values, payloads, arbitrary keys or credentials. Do not claim live pricing compatibility until a real response has validated. Keep monetary validation independent from optional restriction metadata: unverified conditions must block eligibility, not erase otherwise validated charges.
+
+Servio's published field types can differ from a deployed hotel's serialization.
+
+**Why:** Its documentation describes tariff flags as integer 0/1, but the user's production diagnostic showed `IsNonReturnRate` arriving as a JSON boolean. This is direct compatibility evidence, not a reason to weaken all validation.
+
+**How to apply:** Accept documented numeric flags and the observed boolean representation explicitly, preserving false. Do not coerce strings, null or missing flags; validate other fields independently rather than assuming the whole response matches the documentation.
