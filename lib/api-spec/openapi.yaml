@@ -2475,6 +2475,34 @@ paths:
               schema:
                 $ref: "#/components/schemas/AnalyticsSummary"
 
+  /public/bookings:
+    post:
+      operationId: createLocalPublicBooking
+      summary: Create or replay a local booking with a server-verified party and price
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalPublicBookingInput'
+      responses:
+        "201":
+          description: Pending unpaid booking created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalPublicBookingResult' }
+        "200":
+          description: Existing booking returned for an identical request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalPublicBookingResult' }
+        "400":
+          description: Invalid party, dates, contact data or consent
+        "409":
+          description: Availability, price or request identity conflict
+        "503":
+          description: Online sales unavailable
+
   /public/booking-engine/{slug}/checkout:
     post:
       tags: [BookingEngine]
@@ -2977,6 +3005,51 @@ components:
           type: array
           items: { $ref: '#/components/schemas/BookingLiqpaySeller' }
         callbackConfigured: { type: boolean }
+    LocalPublicBookingResult:
+      type: object
+      required: [booking]
+      properties:
+        booking:
+          type: object
+          required: [id, bookingRef, guestAccessCode]
+          properties:
+            id: { type: integer }
+            bookingRef: { type: string }
+            guestAccessCode: { type: string }
+            checkIn: { type: string, format: date }
+            checkOut: { type: string, format: date }
+            nights: { type: integer }
+            totalAmount: { type: number }
+            propertyName: { type: string }
+            unitName: { type: string }
+            status: { type: string }
+    LocalPublicBookingInput:
+      type: object
+      required: [slug, bookingEngine, bookingRequestId, unitId, checkIn, checkOut, firstName, lastName, adults, guestsCount, expectedTotal, agreeTerms, agreeNonRefundable, tariffPolicyVersion]
+      properties:
+        slug: { type: string }
+        bookingEngine: { type: boolean, enum: [true] }
+        bookingRequestId: { type: string, format: uuid }
+        unitId: { type: integer, minimum: 1 }
+        checkIn: { type: string, format: date }
+        checkOut: { type: string, format: date }
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string }
+        phone: { type: string }
+        adults: { type: integer, minimum: 1, maximum: 20 }
+        children: { type: integer, minimum: 0, maximum: 19, default: 0 }
+        guestsCount: { type: integer, minimum: 1, maximum: 20 }
+        childrenAges:
+          type: array
+          maxItems: 19
+          description: Required for every child; guestsCount must equal adults plus children. Local room pricing includes all occupants within the room capacity.
+          items: { type: integer, minimum: 0, maximum: 17 }
+        specialRequests: { type: string, maxLength: 1000 }
+        expectedTotal: { type: number, minimum: 0 }
+        agreeTerms: { type: boolean }
+        agreeNonRefundable: { type: boolean }
+        tariffPolicyVersion: { type: string }
     BookingServioSearchInput:
       type: object
       required: [checkIn, checkOut, adults, childAges, useExtraBed, companyId, companyCodeId, conditionId]

@@ -2,20 +2,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "wouter";
 import { useGetPublicBookingEngine } from "@workspace/api-client-react";
 import { UnitCard, type PublicUnit } from "@/components/booking/unit-card";
-import { SearchBar } from "@/components/booking/search-bar";
+import { SearchBar, MAX_PARTY } from "@/components/booking/search-bar";
 import { NonRefundableConsent } from "@/components/booking/nonrefundable-consent";
 import { PaymentStatusView } from "@/components/booking/payment-status-view";
-import { photoList, resolvePhotoUrl } from "@/lib/booking-media";
-import { normalizeAppearance, type BookingAppearanceValue, type CatalogItem } from "@/lib/booking-appearance";
+import { photoList } from "@/lib/booking-media";
+import { normalizeAppearance, type BookingAppearanceValue } from "@/lib/booking-appearance";
 import { DogodaTheme } from "@/components/booking/dogoda/dogoda-theme";
-import { DogodaShowcase } from "@/components/booking/dogoda/dogoda-showcase";
+import { DogodaSteps, type DogodaStep } from "@/components/booking/dogoda/dogoda-steps";
 import { DogodaLogo } from "@/components/booking/dogoda/dogoda-logo";
 import {
   captureReturnFromUrl, clearPending, clearReturn, loadPending, loadReturn, parseTariffPolicy, redirectToLiqPay, savePending,
   type PendingCheckout, type ReturnRef,
 } from "@/lib/booking-payment";
 import {
-  AlertTriangle, BedDouble, CalendarDays, Clock, CreditCard, Home, Loader2, Lock, Mail, MapPin, Phone, RefreshCw, Users,
+  AlertTriangle, ArrowLeft, BedDouble, ChevronRight, Pencil, CalendarDays, Clock, CreditCard, Home, Loader2, Lock, Mail, MapPin, Phone, RefreshCw, Users,
 } from "lucide-react";
 
 type Unit = PublicUnit;
@@ -75,9 +75,6 @@ export default function BookingPublicPage() {
   const name = s(cfg.displayName) || orgName || "Бронювання";
   const ap: BookingAppearanceValue | null = cfg.appearance && typeof cfg.appearance === "object" && (cfg.appearance as Record<string, unknown>).preset === "dogoda" ? normalizeAppearance(cfg.appearance) : null;
   const previewLocked = data?.preview === true && data?.salesEnabled === false;
-  const catalog: CatalogItem[] = useMemo(() => (Array.isArray(data?.accommodationCatalog) ? data!.accommodationCatalog : []).map((c: any) => ({
-    id: s(c?.id), name: s(c?.name), category: s(c?.category), description: s(c?.description), photos: photoList(c?.photos), videoUrl: s(c?.videoUrl),
-  })).filter((c: CatalogItem) => c.id && c.name), [data]);
   const accent = ap ? ap.buttonColor : /^#[0-9a-fA-F]{6}$/.test(s(cfg.accentColor)) ? s(cfg.accentColor) : "#1f4e5f";
   const properties: { id: number; name: string }[] = Array.isArray(data?.properties) ? data!.properties : [];
   const policy = useMemo(() => parseTariffPolicy(data?.tariffPolicy), [data]);
@@ -86,7 +83,11 @@ export default function BookingPublicPage() {
   const [propertyId, setPropertyId] = useState<string>("");
   const [checkIn, setCheckIn] = useState(ymd(addDays(today, 1)));
   const [checkOut, setCheckOut] = useState(ymd(addDays(today, 2)));
-  const [guests, setGuests] = useState(2);
+  const [guests, setGuests] = useState(2); // adults
+  const [childAges, setChildAges] = useState<(number | null)[]>([]); // DOGODA only; null = age not chosen yet
+  const [step, setStep] = useState<DogodaStep>(1);
+  const [contactErr, setContactErr] = useState<string | null>(null);
+  const searchSeq = useRef(0);
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [results, setResults] = useState<{ units: Unit[]; nights: number; key: string; checkIn: string; checkOut: string } | null>(null);
@@ -121,21 +122,38 @@ export default function BookingPublicPage() {
 
   useEffect(() => { if (properties.length && !propertyId) setPropertyId(String(properties[0].id)); }, [properties, propertyId]);
 
-  const searchKey = `${propertyId}|${checkIn}|${checkOut}|${guests}`;
+  const kids = ap ? childAges : [];
+  const childrenCount = kids.length;
+  const totalGuests = guests + childrenCount;
+  const searchKey = `${propertyId}|${checkIn}|${checkOut}|${guests}|${childrenCount}|${kids.map((a) => (a === null ? "?" : a)).join(",")}`;
   const resultsOutdated = !!results && results.key !== searchKey;
-  const consentKey = chosen && policy ? `${chosen.id}|${checkIn}|${checkOut}|${chosen.totalPrice}|${policy.version}` : "";
+  const consentKey = chosen && policy ? `${chosen.id}|${checkIn}|${checkOut}|${guests}|${childrenCount}|${kids.join(",")}|${chosen.totalPrice}|${policy.version}` : "";
   const nrAgree = !!consentKey && nrAgreedKey === consentKey;
+
+  // DOGODA: any change of dates/party/property invalidates the chosen quote and all consents; payment needs a fresh search.
+  useEffect(() => {
+    if (!ap) return;
+    setChosen(null); setNrAgreedKey(null); setAgree(false);
+    setStep((x) => (x > 1 ? 1 : x));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchKey]);
 
   const search = async () => {
     if (previewLocked) { setSearchErr("Приватний перегляд: пошук і бронювання вимкнені, поки продажі закриті."); return; }
     setSearchErr(null); setStale(null); setChosen(null); setSubmitErr(null); setNrAgreedKey(null);
+    if (ap) setAgree(false);
     if (!(checkOut > checkIn)) { setSearchErr("Дата виїзду має бути пізніше дати заїзду"); return; }
     if (checkIn < ymd(today)) { setSearchErr("Дата заїзду не може бути в минулому"); return; }
+    if (kids.some((a) => a === null || !Number.isInteger(a) || a < 0 || a > 17)) { setSearchErr("Вкажіть вік кожної дитини (від 0 до 17 років)."); return; }
+    if (totalGuests > MAX_PARTY) { setSearchErr(`Не більше ${MAX_PARTY} гостей в одному бронюванні.`); return; }
+    const seq = ++searchSeq.current;
+    const key = searchKey, ci = checkIn, co = checkOut;
     setSearching(true);
     try {
-      const p = new URLSearchParams({ slug, engine: "1", checkIn, checkOut, guests: String(guests) });
+      const p = new URLSearchParams({ slug, engine: "1", checkIn: ci, checkOut: co, guests: String(totalGuests) });
       if (propertyId) p.set("propertyId", propertyId);
       const r = await fetch(`${API}/availability?${p}`);
+      if (seq !== searchSeq.current) return;
       if (!r.ok) throw new Error((await readError(r)).msg);
       const j = await r.json();
       const units: Unit[] = (Array.isArray(j?.units) ? j.units : []).map((u: any) => ({
@@ -147,10 +165,12 @@ export default function BookingPublicPage() {
         hasView: typeof u.hasView === "string" && u.hasView ? u.hasView : null,
         maxCapacity: n(u.maxCapacity) > 0 ? n(u.maxCapacity) : null,
       }));
-      setResults({ units, nights: n(j?.nights), key: searchKey, checkIn, checkOut });
-      setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
-    } catch (e) { setResults(null); setSearchErr((e as Error).message || "Не вдалося перевірити наявність"); }
-    finally { setSearching(false); }
+      if (seq !== searchSeq.current) return;
+      setResults({ units, nights: n(j?.nights), key, checkIn: ci, checkOut: co });
+      if (ap) setStep(2);
+      else setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    } catch (e) { if (seq !== searchSeq.current) return; setResults(null); setSearchErr((e as Error).message || "Не вдалося перевірити наявність"); }
+    finally { if (seq === searchSeq.current) setSearching(false); }
   };
 
   /** Starts (or retries) LiqPay checkout for an already created booking. Never creates a new reservation. */
@@ -192,11 +212,12 @@ export default function BookingPublicPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (previewLocked || !chosen || !policy || !canSubmit || inflight.current) return;
+    if (ap && kids.some((a) => a === null)) return;
     inflight.current = true; setSubmitting(true); setSubmitErr(null);
     const payload = {
       slug, bookingEngine: true, unitId: chosen.id, checkIn, checkOut,
       firstName: form.firstName.trim(), lastName: form.lastName.trim(), email: form.email.trim(), phone: form.phone.trim(),
-      adults: guests, children: 0, guestsCount: guests, specialRequests: form.specialRequests.trim(),
+      adults: guests, children: childrenCount, guestsCount: totalGuests, ...(childrenCount > 0 ? { childrenAges: kids as number[] } : {}), specialRequests: form.specialRequests.trim(),
       expectedTotal: chosen.totalPrice, agreeTerms: true, agreeNonRefundable: true, tariffPolicyVersion: policy.version,
     };
     const key = payloadKey(payload);
@@ -241,6 +262,16 @@ export default function BookingPublicPage() {
     }
     finally { inflight.current = false; setSubmitting(false); }
     if (created) { window.scrollTo({ top: 0, behavior: "smooth" }); void startCheckout(created); }
+  };
+
+  const emailOk = form.email.trim() === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+  const toReview = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!policy) { setContactErr("Онлайн-оплата зараз недоступна. Зв'яжіться з готелем напряму."); return; }
+    if (!form.firstName.trim() || !form.lastName.trim()) { setContactErr("Вкажіть ім'я та прізвище."); return; }
+    if (!contactOk) { setContactErr("Вкажіть email або телефон для зв'язку."); return; }
+    if (!emailOk) { setContactErr("Перевірте формат email."); return; }
+    setContactErr(null); setStep(4);
   };
 
   const abandonPending = () => {
@@ -296,7 +327,224 @@ export default function BookingPublicPage() {
     );
   }
 
-  const heroPhoto = ap ? resolvePhotoUrl(ap.heroPhotoUrl) ?? catalog.find((c) => c.photos[0])?.photos[0] ?? null : null;
+  const banner = previewLocked && (
+    <div role="status" className="sticky top-0 z-40 px-5 py-2.5 text-center text-sm" style={{ background: "#292D05", color: "#FFF4E5" }} data-testid="banner-private-preview">
+      Приватний перегляд для команди. Продажі закриті: пошук, бронювання й оплата вимкнені.
+    </div>
+  );
+  const pendingPanel = pending && (
+    <section className="mb-8 rounded-3xl bg-white border-2 border-amber-300 p-5 md:p-6 shadow-sm" data-testid="panel-pending-payment">
+      <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-700 font-semibold">Бронювання створено, оплату не завершено</p>
+          <p className="text-lg font-semibold mt-1">{pending.unitName}{pending.propertyName ? `, ${pending.propertyName}` : ""}</p>
+          <p className="text-sm text-stone-600">{fmtDate(pending.checkIn)} – {fmtDate(pending.checkOut)} · <span className="font-mono" data-testid="text-booking-ref">{pending.bookingRef}</span></p>
+          <p className="text-sm text-stone-700 mt-2">Номер не гарантовано, доки платіжна система не підтвердить оплату 100% вартості.</p>
+        </div>
+        <div className="flex flex-col items-stretch md:items-end gap-2 shrink-0">
+          <p className="text-2xl font-semibold font-mono">{money(pending.totalAmount)}</p>
+          <button type="button" data-testid="button-retry-checkout" disabled={redirecting} onClick={() => void startCheckout(pending)}
+            className="rounded-xl px-6 py-3 text-sm font-semibold text-white inline-flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: accent }}>
+            {redirecting ? <><Loader2 className="w-4 h-4 animate-spin" />Перехід до оплати...</> : <><Lock className="w-4 h-4" />Оплатити {money(pending.totalAmount)}</>}
+          </button>
+          <button type="button" onClick={() => setReturnRef({ bookingId: pending.bookingId, code: pending.guestAccessCode })} className="text-xs underline text-stone-600" data-testid="button-check-status">Перевірити статус оплати</button>
+        </div>
+      </div>
+      {checkoutErr && <p className="mt-4 rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-900" data-testid="text-checkout-error">{checkoutErr}</p>}
+      <button type="button" onClick={abandonPending} className="mt-4 text-xs text-stone-500 underline" data-testid="button-abandon-pending">
+        Почати нове бронювання (це неоплачене бронювання не буде продовжено)
+      </button>
+    </section>
+  );
+
+  if (ap) {
+    const ageWord = (a: number) => (a === 0 ? "до 1 р." : `${a} р.`);
+    const party = `${guests} ${guests === 1 ? "дорослий" : "дорослих"}${childrenCount ? ` · ${childrenCount} ${childrenCount === 1 ? "дитина" : childrenCount < 5 ? "дитини" : "дітей"} (${kids.map((a) => (a === null ? "?" : ageWord(a))).join(", ")})` : ""}`;
+    const hasResults = !!results && !resultsOutdated;
+    const eff: DogodaStep = chosen && step >= 3 && hasResults ? (step === 4 ? 4 : 3) : hasResults && step >= 2 ? 2 : (stale && chosen && step === 4 ? 4 : 1);
+    const go = (x: DogodaStep) => { setStep(x); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    const back = (to: DogodaStep, label: string) => (
+      <button type="button" onClick={() => go(to)} className="inline-flex items-center gap-1.5 text-sm underline" data-testid={`button-back-${to}`}><ArrowLeft className="w-4 h-4" />{label}</button>
+    );
+    const summary = (
+      <aside className="lg:sticky lg:top-28" data-testid="panel-summary">
+        <div className="rounded-3xl bg-white border border-stone-200 overflow-hidden">
+          {chosen && (chosen.photos[0] ? <img src={chosen.photos[0]} alt="" className="w-full h-36 object-cover" /> :
+            <div className="h-20 flex items-center justify-center" style={{ background: accent }}><Home className="w-7 h-7" /></div>)}
+          <div className="p-5 space-y-3 text-sm">
+            <p className="font-semibold">{chosen ? chosen.name : "Ваше бронювання"}</p>
+            {chosen && <p className="text-[11px] uppercase tracking-wider text-stone-500 -mt-2">{chosen.category}{chosen.propertyName ? ` · ${chosen.propertyName}` : ""}</p>}
+            <p className="flex items-center gap-2 text-stone-600"><CalendarDays className="w-4 h-4 shrink-0" />{fmtDate(checkIn)} – {fmtDate(checkOut)}{hasResults ? ` · ${nights} ноч.` : ""}</p>
+            <p className="flex items-start gap-2 text-stone-600" data-testid="text-summary-party"><Users className="w-4 h-4 shrink-0 mt-0.5" />{party}</p>
+            {chosen && <div className="flex justify-between items-baseline border-t border-stone-200 pt-3"><span className="font-semibold">Разом</span><span className="text-xl font-semibold font-mono" data-testid="text-summary-total">{money(chosen.totalPrice)}</span></div>}
+            {policy && <p className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-900"><b>Неповоротний тариф:</b> 100% оплата онлайн, без повернення коштів і зміни дат.</p>}
+            {eff > 1 && <button type="button" onClick={() => go(1)} className="inline-flex items-center gap-1.5 text-xs underline" data-testid="button-edit-search"><Pencil className="w-3.5 h-3.5" />Змінити дати або гостей</button>}
+          </div>
+        </div>
+        {(phone || email) && (
+          <div className="mt-4 rounded-2xl bg-white/70 border border-stone-200 p-4 text-sm text-stone-600 space-y-1.5">
+            <p className="font-medium text-stone-800">Питання до нас</p>
+            {phone && <a href={`tel:${phone}`} className="flex items-center gap-2"><Phone className="w-4 h-4" />{phone}</a>}
+            {email && <a href={`mailto:${email}`} className="flex items-center gap-2"><Mail className="w-4 h-4" />{email}</a>}
+          </div>
+        )}
+      </aside>
+    );
+
+    return (
+      <Shell ap={ap}>
+        {banner}
+        {header}
+        <main className="max-w-6xl mx-auto px-4 md:px-5 py-6 md:py-10">
+          <h1 className="sr-only" data-testid="text-dogoda-title">{name}: бронювання</h1>
+          <div className="mb-6 overflow-x-auto"><DogodaSteps step={eff} onGo={go} /></div>
+          {!policy && (
+            <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 flex gap-2" data-testid="text-policy-unavailable">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />Онлайн-оплата зараз недоступна, тому бронювання тимчасово неможливе. Зв'яжіться з нами напряму.
+            </div>
+          )}
+          {pendingPanel}
+
+          {eff === 1 && (
+            <section className="dg-rise" aria-labelledby="dg-step1">
+              <p className="dg-hand text-2xl" style={{ color: "var(--dg-button)" }}>pick your dates</p>
+              <h2 id="dg-step1" className="text-3xl md:text-4xl tracking-tight mb-6">Коли приїдете і скільки вас?</h2>
+              <SearchBar properties={properties} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}
+                checkOut={checkOut} setCheckOut={setCheckOut} guests={guests} setGuests={setGuests} minDate={ymd(today)} searching={searching} onSearch={search} accent={accent}
+                childAges={childAges} setChildAges={setChildAges} locked={previewLocked} lockedNote="Приватний перегляд: продажі закриті, тому пошук вільних дат вимкнено." />
+              {stale && !chosen && (
+                <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900" data-testid="text-price-changed">
+                  <p className="font-medium">{stale}</p>
+                  <p className="mt-1">Ваші контактні дані збережено. Виконайте пошук ще раз, перевірте нову ціну та оберіть будиночок.</p>
+                </div>
+              )}
+              {searchErr && <p className="mt-4 text-sm text-red-700" role="alert" data-testid="text-search-error">{searchErr}</p>}
+              {searching && <div className="mt-8 space-y-6 animate-pulse">{[0, 1].map((i) => <div key={i} className="h-64 bg-stone-200 rounded-3xl" />)}</div>}
+              {!searching && (
+                <p className="mt-6 text-sm dg-muted flex items-center gap-2"><Clock className="w-4 h-4" />Заїзд з {s(cfg.checkInTime, "14:00")}, виїзд до {s(cfg.checkOutTime, "12:00")}. Покажемо лише вільні варіанти з ціною за весь період.</p>
+              )}
+            </section>
+          )}
+
+          {eff === 2 && results && (
+            <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-8 items-start">
+              <section id="results" className="space-y-6 min-w-0 dg-rise" aria-labelledby="dg-step2">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 id="dg-step2" className="text-2xl md:text-3xl tracking-tight">
+                    {results.units.length ? `${results.units.length} ${results.units.length === 1 ? "варіант" : results.units.length < 5 ? "варіанти" : "варіантів"} на ваші дати` : "Вільних варіантів немає"}
+                  </h2>
+                  {back(1, "Змінити дати")}
+                </div>
+                {results.units.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-stone-300 bg-white p-10 text-center text-stone-600" data-testid="text-no-units">
+                    На ці дати немає вільних будиночків для {party}. Спробуйте інші дати{phone || email ? " або зв'яжіться з нами" : ""}.
+                  </div>
+                ) : results.units.map((u) => (
+                  <UnitCard key={u.id} unit={u} nights={results.nights} accent={accent} active={chosen?.id === u.id} disabled={!!pending || previewLocked}
+                    policyBadge={policy ? "Неповоротний · 100% передоплата" : undefined}
+                    onSelect={() => {
+                      if (chosen?.id !== u.id) { setNrAgreedKey(null); setAgree(false); }
+                      setChosen(u); setStale(null); setSubmitErr(null); go(3);
+                    }} />
+                ))}
+              </section>
+              {summary}
+            </div>
+          )}
+
+          {eff === 3 && chosen && (
+            <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-8 items-start">
+              <form onSubmit={toReview} noValidate className="rounded-3xl bg-white border border-stone-200 p-5 md:p-8 space-y-5 dg-rise" data-testid="form-contact" aria-labelledby="dg-step3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 id="dg-step3" className="text-2xl md:text-3xl tracking-tight">Хто приїде?</h2>
+                  {back(2, "До будиночків")}
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {([["firstName", "Ім'я *", "text", "given-name"], ["lastName", "Прізвище *", "text", "family-name"], ["email", "Email", "email", "email"], ["phone", "Телефон", "tel", "tel"]] as const).map(([k, l, t, ac]) => (
+                    <label key={k} className="text-xs text-stone-600 space-y-1"><span>{l}</span>
+                      <input data-testid={`input-${k}`} type={t} autoComplete={ac} value={form[k]} onChange={(e) => { setForm((f) => ({ ...f, [k]: e.target.value })); setContactErr(null); }} className={inputCls} /></label>
+                  ))}
+                </div>
+                <p className="text-xs text-stone-500">Потрібен email або телефон, щоб ми могли з вами зв'язатися.</p>
+                <label className="text-xs text-stone-600 space-y-1 block"><span>Побажання</span>
+                  <textarea data-testid="input-requests" rows={3} maxLength={1000} value={form.specialRequests} onChange={(e) => setForm((f) => ({ ...f, specialRequests: e.target.value }))}
+                    className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-stone-900" /></label>
+                {contactErr && <p className="text-sm text-red-700" role="alert" data-testid="text-contact-error">{contactErr}</p>}
+                <button type="submit" data-testid="button-to-review" className="rounded-xl px-6 py-3.5 text-sm font-semibold text-white inline-flex items-center gap-2" style={{ background: accent }}>
+                  Перевірити бронювання<ChevronRight className="w-4 h-4" />
+                </button>
+              </form>
+              {summary}
+            </div>
+          )}
+
+          {eff === 4 && chosen && policy && (
+            <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-8 items-start">
+              <form onSubmit={submit} className="rounded-3xl bg-white border border-stone-200 p-5 md:p-8 space-y-7 dg-rise" data-testid="form-booking" aria-labelledby="dg-step4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 id="dg-step4" className="text-2xl md:text-3xl tracking-tight">Перевірте й оплатіть</h2>
+                  {back(3, "Змінити контакти")}
+                </div>
+                <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-sm rounded-2xl border border-stone-200 p-4" data-testid="panel-review">
+                  <div><dt className="text-xs text-stone-500">Будиночок</dt><dd>{chosen.name}</dd></div>
+                  <div><dt className="text-xs text-stone-500">Дати</dt><dd>{fmtDate(checkIn)} – {fmtDate(checkOut)} · {nights} ноч.</dd></div>
+                  <div><dt className="text-xs text-stone-500">Гості</dt><dd>{party}</dd></div>
+                  <div><dt className="text-xs text-stone-500">Гість</dt><dd>{form.firstName.trim()} {form.lastName.trim()}</dd></div>
+                  <div><dt className="text-xs text-stone-500">Контакти</dt><dd className="break-all">{[form.email.trim(), form.phone.trim()].filter(Boolean).join(" · ")}</dd></div>
+                  {form.specialRequests.trim() && <div className="sm:col-span-2"><dt className="text-xs text-stone-500">Побажання</dt><dd className="whitespace-pre-line">{form.specialRequests.trim()}</dd></div>}
+                </dl>
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-semibold mb-2">Умови та конфіденційність</legend>
+                  <label className="flex items-start gap-3 text-sm">
+                    <input data-testid="checkbox-agree" type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-0.5 w-5 h-5 shrink-0" />
+                    <span>Погоджуюсь з <button type="button" className="underline font-medium" onClick={() => setShowLegal("terms")}>умовами бронювання</button> та <button type="button" className="underline font-medium" onClick={() => setShowLegal("privacy")}>політикою конфіденційності</button></span>
+                  </label>
+                  {showLegal && (
+                    <div className="rounded-xl bg-stone-50 border border-stone-200 p-4 text-sm text-stone-700 whitespace-pre-line max-h-64 overflow-y-auto">
+                      <div className="flex justify-between mb-2"><b>{showLegal === "terms" ? "Умови бронювання" : "Політика конфіденційності"}</b><button type="button" className="text-xs underline" onClick={() => setShowLegal(null)}>Закрити</button></div>
+                      {s(showLegal === "terms" ? cfg.terms : cfg.privacy) || "Текст не надано."}
+                    </div>
+                  )}
+                </fieldset>
+                <fieldset>
+                  <legend className="text-sm font-semibold mb-2">Неповоротний тариф</legend>
+                  <NonRefundableConsent policy={policy} total={chosen.totalPrice} checked={nrAgree} onChange={(v) => setNrAgreedKey(v ? consentKey : null)} />
+                </fieldset>
+                {stale && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900" data-testid="text-stale">
+                    <p className="font-medium">Ціна або наявність змінилися: {stale}</p>
+                    <p className="mt-1">Ваші дані збережено. Виконайте пошук ще раз і оберіть будиночок.</p>
+                    <button type="button" onClick={() => { go(1); void search(); }} className="mt-2 underline">Оновити пошук</button>
+                  </div>
+                )}
+                {submitErr && <p className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-900" data-testid="text-submit-error">{submitErr}</p>}
+                <div className="rounded-2xl bg-stone-900 text-white p-4 md:p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between" style={{ color: "var(--dg-surface)" }}>
+                  <div>
+                    <p className="text-xs uppercase tracking-wider opacity-70">До сплати зараз, 100%</p>
+                    <p className="text-2xl font-semibold font-mono" data-testid="text-pay-now">{money(chosen.totalPrice)}</p>
+                    <p className="text-xs font-medium mt-0.5 opacity-80">Без повернення коштів і зміни дат</p>
+                  </div>
+                  <button data-testid="button-submit" type="submit" disabled={!canSubmit || previewLocked}
+                    className="rounded-xl px-6 py-3.5 text-sm font-semibold text-white inline-flex items-center justify-center gap-2 disabled:opacity-40 shrink-0" style={{ background: accent }}>
+                    {ctaBusy ? <><Loader2 className="w-4 h-4 animate-spin" />{submitting ? "Створюємо бронювання..." : "Перехід до оплати..."}</> : <><Lock className="w-4 h-4" />Підтвердити й оплатити {money(chosen.totalPrice)}</>}
+                  </button>
+                </div>
+                {!canSubmit && !ctaBusy && missing.length > 0 && <p className="text-xs text-stone-500 -mt-4">Щоб продовжити, потрібно: {missing.join(", ")}.</p>}
+                <p className="text-xs text-stone-500 -mt-4">Оплата на захищеній сторінці LiqPay. Бронювання гарантоване лише після підтвердження оплати.</p>
+              </form>
+              {summary}
+            </div>
+          )}
+        </main>
+        <footer className="border-t border-stone-200 mt-6">
+          <div className="max-w-6xl mx-auto px-5 py-6 text-xs text-stone-500 flex flex-wrap gap-x-4 gap-y-1 justify-between">
+            <span>Maison HD - студія бронювань</span>
+            <span>Ціни в гривнях. Онлайн-оплата через LiqPay.</span>
+          </div>
+        </footer>
+      </Shell>
+    );
+  }
 
   return (
     <Shell ap={ap}>
@@ -307,38 +555,6 @@ export default function BookingPublicPage() {
       )}
       {header}
 
-      {ap ? (
-        <>
-          <section className="relative overflow-hidden" aria-labelledby="dg-hero-title">
-            <div className="max-w-6xl mx-auto px-5 pt-10 md:pt-16 pb-24 md:pb-28 grid md:grid-cols-[1.05fr_1fr] gap-10 items-center">
-              <div>
-                <p className="dg-hand dg-rise text-3xl md:text-4xl" style={{ color: "var(--dg-button)" }}>slow down</p>
-                <h1 id="dg-hero-title" className="dg-rise dg-rise-2 text-[44px] leading-[0.98] md:text-7xl tracking-tight mt-2" data-testid="text-dogoda-title">{name}</h1>
-                {desc && <p className="dg-rise dg-rise-3 dg-muted text-base md:text-lg mt-5 max-w-xl whitespace-pre-line line-clamp-5">{desc}</p>}
-                <div className="dg-rise dg-rise-3 mt-7 flex flex-wrap gap-2 text-sm">
-                  <span className="rounded-full border dg-line px-4 py-2 inline-flex items-center gap-2"><Clock className="w-4 h-4" aria-hidden />Заїзд з {s(cfg.checkInTime, "14:00")}</span>
-                  <span className="rounded-full border dg-line px-4 py-2 inline-flex items-center gap-2"><Clock className="w-4 h-4" aria-hidden />Виїзд до {s(cfg.checkOutTime, "12:00")}</span>
-                  {policy && <span className="rounded-full px-4 py-2 inline-flex items-center gap-2 dg-surface"><CreditCard className="w-4 h-4" aria-hidden />Неповоротний тариф, 100% онлайн-оплата</span>}
-                </div>
-              </div>
-              {heroPhoto ? (
-                <div className="dg-rise dg-rise-2 relative dg-grain aspect-[4/5] md:aspect-[5/6] rounded-t-[999px] rounded-b-[32px] overflow-hidden">
-                  <img src={heroPhoto} alt={`${name}: фото`} className="absolute inset-0 w-full h-full object-cover" />
-                </div>
-              ) : (
-                <div aria-hidden className="hidden md:block aspect-[5/6] rounded-t-[999px] rounded-b-[32px] relative dg-grain" style={{ background: "linear-gradient(180deg, color-mix(in srgb, var(--dg-muted) 55%, var(--dg-bg)), var(--dg-text))" }}>
-                  <DogodaLogo background={ap.textColor} className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[72%] h-auto" />
-                </div>
-              )}
-            </div>
-          </section>
-          {ap.showGallery && <DogodaShowcase items={catalog} />}
-          <div className="max-w-6xl mx-auto px-5 pt-10" id="dg-search">
-            <p className="dg-hand text-2xl" style={{ color: "var(--dg-button)" }}>pick your dates</p>
-            <h2 className="text-3xl md:text-4xl tracking-tight mb-16 md:mb-20">Вільні дати й ціни</h2>
-          </div>
-        </>
-      ) : (
       <section className="relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${accent} 0%, ${accent}e6 55%, #1c1917 140%)` }}>
         <div className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)", backgroundSize: "22px 22px" }} />
         <div className="relative max-w-6xl mx-auto px-5 pt-10 pb-24 md:pt-14 md:pb-28 text-white">
@@ -353,7 +569,6 @@ export default function BookingPublicPage() {
           </div>
         </div>
       </section>
-      )}
 
       <div className="max-w-6xl mx-auto px-4 md:px-5 -mt-12 md:-mt-14 relative z-10">
         <SearchBar properties={properties} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}

@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DOGODA_DEFAULTS, type BookingAppearanceValue } from "@/lib/booking-appearance";
-import { isAllowedPhoto, resolvePhotoUrl } from "@/lib/booking-media";
 
 type Props = {
   value: BookingAppearanceValue;
@@ -26,8 +25,6 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 /** Controlled editor. Persists only through the studio's existing Save button. */
 export function BookingAppearanceEditor({ value: v, onChange, disabled, previewUrl, onCopy }: Props) {
   const set = <K extends keyof BookingAppearanceValue>(k: K, x: BookingAppearanceValue[K]) => onChange({ ...v, [k]: x });
-  const heroBad = v.heroPhotoUrl.trim() !== "" && !isAllowedPhoto(v.heroPhotoUrl);
-  const hero = heroBad ? null : resolvePhotoUrl(v.heroPhotoUrl);
   const isDogoda = v.preset === "dogoda";
 
   return (
@@ -39,7 +36,7 @@ export function BookingAppearanceEditor({ value: v, onChange, disabled, previewU
             onClick={() => set("preset", p)}
             className={`text-left rounded-xl border px-3 py-2.5 transition-colors disabled:opacity-60 ${v.preset === p ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"}`}>
             <p className="text-sm font-medium">{p === "standard" ? "Стандартний" : "DOGODA"}</p>
-            <p className="text-[11px] text-stone-500">{p === "standard" ? "Загальний шаблон Maison HD" : "Фірмовий стиль, шрифти й галерея"}</p>
+            <p className="text-[11px] text-stone-500">{p === "standard" ? "Загальний шаблон Maison HD" : "Фірмовий стиль: одразу вибір дат"}</p>
           </button>
         ))}
       </div>
@@ -71,21 +68,10 @@ export function BookingAppearanceEditor({ value: v, onChange, disabled, previewU
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="ap-hero" className="text-xs font-medium text-stone-600">Фото для обкладинки (URL або завантажене фото)</Label>
-          <Input id="ap-hero" value={v.heroPhotoUrl} onChange={(e) => set("heroPhotoUrl", e.target.value)} placeholder="https://..." data-testid="input-ap-hero" aria-invalid={heroBad} />
-          {heroBad && <p className="text-[11px] text-red-700">Лише HTTPS або завантажені у сховище фото.</p>}
-        </div>
-
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          <input type="checkbox" checked={v.showGallery} onChange={(e) => set("showGallery", e.target.checked)} data-testid="checkbox-ap-gallery" />
-          Показувати галерею будиночків перед пошуком
-        </label>
       </fieldset>
 
       <div className="rounded-xl overflow-hidden border border-stone-200" aria-label="Попередній перегляд кольорів" data-testid="preview-appearance"
         style={{ background: v.backgroundColor, color: v.textColor }}>
-        {hero && <img src={hero} alt="" className="w-full h-24 object-cover" />}
         <div className="p-4 space-y-3">
           {isDogoda && <DogodaLogo background={v.backgroundColor} className="w-40 h-auto" />}
           <p className="text-lg" style={{ fontFamily: v.font === "brand" ? '"DOGODA Orchidea", serif' : "system-ui, sans-serif" }}>Пора видихнути</p>
@@ -98,7 +84,7 @@ export function BookingAppearanceEditor({ value: v, onChange, disabled, previewU
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...DOGODA_DEFAULTS, heroPhotoUrl: v.heroPhotoUrl })} data-testid="button-ap-reset">
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...DOGODA_DEFAULTS, heroPhotoUrl: v.heroPhotoUrl, showGallery: v.showGallery })} data-testid="button-ap-reset">
           <RotateCcw className="w-3.5 h-3.5 mr-1.5" />Фірмові кольори
         </Button>
         {previewUrl && !disabled && <>

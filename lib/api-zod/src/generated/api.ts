@@ -4004,6 +4004,89 @@ export const GetAnalyticsSummaryResponse = zod.object({
   ),
 });
 
+/**
+ * @summary Create or replay a local booking with a server-verified party and price
+ */
+
+export const createLocalPublicBookingBodyFirstNameMax = 100;
+
+export const createLocalPublicBookingBodyLastNameMax = 100;
+
+export const createLocalPublicBookingBodyAdultsMax = 20;
+
+export const createLocalPublicBookingBodyChildrenDefault = 0;
+export const createLocalPublicBookingBodyChildrenMin = 0;
+export const createLocalPublicBookingBodyChildrenMax = 19;
+
+export const createLocalPublicBookingBodyGuestsCountMax = 20;
+
+export const createLocalPublicBookingBodyChildrenAgesItemMin = 0;
+export const createLocalPublicBookingBodyChildrenAgesItemMax = 17;
+
+export const createLocalPublicBookingBodyChildrenAgesMax = 19;
+
+export const createLocalPublicBookingBodySpecialRequestsMax = 1000;
+
+export const createLocalPublicBookingBodyExpectedTotalMin = 0;
+
+export const CreateLocalPublicBookingBody = zod.object({
+  slug: zod.string(),
+  bookingEngine: zod.literal(true),
+  bookingRequestId: zod.string().uuid(),
+  unitId: zod.number().min(1),
+  checkIn: zod.date(),
+  checkOut: zod.date(),
+  firstName: zod.string().min(1).max(createLocalPublicBookingBodyFirstNameMax),
+  lastName: zod.string().min(1).max(createLocalPublicBookingBodyLastNameMax),
+  email: zod.string().optional(),
+  phone: zod.string().optional(),
+  adults: zod.number().min(1).max(createLocalPublicBookingBodyAdultsMax),
+  children: zod
+    .number()
+    .min(createLocalPublicBookingBodyChildrenMin)
+    .max(createLocalPublicBookingBodyChildrenMax)
+    .default(createLocalPublicBookingBodyChildrenDefault),
+  guestsCount: zod
+    .number()
+    .min(1)
+    .max(createLocalPublicBookingBodyGuestsCountMax),
+  childrenAges: zod
+    .array(
+      zod
+        .number()
+        .min(createLocalPublicBookingBodyChildrenAgesItemMin)
+        .max(createLocalPublicBookingBodyChildrenAgesItemMax),
+    )
+    .max(createLocalPublicBookingBodyChildrenAgesMax)
+    .optional()
+    .describe(
+      "Required for every child; guestsCount must equal adults plus children. Local room pricing includes all occupants within the room capacity.",
+    ),
+  specialRequests: zod
+    .string()
+    .max(createLocalPublicBookingBodySpecialRequestsMax)
+    .optional(),
+  expectedTotal: zod.number().min(createLocalPublicBookingBodyExpectedTotalMin),
+  agreeTerms: zod.boolean(),
+  agreeNonRefundable: zod.boolean(),
+  tariffPolicyVersion: zod.string(),
+});
+
+export const CreateLocalPublicBookingResponse = zod.object({
+  booking: zod.object({
+    id: zod.number(),
+    bookingRef: zod.string(),
+    guestAccessCode: zod.string(),
+    checkIn: zod.date().optional(),
+    checkOut: zod.date().optional(),
+    nights: zod.number().optional(),
+    totalAmount: zod.number().optional(),
+    propertyName: zod.string().optional(),
+    unitName: zod.string().optional(),
+    status: zod.string().optional(),
+  }),
+});
+
 export const CreateBookingEngineCheckoutParams = zod.object({
   slug: zod.coerce.string(),
 });

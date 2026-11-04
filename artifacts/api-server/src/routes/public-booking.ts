@@ -16,6 +16,7 @@ import { orchestrateFiscalization, isSubmissionEligible } from "../services/prro
 import { submitDocument } from "./prro.js";
 import { engineConfig, engineSalesGuard, engineQuote, validBookingDates } from "../lib/booking-engine.js";
 import { createHash } from "node:crypto";
+import { parseBookingParty } from "../lib/booking-party.js";
 import { BOOKING_TARIFF_POLICY, acceptsBookingTariff, bookingMerchant } from "../lib/booking-tariff.js";
 import { bookingCheckoutRouter, bookingPaymentOrigin } from "./booking-checkout.js";
 
@@ -337,9 +338,9 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       return res.status(400).json({ error: "Некоректна кількість гостей" });
     }
     const totalGuests = parseInt(String(guestsCount || totalAdults + totalChildren), 10);
-    if (engineMode && (!Number.isInteger(Number(adults)) || totalChildren !== 0
-      || !Number.isInteger(Number(guestsCount)) || totalGuests !== totalAdults)) {
-      return res.status(400).json({ error: "Перша версія підтримує від 1 до 20 гостей за основним тарифом." });
+    const engineParty = engineMode ? parseBookingParty(adults, children, guestsCount, req.body.childrenAges) : null;
+    if (engineMode && !engineParty) {
+      return res.status(400).json({ error: "Вкажіть дорослих і вік кожної дитини (0–17 років). Загальна кількість гостей має збігатися та не перевищувати 20." });
     }
 
     let nightlyRate = parseFloat(String(unit.basePrice || 0));
@@ -413,6 +414,8 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       parsedUnitId, checkIn, checkOut, totalGuests, firstName.trim(), lastName.trim(),
       normalizedEmail, normalizedPhone, req.body.expectedTotal, req.body.specialRequests || "",
       BOOKING_TARIFF_POLICY.version,
+      // Keep adult-only fingerprints stable across upgrades, but bind every family detail.
+      ...(engineParty?.children ? [[engineParty.adults, engineParty.childrenAges]] : []),
     ])).digest("hex") : null;
 
     const client = await pool.connect();
@@ -543,7 +546,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         [
           org.id, parsedUnitId, guestId, firstName.trim(), lastName.trim(),
           normalizedEmail, normalizedPhone,
-          totalGuests, totalAdults, Math.ceil(totalChildren / 2), Math.floor(totalChildren / 2),
+          totalGuests, totalAdults, engineParty?.under6 ?? Math.ceil(totalChildren / 2), engineParty?.over6 ?? Math.floor(totalChildren / 2),
           checkIn, checkOut, totalAmount.toFixed(2), specialRequests || null,
           bookingRef, guestAccessCode,
         ],
@@ -557,6 +560,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
           ...BOOKING_TARIFF_POLICY, acceptedAt: new Date().toISOString(), bookingRequestId: req.body.bookingRequestId,
           termsText: brand.terms, privacyText: brand.privacy,
           unitId: parsedUnitId, checkIn, checkOut, guestsCount: totalGuests, amountMinor: Math.round(totalAmount * 100), currency: "UAH",
+          ...(engineParty?.children ? { adults: engineParty.adults, children: engineParty.children, childrenAges: engineParty.childrenAges } : {}),
         };
         await client.query("UPDATE bookings SET booking_policy_receipt=$2::jsonb,draft_expires_at=NOW()+INTERVAL '30 minutes' WHERE id=$1",
           [booking.id, JSON.stringify(receipt)]);

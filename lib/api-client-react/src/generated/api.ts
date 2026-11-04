@@ -120,6 +120,8 @@ import type {
   ListTvPropertyWeather200,
   ListUnitCategoriesParams,
   ListUnitsParams,
+  LocalPublicBookingInput,
+  LocalPublicBookingResult,
   LoginRequest,
   MonthlyReport,
   NightAudit,
@@ -10137,6 +10139,96 @@ export function useGetAnalyticsSummary<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Create or replay a local booking with a server-verified party and price
+ */
+export const getCreateLocalPublicBookingUrl = () => {
+  return `/api/public/bookings`;
+};
+
+export const createLocalPublicBooking = async (
+  localPublicBookingInput: LocalPublicBookingInput,
+  options?: RequestInit,
+): Promise<LocalPublicBookingResult> => {
+  return customFetch<LocalPublicBookingResult>(
+    getCreateLocalPublicBookingUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(localPublicBookingInput),
+    },
+  );
+};
+
+export const getCreateLocalPublicBookingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createLocalPublicBooking>>,
+    TError,
+    { data: BodyType<LocalPublicBookingInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createLocalPublicBooking>>,
+  TError,
+  { data: BodyType<LocalPublicBookingInput> },
+  TContext
+> => {
+  const mutationKey = ["createLocalPublicBooking"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createLocalPublicBooking>>,
+    { data: BodyType<LocalPublicBookingInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createLocalPublicBooking(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateLocalPublicBookingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createLocalPublicBooking>>
+>;
+export type CreateLocalPublicBookingMutationBody =
+  BodyType<LocalPublicBookingInput>;
+export type CreateLocalPublicBookingMutationError = ErrorType<void>;
+
+/**
+ * @summary Create or replay a local booking with a server-verified party and price
+ */
+export const useCreateLocalPublicBooking = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createLocalPublicBooking>>,
+    TError,
+    { data: BodyType<LocalPublicBookingInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createLocalPublicBooking>>,
+  TError,
+  { data: BodyType<LocalPublicBookingInput> },
+  TContext
+> => {
+  return useMutation(getCreateLocalPublicBookingMutationOptions(options));
+};
 
 export const getCreateBookingEngineCheckoutUrl = (slug: string) => {
   return `/api/public/booking-engine/${slug}/checkout`;

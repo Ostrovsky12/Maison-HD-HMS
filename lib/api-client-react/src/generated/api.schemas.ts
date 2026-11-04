@@ -79,6 +79,72 @@ export interface BookingLiqpaySettings {
   callbackConfigured: boolean;
 }
 
+export type LocalPublicBookingResultBooking = {
+  id: number;
+  bookingRef: string;
+  guestAccessCode: string;
+  checkIn?: string;
+  checkOut?: string;
+  nights?: number;
+  totalAmount?: number;
+  propertyName?: string;
+  unitName?: string;
+  status?: string;
+};
+
+export interface LocalPublicBookingResult {
+  booking: LocalPublicBookingResultBooking;
+}
+
+export interface LocalPublicBookingInput {
+  slug: string;
+  bookingEngine: boolean;
+  bookingRequestId: string;
+  /** @minimum 1 */
+  unitId: number;
+  checkIn: string;
+  checkOut: string;
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  firstName: string;
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  lastName: string;
+  email?: string;
+  phone?: string;
+  /**
+   * @minimum 1
+   * @maximum 20
+   */
+  adults: number;
+  /**
+   * @minimum 0
+   * @maximum 19
+   */
+  children?: number;
+  /**
+   * @minimum 1
+   * @maximum 20
+   */
+  guestsCount: number;
+  /**
+   * Required for every child; guestsCount must equal adults plus children. Local room pricing includes all occupants within the room capacity.
+   * @maxItems 19
+   */
+  childrenAges?: number[];
+  /** @maxLength 1000 */
+  specialRequests?: string;
+  /** @minimum 0 */
+  expectedTotal: number;
+  agreeTerms: boolean;
+  agreeNonRefundable: boolean;
+  tariffPolicyVersion: string;
+}
+
 export interface BookingServioSearchInput {
   /** @pattern ^\d{4}-\d{2}-\d{2}$ */
   checkIn: string;

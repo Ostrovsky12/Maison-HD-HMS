@@ -80,6 +80,25 @@ function prepare() { f.selections.length = 0; f.selections.push([org], [unit], [
 function post(extra = {}) { prepare(); return request(app).post("/api/public/bookings").send({ ...payload(), ...extra }); }
 
 describe("new module booking submission", () => {
+  it("includes children in capacity and persists their actual age groups", async () => {
+    unit.capacity = 6; rate.capacity = 6;
+    const res = await post({ adults: 2, children: 3, guestsCount: 5, childrenAges: [0, 3, 6] });
+    expect(res.status).toBe(201);
+    const values = f.query.mock.calls.find(([sql]) => sql.includes("INSERT INTO bookings"))?.[1];
+    expect(values.slice(7, 11)).toEqual([5, 2, 2, 1]);
+    expect(saved.booking_policy_receipt.childrenAges).toEqual([0, 3, 6]);
+    expect(saved.total_amount).toBe("2400.00");
+  });
+  it("never exceeds capacity by ignoring children", async () => {
+    const res = await post({ adults: 2, children: 1, guestsCount: 3, childrenAges: [5] });
+    expect(res.status).toBe(409);
+    expect(saved).toBeNull();
+  });
+  it("does not reuse a family booking identity for changed child ages", async () => {
+    unit.capacity = 4; rate.capacity = 4;
+    expect((await post({ adults: 2, children: 1, guestsCount: 3, childrenAges: [5] })).status).toBe(201);
+    expect((await post({ adults: 2, children: 1, guestsCount: 3, childrenAges: [6] })).status).toBe(409);
+  });
   it("returns saved media and description alongside real quoted availability", async () => {
     org.bookingEngineConfig = { ...org.booking_engine_config, unitMedia: {
       "10": { photos: ["https://example.com/house.jpg"], videoUrl: "https://example.com/tour.mp4", description: "Full house description" },
