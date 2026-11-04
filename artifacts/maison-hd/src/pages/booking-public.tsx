@@ -303,12 +303,12 @@ export default function BookingPublicPage() {
   const header = (
     <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-stone-200">
       <div className={`max-w-6xl mx-auto px-5 ${ap ? "h-24" : "h-16"} flex items-center justify-between gap-4`}>
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="dg-public-brand flex items-center gap-3 min-w-0">
           {ap ? <DogodaLogo background={ap.surfaceColor} customSrc={logo} className="h-16 w-auto max-w-[160px] shrink-0" /> : logo ? <img src={logo} alt="" className="h-9 w-9 rounded-xl object-cover" /> :
             <div className="h-9 w-9 rounded-xl flex items-center justify-center text-white font-semibold" style={{ background: accent }}>{name.slice(0, 1)}</div>}
           <p className={ap ? "sr-only" : "font-semibold truncate"} data-testid="text-hotel-name">{name}</p>
         </div>
-        <div className="flex items-center gap-1 text-sm text-stone-700">
+        <div className="dg-public-contacts flex items-center gap-1 text-sm text-stone-700">
           {phone && <a href={`tel:${phone}`} className="flex items-center gap-1.5 rounded-full px-3 py-2 hover:bg-stone-100"><Phone className="w-4 h-4" /><span className="hidden md:inline">{phone}</span></a>}
           {email && <a href={`mailto:${email}`} className="flex items-center gap-1.5 rounded-full px-3 py-2 hover:bg-stone-100"><Mail className="w-4 h-4" /><span className="hidden lg:inline">{email}</span></a>}
         </div>
@@ -407,7 +407,7 @@ export default function BookingPublicPage() {
 
           {eff === 1 && (
             <section className="dg-rise" aria-labelledby="dg-step1">
-              <p className="dg-hand text-2xl" style={{ color: "var(--dg-button)" }}>pick your dates</p>
+              <p className="dg-hand hidden md:block text-2xl" style={{ color: "var(--dg-button)" }}>pick your dates</p>
               <h2 id="dg-step1" className="text-3xl md:text-4xl tracking-tight mb-6">Коли приїдете і скільки вас?</h2>
               <SearchBar properties={properties} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}
                 checkOut={checkOut} setCheckOut={setCheckOut} guests={guests} setGuests={setGuests} minDate={ymd(today)} searching={searching} onSearch={search} accent={accent}

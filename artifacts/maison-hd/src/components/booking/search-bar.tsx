@@ -31,35 +31,35 @@ export function SearchBar(p: Props) {
   const setAge = (i: number, v: number | null) => p.setChildAges?.(ages.map((a, j) => (j === i ? v : a)));
   return (
     <form role="search" onSubmit={(e) => { e.preventDefault(); if (!p.locked) p.onSearch(); }}
-      className={`${withKids && ages.length ? "rounded-[28px]" : "rounded-[28px] md:rounded-full"} bg-white border border-stone-200 shadow-[0_10px_40px_-12px_rgba(30,30,30,0.25)] p-2`}>
-      <div className="flex flex-col md:flex-row md:items-center gap-1">
+      className={`dg-search ${withKids && ages.length ? "rounded-[28px]" : "rounded-[28px] md:rounded-full"} bg-white border border-stone-200 shadow-[0_10px_40px_-12px_rgba(30,30,30,0.25)] p-2`}>
+      <div className="dg-search-fields flex flex-col md:flex-row md:items-center gap-1">
         {p.properties.length > 1 ? (
-          <label className={seg}>
+          <label className={`${seg} dg-search-field dg-search-property`}>
             <span className={lbl}><Building2 className="w-3.5 h-3.5" />Об'єкт</span>
             <select data-testid="select-property" value={p.propertyId} onChange={(e) => p.setPropertyId(e.target.value)} className={`${inp} appearance-none cursor-pointer`}>
               {p.properties.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
             </select>
           </label>
         ) : (
-          <div className={seg}>
+          <div className={`${seg} dg-search-field dg-search-property`}>
             <span className={lbl}><Building2 className="w-3.5 h-3.5" />Об'єкт</span>
             <p className="text-sm text-stone-700 mt-0.5 truncate">{p.properties[0]?.name ?? "—"}</p>
           </div>
         )}
         <span className="hidden md:block w-px h-8 bg-stone-200" />
-        <label className={seg}>
+        <label className={`${seg} dg-search-field dg-search-date`}>
           <span className={lbl}><CalendarDays className="w-3.5 h-3.5" />Заїзд</span>
           <input data-testid="input-checkin" type="date" min={p.minDate} value={p.checkIn} onChange={(e) => p.setCheckIn(e.target.value)} className={inp} />
         </label>
         <span className="hidden md:block w-px h-8 bg-stone-200" />
-        <label className={seg}>
+        <label className={`${seg} dg-search-field dg-search-date`}>
           <span className={lbl}><CalendarDays className="w-3.5 h-3.5" />Виїзд{nights > 0 ? <span className="normal-case tracking-normal font-normal text-stone-500">· {nights} ноч.</span> : null}</span>
           <input data-testid="input-checkout" type="date" min={p.checkIn} value={p.checkOut} onChange={(e) => p.setCheckOut(e.target.value)} className={inp} />
         </label>
         <span className="hidden md:block w-px h-8 bg-stone-200" />
-        <div className={`${seg} md:flex-[0.9]`}>
+        <div className={`${seg} dg-search-field dg-search-party md:flex-[0.9]`}>
           <span className={lbl}><Users className="w-3.5 h-3.5" />Дорослих</span>
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="dg-search-counter flex items-center gap-2 mt-0.5">
             <button type="button" aria-label="Менше дорослих" onClick={() => p.setGuests(Math.max(1, p.guests - 1))} disabled={p.guests <= 1}
               className={stepBtn} data-testid="button-guests-minus"><Minus className="w-3 h-3" /></button>
             <input data-testid="input-guests" type="number" min={1} max={MAX_PARTY - ages.length} value={p.guests} aria-label="Кількість дорослих"
@@ -70,9 +70,9 @@ export function SearchBar(p: Props) {
         </div>
         {withKids && <>
           <span className="hidden md:block w-px h-8 bg-stone-200" />
-          <div className={`${seg} md:flex-[0.9]`}>
+          <div className={`${seg} dg-search-field dg-search-party md:flex-[0.9]`}>
             <span className={lbl}><Baby className="w-3.5 h-3.5" />Дітей</span>
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="dg-search-counter flex items-center gap-2 mt-0.5">
               <button type="button" aria-label="Прибрати дитину" onClick={() => p.setChildAges?.(ages.slice(0, -1))} disabled={ages.length === 0}
                 className={stepBtn} data-testid="button-children-minus"><Minus className="w-3 h-3" /></button>
               <span className="w-8 text-center text-sm" data-testid="text-children-count">{ages.length}</span>
@@ -82,7 +82,7 @@ export function SearchBar(p: Props) {
           </div>
         </>}
         <button data-testid="button-search" type="submit" disabled={p.searching || p.locked}
-          className="h-12 md:h-14 md:w-auto px-6 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 shrink-0"
+          className="dg-search-action h-12 md:h-14 md:w-auto px-6 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 shrink-0"
           style={{ background: p.accent }}>
           <Search className="w-4 h-4" />{p.locked ? "Пошук вимкнено" : p.searching ? "Пошук..." : "Знайти"}
         </button>

@@ -40,6 +40,41 @@
 @keyframes dg-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .dogoda-root .dg-card-img { transition: transform .9s cubic-bezier(.2,.7,.2,1); }
 .dogoda-root .dg-card:hover .dg-card-img { transform: scale(1.035); }
+/* Mobile only: a compact, centered two-column search, without changing desktop or other hotels. */
+@media (max-width: 767px) {
+  .dogoda-root { text-align: center; }
+  .dogoda-root input, .dogoda-root textarea, .dogoda-root select { text-align: center; font-size: 16px; }
+  .dogoda-root select { text-align-last: center; }
+  .dogoda-root [data-testid="banner-private-preview"] { position: static; font-size: 12px; line-height: 1.5; }
+  .dogoda-root header > div { position: relative; height: 80px; }
+  .dogoda-root .dg-public-brand { margin-inline: auto; }
+  .dogoda-root .dg-public-brand img { height: 56px; width: auto; }
+  .dogoda-root .dg-public-contacts { position: absolute; right: 12px; }
+  .dogoda-root .dg-public-contacts a { padding: 8px; }
+  .dogoda-root [data-testid="nav-steps"] { justify-content: center; gap: 4px; }
+  .dogoda-root [data-testid="nav-steps"] li { gap: 4px; }
+  .dogoda-root [data-testid="nav-steps"] li > span { width: 8px; }
+  .dogoda-root [data-testid="nav-steps"] button { padding: 4px 8px 4px 4px; gap: 4px; font-size: 11px; }
+  .dogoda-root #dg-step1 { font-size: 28px; line-height: 1.2; letter-spacing: -.02em; text-wrap: balance; margin: 0 auto 24px; max-width: 22ch; }
+  .dogoda-root .dg-search { padding: 10px; border-radius: 26px; }
+  .dogoda-root .dg-search-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .dogoda-root .dg-search-field { padding: 14px 8px; border-radius: 18px; }
+  .dogoda-root .dg-search-field > span { justify-content: center; flex-wrap: wrap; gap: 4px; }
+  .dogoda-root .dg-search-property { grid-column: 1 / -1; padding-block: 10px 16px; border-bottom: 1px solid color-mix(in srgb, var(--dg-muted) 25%, transparent); border-radius: 0; }
+  .dogoda-root .dg-search-date, .dogoda-root .dg-search-party { background: color-mix(in srgb, var(--dg-muted) 7%, var(--dg-surface)); }
+  .dogoda-root .dg-search input[type="date"] { display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 28px; padding: 0; -webkit-appearance: none; }
+  .dogoda-root .dg-search input[type="date"]::-webkit-date-and-time-value { text-align: center; }
+  .dogoda-root .dg-search input[type="date"]::-webkit-datetime-edit { padding: 0; }
+  .dogoda-root .dg-search-counter { justify-content: center; gap: 4px; margin-top: 8px; }
+  .dogoda-root .dg-search-counter button { width: 40px; height: 40px; flex-shrink: 0; }
+  .dogoda-root .dg-search-counter input, .dogoda-root .dg-search-counter > span { width: 20px; min-width: 0; padding: 0; }
+  .dogoda-root .dg-search-counter input { appearance: textfield; -moz-appearance: textfield; }
+  .dogoda-root .dg-search-counter input::-webkit-inner-spin-button, .dogoda-root .dg-search-counter input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .dogoda-root .dg-search-action { grid-column: 1 / -1; width: 100%; height: 52px; margin-top: 4px; }
+  .dogoda-root [data-testid="panel-child-ages"] > div { justify-content: center; }
+  .dogoda-root main p.flex, .dogoda-root main a[href^="tel:"], .dogoda-root main a[href^="mailto:"] { justify-content: center; }
+  .dogoda-root footer > div { flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .dogoda-root .dg-rise, .dogoda-root .dg-card-img { animation: none; transition: none; }
   .dogoda-root .dg-card:hover .dg-card-img { transform: none; }

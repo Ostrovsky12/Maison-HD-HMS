@@ -14,3 +14,9 @@ The guest module must open directly with dates and guests, including adding chil
 **Why:** The user explicitly said the first two introductory screens are unnecessary and the module should start at date selection.
 
 **How to apply:** Treat DOGODA booking as a sequential transaction, not a landing page. Keep accommodation media with the post-search selection, even when revisiting the brand design.
+
+On mobile, remove decorative English copy, center text, keep arrival/departure side by side, and keep adults/children side by side. Preserve the desktop layout.
+
+**Why:** The user explicitly requested this mobile arrangement.
+
+**How to apply:** Keep these adjustments scoped to DOGODA's mobile breakpoint, not other hotels or desktop.
