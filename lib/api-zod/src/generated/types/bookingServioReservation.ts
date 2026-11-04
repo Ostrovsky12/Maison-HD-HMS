@@ -11,6 +11,8 @@ import type { BookingServioReservationState } from "./bookingServioReservationSt
 export interface BookingServioReservation {
   id: string;
   requestId: string;
+  /** Whether an administrator has issued private guest access; never includes the bearer token */
+  hasGuestAccess?: boolean;
   state: BookingServioReservationState;
   message: string;
   createdAt: string;

@@ -172,6 +172,20 @@ export interface BookingServioCheckoutInput {
   tariffPolicyVersion: string;
 }
 
+export interface BookingServioGuestLinkInput {
+  authorizeGuestAccess: boolean;
+}
+
+export interface BookingServioGuestLink {
+  url: string;
+  expiresAt: string;
+  reservationId: string;
+}
+
+export type BookingServioGuestCheckoutInput = BookingServioCheckoutInput & {
+  agreeTerms: boolean;
+};
+
 export type BookingServioReservationState =
   (typeof BookingServioReservationState)[keyof typeof BookingServioReservationState];
 
@@ -199,6 +213,8 @@ export const BookingServioReservationMode = {
 export interface BookingServioReservation {
   id: string;
   requestId: string;
+  /** Whether an administrator has issued private guest access; never includes the bearer token */
+  hasGuestAccess?: boolean;
   state: BookingServioReservationState;
   message: string;
   createdAt: string;
@@ -215,6 +231,17 @@ export interface BookingServioReservation {
   mode: BookingServioReservationMode;
   policyVersion: string;
   acknowledgementText: string;
+}
+
+export interface BookingServioGuestView {
+  reservation: BookingServioReservation;
+  hotelName: string;
+  sellerName: string;
+  phone: string;
+  email: string;
+  terms: string;
+  privacy: string;
+  accessExpiresAt: string;
 }
 
 export interface BookingServioCheckout {

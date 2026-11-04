@@ -34,6 +34,10 @@ import type {
   BookingLiqpaySettings,
   BookingServioCheckout,
   BookingServioCheckoutInput,
+  BookingServioGuestCheckoutInput,
+  BookingServioGuestLink,
+  BookingServioGuestLinkInput,
+  BookingServioGuestView,
   BookingServioPreflight,
   BookingServioPreflightInput,
   BookingServioReservation,
@@ -1028,6 +1032,301 @@ export const useCancelBookingServioReservation = <
   TContext
 > => {
   return useMutation(getCancelBookingServioReservationMutationOptions(options));
+};
+
+export const getIssueBookingServioGuestLinkUrl = (id: string) => {
+  return `/api/booking-engine/servio/reservations/${id}/guest-link`;
+};
+
+export const issueBookingServioGuestLink = async (
+  id: string,
+  bookingServioGuestLinkInput: BookingServioGuestLinkInput,
+  options?: RequestInit,
+): Promise<BookingServioGuestLink> => {
+  return customFetch<BookingServioGuestLink>(
+    getIssueBookingServioGuestLinkUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bookingServioGuestLinkInput),
+    },
+  );
+};
+
+export const getIssueBookingServioGuestLinkMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof issueBookingServioGuestLink>>,
+    TError,
+    { id: string; data: BodyType<BookingServioGuestLinkInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof issueBookingServioGuestLink>>,
+  TError,
+  { id: string; data: BodyType<BookingServioGuestLinkInput> },
+  TContext
+> => {
+  const mutationKey = ["issueBookingServioGuestLink"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof issueBookingServioGuestLink>>,
+    { id: string; data: BodyType<BookingServioGuestLinkInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return issueBookingServioGuestLink(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type IssueBookingServioGuestLinkMutationResult = NonNullable<
+  Awaited<ReturnType<typeof issueBookingServioGuestLink>>
+>;
+export type IssueBookingServioGuestLinkMutationBody =
+  BodyType<BookingServioGuestLinkInput>;
+export type IssueBookingServioGuestLinkMutationError = ErrorType<void>;
+
+export const useIssueBookingServioGuestLink = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof issueBookingServioGuestLink>>,
+    TError,
+    { id: string; data: BodyType<BookingServioGuestLinkInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof issueBookingServioGuestLink>>,
+  TError,
+  { id: string; data: BodyType<BookingServioGuestLinkInput> },
+  TContext
+> => {
+  return useMutation(getIssueBookingServioGuestLinkMutationOptions(options));
+};
+
+export const getGetBookingServioGuestReservationUrl = (
+  slug: string,
+  id: string,
+) => {
+  return `/api/public/booking-engine/${slug}/servio/reservations/${id}`;
+};
+
+export const getBookingServioGuestReservation = async (
+  slug: string,
+  id: string,
+  options?: RequestInit,
+): Promise<BookingServioGuestView> => {
+  return customFetch<BookingServioGuestView>(
+    getGetBookingServioGuestReservationUrl(slug, id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetBookingServioGuestReservationQueryKey = (
+  slug: string,
+  id: string,
+) => {
+  return [
+    `/api/public/booking-engine/${slug}/servio/reservations/${id}`,
+  ] as const;
+};
+
+export const getGetBookingServioGuestReservationQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookingServioGuestReservation>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBookingServioGuestReservation>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetBookingServioGuestReservationQueryKey(slug, id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookingServioGuestReservation>>
+  > = ({ signal }) =>
+    getBookingServioGuestReservation(slug, id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(slug && id),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingServioGuestReservation>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBookingServioGuestReservationQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookingServioGuestReservation>>
+>;
+export type GetBookingServioGuestReservationQueryError = ErrorType<void>;
+
+export function useGetBookingServioGuestReservation<
+  TData = Awaited<ReturnType<typeof getBookingServioGuestReservation>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBookingServioGuestReservation>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBookingServioGuestReservationQueryOptions(
+    slug,
+    id,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getCheckoutBookingServioGuestReservationUrl = (
+  slug: string,
+  id: string,
+) => {
+  return `/api/public/booking-engine/${slug}/servio/reservations/${id}/checkout`;
+};
+
+export const checkoutBookingServioGuestReservation = async (
+  slug: string,
+  id: string,
+  bookingServioGuestCheckoutInput: BookingServioGuestCheckoutInput,
+  options?: RequestInit,
+): Promise<BookingServioCheckout> => {
+  return customFetch<BookingServioCheckout>(
+    getCheckoutBookingServioGuestReservationUrl(slug, id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bookingServioGuestCheckoutInput),
+    },
+  );
+};
+
+export const getCheckoutBookingServioGuestReservationMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkoutBookingServioGuestReservation>>,
+    TError,
+    {
+      slug: string;
+      id: string;
+      data: BodyType<BookingServioGuestCheckoutInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof checkoutBookingServioGuestReservation>>,
+  TError,
+  { slug: string; id: string; data: BodyType<BookingServioGuestCheckoutInput> },
+  TContext
+> => {
+  const mutationKey = ["checkoutBookingServioGuestReservation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof checkoutBookingServioGuestReservation>>,
+    {
+      slug: string;
+      id: string;
+      data: BodyType<BookingServioGuestCheckoutInput>;
+    }
+  > = (props) => {
+    const { slug, id, data } = props ?? {};
+
+    return checkoutBookingServioGuestReservation(
+      slug,
+      id,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CheckoutBookingServioGuestReservationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof checkoutBookingServioGuestReservation>>
+>;
+export type CheckoutBookingServioGuestReservationMutationBody =
+  BodyType<BookingServioGuestCheckoutInput>;
+export type CheckoutBookingServioGuestReservationMutationError =
+  ErrorType<void>;
+
+export const useCheckoutBookingServioGuestReservation = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkoutBookingServioGuestReservation>>,
+    TError,
+    {
+      slug: string;
+      id: string;
+      data: BodyType<BookingServioGuestCheckoutInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof checkoutBookingServioGuestReservation>>,
+  TError,
+  { slug: string; id: string; data: BodyType<BookingServioGuestCheckoutInput> },
+  TContext
+> => {
+  return useMutation(
+    getCheckoutBookingServioGuestReservationMutationOptions(options),
+  );
 };
 
 export const getGetPublicBookingEngineUrl = (slug: string) => {

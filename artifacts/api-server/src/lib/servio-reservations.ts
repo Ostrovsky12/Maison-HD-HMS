@@ -17,7 +17,7 @@ export type ReservationConnection = {
 export type Attempt = {
   id: string; organization_id: number; request_id: string; request_hash: string; state: BookingServioReservation["state"];
   account: string | null; payload: { input: BookingServioReservationInput; categoryName: string; rateName: string };
-  connection: string; bill: ServioBill | null; consent: any; payment: any; issue: string | null; created_at: Date | string; updated_at: Date | string;
+  connection: string; guest_access?: string | null; bill: ServioBill | null; consent: any; payment: any; issue: string | null; created_at: Date | string; updated_at: Date | string;
 };
 export type AttemptPatch = { state: Attempt["state"]; account?: string; bill?: ServioBill; consent?: any; payment?: any; issue?: string };
 export interface AttemptStore {
@@ -78,6 +78,7 @@ export function reservationView(row: Attempt): BookingServioReservation {
     total: row.bill ? row.bill.totalMinor / 100 : null, currency: "UAH", account: row.account,
     mode: attemptConnection(row).mode, policyVersion: BOOKING_TARIFF_POLICY.version,
     acknowledgementText: BOOKING_TARIFF_POLICY.acknowledgementText,
+    hasGuestAccess: !!row.guest_access,
   };
 }
 export function hashReservationRequest(input: BookingServioReservationInput) {
@@ -121,13 +122,13 @@ export async function createServioReservation(
     }) ?? row;
   }
 }
-export async function checkoutServioReservation(row: Attempt, store: AttemptStore = attemptStore) {
+export async function checkoutServioReservation(row: Attempt, store: AttemptStore = attemptStore, actor: "administrator" | "guest" = "administrator") {
   if (!row.bill || !["bill_ready", "awaiting_payment"].includes(row.state)) throw new Error("not_payable");
   const connection = attemptConnection(row);
   if (!row.consent) {
     const updated = await store.transition(row.id, row.organization_id, ["bill_ready"], {
       state: "awaiting_payment", consent: {
-        ...BOOKING_TARIFF_POLICY, acceptedAt: new Date().toISOString(), amountMinor: row.bill.totalMinor,
+        ...BOOKING_TARIFF_POLICY, acceptedAt: new Date().toISOString(), actor, amountMinor: row.bill.totalMinor,
         legalEntityId: connection.legalEntityId, propertyId: connection.propertyId, hotelId: connection.hotelId,
         hotelTerms: connection.terms ?? "", hotelPrivacy: connection.privacy ?? "",
       },
@@ -138,11 +139,25 @@ export async function checkoutServioReservation(row: Attempt, store: AttemptStor
       row = current;
     } else row = updated;
   }
+  if (actor === "guest" && row.consent.actor !== "guest" && !row.consent.guestAcceptance) {
+    const updated = await store.transition(row.id, row.organization_id, ["awaiting_payment"], {
+      state: "awaiting_payment", consent: { ...row.consent,
+        guestAcceptance: { ...BOOKING_TARIFF_POLICY, acceptedAt: new Date().toISOString(),
+          amountMinor: row.bill!.totalMinor, hotelTerms: connection.terms ?? "", hotelPrivacy: connection.privacy ?? "" } },
+    });
+    if (!updated) throw new Error("not_payable");
+    row = updated;
+  }
+  // Private guest links never put their bearer token in a bank return URL.
+  // Read access from the updated row, so concurrent admin/guest checkout share
+  // the same return destination and the same immutable payment order.
+  const guestAccess = row.guest_access ? JSON.parse(decrypt(row.guest_access) || "null") : null;
+  const resultPath = guestAccess?.returnPath ?? "/booking-studio";
   const form = generateLiqPayForm({
     action: "pay", amount: row.bill!.totalMinor / 100, currency: "UAH",
     orderId: `mhd_servio_${row.id}`, description: `Maison HD Servio ${row.account}: 100% передоплата`,
     publicKey: connection.publicKey, privateKey: connection.secretKey,
-    resultUrl: `${connection.origin}/booking-studio`,
+    resultUrl: `${connection.origin}${resultPath}`,
     serverUrl: `${connection.origin}/api/public/booking-engine/servio/payment-callback`,
   });
   return { reservation: reservationView(row), ...form };

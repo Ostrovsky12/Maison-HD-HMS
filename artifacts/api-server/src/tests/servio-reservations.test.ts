@@ -8,6 +8,7 @@ import {
 } from "../lib/servio-reservations.js";
 import { servioAccount, parseServioBill, reservationPayload } from "../lib/servio-reservation-protocol.js";
 import { BOOKING_TARIFF_POLICY } from "../lib/booking-tariff.js";
+import { createServioGuestAccess, encodeServioGuestAccess } from "../lib/servio-guest-access.js";
 
 const input: any = {
   checkIn: "2026-12-01", checkOut: "2026-12-03", adults: 2, childAges: [6], useExtraBed: true,
@@ -56,10 +57,11 @@ function memoryStore() {
   return { store, rows };
 }
 let store: AttemptStore;
+let storedRows: Map<string, Attempt>;
 let send: Mock<ServioWriteRequest>;
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", "test-only-session-secret-more-than-32-bytes");
-  ({ store } = memoryStore());
+  ({ store, rows: storedRows } = memoryStore());
   send = vi.fn<ServioWriteRequest>().mockResolvedValueOnce({ Result: 0, Account: 123 }).mockResolvedValueOnce(finalBill());
 });
 const create = () => createServioReservation(7, input, connection, "House", rate, store, send);
@@ -136,6 +138,27 @@ describe("durable Servio controlled booking workflow", () => {
     const row = await payable();
     expect(row.state).toBe("awaiting_payment"); expect(row.payment).toBeNull();
     expect(send.mock.calls.every(call => call[2] !== "SetReservationType")).toBe(true);
+  });
+  it("returns a guest to the private booking page without disclosing its bearer token to LiqPay", async () => {
+    const row = await create();
+    const access = createServioGuestAccess("fixture-hotel", row.id, { hotelName: "Fixture", sellerName: "Seller", phone: "", email: "" });
+    row.guest_access = encodeServioGuestAccess(access); storedRows.set(row.id, row);
+    const checkout = await checkoutServioReservation(row, store, "guest");
+    const decoded = JSON.parse(Buffer.from(checkout.data, "base64").toString("utf8"));
+    expect(decoded.result_url).toBe(`https://example.invalid/booking/fixture-hotel/servio/${row.id}`);
+    expect(JSON.stringify(decoded)).not.toContain(access.token);
+    expect((await store.get(row.id, 7))?.consent.actor).toBe("guest");
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+  it("retains the guest's own acceptance even when an administrator first issued the payment form", async () => {
+    const row = await create();
+    await checkoutServioReservation(row, store);
+    const awaiting = (await store.get(row.id, 7))!;
+    await checkoutServioReservation(awaiting, store, "guest");
+    const saved = (await store.get(row.id, 7))!;
+    expect(saved.consent.actor).toBe("administrator");
+    expect(saved.consent.guestAcceptance).toMatchObject({ version: BOOKING_TARIFF_POLICY.version, amountMinor: 22500 });
+    expect(send).toHaveBeenCalledTimes(2);
   });
   it("requires a valid signature and exact order and merchant from immutable credentials", async () => {
     const row = await payable();

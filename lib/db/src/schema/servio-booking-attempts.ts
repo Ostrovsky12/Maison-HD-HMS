@@ -14,6 +14,7 @@ export const servioBookingAttemptsTable = pgTable("servio_booking_attempts", {
   account: text("account"),
   payload: jsonb("payload").notNull(),
   connection: text("connection").notNull(),
+  guestAccess: text("guest_access"),
   bill: jsonb("bill"),
   consent: jsonb("consent"),
   payment: jsonb("payment"),

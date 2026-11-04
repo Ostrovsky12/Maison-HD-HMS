@@ -541,6 +541,12 @@ export const GetBookingEngineOverviewResponse = zod.record(
 export const ListBookingServioReservationsResponseItem = zod.object({
   id: zod.string(),
   requestId: zod.string(),
+  hasGuestAccess: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Whether an administrator has issued private guest access; never includes the bearer token",
+    ),
   state: zod.enum([
     "creating",
     "billing",
@@ -700,6 +706,12 @@ export const CreateBookingServioReservationBody = zod
 export const CreateBookingServioReservationResponse = zod.object({
   id: zod.string(),
   requestId: zod.string(),
+  hasGuestAccess: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Whether an administrator has issued private guest access; never includes the bearer token",
+    ),
   state: zod.enum([
     "creating",
     "billing",
@@ -747,6 +759,12 @@ export const CheckoutBookingServioReservationResponse = zod.object({
   reservation: zod.object({
     id: zod.string(),
     requestId: zod.string(),
+    hasGuestAccess: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether an administrator has issued private guest access; never includes the bearer token",
+      ),
     state: zod.enum([
       "creating",
       "billing",
@@ -785,6 +803,12 @@ export const CancelBookingServioReservationParams = zod.object({
 export const CancelBookingServioReservationResponse = zod.object({
   id: zod.string(),
   requestId: zod.string(),
+  hasGuestAccess: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Whether an administrator has issued private guest access; never includes the bearer token",
+    ),
   state: zod.enum([
     "creating",
     "billing",
@@ -810,6 +834,142 @@ export const CancelBookingServioReservationResponse = zod.object({
   mode: zod.enum(["test", "live"]),
   policyVersion: zod.string(),
   acknowledgementText: zod.string(),
+});
+
+export const IssueBookingServioGuestLinkParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const IssueBookingServioGuestLinkBody = zod.object({
+  authorizeGuestAccess: zod.boolean(),
+});
+
+export const IssueBookingServioGuestLinkResponse = zod.object({
+  url: zod.string(),
+  expiresAt: zod.string(),
+  reservationId: zod.string(),
+});
+
+export const GetBookingServioGuestReservationParams = zod.object({
+  slug: zod.coerce.string(),
+  id: zod.coerce.string().uuid(),
+});
+
+export const GetBookingServioGuestReservationHeader = zod.object({
+  "X-Booking-Access": zod.string(),
+});
+
+export const GetBookingServioGuestReservationResponse = zod.object({
+  reservation: zod.object({
+    id: zod.string(),
+    requestId: zod.string(),
+    hasGuestAccess: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether an administrator has issued private guest access; never includes the bearer token",
+      ),
+    state: zod.enum([
+      "creating",
+      "billing",
+      "bill_ready",
+      "awaiting_payment",
+      "confirming",
+      "confirmed",
+      "review",
+      "failed",
+      "cancelling",
+      "cancelled",
+    ]),
+    message: zod.string(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    categoryName: zod.string(),
+    rateName: zod.string(),
+    checkIn: zod.string(),
+    checkOut: zod.string(),
+    total: zod.number().nullable(),
+    currency: zod.string(),
+    account: zod.string().nullable(),
+    mode: zod.enum(["test", "live"]),
+    policyVersion: zod.string(),
+    acknowledgementText: zod.string(),
+  }),
+  hotelName: zod.string(),
+  sellerName: zod.string(),
+  phone: zod.string(),
+  email: zod.string(),
+  terms: zod.string(),
+  privacy: zod.string(),
+  accessExpiresAt: zod.string(),
+});
+
+export const CheckoutBookingServioGuestReservationParams = zod.object({
+  slug: zod.coerce.string(),
+  id: zod.coerce.string().uuid(),
+});
+
+export const CheckoutBookingServioGuestReservationHeader = zod.object({
+  "X-Booking-Access": zod.string(),
+});
+
+export const checkoutBookingServioGuestReservationBodyOneExpectedTotalExclusiveMin = 0;
+export const checkoutBookingServioGuestReservationBodyOneExpectedTotalMax = 10000000;
+
+export const CheckoutBookingServioGuestReservationBody = zod
+  .object({
+    expectedTotal: zod
+      .number()
+      .gt(checkoutBookingServioGuestReservationBodyOneExpectedTotalExclusiveMin)
+      .max(checkoutBookingServioGuestReservationBodyOneExpectedTotalMax),
+    agreeNonRefundable: zod.boolean(),
+    tariffPolicyVersion: zod.string(),
+  })
+  .and(
+    zod.object({
+      agreeTerms: zod.boolean(),
+    }),
+  );
+
+export const CheckoutBookingServioGuestReservationResponse = zod.object({
+  reservation: zod.object({
+    id: zod.string(),
+    requestId: zod.string(),
+    hasGuestAccess: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether an administrator has issued private guest access; never includes the bearer token",
+      ),
+    state: zod.enum([
+      "creating",
+      "billing",
+      "bill_ready",
+      "awaiting_payment",
+      "confirming",
+      "confirmed",
+      "review",
+      "failed",
+      "cancelling",
+      "cancelled",
+    ]),
+    message: zod.string(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    categoryName: zod.string(),
+    rateName: zod.string(),
+    checkIn: zod.string(),
+    checkOut: zod.string(),
+    total: zod.number().nullable(),
+    currency: zod.string(),
+    account: zod.string().nullable(),
+    mode: zod.enum(["test", "live"]),
+    policyVersion: zod.string(),
+    acknowledgementText: zod.string(),
+  }),
+  url: zod.string(),
+  data: zod.string(),
+  signature: zod.string(),
 });
 
 export const GetPublicBookingEngineParams = zod.object({

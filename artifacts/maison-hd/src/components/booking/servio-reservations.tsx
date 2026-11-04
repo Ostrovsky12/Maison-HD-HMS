@@ -4,6 +4,7 @@ import {
   useListBookingServioReservations, getListBookingServioReservationsQueryKey,
   useCreateBookingServioReservation, useCheckoutBookingServioReservation, useCancelBookingServioReservation,
   useGetBookingEngineSettings, getGetBookingEngineSettingsQueryKey,
+  useIssueBookingServioGuestLink,
 } from "@workspace/api-client-react";
 import type { BookingServioPreflightInput, BookingServioReservation, BookingServioPreflightCheck } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { AlertTriangle, BookOpen, ExternalLink, Inbox, Loader2, Lock, RefreshCw, ShieldAlert, XCircle } from "lucide-react";
+import { absoluteGuestUrl } from "@/lib/servio-guest-payment";
+import { AlertTriangle, BookOpen, Copy, Link2, ExternalLink, Inbox, Loader2, Lock, RefreshCw, ShieldAlert, XCircle } from "lucide-react";
 
 /* ---------- shared helpers ---------- */
 
@@ -348,6 +350,28 @@ function JournalRow({ r }: { r: BookingServioReservation }) {
   const [link, setLink] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const issueGuest = useIssueBookingServioGuestLink();
+  const [guestOpen, setGuestOpen] = useState(false);
+  const [guestAuth, setGuestAuth] = useState(false);
+  const [guestLink, setGuestLink] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [guestErr, setGuestErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const guestOk = r.state === "bill_ready" || r.state === "awaiting_payment";
+  useEffect(() => { if (!guestOk) { setGuestLink(null); setGuestOpen(false); setGuestAuth(false); } }, [guestOk]);
+  const canIssueGuest = guestOk && (r.state === "bill_ready" || r.hasGuestAccess === true) && r.total !== null && r.total > 0;
+  const doIssueGuest = () => {
+    if (!canIssueGuest || !guestAuth || issueGuest.isPending) return;
+    setGuestErr(null);
+    issueGuest.mutate({ id: r.id, data: { authorizeGuestAccess: true } }, {
+      onSuccess: (res) => { setGuestOpen(false); setGuestAuth(false); if (res.reservationId === r.id && res.url) { setGuestLink({ url: absoluteGuestUrl(res.url), expiresAt: res.expiresAt }); invalidate(); } else setGuestErr("Сервер повернув неочікувану відповідь."); },
+      onError: (e) => { setGuestOpen(false); setGuestAuth(false); setGuestErr(safeErr(e, "Не вдалося створити приватне посилання.")); invalidate(); },
+    });
+  };
+  const copyGuest = async () => {
+    if (!guestLink) return;
+    try { await navigator.clipboard.writeText(guestLink.url); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { setGuestErr("Не вдалося скопіювати. Виділіть посилання вручну."); }
+  };
   const st = STATE[r.state] ?? { label: r.state, c: "bg-stone-100 text-stone-700 border-stone-200" };
   const canPay = (r.state === "bill_ready" || r.state === "awaiting_payment") && r.total !== null && r.total > 0;
   const canCancel = r.state === "bill_ready" && !link;
@@ -429,12 +453,50 @@ function JournalRow({ r }: { r: BookingServioReservation }) {
         </div>
       )}
 
+      {(canIssueGuest || (guestOk && guestLink)) && (
+        <div className="mt-3 rounded-lg border border-dashed border-stone-300 p-3 space-y-2">
+          {canIssueGuest && (
+            <Button size="sm" variant="outline" data-testid={`button-servio-guest-link-${r.id}`} disabled={issueGuest.isPending} onClick={() => { setGuestAuth(false); setGuestOpen(true); }}>
+              {issueGuest.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5 mr-1.5" />}{r.hasGuestAccess ? "Отримати приватне посилання повторно" : "Створити приватне посилання для гостя"}
+            </Button>
+          )}
+          {guestLink && (
+            <div className="space-y-1.5">
+              <div className="flex gap-2">
+                <Input readOnly value={guestLink.url} aria-label="Приватне посилання для гостя" className="font-mono text-xs" data-testid={`servio-guest-link-${r.id}`} onFocus={e => e.currentTarget.select()} />
+                <Button size="sm" variant="outline" data-testid={`button-copy-servio-guest-link-${r.id}`} onClick={copyGuest}><Copy className="w-3.5 h-3.5 mr-1.5" />{copied ? "Скопійовано" : "Копіювати"}</Button>
+              </div>
+              <p className="text-[11px] text-stone-500">Доступ діє до {new Date(guestLink.expiresAt).toLocaleString("uk-UA")} (24 год). Це строк доступу до сторінки, а не утримання номера чи строк оплати. Надсилайте лише гостю цього бронювання.</p>
+            </div>
+          )}
+          {guestErr && <p role="alert" className="text-xs text-red-700">{guestErr}</p>}
+        </div>
+      )}
+
       {canCancel && (
         <Button size="sm" variant="ghost" className="mt-2 text-red-800 hover:bg-red-50" data-testid={`button-servio-cancel-${r.id}`} disabled={busy} onClick={() => setCancelOpen(true)}>
           {cancel.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5 mr-1.5" />}Скасувати в Servio
         </Button>
       )}
       {err && <p role="alert" className="mt-2 text-xs text-red-700">{err}</p>}
+
+      <AlertDialog open={guestOpen} onOpenChange={(o) => { setGuestOpen(o); if (!o) setGuestAuth(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Створити приватне посилання для гостя?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Будь-хто з цим посиланням зможе переглянути й оплатити лише це бронювання ({r.categoryName}, {fmtDate(r.checkIn)} – {fmtDate(r.checkOut)}). Це не відкриває самостійні продажі, не створює нового бронювання і не звертається до банку. Повторне створення поверне те саме чинне посилання. Доступ діє 24 години.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Consent id={`servio-guest-auth-${r.id}`} testId={`input-servio-guest-auth-${r.id}`} checked={guestAuth} onChange={setGuestAuth} disabled={issueGuest.isPending}>
+            Я дозволяю видати гостю посилання на перегляд і оплату цього бронювання.
+          </Consent>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Скасувати</AlertDialogCancel>
+            <AlertDialogAction disabled={!guestAuth || issueGuest.isPending} data-testid={`button-confirm-servio-guest-link-${r.id}`} onClick={(e) => { e.preventDefault(); doIssueGuest(); }}>Створити посилання</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <AlertDialogContent>

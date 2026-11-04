@@ -205,6 +205,60 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BookingServioReservation" }
+  /booking-engine/servio/reservations/{id}/guest-link:
+    post:
+      operationId: issueBookingServioGuestLink
+      tags: [BookingEngine]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingServioGuestLinkInput" }
+      responses:
+        "200":
+          description: Private guest access link issued by an authorized administrator
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioGuestLink" }
+        "409": { description: Reservation is not eligible for guest access }
+  /public/booking-engine/{slug}/servio/reservations/{id}:
+    get:
+      operationId: getBookingServioGuestReservation
+      tags: [BookingEngine]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: X-Booking-Access, in: header, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Minimal guest projection authenticated by the private booking token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioGuestView" }
+        "404": { description: Invalid or expired private access }
+  /public/booking-engine/{slug}/servio/reservations/{id}/checkout:
+    post:
+      operationId: checkoutBookingServioGuestReservation
+      tags: [BookingEngine]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: X-Booking-Access, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingServioGuestCheckoutInput" }
+      responses:
+        "200":
+          description: Payment of the existing final bill without creating another reservation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioCheckout" }
+        "404": { description: Invalid or expired private access }
+        "409": { description: Amount changed or reservation not payable }
   /public/booking-engine/{slug}:
     get:
       operationId: getPublicBookingEngine
@@ -2942,12 +2996,44 @@ components:
         expectedTotal: { type: number, exclusiveMinimum: 0, maximum: 10000000 }
         agreeNonRefundable: { type: boolean }
         tariffPolicyVersion: { type: string }
+    BookingServioGuestLinkInput:
+      type: object
+      required: [authorizeGuestAccess]
+      properties:
+        authorizeGuestAccess: { type: boolean }
+    BookingServioGuestLink:
+      type: object
+      required: [url, expiresAt, reservationId]
+      properties:
+        url: { type: string }
+        expiresAt: { type: string }
+        reservationId: { type: string }
+    BookingServioGuestCheckoutInput:
+      allOf:
+        - $ref: "#/components/schemas/BookingServioCheckoutInput"
+        - type: object
+          required: [agreeTerms]
+          properties:
+            agreeTerms: { type: boolean }
+    BookingServioGuestView:
+      type: object
+      required: [reservation, hotelName, sellerName, phone, email, terms, privacy, accessExpiresAt]
+      properties:
+        reservation: { $ref: "#/components/schemas/BookingServioReservation" }
+        hotelName: { type: string }
+        sellerName: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        terms: { type: string }
+        privacy: { type: string }
+        accessExpiresAt: { type: string }
     BookingServioReservation:
       type: object
       required: [id, requestId, state, message, createdAt, updatedAt, categoryName, rateName, checkIn, checkOut, total, currency, account, mode, policyVersion, acknowledgementText]
       properties:
         id: { type: string }
         requestId: { type: string }
+        hasGuestAccess: { type: boolean, description: Whether an administrator has issued private guest access; never includes the bearer token }
         state: { type: string, enum: [creating, billing, bill_ready, awaiting_payment, confirming, confirmed, review, failed, cancelling, cancelled] }
         message: { type: string }
         createdAt: { type: string }

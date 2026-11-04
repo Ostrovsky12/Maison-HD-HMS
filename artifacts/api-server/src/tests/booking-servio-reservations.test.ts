@@ -61,6 +61,10 @@ describe("controlled Servio route boundaries", () => {
     expect((await request(app).post("/reservations").set("x-role", role).send(input)).status).toBe(403);
     expect(f.query).not.toHaveBeenCalled(); expect(f.create).not.toHaveBeenCalled();
   });
+  it.each(["staff", "manager"])("does not let %s issue private guest payment links", async role => {
+    expect((await request(app).post(`/reservations/${id}/guest-link`).set("x-role", role).send({ authorizeGuestAccess: true })).status).toBe(403);
+    expect(f.query).not.toHaveBeenCalled();
+  });
   it.each(["agreeNonRefundable", "authorizeProviderWrite", "agreeTerms"])("requires explicit %s before any writes", async flag => {
     expect((await request(app).post("/reservations").send({ ...input, [flag]: false })).status).toBe(400);
     expect(f.query).not.toHaveBeenCalled(); expect(f.create).not.toHaveBeenCalled();

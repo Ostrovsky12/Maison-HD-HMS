@@ -15,6 +15,7 @@ import { servioFingerprint, servioBaseUrl, servioHotelId } from "../lib/servio-c
 import { searchServioAvailability, validServioSearch } from "../lib/servio-availability.js";
 import { liqpayCredentialFingerprint } from "../lib/liqpay-connection.js";
 import { bookingPaymentOrigin } from "./booking-checkout.js";
+import { issueServioGuestLink } from "./booking-servio-guest.js";
 import {
   attemptStore, createServioReservation, reservationView, hashReservationRequest,
   checkoutServioReservation, cancelServioReservation, validServioCallback, recordServioPayment,
@@ -22,6 +23,7 @@ import {
 
 const router = Router();
 router.use(requireRole("super_admin", "owner", "admin"));
+router.post("/:id/guest-link", rateLimit({ windowMs: 60_000, max: 10, standardHeaders: true, legacyHeaders: false }), issueServioGuestLink);
 const limiter = rateLimit({ windowMs: 60_000, max: 4, standardHeaders: true, legacyHeaders: false });
 const uuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const orgSql = "SELECT name,booking_engine_config FROM organizations WHERE id=$1 AND is_active=true";

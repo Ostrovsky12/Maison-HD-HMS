@@ -75,6 +75,14 @@
       "tag": "0009_servio_booking_attempts",
       "scope": "booking-engine",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793800000001,
+      "tag": "0010_servio_guest_access",
+      "scope": "booking-engine",
+      "breakpoints": true
     }
   ]
 }

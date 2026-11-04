@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { servioReservationPaymentCallback } from "./booking-servio-reservations.js";
+import bookingServioGuest from "./booking-servio-guest.js";
 import { pool } from "@workspace/db";
 import { SaveBookingEngineSettingsBody, RequestUploadUrlBody } from "@workspace/api-zod";
 import { requireAuth, requireRole } from "../lib/auth.js";
@@ -179,6 +180,7 @@ router.get("/overview", async (req: any, res): Promise<void> => {
 });
 
 export const publicEngineRouter = Router();
+publicEngineRouter.use(bookingServioGuest);
 publicEngineRouter.post("/servio/payment-callback", servioReservationPaymentCallback);
 publicEngineRouter.get("/:slug", async (req, res): Promise<void> => {
   res.setHeader("Cache-Control", "no-store");
