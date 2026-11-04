@@ -116,6 +116,26 @@ paths:
         "404": { description: Organization not found }
         "409": { description: Connection changed during the search }
         "429": { description: Too many searches }
+  /booking-engine/servio/preflight:
+    post:
+      operationId: checkBookingServioPreflight
+      tags: [BookingEngine]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingServioPreflightInput" }
+      responses:
+        "200":
+          description: Read-only checks of current tariff, seller and payment configuration. Never creates a reservation or a checkout.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingServioPreflight" }
+        "400": { description: Invalid selection or unverified saved Servio connection }
+        "403": { description: Administrator access required }
+        "404": { description: Organization not found }
+        "409": { description: Configuration changed during the check }
+        "429": { description: Too many checks }
   /booking-engine/overview:
     get:
       operationId: getBookingEngineOverview
@@ -2830,6 +2850,42 @@ components:
         companyId: { type: integer, minimum: 0, maximum: 2147483647 }
         companyCodeId: { type: integer, minimum: 0, maximum: 2147483647 }
         conditionId: { type: integer, minimum: 0, maximum: 2147483647 }
+    BookingServioPreflightInput:
+      allOf:
+        - $ref: "#/components/schemas/BookingServioSearchInput"
+        - type: object
+          required: [categoryId, priceListId, rateConditionId, propertyId]
+          properties:
+            categoryId: { type: integer, minimum: 1, maximum: 2147483647 }
+            priceListId: { type: integer, minimum: 1, maximum: 2147483647 }
+            rateConditionId: { type: integer, minimum: 0, maximum: 2147483647 }
+            propertyId: { type: integer, minimum: 1, maximum: 2147483647 }
+    BookingServioPreflightCheck:
+      type: object
+      required: [code, status, message]
+      properties:
+        code: { type: string }
+        status: { type: string, enum: [passed, blocked, unverified] }
+        message: { type: string }
+    BookingServioPreflight:
+      type: object
+      required: [checkedAt, input, hotelId, categoryName, rateName, currency, total, inputChecksPassed, canCreateReservation, canAcceptPayment, policyVersion, acknowledgementText, checks]
+      properties:
+        checkedAt: { type: string }
+        input: { $ref: "#/components/schemas/BookingServioPreflightInput" }
+        hotelId: { type: integer }
+        categoryName: { type: ["string", "null"] }
+        rateName: { type: ["string", "null"] }
+        currency: { type: ["string", "null"] }
+        total: { type: ["number", "null"] }
+        inputChecksPassed: { type: boolean }
+        canCreateReservation: { type: boolean, description: Always false for this read-only preflight. }
+        canAcceptPayment: { type: boolean, description: Always false for this read-only preflight. }
+        policyVersion: { type: string }
+        acknowledgementText: { type: string }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/BookingServioPreflightCheck" }
     BookingServioCharge:
       type: object
       required: [serviceId, serviceName, date, amount]

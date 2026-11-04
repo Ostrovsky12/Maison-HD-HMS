@@ -339,6 +339,200 @@ export const SearchBookingServioAvailabilityResponse = zod.object({
   ),
 });
 
+export const checkBookingServioPreflightBodyOneCheckInRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const checkBookingServioPreflightBodyOneCheckOutRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const checkBookingServioPreflightBodyOneAdultsMax = 20;
+
+export const checkBookingServioPreflightBodyOneChildAgesItemMin = 0;
+export const checkBookingServioPreflightBodyOneChildAgesItemMax = 17;
+
+export const checkBookingServioPreflightBodyOneChildAgesMax = 10;
+
+export const checkBookingServioPreflightBodyOneCompanyIdMin = 0;
+export const checkBookingServioPreflightBodyOneCompanyIdMax = 2147483647;
+
+export const checkBookingServioPreflightBodyOneCompanyCodeIdMin = 0;
+export const checkBookingServioPreflightBodyOneCompanyCodeIdMax = 2147483647;
+
+export const checkBookingServioPreflightBodyOneConditionIdMin = 0;
+export const checkBookingServioPreflightBodyOneConditionIdMax = 2147483647;
+
+export const checkBookingServioPreflightBodyTwoCategoryIdMax = 2147483647;
+
+export const checkBookingServioPreflightBodyTwoPriceListIdMax = 2147483647;
+
+export const checkBookingServioPreflightBodyTwoRateConditionIdMin = 0;
+export const checkBookingServioPreflightBodyTwoRateConditionIdMax = 2147483647;
+
+export const checkBookingServioPreflightBodyTwoPropertyIdMax = 2147483647;
+
+export const CheckBookingServioPreflightBody = zod
+  .object({
+    checkIn: zod
+      .string()
+      .regex(checkBookingServioPreflightBodyOneCheckInRegExp),
+    checkOut: zod
+      .string()
+      .regex(checkBookingServioPreflightBodyOneCheckOutRegExp),
+    adults: zod
+      .number()
+      .min(1)
+      .max(checkBookingServioPreflightBodyOneAdultsMax),
+    childAges: zod
+      .array(
+        zod
+          .number()
+          .min(checkBookingServioPreflightBodyOneChildAgesItemMin)
+          .max(checkBookingServioPreflightBodyOneChildAgesItemMax),
+      )
+      .max(checkBookingServioPreflightBodyOneChildAgesMax),
+    useExtraBed: zod.boolean(),
+    companyId: zod
+      .number()
+      .min(checkBookingServioPreflightBodyOneCompanyIdMin)
+      .max(checkBookingServioPreflightBodyOneCompanyIdMax),
+    companyCodeId: zod
+      .number()
+      .min(checkBookingServioPreflightBodyOneCompanyCodeIdMin)
+      .max(checkBookingServioPreflightBodyOneCompanyCodeIdMax),
+    conditionId: zod
+      .number()
+      .min(checkBookingServioPreflightBodyOneConditionIdMin)
+      .max(checkBookingServioPreflightBodyOneConditionIdMax),
+  })
+  .and(
+    zod.object({
+      categoryId: zod
+        .number()
+        .min(1)
+        .max(checkBookingServioPreflightBodyTwoCategoryIdMax),
+      priceListId: zod
+        .number()
+        .min(1)
+        .max(checkBookingServioPreflightBodyTwoPriceListIdMax),
+      rateConditionId: zod
+        .number()
+        .min(checkBookingServioPreflightBodyTwoRateConditionIdMin)
+        .max(checkBookingServioPreflightBodyTwoRateConditionIdMax),
+      propertyId: zod
+        .number()
+        .min(1)
+        .max(checkBookingServioPreflightBodyTwoPropertyIdMax),
+    }),
+  );
+
+export const checkBookingServioPreflightResponseInputOneCheckInRegExp =
+  new RegExp("^\\d{4}-\\d{2}-\\d{2}$");
+export const checkBookingServioPreflightResponseInputOneCheckOutRegExp =
+  new RegExp("^\\d{4}-\\d{2}-\\d{2}$");
+export const checkBookingServioPreflightResponseInputOneAdultsMax = 20;
+
+export const checkBookingServioPreflightResponseInputOneChildAgesItemMin = 0;
+export const checkBookingServioPreflightResponseInputOneChildAgesItemMax = 17;
+
+export const checkBookingServioPreflightResponseInputOneChildAgesMax = 10;
+
+export const checkBookingServioPreflightResponseInputOneCompanyIdMin = 0;
+export const checkBookingServioPreflightResponseInputOneCompanyIdMax = 2147483647;
+
+export const checkBookingServioPreflightResponseInputOneCompanyCodeIdMin = 0;
+export const checkBookingServioPreflightResponseInputOneCompanyCodeIdMax = 2147483647;
+
+export const checkBookingServioPreflightResponseInputOneConditionIdMin = 0;
+export const checkBookingServioPreflightResponseInputOneConditionIdMax = 2147483647;
+
+export const checkBookingServioPreflightResponseInputTwoCategoryIdMax = 2147483647;
+
+export const checkBookingServioPreflightResponseInputTwoPriceListIdMax = 2147483647;
+
+export const checkBookingServioPreflightResponseInputTwoRateConditionIdMin = 0;
+export const checkBookingServioPreflightResponseInputTwoRateConditionIdMax = 2147483647;
+
+export const checkBookingServioPreflightResponseInputTwoPropertyIdMax = 2147483647;
+
+export const CheckBookingServioPreflightResponse = zod.object({
+  checkedAt: zod.string(),
+  input: zod
+    .object({
+      checkIn: zod
+        .string()
+        .regex(checkBookingServioPreflightResponseInputOneCheckInRegExp),
+      checkOut: zod
+        .string()
+        .regex(checkBookingServioPreflightResponseInputOneCheckOutRegExp),
+      adults: zod
+        .number()
+        .min(1)
+        .max(checkBookingServioPreflightResponseInputOneAdultsMax),
+      childAges: zod
+        .array(
+          zod
+            .number()
+            .min(checkBookingServioPreflightResponseInputOneChildAgesItemMin)
+            .max(checkBookingServioPreflightResponseInputOneChildAgesItemMax),
+        )
+        .max(checkBookingServioPreflightResponseInputOneChildAgesMax),
+      useExtraBed: zod.boolean(),
+      companyId: zod
+        .number()
+        .min(checkBookingServioPreflightResponseInputOneCompanyIdMin)
+        .max(checkBookingServioPreflightResponseInputOneCompanyIdMax),
+      companyCodeId: zod
+        .number()
+        .min(checkBookingServioPreflightResponseInputOneCompanyCodeIdMin)
+        .max(checkBookingServioPreflightResponseInputOneCompanyCodeIdMax),
+      conditionId: zod
+        .number()
+        .min(checkBookingServioPreflightResponseInputOneConditionIdMin)
+        .max(checkBookingServioPreflightResponseInputOneConditionIdMax),
+    })
+    .and(
+      zod.object({
+        categoryId: zod
+          .number()
+          .min(1)
+          .max(checkBookingServioPreflightResponseInputTwoCategoryIdMax),
+        priceListId: zod
+          .number()
+          .min(1)
+          .max(checkBookingServioPreflightResponseInputTwoPriceListIdMax),
+        rateConditionId: zod
+          .number()
+          .min(checkBookingServioPreflightResponseInputTwoRateConditionIdMin)
+          .max(checkBookingServioPreflightResponseInputTwoRateConditionIdMax),
+        propertyId: zod
+          .number()
+          .min(1)
+          .max(checkBookingServioPreflightResponseInputTwoPropertyIdMax),
+      }),
+    ),
+  hotelId: zod.number(),
+  categoryName: zod.string().nullable(),
+  rateName: zod.string().nullable(),
+  currency: zod.string().nullable(),
+  total: zod.number().nullable(),
+  inputChecksPassed: zod.boolean(),
+  canCreateReservation: zod
+    .boolean()
+    .describe("Always false for this read-only preflight."),
+  canAcceptPayment: zod
+    .boolean()
+    .describe("Always false for this read-only preflight."),
+  policyVersion: zod.string(),
+  acknowledgementText: zod.string(),
+  checks: zod.array(
+    zod.object({
+      code: zod.string(),
+      status: zod.enum(["passed", "blocked", "unverified"]),
+      message: zod.string(),
+    }),
+  ),
+});
+
 export const GetBookingEngineOverviewResponse = zod.record(
   zod.string(),
   zod.unknown(),

@@ -6,6 +6,7 @@ import type { BookingServioSearchInput, BookingServioSearchResult, BookingServio
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ServioPreflight } from "./servio-preflight";
 import { Loader2, Search, Plus, X, ChevronDown, ChevronRight } from "lucide-react";
 
 const MAX_INT = 2147483647;
@@ -282,6 +283,9 @@ export function ServioAvailability({ organizationId, role, dirty, hasToken }: {
               ))}</ul>
             )}
           </div>
+        )}
+        {result && !search.isPending && canRun && result.status !== "failed" && result.categories.some(c => c.rates.length > 0) && (
+          <ServioPreflight key={JSON.stringify([organizationId, result])} organizationId={organizationId} result={result} canRun={canRun} />
         )}
         {!showResultSlot && !pendingCurrent && !shownErr && !canRun && <p className="text-xs text-stone-400">Знімка наявності ще немає.</p>}
       </div>

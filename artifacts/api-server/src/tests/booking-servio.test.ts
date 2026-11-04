@@ -16,6 +16,7 @@ vi.mock("../lib/servio-availability.js", async importOriginal => ({
 import router from "../routes/booking-servio.js";
 import { encrypt } from "../lib/encrypt.js";
 import { servioFingerprint } from "../lib/servio-connection.js";
+import { liqpayCredentialFingerprint } from "../lib/liqpay-connection.js";
 const app = express();
 app.use(express.json(), (req: any, _res, next) => {
   req.user = { organizationId: 7, role: req.headers["x-role"] || "owner" };
@@ -132,5 +133,59 @@ describe("tenant-owned read-only availability route", () => {
     f.query.mockResolvedValueOnce({ rows: [{ name: "Test", booking_engine_config: { ...config } }] })
       .mockResolvedValueOnce({ rows: [{ name: "Test", booking_engine_config: { ...config, servioHotelId: "8" } }] });
     expect((await request(app).post("/servio/availability").send(searchInput)).status).toBe(409);
+  });
+});
+
+describe("tenant-owned read-only checkout preflight route", () => {
+  const selection = { ...searchInput, categoryId: 1, priceListId: 90, rateConditionId: 1, propertyId: 4 };
+  const snapshot = { status: "complete", code: "availability_prices_read", message: "ok", checkedAt: "2026-11-01T00:00:00Z",
+    query: searchInput, hotelId: 7, currency: "грн", categories: [{
+      id: 1, name: "Test", freeRooms: 2, mainPlaces: 3, nearestDate: null,
+      rates: [{ priceListId: 90, conditionId: 1, name: "NR Site", nonRefundable: true, specialRate: false, saleAllowed: true, total: 205.35, charges: [], restrictions: [] }],
+    }] };
+  let seller: any;
+  beforeEach(() => {
+    vi.stubEnv("PUBLIC_APP_URL", "https://example.invalid");
+    seller = { id: 4, legal_entity_id: 8, seller_id: 8, liqpay_public_key: "fixture-public", liqpay_private_key: "fixture-encrypted-key" };
+    config.servioVerification = { fingerprint: servioFingerprint(config), result };
+    config.terms = "Rules"; config.privacy = "Privacy";
+    config.liqpayVerification = { "8": { status: "connected", fingerprint: liqpayCredentialFingerprint(seller.liqpay_public_key, seller.liqpay_private_key) } };
+    f.search.mockResolvedValue(snapshot);
+    f.query.mockImplementation(async (sql: string) => ({
+      rows: sql.includes("FROM properties p") ? seller ? [{ ...seller }] : [] : [{ name: "Test hotel", booking_engine_config: config }],
+    }));
+  });
+  it("re-reads Servio, scopes the seller to the authenticated tenant and returns no secrets or write permission", async () => {
+    const response = await request(app).post("/servio/preflight").send({ ...selection, organizationId: 999, token: "attacker" });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ inputChecksPassed: true, canAcceptPayment: false, canCreateReservation: false, total: 205.35 });
+    expect(f.search).toHaveBeenCalledWith(expect.objectContaining({ token: "fixture-token", hotelId: 7 }), searchInput, result.categories);
+    expect(f.query.mock.calls.filter(([sql]) => sql.includes("FROM properties p")).every(([, values]) => JSON.stringify(values) === "[4,7]")).toBe(true);
+    expect(f.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
+    expect(f.connect).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.body)).not.toMatch(/fixture-token|fixture-public|fixture-encrypted-key|fingerprint|attacker/);
+  });
+  it.each(["manager", "staff"])("denies %s before accessing credentials or the provider", async role => {
+    expect((await request(app).post("/servio/preflight").set("x-role", role).send(selection)).status).toBe(403);
+    expect(f.search).not.toHaveBeenCalled(); expect(f.query).not.toHaveBeenCalled();
+  });
+  it("blocks a missing/foreign property instead of borrowing any other seller", async () => {
+    seller = null;
+    const response = await request(app).post("/servio/preflight").send(selection);
+    expect(response.status).toBe(200);
+    expect(response.body.inputChecksPassed).toBe(false);
+    expect(response.body.checks.find((check: any) => check.code === "seller_mapping").status).toBe("blocked");
+  });
+  it("rejects changed credentials before a provider call", async () => {
+    config.servioHotelId = "8";
+    expect((await request(app).post("/servio/preflight").send(selection)).status).toBe(400);
+    expect(f.search).not.toHaveBeenCalled();
+  });
+  it("discards a result if either connection or seller changes during the provider request", async () => {
+    f.search.mockImplementationOnce(async () => { config.servioHotelId = "8"; return snapshot; });
+    expect((await request(app).post("/servio/preflight").send(selection)).status).toBe(409);
+    config.servioHotelId = "7";
+    f.search.mockImplementationOnce(async () => { seller.liqpay_public_key = "rotated"; return snapshot; });
+    expect((await request(app).post("/servio/preflight").send(selection)).status).toBe(409);
   });
 });

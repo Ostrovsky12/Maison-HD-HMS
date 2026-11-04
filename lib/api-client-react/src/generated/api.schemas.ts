@@ -109,6 +109,66 @@ export interface BookingServioSearchInput {
   conditionId: number;
 }
 
+export type BookingServioPreflightInput = BookingServioSearchInput & {
+  /**
+   * @minimum 1
+   * @maximum 2147483647
+   */
+  categoryId: number;
+  /**
+   * @minimum 1
+   * @maximum 2147483647
+   */
+  priceListId: number;
+  /**
+   * @minimum 0
+   * @maximum 2147483647
+   */
+  rateConditionId: number;
+  /**
+   * @minimum 1
+   * @maximum 2147483647
+   */
+  propertyId: number;
+};
+
+export type BookingServioPreflightCheckStatus =
+  (typeof BookingServioPreflightCheckStatus)[keyof typeof BookingServioPreflightCheckStatus];
+
+export const BookingServioPreflightCheckStatus = {
+  passed: "passed",
+  blocked: "blocked",
+  unverified: "unverified",
+} as const;
+
+export interface BookingServioPreflightCheck {
+  code: string;
+  status: BookingServioPreflightCheckStatus;
+  message: string;
+}
+
+export interface BookingServioPreflight {
+  checkedAt: string;
+  input: BookingServioPreflightInput;
+  hotelId: number;
+  /** @nullable */
+  categoryName: string | null;
+  /** @nullable */
+  rateName: string | null;
+  /** @nullable */
+  currency: string | null;
+  /** @nullable */
+  total: number | null;
+  inputChecksPassed: boolean;
+  /** Always false for this read-only preflight. */
+  canCreateReservation: boolean;
+  /** Always false for this read-only preflight. */
+  canAcceptPayment: boolean;
+  policyVersion: string;
+  acknowledgementText: string;
+  checks: BookingServioPreflightCheck[];
+}
+
 export interface BookingServioCharge {
   serviceId: number;
   serviceName: string;

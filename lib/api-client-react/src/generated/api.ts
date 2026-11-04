@@ -32,6 +32,8 @@ import type {
   BookingLiqpayCheckInput,
   BookingLiqpayInput,
   BookingLiqpaySettings,
+  BookingServioPreflight,
+  BookingServioPreflightInput,
   BookingServioSearchInput,
   BookingServioSearchResult,
   BookingServioStatus,
@@ -541,6 +543,90 @@ export const useSearchBookingServioAvailability = <
   return useMutation(
     getSearchBookingServioAvailabilityMutationOptions(options),
   );
+};
+
+export const getCheckBookingServioPreflightUrl = () => {
+  return `/api/booking-engine/servio/preflight`;
+};
+
+export const checkBookingServioPreflight = async (
+  bookingServioPreflightInput: BookingServioPreflightInput,
+  options?: RequestInit,
+): Promise<BookingServioPreflight> => {
+  return customFetch<BookingServioPreflight>(
+    getCheckBookingServioPreflightUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bookingServioPreflightInput),
+    },
+  );
+};
+
+export const getCheckBookingServioPreflightMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkBookingServioPreflight>>,
+    TError,
+    { data: BodyType<BookingServioPreflightInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof checkBookingServioPreflight>>,
+  TError,
+  { data: BodyType<BookingServioPreflightInput> },
+  TContext
+> => {
+  const mutationKey = ["checkBookingServioPreflight"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof checkBookingServioPreflight>>,
+    { data: BodyType<BookingServioPreflightInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return checkBookingServioPreflight(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CheckBookingServioPreflightMutationResult = NonNullable<
+  Awaited<ReturnType<typeof checkBookingServioPreflight>>
+>;
+export type CheckBookingServioPreflightMutationBody =
+  BodyType<BookingServioPreflightInput>;
+export type CheckBookingServioPreflightMutationError = ErrorType<void>;
+
+export const useCheckBookingServioPreflight = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkBookingServioPreflight>>,
+    TError,
+    { data: BodyType<BookingServioPreflightInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof checkBookingServioPreflight>>,
+  TError,
+  { data: BodyType<BookingServioPreflightInput> },
+  TContext
+> => {
+  return useMutation(getCheckBookingServioPreflightMutationOptions(options));
 };
 
 export const getGetBookingEngineOverviewUrl = () => {

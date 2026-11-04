@@ -8,8 +8,10 @@ import { decrypt } from "../lib/encrypt.js";
 import { engineConfig } from "../lib/booking-engine.js";
 import { checkServioConnection, servioBaseUrl, servioHotelId, servioFingerprint, uncheckedServio } from "../lib/servio-connection.js";
 import { searchServioAvailability, validServioSearch } from "../lib/servio-availability.js";
+import bookingServioPreflight from "./booking-servio-preflight.js";
 
 const router = Router();
+router.use("/preflight", bookingServioPreflight);
 const editors = requireRole("super_admin", "owner", "admin");
 const limiter = rateLimit({ windowMs: 60_000, max: 3, standardHeaders: true, legacyHeaders: false });
 const searchLimiter = rateLimit({ windowMs: 60_000, max: 6, standardHeaders: true, legacyHeaders: false });

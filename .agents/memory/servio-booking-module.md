@@ -74,3 +74,15 @@ Servio's published field types can differ from a deployed hotel's serialization.
 **How to apply:** Accept documented numeric flags and the observed boolean representation explicitly, preserving false. Do not coerce strings, null or missing flags; validate other fields independently rather than assuming the whole response matches the documentation.
 
 For monetary fields, accept validated decimal-dot numeric strings as well as numbers. Preserve cent precision and reject blank, localized, currency-suffixed or otherwise ambiguous strings; do not use permissive parseFloat or invent a zero amount.
+
+Servio checkout needs an explicit tenant-owned seller assignment independent of local accommodation inventory.
+
+**Why:** Servio categories are not Maison HD unit IDs. A locally configured property can be used to inspect its merchant settings, but that alone does not establish which legal entity sells a Servio hotel/category.
+
+**How to apply:** Treat cabinet preflight seller selection as a candidate, not a permanent assignment. Before issuing a checkout, persist an explicit owner-confirmed assignment to the Servio identity and retain the seller/credential snapshot through payment reconciliation. Never infer it from matching IDs or the first local property.
+
+Do not assume Servio's reservation-guarantee amount field means the entire prepaid stay.
+
+**Why:** The vendor describes `SetReservationType.Amount` and `SetReservationBill.Amount` as the first day's amount while the module requires 100% payment. Bill formation also returns adjusted service charges after tax calculation.
+
+**How to apply:** Confirm the operation-specific reconciliation semantics before enabling real payment confirmation. Preserve authoritative service/date charges and never wire the full LiqPay total into a first-day field merely because both are named amount.
