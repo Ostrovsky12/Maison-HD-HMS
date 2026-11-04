@@ -5,6 +5,75 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export type BookingEngineInputProvider =
+  (typeof BookingEngineInputProvider)[keyof typeof BookingEngineInputProvider];
+
+export const BookingEngineInputProvider = {
+  maison: "maison",
+  servio: "servio",
+} as const;
+
+export interface BookingEngineInput {
+  provider: BookingEngineInputProvider;
+  published: boolean;
+  /**
+   * @minLength 1
+   * @maxLength 120
+   */
+  displayName: string;
+  /** @maxLength 2000 */
+  description: string;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  accentColor: string;
+  /** @maxLength 1000 */
+  logoUrl: string;
+  /** @maxLength 60 */
+  phone: string;
+  /** @maxLength 180 */
+  email: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  checkInTime: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  checkOutTime: string;
+  /** @maxLength 10000 */
+  terms: string;
+  /** @maxLength 10000 */
+  privacy: string;
+  /** @maxLength 1000 */
+  servioBaseUrl: string;
+  /** @maxLength 50 */
+  servioHotelId: string;
+  /** @maxLength 2000 */
+  servioToken?: string;
+  clearServioToken?: boolean;
+}
+
+export type BookingEngineViewOrganization = {
+  id: number;
+  name: string;
+  slug: string;
+};
+
+export type BookingEngineViewConfig = { [key: string]: unknown };
+
+export type BookingEngineViewReadiness = {
+  canPublish: boolean;
+  issues: string[];
+  servioSupported: boolean;
+};
+
+export type BookingEngineViewPropertiesItem = {
+  id: number;
+  name: string;
+};
+
+export interface BookingEngineView {
+  organization: BookingEngineViewOrganization;
+  config: BookingEngineViewConfig;
+  readiness: BookingEngineViewReadiness;
+  properties: BookingEngineViewPropertiesItem[];
+}
+
 export interface PosterMenuImportOptions {
   overwrite_existing?: boolean;
   skip_no_price?: boolean;
@@ -1599,6 +1668,10 @@ export interface GuideAdminStats {
   pendingReview: number;
   approved: number;
 }
+
+export type GetBookingEngineOverview200 = { [key: string]: unknown };
+
+export type GetPublicBookingEngine200 = { [key: string]: unknown };
 
 export type PreviewPosterMenuImport200 = { [key: string]: unknown };
 

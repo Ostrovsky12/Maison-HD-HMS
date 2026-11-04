@@ -118,7 +118,7 @@ router.get("/me", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Not Found", message: "Організацію не знайдено" });
     return;
   }
-  res.json(org);
+  res.json({ ...org, bookingEngineConfig: undefined });
 });
 
 // ── GET org by id ──────────────────────────────────────────────────
@@ -134,7 +134,7 @@ router.get("/:orgId", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Not Found", message: "Organization not found" });
     return;
   }
-  res.json(org);
+  res.json({ ...org, bookingEngineConfig: undefined });
 });
 
 // ── UPDATE org ────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ router.patch("/:orgId", requireAuth, async (req, res) => {
     updates.maxUsers = limits.maxUsers;
   }
   const [updated] = await db.update(organizationsTable).set(updates as any).where(eq(organizationsTable.id, orgId)).returning();
-  res.json(updated);
+  res.json({ ...updated, bookingEngineConfig: undefined });
 });
 
 // ── LIST members ───────────────────────────────────────────────────

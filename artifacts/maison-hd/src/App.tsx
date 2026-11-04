@@ -90,6 +90,8 @@ import FbWriteoffsPage from "@/pages/fb-writeoffs";
 import HqPage from "@/pages/hq";
 import AutomationPage from "@/pages/automation";
 import BookPage from "@/pages/book";
+import BookingStudioPage from "@/pages/booking-studio";
+import BookingPublicPage from "@/pages/booking-public";
 import RentalsPage from "@/pages/rentals";
 import OtaPage from "@/pages/ota";
 import RevenuePage from "@/pages/revenue";
@@ -315,6 +317,8 @@ function Router() {
       <Route path="/minibar" component={() => <ProtectedRoute component={MinibarPage} />} />
       <Route path="/minibar-guest/:unitId" component={MinibarGuestPage} />
       <Route path="/book" component={BookPage} />
+      <Route path="/booking-studio"><ProtectedRoute component={BookingStudioPage} roles={["owner","manager","admin","super_admin"]} /></Route>
+      <Route path="/booking/:slug" component={BookingPublicPage} />
       <Route path="/rentals"><ProtectedRoute component={RentalsPage} /></Route>
       <Route path="/ota"><ProtectedRoute component={OtaPage} /></Route>
       <Route path="/revenue"><ProtectedRoute component={RevenuePage} /></Route>

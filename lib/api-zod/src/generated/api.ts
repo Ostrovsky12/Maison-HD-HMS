@@ -7,6 +7,124 @@
  */
 import * as zod from "zod";
 
+export const GetBookingEngineSettingsResponse = zod.object({
+  organization: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    slug: zod.string(),
+  }),
+  config: zod.record(zod.string(), zod.unknown()),
+  readiness: zod.object({
+    canPublish: zod.boolean(),
+    issues: zod.array(zod.string()),
+    servioSupported: zod.boolean(),
+  }),
+  properties: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+    }),
+  ),
+});
+
+export const saveBookingEngineSettingsBodyDisplayNameMax = 120;
+
+export const saveBookingEngineSettingsBodyDescriptionMax = 2000;
+
+export const saveBookingEngineSettingsBodyAccentColorRegExp = new RegExp(
+  "^#[0-9a-fA-F]{6}$",
+);
+export const saveBookingEngineSettingsBodyLogoUrlMax = 1000;
+
+export const saveBookingEngineSettingsBodyPhoneMax = 60;
+
+export const saveBookingEngineSettingsBodyEmailMax = 180;
+
+export const saveBookingEngineSettingsBodyCheckInTimeRegExp = new RegExp(
+  "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+);
+export const saveBookingEngineSettingsBodyCheckOutTimeRegExp = new RegExp(
+  "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+);
+export const saveBookingEngineSettingsBodyTermsMax = 10000;
+
+export const saveBookingEngineSettingsBodyPrivacyMax = 10000;
+
+export const saveBookingEngineSettingsBodyServioBaseUrlMax = 1000;
+
+export const saveBookingEngineSettingsBodyServioHotelIdMax = 50;
+
+export const saveBookingEngineSettingsBodyServioTokenMax = 2000;
+
+export const SaveBookingEngineSettingsBody = zod.object({
+  provider: zod.enum(["maison", "servio"]),
+  published: zod.boolean(),
+  displayName: zod
+    .string()
+    .min(1)
+    .max(saveBookingEngineSettingsBodyDisplayNameMax),
+  description: zod.string().max(saveBookingEngineSettingsBodyDescriptionMax),
+  accentColor: zod
+    .string()
+    .regex(saveBookingEngineSettingsBodyAccentColorRegExp),
+  logoUrl: zod.string().max(saveBookingEngineSettingsBodyLogoUrlMax),
+  phone: zod.string().max(saveBookingEngineSettingsBodyPhoneMax),
+  email: zod.string().max(saveBookingEngineSettingsBodyEmailMax),
+  checkInTime: zod
+    .string()
+    .regex(saveBookingEngineSettingsBodyCheckInTimeRegExp),
+  checkOutTime: zod
+    .string()
+    .regex(saveBookingEngineSettingsBodyCheckOutTimeRegExp),
+  terms: zod.string().max(saveBookingEngineSettingsBodyTermsMax),
+  privacy: zod.string().max(saveBookingEngineSettingsBodyPrivacyMax),
+  servioBaseUrl: zod
+    .string()
+    .max(saveBookingEngineSettingsBodyServioBaseUrlMax),
+  servioHotelId: zod
+    .string()
+    .max(saveBookingEngineSettingsBodyServioHotelIdMax),
+  servioToken: zod
+    .string()
+    .max(saveBookingEngineSettingsBodyServioTokenMax)
+    .optional(),
+  clearServioToken: zod.boolean().optional(),
+});
+
+export const SaveBookingEngineSettingsResponse = zod.object({
+  organization: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    slug: zod.string(),
+  }),
+  config: zod.record(zod.string(), zod.unknown()),
+  readiness: zod.object({
+    canPublish: zod.boolean(),
+    issues: zod.array(zod.string()),
+    servioSupported: zod.boolean(),
+  }),
+  properties: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+    }),
+  ),
+});
+
+export const GetBookingEngineOverviewResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+export const GetPublicBookingEngineParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetPublicBookingEngineResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
 export const PreviewPosterMenuImportBody = zod.object({
   account: zod.string().optional(),
   token: zod.string().optional(),

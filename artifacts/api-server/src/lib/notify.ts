@@ -253,8 +253,17 @@ export function buildGuestConfirmationEmail(booking: {
   orgEmail?: string;
   orgPhone?: string;
   orgName?: string;
+  pending?: boolean;
+  checkInTime?: string;
+  checkOutTime?: string;
 }): { html: string; text: string } {
   const { bookingRef, guestName, unitName, propertyName, checkIn, checkOut, nights, totalAmount, guestsCount, orgName, orgEmail, orgPhone } = booking;
+  const heading = booking.pending ? "Заявку на бронювання отримано" : "Бронювання підтверджено!";
+  const stateText = booking.pending
+    ? "Заявка очікує підтвердження готелем. Це ще не гарантоване бронювання."
+    : "Ваше бронювання прийнято. Нижче деталі вашого перебування.";
+  const arrivalTime = booking.checkInTime || "14:00";
+  const departureTime = booking.checkOutTime || "12:00";
 
   const formatDate = (d: string) => {
     try {
@@ -264,7 +273,7 @@ export function buildGuestConfirmationEmail(booking: {
 
   const html = `<!DOCTYPE html>
 <html lang="uk">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Підтвердження бронювання</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${heading}</title></head>
 <body style="margin:0;padding:0;background:#f6f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7fb;padding:32px 0">
     <tr><td align="center">
@@ -273,7 +282,7 @@ export function buildGuestConfirmationEmail(booking: {
         <tr>
           <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px;text-align:center">
             <p style="margin:0 0 8px;font-size:28px">🏨</p>
-            <h1 style="margin:0;color:#fff;font-size:24px;font-weight:700">Бронювання підтверджено!</h1>
+            <h1 style="margin:0;color:#fff;font-size:24px;font-weight:700">${heading}</h1>
             <p style="margin:8px 0 0;color:#c4b5fd;font-size:15px">${esc(orgName || propertyName)}</p>
           </td>
         </tr>
@@ -289,7 +298,7 @@ export function buildGuestConfirmationEmail(booking: {
           <td style="padding:28px 32px 0">
             <p style="margin:0;font-size:16px;color:#1e1b4b">Вітаємо, <b>${esc(guestName)}</b>!</p>
             <p style="margin:8px 0 0;color:#6b7280;font-size:15px;line-height:1.6">
-              Ваше бронювання прийнято. Нижче деталі вашого перебування.
+              ${stateText}
             </p>
           </td>
         </tr>
@@ -319,7 +328,7 @@ export function buildGuestConfirmationEmail(booking: {
             <div style="background:#eff6ff;border-radius:10px;padding:14px 16px;border-left:4px solid #3b82f6">
               <p style="margin:0;font-size:13px;color:#1e40af;font-weight:600">ℹ️ Важлива інформація</p>
               <ul style="margin:8px 0 0;padding:0 0 0 16px;font-size:13px;color:#1d4ed8;line-height:1.8">
-                <li>Заїзд з 14:00, виїзд до 12:00 (ранній/пізній заїзд за домовленістю)</li>
+                <li>Заїзд з ${esc(arrivalTime)}, виїзд до ${esc(departureTime)} (ранній/пізній заїзд за домовленістю)</li>
                 <li>При заїзді пред'явіть документ і підтвердження бронювання</li>
                 <li>Для скасування зв'яжіться з адміністрацією за 24 год</li>
               </ul>
@@ -348,12 +357,12 @@ export function buildGuestConfirmationEmail(booking: {
 </body>
 </html>`;
 
-  const text = `Підтвердження бронювання ${bookingRef}
-${guestName}, ваше бронювання підтверджено!
+  const text = `${heading} ${bookingRef}
+${guestName}, ${booking.pending ? stateText : "ваше бронювання підтверджено!"}
 Об'єкт: ${propertyName}
 Номер: ${unitName}
-Заїзд: ${formatDate(checkIn)} (з 14:00)
-Виїзд: ${formatDate(checkOut)} (до 12:00)
+Заїзд: ${formatDate(checkIn)} (з ${arrivalTime})
+Виїзд: ${formatDate(checkOut)} (до ${departureTime})
 Ночей: ${nights}
 Гостей: ${guestsCount}
 Сума: ${Math.round(Number(totalAmount)).toLocaleString("uk-UA")} ₴
@@ -447,7 +456,9 @@ export async function sendGuestConfirmationEmail(orgId: number, guestEmail: stri
 
   return sendEmail(orgId, {
     to: guestEmail,
-    subject: `✅ Бронювання ${booking.bookingRef} підтверджено — ${booking.propertyName}`,
+    subject: booking.pending
+      ? `Заявку ${booking.bookingRef} отримано — ${booking.propertyName}`
+      : `✅ Бронювання ${booking.bookingRef} підтверджено — ${booking.propertyName}`,
     html,
     text,
   });
@@ -459,6 +470,7 @@ export async function sendGuestConfirmationSms(orgId: number, guestPhone: string
   checkIn: string;
   checkOut: string;
   totalAmount: number | string;
+  pending?: boolean;
 }) {
   const cfg = await getSmsConfig(orgId);
   if (!cfg?.enabled || !cfg.guestSmsEnabled) return { ok: false, error: "SMS для гостей вимкнено" };
@@ -467,6 +479,7 @@ export async function sendGuestConfirmationSms(orgId: number, guestPhone: string
     try { return new Date(d).toLocaleDateString("uk-UA", { day: "numeric", month: "short" }); } catch { return d; }
   };
 
-  const text = `${booking.propertyName}: бронювання ${booking.bookingRef} підтверджено! Заїзд ${formatDate(booking.checkIn)}, виїзд ${formatDate(booking.checkOut)}. Сума: ${Math.round(Number(booking.totalAmount)).toLocaleString("uk-UA")} грн.`;
+  const state = booking.pending ? "заявку отримано, очікує підтвердження готелем" : "бронювання підтверджено";
+  const text = `${booking.propertyName}: ${booking.bookingRef} — ${state}. Заїзд ${formatDate(booking.checkIn)}, виїзд ${formatDate(booking.checkOut)}. Сума: ${Math.round(Number(booking.totalAmount)).toLocaleString("uk-UA")} грн.`;
   return sendSms(orgId, guestPhone, text);
 }

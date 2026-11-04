@@ -26,6 +26,8 @@ import type {
   BookingAddon,
   BookingCalendarResponse,
   BookingDetail,
+  BookingEngineInput,
+  BookingEngineView,
   CancelBookingBody,
   CompleteHousekeepingTaskBody,
   CreateAddonRequest,
@@ -49,12 +51,14 @@ import type {
   Forecast,
   GenerateForecastParams,
   GenerateForecastResponse,
+  GetBookingEngineOverview200,
   GetBookingsCalendarParams,
   GetDashboardAnalyticsParams,
   GetMonthlyReportParams,
   GetOccupancyAnalyticsParams,
   GetPosterOrderBridgeCatalog200,
   GetPricingPreviewParams,
+  GetPublicBookingEngine200,
   GetUnitsAvailabilityParams,
   Guest,
   GuestDetail,
@@ -143,6 +147,313 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getGetBookingEngineSettingsUrl = () => {
+  return `/api/booking-engine/settings`;
+};
+
+export const getBookingEngineSettings = async (
+  options?: RequestInit,
+): Promise<BookingEngineView> => {
+  return customFetch<BookingEngineView>(getGetBookingEngineSettingsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBookingEngineSettingsQueryKey = () => {
+  return [`/api/booking-engine/settings`] as const;
+};
+
+export const getGetBookingEngineSettingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookingEngineSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingEngineSettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBookingEngineSettingsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookingEngineSettings>>
+  > = ({ signal }) => getBookingEngineSettings({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingEngineSettings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBookingEngineSettingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookingEngineSettings>>
+>;
+export type GetBookingEngineSettingsQueryError = ErrorType<unknown>;
+
+export function useGetBookingEngineSettings<
+  TData = Awaited<ReturnType<typeof getBookingEngineSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingEngineSettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBookingEngineSettingsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSaveBookingEngineSettingsUrl = () => {
+  return `/api/booking-engine/settings`;
+};
+
+export const saveBookingEngineSettings = async (
+  bookingEngineInput: BookingEngineInput,
+  options?: RequestInit,
+): Promise<BookingEngineView> => {
+  return customFetch<BookingEngineView>(getSaveBookingEngineSettingsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bookingEngineInput),
+  });
+};
+
+export const getSaveBookingEngineSettingsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveBookingEngineSettings>>,
+    TError,
+    { data: BodyType<BookingEngineInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof saveBookingEngineSettings>>,
+  TError,
+  { data: BodyType<BookingEngineInput> },
+  TContext
+> => {
+  const mutationKey = ["saveBookingEngineSettings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof saveBookingEngineSettings>>,
+    { data: BodyType<BookingEngineInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return saveBookingEngineSettings(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SaveBookingEngineSettingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof saveBookingEngineSettings>>
+>;
+export type SaveBookingEngineSettingsMutationBody =
+  BodyType<BookingEngineInput>;
+export type SaveBookingEngineSettingsMutationError = ErrorType<unknown>;
+
+export const useSaveBookingEngineSettings = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveBookingEngineSettings>>,
+    TError,
+    { data: BodyType<BookingEngineInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof saveBookingEngineSettings>>,
+  TError,
+  { data: BodyType<BookingEngineInput> },
+  TContext
+> => {
+  return useMutation(getSaveBookingEngineSettingsMutationOptions(options));
+};
+
+export const getGetBookingEngineOverviewUrl = () => {
+  return `/api/booking-engine/overview`;
+};
+
+export const getBookingEngineOverview = async (
+  options?: RequestInit,
+): Promise<GetBookingEngineOverview200> => {
+  return customFetch<GetBookingEngineOverview200>(
+    getGetBookingEngineOverviewUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetBookingEngineOverviewQueryKey = () => {
+  return [`/api/booking-engine/overview`] as const;
+};
+
+export const getGetBookingEngineOverviewQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookingEngineOverview>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingEngineOverview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBookingEngineOverviewQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookingEngineOverview>>
+  > = ({ signal }) => getBookingEngineOverview({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingEngineOverview>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBookingEngineOverviewQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookingEngineOverview>>
+>;
+export type GetBookingEngineOverviewQueryError = ErrorType<unknown>;
+
+export function useGetBookingEngineOverview<
+  TData = Awaited<ReturnType<typeof getBookingEngineOverview>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBookingEngineOverview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBookingEngineOverviewQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getGetPublicBookingEngineUrl = (slug: string) => {
+  return `/api/public/booking-engine/${slug}`;
+};
+
+export const getPublicBookingEngine = async (
+  slug: string,
+  options?: RequestInit,
+): Promise<GetPublicBookingEngine200> => {
+  return customFetch<GetPublicBookingEngine200>(
+    getGetPublicBookingEngineUrl(slug),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetPublicBookingEngineQueryKey = (slug: string) => {
+  return [`/api/public/booking-engine/${slug}`] as const;
+};
+
+export const getGetPublicBookingEngineQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPublicBookingEngine>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPublicBookingEngine>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPublicBookingEngineQueryKey(slug);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPublicBookingEngine>>
+  > = ({ signal }) =>
+    getPublicBookingEngine(slug, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!slug,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPublicBookingEngine>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPublicBookingEngineQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPublicBookingEngine>>
+>;
+export type GetPublicBookingEngineQueryError = ErrorType<unknown>;
+
+export function useGetPublicBookingEngine<
+  TData = Awaited<ReturnType<typeof getPublicBookingEngine>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPublicBookingEngine>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPublicBookingEngineQueryOptions(slug, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 export const getPreviewPosterMenuImportUrl = () => {
   return `/api/fb/import/poster/preview`;

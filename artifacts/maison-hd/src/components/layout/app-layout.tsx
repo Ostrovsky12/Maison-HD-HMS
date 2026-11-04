@@ -55,7 +55,7 @@ const NAV: NavSection[] = [
       { name: "Ціновий календар", path: "/pricing-calendar", icon: CalendarRange, roles: ["super_admin","owner","manager"] },
       { name: "Номери",      path: "/units",        icon: KeyRound,     roles: null },
       { name: "Гості",       path: "/guests",       icon: Users,        roles: null },
-      { name: "Онлайн-бронювання", path: "/book",   icon: Globe,        roles: ["super_admin","owner","manager"] },
+      { name: "Онлайн-бронювання", path: "/booking-studio", icon: Globe,        roles: ["super_admin","owner","manager"] },
     ],
   },
   {

@@ -30,6 +30,7 @@ export const organizationsTable = pgTable("organizations", {
   taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).default("20.0"),
 
   enabledModules: jsonb("enabled_modules"),
+  bookingEngineConfig: jsonb("booking_engine_config"),
   guestCardRules: text("guest_card_rules"),
   paymentUrl: text("payment_url"),
 

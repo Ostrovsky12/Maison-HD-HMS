@@ -14,6 +14,8 @@ import { fireBookingEvent } from "../lib/automation-runner.js";
 import { sendGuestConfirmationEmail, sendGuestConfirmationSms, notifyBookingCreated } from "../lib/notify.js";
 import { orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
 import { submitDocument } from "./prro.js";
+import { engineConfig, engineSalesGuard, engineQuote, validBookingDates } from "../lib/booking-engine.js";
+import { createHash } from "node:crypto";
 
 const router = Router();
 
@@ -120,7 +122,14 @@ router.get("/availability", async (req, res) => {
 
     // slug is mandatory for tenant isolation
     if (!slug) return res.status(400).json({ error: "slug query parameter is required" });
+    const engineMode = req.query.engine === "1";
+    const salesBlock = await engineSalesGuard(String(slug), engineMode);
+    if (salesBlock) return res.status(salesBlock.status).json({ error: salesBlock.error });
     if (!checkIn || !checkOut) return res.status(400).json({ error: "checkIn and checkOut required" });
+    if (engineMode && (!validBookingDates(String(checkIn), String(checkOut))
+      || !Number.isInteger(Number(guests)) || Number(guests) < 1 || Number(guests) > 20)) {
+      return res.status(400).json({ error: "Перевірте дати та кількість гостей (1–20)." });
+    }
     const checkInDate = new Date(checkIn);
     const checkOutDate = new Date(checkOut);
     if (!Number.isFinite(checkInDate.getTime()) || !Number.isFinite(checkOutDate.getTime()) || checkInDate >= checkOutDate) {
@@ -206,12 +215,19 @@ router.get("/availability", async (req, res) => {
     const cout = new Date(checkOut);
     const nights = Math.max(1, Math.round((cout.getTime() - cin.getTime()) / 86400000));
 
-    const result = units.map(u => ({
+    let result = units.map(u => ({
       ...u,
       basePrice: parseFloat(String(u.basePrice || 0)),
       nights,
       totalPrice: parseFloat(String(u.basePrice || 0)) * nights,
     }));
+    if (engineMode) {
+      const quoted = await Promise.all(result.map(async u => {
+        const quote = await engineQuote(u.id, checkIn, checkOut, Number(guests));
+        return quote ? { ...u, basePrice: quote.nightlyRate, totalPrice: quote.totalPrice } : null;
+      }));
+      result = quoted.filter((u): u is NonNullable<typeof u> => u !== null);
+    }
 
     return res.json({ units: result, nights, checkIn, checkOut, guests, totalUnits: result.length });
   } catch (e: any) { console.error("AVAILABILITY ERROR:", e); return res.status(500).json({ error: e.message }); }
@@ -227,6 +243,24 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
     } = req.body;
     if (!slug) {
       return res.status(400).json({ error: "slug is required" });
+    }
+    const engineMode = req.body.bookingEngine === true;
+    const salesBlock = await engineSalesGuard(String(slug), engineMode);
+    if (salesBlock) return res.status(salesBlock.status).json({ error: salesBlock.error });
+    if (engineMode && (!validBookingDates(String(checkIn), String(checkOut))
+      || req.body.agreeTerms !== true
+      || (!String(email || "").trim() && !String(phone || "").trim())
+      || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email)))
+      || typeof firstName !== "string" || firstName.trim().length > 100
+      || typeof lastName !== "string" || lastName.trim().length > 100
+      || String(phone || "").length > 60
+      || String(email || "").length > 180
+      || String(req.body.specialRequests || "").length > 2000
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(req.body.bookingRequestId || "")))) {
+      return res.status(400).json({ error: "Перевірте дати, контактні дані та згоду з умовами." });
+    }
+    if (engineMode && (req.body.packageId || req.body.promoCode || req.body.addonIds?.length)) {
+      return res.status(400).json({ error: "Пакети та промокоди ще не підключені до цього модуля." });
     }
     if (!unitId || !checkIn || !checkOut || !firstName || !lastName) {
       return res.status(400).json({ error: "Заповніть всі обов'язкові поля" });
@@ -281,6 +315,10 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       return res.status(400).json({ error: "Некоректна кількість гостей" });
     }
     const totalGuests = parseInt(String(guestsCount || totalAdults + totalChildren), 10);
+    if (engineMode && (!Number.isInteger(Number(adults)) || totalChildren !== 0
+      || !Number.isInteger(Number(guestsCount)) || totalGuests !== totalAdults)) {
+      return res.status(400).json({ error: "Перша версія підтримує від 1 до 20 гостей за основним тарифом." });
+    }
 
     let nightlyRate = parseFloat(String(unit.basePrice || 0));
     const [channelSetting] = await db.select().from(channelRateSettingsTable)
@@ -333,18 +371,48 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
     const discount = promo
       ? (promo.percent ? subtotal * promo.percent / 100 : promo.fixed || 0)
       : 0;
-    const totalAmount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+    let totalAmount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+    if (engineMode) {
+      const quote = await engineQuote(parsedUnitId, checkIn, checkOut, totalGuests);
+      if (!quote) return res.status(409).json({ error: "Обраний номер або тариф більше недоступний. Оновіть пошук." });
+      totalAmount = quote.totalPrice;
+      if (typeof req.body.expectedTotal !== "number" || Math.abs(req.body.expectedTotal - totalAmount) > 0.005) {
+        return res.status(409).json({ error: "Вартість змінилася. Оновіть пошук і підтвердьте актуальну ціну.", code: "PRICE_CHANGED" });
+      }
+    }
 
     const refNum = Math.floor(100000 + Math.random() * 900000);
     const bookingRef = `BK-${refNum}`;
-    const guestAccessCode = randomBytes(5).toString("hex").toUpperCase();
+    const guestAccessCode = randomBytes(engineMode ? 10 : 5).toString("hex").toUpperCase();
     const normalizedEmail = typeof email === "string" && email.trim() ? email.trim().toLowerCase() : null;
     const normalizedPhone = typeof phone === "string" && phone.trim() ? phone.trim() : null;
+    const requestFingerprint = engineMode ? createHash("sha256").update(JSON.stringify([
+      parsedUnitId, checkIn, checkOut, totalGuests, firstName.trim(), lastName.trim(),
+      normalizedEmail, normalizedPhone, req.body.expectedTotal, req.body.specialRequests || "",
+    ])).digest("hex") : null;
 
     const client = await pool.connect();
     let booking: any;
     try {
       await client.query("BEGIN");
+      if (engineMode) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`booking-engine:${org.id}:${req.body.bookingRequestId}`]);
+        const previous = (await client.query(
+          "SELECT * FROM bookings WHERE organization_id=$1 AND utm_source='maison_hd_booking' AND utm_content=$2 LIMIT 1",
+          [org.id, req.body.bookingRequestId])).rows[0];
+        if (previous) {
+          await client.query("COMMIT");
+          if (previous.utm_campaign !== requestFingerprint) return res.status(409).json({ error: "Запит із цим номером уже використано для іншого бронювання." });
+          return res.status(200).json({ booking: {
+            id: previous.id, bookingRef: previous.booking_ref, guestAccessCode: previous.guest_access_code,
+            firstName: previous.first_name, lastName: previous.last_name, email: previous.email,
+            checkIn, checkOut, nights, totalAmount: Number(previous.total_amount),
+            propertyName: prop?.name, unitName: unit.name, status: previous.status,
+          } });
+        }
+        const blocked = await engineSalesGuard(String(slug), true, client, true);
+        if (blocked) { await client.query("ROLLBACK"); return res.status(blocked.status).json({ error: blocked.error }); }
+      }
       const lockedUnit = await client.query(
         "SELECT id FROM units WHERE id = $1 FOR UPDATE",
         [parsedUnitId],
@@ -352,6 +420,13 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       if (!lockedUnit.rows.length) {
         await client.query("ROLLBACK");
         return res.status(404).json({ error: "Юніт не знайдено" });
+      }
+      if (engineMode) {
+        const quote = await engineQuote(parsedUnitId, checkIn, checkOut, totalGuests, client);
+        if (!quote || Math.abs(quote.totalPrice - totalAmount) > 0.005) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({ error: "Тариф або доступність змінилися. Оновіть пошук." });
+        }
       }
 
       const conflict = await client.query(
@@ -447,6 +522,10 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         ],
       );
       booking = inserted.rows[0];
+      if (engineMode) {
+        await client.query("UPDATE bookings SET utm_source='maison_hd_booking',utm_content=$2,utm_campaign=$3 WHERE id=$1",
+          [booking.id, req.body.bookingRequestId, requestFingerprint]);
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -457,6 +536,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
 
     // Fire automation event + notifications (non-blocking)
     if ((booking as any).id) {
+      const moduleBrand = engineMode ? engineConfig({ name: org.name, booking_engine_config: (org as any).bookingEngineConfig }) : null;
       const [unitWithProp] = await db.select({
         orgId: propertiesTable.organizationId,
         orgEmail: organizationsTable.email,
@@ -493,6 +573,9 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
             checkIn, checkOut, nights,
             totalAmount: Math.round(totalAmount),
             guestsCount: totalGuests,
+            pending: engineMode,
+            checkInTime: moduleBrand?.checkInTime,
+            checkOutTime: moduleBrand?.checkOutTime,
             orgName: unitWithProp.orgName || undefined,
             orgEmail: unitWithProp.orgEmail || undefined,
             orgPhone: unitWithProp.orgPhone || undefined,
@@ -502,6 +585,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         // Guest confirmation SMS (non-blocking)
         if (phone) {
           sendGuestConfirmationSms(orgId, phone, {
+            pending: engineMode,
             bookingRef,
             propertyName: prop?.name || "Готель",
             checkIn, checkOut,
@@ -511,7 +595,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
       }
     }
 
-    return res.json({
+    return res.status(engineMode ? 201 : 200).json({
       booking: {
         id: booking.id,
         bookingRef: (booking as any).bookingRef || bookingRef,
