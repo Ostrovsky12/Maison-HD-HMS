@@ -24,3 +24,14 @@ separates dev migration from production verification.
 
 **How to apply:** Keep deployment builds/startup free of new fiscal DDL and do not
 require dev migration-ledger rows to exist in production.
+
+Database-backed fiscal tests must use a disposable PostgreSQL schema with
+`public` excluded from the search path, and verify that scope before fixture DDL.
+
+**Why:** Legacy application tables may lag behind the expected payment contract.
+Falling through to them can both conceal a missing fixture and modify actual
+development data. Connection URL options can override the intended search path.
+
+**How to apply:** Provision the isolated base and fiscal journal, keep legacy
+route prerequisites explicit, fail on missing database access instead of skipping
+the suite, and drop only the run-owned schema during cleanup.

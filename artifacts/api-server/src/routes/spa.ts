@@ -339,7 +339,7 @@ router.patch("/appointments/:id", requireAuth, async (req: any, res) => {
         `SELECT a.*, s.name AS service_name
            FROM spa_appointments a
            LEFT JOIN spa_services s ON s.id = a.service_id
-          WHERE a.id = $1 AND a.organization_id = $2 FOR UPDATE`,
+          WHERE a.id = $1 AND a.organization_id = $2 FOR UPDATE OF a`,
         [appointmentId, orgId],
       );
       current = locked.rows[0];

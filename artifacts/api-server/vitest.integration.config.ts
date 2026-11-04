@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    include: ["src/tests/invoice-isolation.integration.ts"],
+    include: ["src/tests/*.integration.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run && vitest run --config vitest.integration.config.ts",
+    "test:prro-concurrency": "vitest run --config vitest.integration.config.ts src/tests/prro-concurrency.integration.ts",
     "test:watch": "vitest",
     "seed:demo": "node_modules/.bin/tsx src/lib/demo-seed.ts"
   },
@@ -54,6 +55,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "catalog:",
     "@types/node-fetch": "^2.6.13",
+    "@types/pg": "^8.18.0",
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^7.2.1",
     "esbuild": "^0.27.3",
