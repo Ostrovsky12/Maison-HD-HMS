@@ -67,11 +67,11 @@ Treat Servio's supplied request examples as protocol evidence, not production da
 
 **How to apply:** Follow the documented operation-specific payloads. Verify the tenant's HTTPS endpoint independently of the example's HTTP/IP endpoint. Separate Ping success from category access, availability, rates, reservation confirmation and payment reconciliation. Never copy sample reservation, bill or transaction identifiers into live writes, and never assume a separately supplied password is the API AccessToken.
 
-The password supplied by Servio is used for API requests, not merely cabinet login.
+AccessToken має містити саме наданий Servio токен, а не пароль.
 
-**Why:** The user explicitly clarified its purpose.
+**Why:** Користувач передав уточнення від Servio: «Стосовно AccessToken надав його, там не треба пароль як значення. Приклади є в інструкції».
 
-**How to apply:** Treat it as an integration credential. Confirm its exact header or request-field mapping before changing authentication; its purpose alone does not establish that it replaces AccessToken.
+**How to apply:** Не підставляти пароль замість AccessToken. Використовувати наданий токен відповідно до прикладів інструкції; не вважати раніше збережене значення перевіреним і не виводити його під час діагностики.
 
 A Servio availability/price diagnostic is not a final payable quote or an inventory hold.
 
