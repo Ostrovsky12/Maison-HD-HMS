@@ -742,6 +742,23 @@ export interface BookingAppearance {
   showGallery: boolean;
 }
 
+export interface BookingAdditionalService {
+  /**
+   * @minLength 1
+   * @maxLength 80
+   * @pattern ^[a-zA-Z0-9_-]+$
+   */
+  id: string;
+  /**
+   * @minLength 1
+   * @maxLength 60
+   */
+  name: string;
+  /** @maxLength 300 */
+  description: string;
+  enabled: boolean;
+}
+
 export type BookingEngineInputProvider =
   (typeof BookingEngineInputProvider)[keyof typeof BookingEngineInputProvider];
 
@@ -791,6 +808,8 @@ export interface BookingEngineInput {
   servioSellerPropertyId?: number | null;
   /** @maxLength 2000 */
   paymentWindowText?: string;
+  /** @maxItems 10 */
+  additionalServices?: BookingAdditionalService[];
   /** @maxLength 2000 */
   servioToken?: string;
   clearServioToken?: boolean;

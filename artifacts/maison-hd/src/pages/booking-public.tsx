@@ -14,6 +14,8 @@ import { DogodaTheme } from "@/components/booking/dogoda/dogoda-theme";
 import { DogodaSteps, type DogodaStep } from "@/components/booking/dogoda/dogoda-steps";
 import { DogodaLogo } from "@/components/booking/dogoda/dogoda-logo";
 import { useBookingDraft, BOOKING_DRAFT_NOTICE } from "@/lib/booking-draft";
+import { AdditionalServicesPicker } from "@/components/booking/additional-services";
+import { normalizeAdditionalServices, serviceRequestText } from "@/lib/booking-additional-services";
 import {
   captureReturnFromUrl, clearPending, clearReturn, loadPending, loadReturn, parseTariffPolicy, redirectToLiqPay, savePending,
   type PendingCheckout, type ReturnRef,
@@ -103,6 +105,9 @@ export default function BookingPublicPage() {
   const [stale, setStale] = useState<string | null>(null);
 
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", specialRequests: "" });
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const services = normalizeAdditionalServices(cfg.additionalServices);
+  const requestsText = serviceRequestText(services, selectedServices, form.specialRequests);
   const [agree, setAgree] = useState(false);
   const [nrAgreedKey, setNrAgreedKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -263,12 +268,13 @@ export default function BookingPublicPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (previewLocked || !chosen || !policy || !canSubmit || inflight.current) return;
+    if (requestsText.length > 1000) { setSubmitErr("Скоротіть побажання: разом із вибраними опціями дозволено до 1000 символів."); return; }
     if (ap && kids.some((a) => a === null)) return;
     inflight.current = true; setSubmitting(true); setSubmitErr(null);
     const payload = {
       slug, bookingEngine: true, unitId: chosen.id, checkIn, checkOut,
       firstName: form.firstName.trim(), lastName: form.lastName.trim(), email: form.email.trim(), phone: form.phone.trim(),
-      adults: guests, children: childrenCount, guestsCount: totalGuests, ...(childrenCount > 0 ? { childrenAges: kids as number[] } : {}), specialRequests: form.specialRequests.trim(),
+      adults: guests, children: childrenCount, guestsCount: totalGuests, ...(childrenCount > 0 ? { childrenAges: kids as number[] } : {}), specialRequests: requestsText,
       expectedTotal: chosen.totalPrice, agreeTerms: true, agreeNonRefundable: true, tariffPolicyVersion: policy.version,
     };
     const key = payloadKey(payload);
@@ -283,7 +289,7 @@ export default function BookingPublicPage() {
           body: JSON.stringify({
             ...chosen.servio, checkIn, checkOut, adults: guests, childAges: kids,
             firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(), email: form.email.trim(),
-            specialRequests: form.specialRequests.trim(),
+            specialRequests: requestsText,
             expectedTotal: chosen.totalPrice, agreeTerms: true, agreeNonRefundable: true,
             tariffPolicyVersion: policy.version, requestId: bookingRequestId,
           }),
@@ -353,6 +359,7 @@ export default function BookingPublicPage() {
   const emailOk = form.email.trim() === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
   const toReview = (e: React.FormEvent) => {
     e.preventDefault();
+    if (requestsText.length > 1000) { setContactErr("Скоротіть побажання: разом із вибраними опціями дозволено до 1000 символів."); return; }
     if (!policy) { setContactErr("Онлайн-оплата зараз недоступна. Зв'яжіться з готелем напряму."); return; }
     if (!form.firstName.trim() || !form.lastName.trim()) { setContactErr("Вкажіть ім'я та прізвище."); return; }
     if (!contactOk) { setContactErr(isServio ? "Вкажіть коректні email та телефон: на email надійде підтвердження." : "Вкажіть email або телефон для зв'язку."); return; }
@@ -574,6 +581,7 @@ export default function BookingPublicPage() {
                   ))}
                 </div>
                 <p className="text-xs text-stone-500">{isServio ? "Потрібні email і телефон. Підтвердження бронювання та оплати надійде на email." : "Потрібен email або телефон, щоб ми могли з вами зв'язатися."}</p>
+                <AdditionalServicesPicker services={services} selected={selectedServices} onChange={setSelectedServices} />
                 <label className="text-xs text-stone-600 space-y-1 block"><span>Побажання</span>
                   <textarea data-testid="input-requests" rows={3} maxLength={1000} value={form.specialRequests} onChange={(e) => setForm((f) => ({ ...f, specialRequests: e.target.value }))}
                     className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-stone-900" /></label>
@@ -610,7 +618,7 @@ export default function BookingPublicPage() {
                       </>}
                     </div>
                   )}
-                  {form.specialRequests.trim() && <div className="sm:col-span-2"><dt className="text-xs text-stone-500">Побажання</dt><dd className="whitespace-pre-line">{form.specialRequests.trim()}</dd></div>}
+                  {requestsText && <div className="sm:col-span-2"><dt className="text-xs text-stone-500">Побажання</dt><dd className="whitespace-pre-line">{requestsText}</dd></div>}
                 </dl>
                 <fieldset className="space-y-2">
                   <legend className="text-sm font-semibold mb-2">Умови та конфіденційність</legend>
@@ -785,6 +793,7 @@ export default function BookingPublicPage() {
                     ))}
                   </div>
                   {!contactOk && <p className="text-xs text-stone-500">Вкажіть email або телефон для зв'язку.</p>}
+                  <AdditionalServicesPicker services={services} selected={selectedServices} onChange={setSelectedServices} disabled={submitting} />
                   <label className="text-xs text-stone-600 space-y-1 block"><span>Побажання</span>
                     <textarea data-testid="input-requests" rows={3} maxLength={1000} value={form.specialRequests} onChange={(e) => setForm((f) => ({ ...f, specialRequests: e.target.value }))}
                       className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-stone-900" /></label>

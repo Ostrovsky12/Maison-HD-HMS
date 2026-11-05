@@ -11,6 +11,8 @@ import {
 } from "@workspace/api-client-react";
 import type { BookingEngineInput } from "@workspace/api-client-react";
 import { UnitMediaEditor, type StudioUnit } from "@/components/booking/unit-media-editor";
+import { AdditionalServicesEditor } from "@/components/booking/additional-services";
+import { normalizeAdditionalServices } from "@/lib/booking-additional-services";
 import { normalizeUnitMedia, videoUrlError, isAllowedPhoto, type UnitMediaMap } from "@/lib/booking-media";
 import { BookingAppearanceEditor } from "@/components/booking/dogoda/booking-appearance-editor";
 import { normalizeAppearance, type BookingAppearanceValue } from "@/lib/booking-appearance";
@@ -57,6 +59,7 @@ function normalizeConfig(c: Record<string, unknown> | undefined) {
     servioHotelId: str(cfg.servioHotelId),
     servioSellerPropertyId: typeof cfg.servioSellerPropertyId === "number" ? cfg.servioSellerPropertyId : null,
     paymentWindowText: str(cfg.paymentWindowText),
+    additionalServices: normalizeAdditionalServices(cfg.additionalServices),
     unitMedia: normalizeUnitMedia(cfg.unitMedia),
     appearance: normalizeAppearance(cfg.appearance),
   };
@@ -356,7 +359,11 @@ export default function BookingStudioPage() {
               </div>
             </Section>
 
-            <Section n="04" title="Правові тексти" hint="Гість погоджується з обома перед відправкою заявки">
+            <Section n="04" title="Додаткові побажання">
+              <AdditionalServicesEditor value={form.additionalServices ?? []} onChange={value => set("additionalServices", value)} />
+            </Section>
+
+            <Section n="05" title="Правові тексти" hint="Гість погоджується з обома перед відправкою заявки">
               <div className="space-y-4">
                 <Field label="Умови бронювання та скасування"><Textarea data-testid="input-terms" rows={5} value={form.terms} onChange={(e) => set("terms", e.target.value)} /></Field>
                 <Field label="Повідомлення про оплату протягом 10 хвилин" hint="Текст показується в умовах тарифу та перед оплатою. Порожнє поле — стандартне повідомлення. Серверний строк оплати залишається 10 хвилин незалежно від формулювання.">
@@ -368,7 +375,7 @@ export default function BookingStudioPage() {
           </div>
 
           <div className="space-y-6 lg:sticky lg:top-4">
-            <Section n="05" title="Попередній перегляд">
+            <Section n="06" title="Попередній перегляд">
               <div className="rounded-xl overflow-hidden border border-stone-200 bg-white">
                 <div className="h-2" style={{ background: accent }} />
                 <div className="p-4">

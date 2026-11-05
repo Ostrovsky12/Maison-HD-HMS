@@ -14,6 +14,7 @@ export * from "./analyticsSummary";
 export * from "./auditLog";
 export * from "./authResponse";
 export * from "./booking";
+export * from "./bookingAdditionalService";
 export * from "./bookingAddon";
 export * from "./bookingAppearance";
 export * from "./bookingAppearanceFont";

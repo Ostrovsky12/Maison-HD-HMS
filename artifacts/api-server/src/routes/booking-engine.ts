@@ -84,6 +84,10 @@ router.put("/settings", async (req: any, res): Promise<void> => {
   const parsed = SaveBookingEngineSettingsBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Перевірте заповнення полів.", fields: parsed.error.issues.map(i => ({ field: i.path.join("."), message: i.message })) }); return; }
   const input = parsed.data;
+  if (input.additionalServices && (new Set(input.additionalServices.map(service => service.id)).size !== input.additionalServices.length
+    || input.additionalServices.some(service => !service.name.trim()))) {
+    res.status(400).json({ error: "Кожна додаткова послуга повинна мати назву й унікальний ідентифікатор." }); return;
+  }
   input.servioBaseUrl = input.servioBaseUrl.trim();
   input.servioHotelId = input.servioHotelId.trim();
   if (input.appearance?.heroPhotoUrl && !validBookingMediaUrl(input.appearance.heroPhotoUrl)) {

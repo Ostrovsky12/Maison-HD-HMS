@@ -1,6 +1,8 @@
 import { pool } from "@workspace/db";
 import type { BookingServioStatus, BookingAppearance, BookingRoomDetails } from "@workspace/api-zod";
 import { servioFingerprint } from "./servio-connection.js";
+import { bookingAdditionalServices } from "./booking-additional-services.js";
+import type { BookingAdditionalService } from "@workspace/api-zod";
 
 export type BookingUnitMedia = { photos: string[]; videoUrl: string; description: string; details?: BookingRoomDetails };
 
@@ -77,6 +79,7 @@ export type BookingEngineConfig = {
   servioSellerPropertyId?: number | null;
   servioSellerFingerprint?: string;
   paymentWindowText?: string;
+  additionalServices?: BookingAdditionalService[];
   unitMedia?: Record<string, BookingUnitMedia>;
   appearance?: BookingAppearance;
   servioCategoryMedia?: Record<string, Record<string, { media: BookingUnitMedia; revision: number }>>;
@@ -93,6 +96,7 @@ export function engineConfig(org: any): BookingEngineConfig {
     terms: "", privacy: "", servioBaseUrl: "", servioHotelId: "",
     ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}),
     unitMedia: bookingUnitMedia(raw?.unitMedia),
+    additionalServices: bookingAdditionalServices(raw?.additionalServices),
     paymentWindowText: typeof raw?.paymentWindowText === "string" ? raw.paymentWindowText.slice(0, 2000) : "",
     // Some internal callers intentionally select no slug: preserve their stored
     // appearance without injecting a default that could overwrite DOGODA later.
@@ -127,6 +131,7 @@ export function publicEngineConfig(config: BookingEngineConfig, visibleUnitIds: 
   const unitMedia = Object.fromEntries(Object.entries(bookingUnitMedia(config.unitMedia)).filter(([id]) => visible.has(id)));
   return { provider, published, displayName, description, accentColor, logoUrl, phone, email,
     checkInTime, checkOutTime, terms, privacy, unitMedia,
+    additionalServices: bookingAdditionalServices(config.additionalServices).filter(service => service.enabled),
     appearance: config.appearance ?? bookingAppearance(undefined, false),
     paymentWindowText: config.paymentWindowText?.trim() || DEFAULT_PAYMENT_WINDOW_TEXT };
 }

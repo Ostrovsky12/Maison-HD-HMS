@@ -5,6 +5,7 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+import type { BookingAdditionalService } from "./bookingAdditionalService";
 import type { BookingAppearance } from "./bookingAppearance";
 import type { BookingEngineInputProvider } from "./bookingEngineInputProvider";
 import type { BookingEngineInputUnitMedia } from "./bookingEngineInputUnitMedia";
@@ -48,6 +49,8 @@ export interface BookingEngineInput {
   servioSellerPropertyId?: number | null;
   /** @maxLength 2000 */
   paymentWindowText?: string;
+  /** @maxItems 10 */
+  additionalServices?: BookingAdditionalService[];
   /** @maxLength 2000 */
   servioToken?: string;
   clearServioToken?: boolean;

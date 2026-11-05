@@ -257,6 +257,16 @@ export const saveBookingEngineSettingsBodyServioSellerPropertyIdMax = 2147483647
 
 export const saveBookingEngineSettingsBodyPaymentWindowTextMax = 2000;
 
+export const saveBookingEngineSettingsBodyAdditionalServicesItemIdMax = 80;
+
+export const saveBookingEngineSettingsBodyAdditionalServicesItemIdRegExp =
+  new RegExp("^[a-zA-Z0-9_-]+$");
+export const saveBookingEngineSettingsBodyAdditionalServicesItemNameMax = 60;
+
+export const saveBookingEngineSettingsBodyAdditionalServicesItemDescriptionMax = 300;
+
+export const saveBookingEngineSettingsBodyAdditionalServicesMax = 10;
+
 export const saveBookingEngineSettingsBodyServioTokenMax = 2000;
 
 export const saveBookingEngineSettingsBodyUnitMediaPhotosItemMax = 1000;
@@ -346,6 +356,28 @@ export const SaveBookingEngineSettingsBody = zod.object({
   paymentWindowText: zod
     .string()
     .max(saveBookingEngineSettingsBodyPaymentWindowTextMax)
+    .optional(),
+  additionalServices: zod
+    .array(
+      zod.object({
+        id: zod
+          .string()
+          .min(1)
+          .max(saveBookingEngineSettingsBodyAdditionalServicesItemIdMax)
+          .regex(saveBookingEngineSettingsBodyAdditionalServicesItemIdRegExp),
+        name: zod
+          .string()
+          .min(1)
+          .max(saveBookingEngineSettingsBodyAdditionalServicesItemNameMax),
+        description: zod
+          .string()
+          .max(
+            saveBookingEngineSettingsBodyAdditionalServicesItemDescriptionMax,
+          ),
+        enabled: zod.boolean(),
+      }),
+    )
+    .max(saveBookingEngineSettingsBodyAdditionalServicesMax)
     .optional(),
   servioToken: zod
     .string()
