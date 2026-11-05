@@ -11,6 +11,12 @@ The user wants QR menus at tables, houses, and hotel rooms to let guests order a
 
 ## Safe staging and live testing
 
+QR orders require waiter confirmation before reaching the kitchen, including each later guest addition to an already open bill.
+
+**Why:** The user explicitly chose «Після підтвердження офіціантом».
+
+**How to apply:** Approval covers only the item IDs the waiter actually reviewed, never all rows present when the server processes the click. Apply the boundary to both public ordering entry points and every dispatch/accept path; do not treat an open parent bill as approval of future guest additions.
+
 The user reports having only the live Poster account, with no separate test account.
 
 **Why:** The user explicitly answered that only a production account is available.
