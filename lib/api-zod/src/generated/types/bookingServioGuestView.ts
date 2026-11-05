@@ -16,4 +16,5 @@ export interface BookingServioGuestView {
   terms: string;
   privacy: string;
   accessExpiresAt: string;
+  paymentWindowText?: string;
 }

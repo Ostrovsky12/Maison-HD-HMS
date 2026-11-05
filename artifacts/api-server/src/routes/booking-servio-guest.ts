@@ -7,7 +7,7 @@ import {
   CheckoutBookingServioGuestReservationResponse,
 } from "@workspace/api-zod";
 import { acceptsBookingTariff } from "../lib/booking-tariff.js";
-import { engineConfig } from "../lib/booking-engine.js";
+import { engineConfig, DEFAULT_PAYMENT_WINDOW_TEXT } from "../lib/booking-engine.js";
 import { attemptConnection, checkoutServioReservation, reservationView, type Attempt } from "../lib/servio-reservations.js";
 import { createServioGuestAccess, decodeServioGuestAccess, encodeServioGuestAccess, verifiesServioGuestAccess } from "../lib/servio-guest-access.js";
 
@@ -82,6 +82,7 @@ router.get("/:slug/servio/reservations/:id", async (req, res) => {
       reservation: reservationView(row), hotelName: access.hotelName, sellerName: access.sellerName,
       phone: access.phone, email: access.email, terms: connection.terms || "", privacy: connection.privacy || "",
       accessExpiresAt: access.expiresAt,
+      paymentWindowText: connection.paymentWindowText?.trim() || DEFAULT_PAYMENT_WINDOW_TEXT,
     }));
   } catch { res.status(503).json({ error: "Не вдалося перевірити стан бронювання. Не повторюйте оплату, якщо кошти вже списано." }); }
 });
@@ -93,6 +94,9 @@ router.post("/:slug/servio/reservations/:id/checkout", async (req, res) => {
   try {
     const row = await guestAttempt(req);
     if (!row) { res.status(404).json({ error: "Посилання недійсне або строк доступу минув. Зверніться до готелю." }); return; }
+    if (row.payment_deadline && new Date(row.payment_deadline).getTime() <= Date.now()) {
+      res.status(410).json({ error: "10 хвилин на оплату минули. Не оплачуйте старе посилання; перевіряємо стан бронювання.", code: "PAYMENT_WINDOW_EXPIRED" }); return;
+    }
     if (!row.bill || row.bill.totalMinor !== Math.round(parsed.data.expectedTotal * 100)) {
       res.status(409).json({ error: "Остаточна сума змінилася. Оновіть сторінку й перевірте її перед оплатою." }); return;
     }

@@ -25,14 +25,15 @@ export const SERVIO_GATING_CODES = new Set([
 export const servioBaseChecksPass = (checks: BookingServioPreflightCheck[]) =>
   checks.length > 0 && checks.filter(c => !SERVIO_GATING_CODES.has(c.code)).every(c => c.status === "passed");
 
-const ACTIVE = new Set(["creating", "billing", "bill_ready", "awaiting_payment", "confirming", "review", "cancelling"]);
-const UNCERTAIN = new Set(["creating", "billing", "confirming", "review", "cancelling"]);
+const ACTIVE = new Set(["creating", "billing", "bill_ready", "awaiting_payment", "expiring", "confirming", "review", "cancelling"]);
+const UNCERTAIN = new Set(["creating", "billing", "expiring", "confirming", "review", "cancelling"]);
 
 const STATE: Record<string, { label: string; c: string }> = {
   creating: { label: "Створюється в Servio", c: "bg-amber-50 text-amber-900 border-amber-200" },
   billing: { label: "Формується рахунок", c: "bg-amber-50 text-amber-900 border-amber-200" },
   bill_ready: { label: "Рахунок готовий", c: "bg-sky-50 text-sky-900 border-sky-200" },
   awaiting_payment: { label: "Очікує оплату", c: "bg-sky-50 text-sky-900 border-sky-200" },
+  expiring: { label: "Строк оплати минув, перевірка", c: "bg-orange-50 text-orange-900 border-orange-300" },
   confirming: { label: "Перевірка оплати", c: "bg-amber-50 text-amber-900 border-amber-200" },
   confirmed: { label: "Підтверджено (live)", c: "bg-emerald-50 text-emerald-800 border-emerald-200" },
   review: { label: "Ручна перевірка", c: "bg-orange-50 text-orange-900 border-orange-300" },
@@ -425,6 +426,18 @@ function JournalRow({ r }: { r: BookingServioReservation }) {
         <p className="text-[11px] text-orange-900 mt-1.5 flex gap-1"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />Потрібна ручна звірка в Servio{r.state !== "creating" && r.state !== "billing" ? " і LiqPay" : ""}. Автоматичних повторів немає.</p>
       )}
       {r.state === "confirmed" && r.mode === "live" && <p className="text-[11px] text-emerald-800 mt-1.5">Підтверджено підписаним зворотним викликом LiqPay.</p>}
+      {["confirmed", "review"].includes(r.state) && r.notifications && (
+        <div className="text-[11px] mt-2 space-y-1" data-testid={`reservation-mail-${r.id}`}>
+          {(r.state === "confirmed" ? ["guest", "admin"] : ["review"]).map(kind => (
+            <p key={kind} className={r.notifications?.[kind] === "sent" ? "text-emerald-800" : "text-amber-800"}>
+              {kind === "guest" ? "Лист гостю" : "Лист адміністраторам"}: {
+                r.notifications?.[kind] === "sent" ? "відправлено" :
+                r.notifications?.[kind] === "failed" ? "помилка відправлення, очікує повтору" :
+                r.notifications?.[kind] === "sending" ? "відправляється" : "у черзі"}
+            </p>
+          ))}
+        </div>
+      )}
 
       {canPay && (
         <div className="mt-3 rounded-lg border border-stone-300 bg-[#fbfaf7] p-3 space-y-2.5">

@@ -12,6 +12,7 @@ import { engineConfig } from "../lib/booking-engine.js";
 import { acceptsBookingTariff } from "../lib/booking-tariff.js";
 import { decrypt } from "../lib/encrypt.js";
 import { servioFingerprint, servioBaseUrl, servioHotelId } from "../lib/servio-connection.js";
+import { servioInventoryError } from "../lib/servio-inventory.js";
 import { searchServioAvailability, validServioSearch } from "../lib/servio-availability.js";
 import { liqpayCredentialFingerprint } from "../lib/liqpay-connection.js";
 import { bookingPaymentOrigin } from "./booking-checkout.js";
@@ -98,6 +99,8 @@ router.post("/", limiter, async (req: any, res) => {
     req.log.info({ organizationId: orgId, attemptId: row.id, state: row.state }, "Controlled Servio reservation attempt");
     res.json(CreateBookingServioReservationResponse.parse(reservationView(row)));
   } catch (error) {
+    const conflict = servioInventoryError(error);
+    if (conflict) { res.status(409).json(conflict); return; }
     res.status(error instanceof Error && error.message === "request_conflict" ? 409 : 503).json({
       error: "Не вдалося завершити операцію. Спочатку перевірте журнал спроб — бронь могла бути створена. Не створюйте нову спробу навмання.",
     });
@@ -142,6 +145,10 @@ export const servioReservationPaymentCallback = async (req: any, res: any) => {
       res.status(400).json({ error: "invalid_signature" }); return;
     }
     const updated = await recordServioPayment(row, payload);
+    if (updated.payment?.status === "success" && ["confirmed", "review"].includes(updated.state)) {
+      void import("../lib/servio-booking-notifications.js").then(m => m.deliverServioBookingNotifications(updated.id)).catch(() =>
+        req.log.warn({ attemptId: updated.id }, "Booking emails retained for background delivery"));
+    }
     req.log.info({ organizationId: row.organization_id, attemptId: id, state: updated.state }, "Servio payment callback processed");
     res.json({ ok: true });
   } catch (error) {

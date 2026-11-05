@@ -49,6 +49,18 @@ Booking-module sales use 100% online prepayment and a non-refundable tariff with
 
 **How to apply:** Show the full amount and the no-refund/no-date-change conditions beside the payment action. Require a separate, unchecked acknowledgement, not merely generic terms acceptance; retain the accepted wording/version and time. Preserve legally required exceptions rather than implying statutory rights can be waived. Never substitute payment on arrival or a partial percentage, and never infer a successful payment merely from the provider's return URL.
 
+For this booking module, the user wants the same payment sequence as their Spa app: redirect to LiqPay, then notify Servio after verified payment. Send the guest payment/booking confirmation from the hotel's mailbox, and send a separate new-paid-booking notification to that same mailbox for administrators. Do not add fiscalization or further fiscal processing to this flow.
+
+**Why:** The user explicitly defined this scope and said administrators need the notification to verify the reservation and continue communicating with guests.
+
+**How to apply:** Use tenant-owned outgoing mail, not the platform Gmail connector. A browser return alone is not payment confirmation. Keep paid-but-unconfirmed Servio outcomes visible rather than issuing a false confirmed reservation.
+
+The user will add accommodation photos, descriptions and rules through the cabinet.
+
+**Why:** The user explicitly took responsibility for this content and said the texts are already prepared.
+
+**How to apply:** Keep these fields editable in the cabinet; do not make up replacement content or treat content writing as remaining implementation work.
+
 Treat Servio's supplied request examples as protocol evidence, not production data to replay.
 
 **Why:** The user explicitly called the vendor's request example critically important. The supplied HAR demonstrates a POST Ping with scalar JSON `123` and an HTTP 200 scalar `123` response; a GET of the service root is not an equivalent connectivity test. The payment screenshot contains illustrative identifiers, not authorization to submit a payment.
@@ -92,3 +104,15 @@ Do not assume Servio's reservation-guarantee amount field means the entire prepa
 **Why:** The vendor describes `SetReservationType.Amount` and `SetReservationBill.Amount` as the first day's amount while the module requires 100% payment. Bill formation also returns adjusted service charges after tax calculation.
 
 **How to apply:** Confirm the operation-specific reconciliation semantics before enabling real payment confirmation. Preserve authoritative service/date charges and never wire the full LiqPay total into a first-day field merely because both are named amount.
+
+Нове публічне бронювання має 10 хвилин на оплату; неоплачене бронювання потрібно скасувати. Описи категорій, характеристик, тарифів і повідомлення про оплату користувач хоче додавати й редагувати в кабінеті.
+
+**Why:** Користувач надав зразки: «Якщо гість не оплачує, то бронювання злітає» і попросив можливість редагування всіх цих текстів.
+
+**How to apply:** Відлік має бути незмінним на сервері й не починатися заново після відкриття посилання. Перед звільненням бронювання перевіряти банк; невизначений або ще оброблюваний платіж не дорівнює відсутності оплати. Редагування презентаційних текстів не змінює фактичної ціни, номерного фонду чи фінансових правил.
+
+Для автоскасування незалежно від відвідувачів користувач обрав «Постійний сервер» після попередження про зміну оплати хостингу.
+
+**Why:** Autoscale може зупинитися без трафіку й не виконати фоновий таймер вчасно; користувач явно обрав запропонований варіант.
+
+**How to apply:** Зберігати постійно активне розміщення для сервісу бронювання. Підготовлене налаштування не означає, що воно вже працює на опублікованому сайті; не оголошувати перехід активним без перевірки публікації.

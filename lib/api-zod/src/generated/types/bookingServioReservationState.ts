@@ -14,6 +14,7 @@ export const BookingServioReservationState = {
   billing: "billing",
   bill_ready: "bill_ready",
   awaiting_payment: "awaiting_payment",
+  expiring: "expiring",
   confirming: "confirming",
   confirmed: "confirmed",
   review: "review",

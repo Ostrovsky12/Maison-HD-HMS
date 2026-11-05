@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BookingServioReservationMode } from "./bookingServioReservationMode";
+import type { BookingServioReservationNotifications } from "./bookingServioReservationNotifications";
 import type { BookingServioReservationState } from "./bookingServioReservationState";
 
 export interface BookingServioReservation {
@@ -13,6 +14,12 @@ export interface BookingServioReservation {
   requestId: string;
   /** Whether an administrator has issued private guest access; never includes the bearer token */
   hasGuestAccess?: boolean;
+  notifications?: BookingServioReservationNotifications;
+  /**
+   * Immutable server deadline for payment; null for older controlled reservations
+   * @nullable
+   */
+  paymentDeadline?: string | null;
   state: BookingServioReservationState;
   message: string;
   createdAt: string;

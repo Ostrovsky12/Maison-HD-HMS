@@ -101,6 +101,7 @@ export function normalizeUnitMedia(v: unknown): UnitMediaMap {
       photos: Array.isArray(r.photos) ? r.photos.filter((p): p is string => typeof p === "string").slice(0, MAX_PHOTOS) : [],
       videoUrl: typeof r.videoUrl === "string" ? r.videoUrl : "",
       description: typeof r.description === "string" ? r.description : "",
+      ...(r.details && typeof r.details === "object" && !Array.isArray(r.details) ? { details: r.details as UnitMedia["details"] } : {}),
     };
   }
   return out;

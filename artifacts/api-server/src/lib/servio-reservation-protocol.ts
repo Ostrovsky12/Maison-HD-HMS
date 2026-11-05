@@ -26,7 +26,7 @@ export function reservationPayload(input: BookingServioReservationInput, hotelId
     GuestFirstName: input.firstName.trim(), GuestLastName: input.lastName.trim(), RoomTypeID: input.categoryId,
     CompanyID: input.companyId, Company: "", ContractConditionID: input.rateConditionId, PaidType: 200,
     Iso3Country: "", Country: "", Address: "", Phone: input.phone.trim(), Fax: "", eMail: input.email.trim(),
-    NeedTransport: 0, Comment: `Maison HD ${id}`, ClientInfo: "Maison HD Booking",
+    NeedTransport: 0, Comment: `Maison HD ${id}${input.specialRequests?.trim() ? ` · ${input.specialRequests.trim()}` : ""}`, ClientInfo: "Maison HD Booking",
     IsTouristTax: 1, AgentCategory: 0, PriceListID: input.priceListId, LoyaltyCardTypeID: 0,
     LoyaltyCardNumber: "", ContactName: `${input.firstName.trim()} ${input.lastName.trim()}`.slice(0, 50),
     UTM_SOURCE: "maison_hd_booking", UTM_MEDIUM: "direct", UTM_CAMPAIGN: "", UTM_CONTENT: "", UTM_TERM: "",

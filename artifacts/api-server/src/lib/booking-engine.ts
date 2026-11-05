@@ -1,7 +1,20 @@
 import { pool } from "@workspace/db";
-import type { BookingServioStatus, BookingAppearance } from "@workspace/api-zod";
+import type { BookingServioStatus, BookingAppearance, BookingRoomDetails } from "@workspace/api-zod";
+import { servioFingerprint } from "./servio-connection.js";
 
-export type BookingUnitMedia = { photos: string[]; videoUrl: string; description: string };
+export type BookingUnitMedia = { photos: string[]; videoUrl: string; description: string; details?: BookingRoomDetails };
+
+export const DEFAULT_PAYMENT_WINDOW_TEXT = "Для гарантування бронювання оплату потрібно здійснити протягом 10 хвилин. Якщо оплату не підтверджено, бронювання буде скасовано після перевірки стану платежу.";
+
+function roomDetails(value: unknown): BookingRoomDetails | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const limits: Record<string, number> = { displayName: 150, occupancyText: 200, bedsText: 300, sofaText: 200,
+    areaText: 100, tariffTitle: 150, tariffDescription: 5000 };
+  return { ...Object.fromEntries(Object.entries(limits).map(([key, max]) =>
+    [key, typeof raw[key] === "string" ? (raw[key] as string).slice(0, max) : ""])),
+    amenities: Array.isArray(raw.amenities) ? raw.amenities.filter((v): v is string => typeof v === "string").slice(0, 30).map(v => v.slice(0, 150)) : [] };
+}
 
 /** Brand entitlement is the tenant's stable slug, never its editable display name. */
 export function dogodaBrandAvailable(org: { slug?: string }): boolean {
@@ -51,6 +64,7 @@ export function bookingUnitMedia(raw: unknown): Record<string, BookingUnitMedia>
         .filter((u): u is string => typeof u === "string" && u.length <= 1000 && validBookingMediaUrl(u)).slice(0, 30))],
       videoUrl: typeof media.videoUrl === "string" && media.videoUrl.length <= 1000 && validBookingMediaUrl(media.videoUrl) ? media.videoUrl : "",
       description: typeof media.description === "string" ? media.description.slice(0, 10000) : "",
+      ...(media.details ? { details: roomDetails(media.details) } : {}),
     }]];
   }));
 }
@@ -60,6 +74,9 @@ export type BookingEngineConfig = {
   description: string; accentColor: string; logoUrl: string; phone: string; email: string;
   checkInTime: string; checkOutTime: string; terms: string; privacy: string;
   servioBaseUrl: string; servioHotelId: string; servioToken?: string; updatedAt?: string;
+  servioSellerPropertyId?: number | null;
+  servioSellerFingerprint?: string;
+  paymentWindowText?: string;
   unitMedia?: Record<string, BookingUnitMedia>;
   appearance?: BookingAppearance;
   servioCategoryMedia?: Record<string, Record<string, { media: BookingUnitMedia; revision: number }>>;
@@ -76,6 +93,7 @@ export function engineConfig(org: any): BookingEngineConfig {
     terms: "", privacy: "", servioBaseUrl: "", servioHotelId: "",
     ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}),
     unitMedia: bookingUnitMedia(raw?.unitMedia),
+    paymentWindowText: typeof raw?.paymentWindowText === "string" ? raw.paymentWindowText.slice(0, 2000) : "",
     // Some internal callers intentionally select no slug: preserve their stored
     // appearance without injecting a default that could overwrite DOGODA later.
     ...(typeof org.slug === "string"
@@ -85,13 +103,20 @@ export function engineConfig(org: any): BookingEngineConfig {
 
 export function engineIssues(config: BookingEngineConfig, properties: number, activeUnits: number): string[] {
   const issues: string[] = [];
-  if (config.provider === "servio") issues.push("Servio: доступ і протокол ще не перевірені. Публікація продажів заблокована.");
+  if (config.provider === "servio") {
+    const fingerprint = servioFingerprint(config);
+    if (!config.servioToken || config.servioVerification?.fingerprint !== fingerprint
+      || config.servioVerification.result.status !== "connected" || !config.servioVerification.result.categories.length)
+      issues.push("Перевірте підключення й категорії Servio перед відкриттям продажів.");
+    if (!config.servioSellerPropertyId || config.servioSellerFingerprint !== fingerprint)
+      issues.push("Збережіть прив’язку продавця до поточного готелю Servio.");
+  }
   if (!config.displayName.trim()) issues.push("Додайте назву готелю.");
   if (!config.phone.trim() && !config.email.trim()) issues.push("Додайте телефон або email для зв’язку.");
   if (!config.terms.trim()) issues.push("Додайте умови бронювання та скасування.");
   if (!config.privacy.trim()) issues.push("Додайте політику обробки персональних даних.");
-  if (!properties) issues.push("Створіть об’єкт розміщення.");
-  if (!activeUnits) issues.push("Додайте активні видимі номери з коректною ціною.");
+  if (config.provider === "maison" && !properties) issues.push("Створіть об’єкт розміщення.");
+  if (config.provider === "maison" && !activeUnits) issues.push("Додайте активні видимі номери з коректною ціною.");
   return issues;
 }
 
@@ -102,7 +127,8 @@ export function publicEngineConfig(config: BookingEngineConfig, visibleUnitIds: 
   const unitMedia = Object.fromEntries(Object.entries(bookingUnitMedia(config.unitMedia)).filter(([id]) => visible.has(id)));
   return { provider, published, displayName, description, accentColor, logoUrl, phone, email,
     checkInTime, checkOutTime, terms, privacy, unitMedia,
-    appearance: config.appearance ?? bookingAppearance(undefined, false) };
+    appearance: config.appearance ?? bookingAppearance(undefined, false),
+    paymentWindowText: config.paymentWindowText?.trim() || DEFAULT_PAYMENT_WINDOW_TEXT };
 }
 
 /** Existing legacy /book remains available until a tenant explicitly configures this product.

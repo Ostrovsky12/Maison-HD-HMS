@@ -40,6 +40,14 @@ export interface BookingEngineInput {
   servioBaseUrl: string;
   /** @maxLength 50 */
   servioHotelId: string;
+  /**
+   * @minimum 1
+   * @maximum 2147483647
+   * @nullable
+   */
+  servioSellerPropertyId?: number | null;
+  /** @maxLength 2000 */
+  paymentWindowText?: string;
   /** @maxLength 2000 */
   servioToken?: string;
   clearServioToken?: boolean;

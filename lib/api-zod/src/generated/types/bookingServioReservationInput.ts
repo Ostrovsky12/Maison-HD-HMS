@@ -26,6 +26,8 @@ export type BookingServioReservationInput = BookingServioPreflightInput & {
   phone: string;
   /** @maxLength 200 */
   email: string;
+  /** @maxLength 1000 */
+  specialRequests?: string;
   /**
    * @maximum 10000000
    * @exclusiveMinimum 0

@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ query: vi.fn(), connect: vi.fn(), encrypt: vi.fn(), upload: vi.fn() }));
 vi.mock("@workspace/db", () => ({ pool: { query: fixture.query, connect: fixture.connect } }));
+vi.mock("../lib/servio-sales.js", () => ({
+  servioSalesReadiness: vi.fn(async () => ({ issues: ["Servio: продавець і пошта ще не налаштовані"], seller: null, mailbox: null, categories: [] })),
+}));
 vi.mock("../lib/encrypt.js", () => ({ encrypt: fixture.encrypt }));
 vi.mock("../lib/objectStorage.js", () => ({ ObjectStorageService: class {
   getObjectEntityUploadURL = fixture.upload;
@@ -122,8 +125,8 @@ describe("DOGODA guest appearance and private read-only preview", () => {
     expect(result.body).toMatchObject({ preview: true, salesEnabled: false, config: { appearance: { preset: "dogoda" } } });
     expect(result.headers["cache-control"]).toBe("no-store");
     expect(fixture.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
-    expect((await request(app).get("/api/public/booking-engine/dogoda")).status).toBe(503);
-    expect((await request(app).get("/api/public/booking-engine/dogoda?preview=false")).status).toBe(503);
+    expect((await request(app).get("/api/public/booking-engine/dogoda")).status).toBe(404);
+    expect((await request(app).get("/api/public/booking-engine/dogoda?preview=false")).status).toBe(404);
   });
   it("returns only the verified Servio category media in preview, not local rooms or credentials", async () => {
     const { servioFingerprint } = await import("../lib/servio-connection.js");
@@ -371,7 +374,7 @@ describe("configuration and tenant isolation", () => {
   it("does not expose draft, inactive or unsupported-provider pages", async () => {
     expect((await request(app).get("/api/public/booking-engine/test-hotel")).status).toBe(404);
     org.booking_engine_config.provider = "servio";
-    expect((await request(app).get("/api/public/booking-engine/test-hotel")).status).toBe(503);
+    expect((await request(app).get("/api/public/booking-engine/test-hotel")).status).toBe(404);
     org.is_active = false;
     expect((await request(app).get("/api/public/booking-engine/test-hotel")).status).toBe(404);
   });

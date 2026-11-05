@@ -5,6 +5,7 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+import type { BookingRoomDetails } from "./bookingRoomDetails";
 
 export interface BookingUnitMedia {
   /** @maxItems 30 */
@@ -13,4 +14,5 @@ export interface BookingUnitMedia {
   videoUrl: string;
   /** @maxLength 10000 */
   description: string;
+  details?: BookingRoomDetails;
 }

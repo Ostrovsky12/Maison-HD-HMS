@@ -5,6 +5,7 @@ const f = vi.hoisted(() => ({
   query: vi.fn(), create: vi.fn(), get: vi.fn(), checkout: vi.fn(), cancel: vi.fn(), valid: vi.fn(), record: vi.fn(), search: vi.fn(),
 }));
 vi.mock("@workspace/db", () => ({ pool: { query: f.query } }));
+vi.mock("../lib/servio-booking-notifications.js", () => ({ deliverServioBookingNotifications: vi.fn() }));
 vi.mock("../lib/auth.js", () => ({
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => roles.includes(req.user.role) ? next() : res.status(403).json({ error: "Forbidden" }),
 }));

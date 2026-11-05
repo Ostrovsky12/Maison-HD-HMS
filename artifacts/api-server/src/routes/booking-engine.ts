@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { servioReservationPaymentCallback } from "./booking-servio-reservations.js";
 import bookingServioGuest from "./booking-servio-guest.js";
+import bookingServioPublic from "./booking-servio-public.js";
+import { servioSalesReadiness } from "../lib/servio-sales.js";
+import { servioFingerprint } from "../lib/servio-connection.js";
 import { pool } from "@workspace/db";
 import { SaveBookingEngineSettingsBody, RequestUploadUrlBody } from "@workspace/api-zod";
 import { requireAuth, requireRole } from "../lib/auth.js";
@@ -36,11 +39,12 @@ async function view(orgId: number, client: any = pool) {
       AND u.base_price IS NOT NULL AND u.base_price>=0`, [orgId])).rows[0]?.count || 0;
   const { servioToken, servioVerification: _internalServioCheck, liqpayVerification: _internalPaymentChecks, ...safe } = config;
   const issues = engineIssues(config, properties.length, Number(active));
+  if (config.provider === "servio") issues.push(...(await servioSalesReadiness(orgId, org.slug, config, client)).issues);
   const units = (await client.query(`SELECT u.id,u.name,u.description,u.property_id AS "propertyId",p.name AS "propertyName"
     FROM units u JOIN properties p ON p.id=u.property_id WHERE p.organization_id=$1 ORDER BY p.id,u.id`, [orgId])).rows;
   return { organization: { id: org.id, name: org.name, slug: org.slug },
     config: { ...safe, hasServioToken: !!servioToken, dogodaBrandAvailable: dogodaBrandAvailable(org) },
-    readiness: { canPublish: issues.length === 0, issues, servioSupported: false }, properties, units };
+    readiness: { canPublish: issues.length === 0, issues, servioSupported: true }, properties, units };
 }
 
 router.get("/settings", async (req: any, res): Promise<void> => {
@@ -122,7 +126,8 @@ router.put("/settings", async (req: any, res): Promise<void> => {
     const upstreamChanged = old.servioBaseUrl.trim() !== editable.servioBaseUrl
       || old.servioHotelId.trim() !== editable.servioHotelId;
     if (!["super_admin", "owner", "admin"].includes(req.user.role)
-      && (servioToken?.trim() || clearServioToken || upstreamChanged || old.provider !== editable.provider)) {
+      && (servioToken?.trim() || clearServioToken || upstreamChanged || old.provider !== editable.provider
+        || (input.servioSellerPropertyId ?? null) !== (old.servioSellerPropertyId ?? null))) {
       await client.query("ROLLBACK");
       res.status(403).json({ error: "Змінювати підключення PMS може лише власник або адміністратор." }); return;
     }
@@ -159,6 +164,16 @@ router.put("/settings", async (req: any, res): Promise<void> => {
     if (!servioToken?.trim() && upstreamChanged) {
       delete config.servioToken;
     }
+    if (config.servioSellerPropertyId) {
+      const seller = (await client.query(`SELECT p.id FROM properties p JOIN legal_entities le
+        ON le.id=p.legal_entity_id AND le.organization_id=p.organization_id AND le.is_active=true
+        WHERE p.id=$1 AND p.organization_id=$2`, [config.servioSellerPropertyId, req.user.organizationId])).rows[0];
+      if (!seller) {
+        await client.query("ROLLBACK");
+        res.status(400).json({ error: "Оберіть об’єкт із активним продавцем вашого готелю." }); return;
+      }
+      Object.assign(config, { servioSellerFingerprint: servioFingerprint(config) });
+    }
     const existing = await view(req.user.organizationId, client);
     const issues = engineIssues(config, existing!.properties.length,
       (await client.query(`SELECT count(*)::int AS count FROM units u JOIN properties p ON p.id=u.property_id
@@ -166,6 +181,13 @@ router.put("/settings", async (req: any, res): Promise<void> => {
       [req.user.organizationId])).rows[0]?.count || 0);
     if (config.published && issues.length) {
       await client.query("ROLLBACK"); res.status(409).json({ error: issues.join(" "), issues }); return;
+    }
+    if (config.published && config.provider === "servio") {
+      const readiness = await servioSalesReadiness(req.user.organizationId, rows[0].slug, config, client);
+      if (readiness.issues.length) {
+        await client.query("ROLLBACK");
+        res.status(409).json({ error: readiness.issues.join(" "), issues: readiness.issues }); return;
+      }
     }
     await client.query("UPDATE organizations SET booking_engine_config=$2::jsonb,updated_at=NOW() WHERE id=$1",
       [req.user.organizationId, JSON.stringify(config)]);
@@ -197,6 +219,7 @@ router.get("/overview", async (req: any, res): Promise<void> => {
 
 export const publicEngineRouter = Router();
 publicEngineRouter.use(bookingServioGuest);
+publicEngineRouter.use(bookingServioPublic);
 publicEngineRouter.post("/servio/payment-callback", servioReservationPaymentCallback);
 publicEngineRouter.get("/:slug", (req, res, next) => {
   if (req.query.preview === "true" || req.query.preview === "1") {
@@ -213,7 +236,6 @@ publicEngineRouter.get("/:slug", (req, res, next) => {
     res.status(404).json({ error: "Сторінку готелю не знайдено." }); return;
   }
   const config = engineConfig(org);
-  if (!preview && config.provider === "servio") { res.status(503).json({ error: "Онлайн-бронювання Servio ще не підключено." }); return; }
   if (!preview && !config.published) { res.status(404).json({ error: "Сторінка бронювання ще не опублікована." }); return; }
   const properties = (await pool.query("SELECT id,name FROM properties WHERE organization_id=$1 ORDER BY id", [org.id])).rows;
   const visibleUnits = (await pool.query(`SELECT u.id,u.name,u.category,u.description FROM units u JOIN properties p ON p.id=u.property_id
@@ -229,7 +251,7 @@ publicEngineRouter.get("/:slug", (req, res, next) => {
         description: media?.description || unit.description || "", photos: media?.photos ?? [], videoUrl: media?.videoUrl ?? "" };
     });
   res.json({ organization: { name: org.name, slug: org.slug }, config: publicEngineConfig(config, visibleUnits.map((unit: any) => unit.id)), properties, currency: "UAH",
-    accommodationCatalog, preview, salesEnabled: !preview && config.provider === "maison" && config.published,
+    accommodationCatalog, preview, salesEnabled: !preview && config.published,
     tariffPolicy: BOOKING_TARIFF_POLICY });
 });
 export default router;

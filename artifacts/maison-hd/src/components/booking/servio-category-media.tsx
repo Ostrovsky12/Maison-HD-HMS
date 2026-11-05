@@ -28,12 +28,27 @@ const errText = (e: unknown) => {
   return typeof d?.error === "string" ? d.error : (e as Error)?.message || "Не вдалося зберегти";
 };
 
+type TextKey = "displayName" | "occupancyText" | "bedsText" | "sofaText" | "areaText" | "tariffTitle" | "tariffDescription";
+const DETAIL_LIMITS: [TextKey, number][] = [["displayName", 150], ["occupancyText", 200], ["bedsText", 300], ["sofaText", 200], ["areaText", 100], ["tariffTitle", 150], ["tariffDescription", 5000]];
+const DETAIL_LABELS: Record<TextKey, string> = {
+  displayName: "Назва для гостей", occupancyText: "Місткість", bedsText: "Ліжка", sofaText: "Диван", areaText: "Площа",
+  tariffTitle: "Назва тарифу", tariffDescription: "Опис тарифу",
+};
+const DETAIL_PH: Record<TextKey, string> = {
+  displayName: "Будинок з 1 спальнею", occupancyText: "до 4 гостей", bedsText: "2 односпальних або 1 двоспальне ліжко", sofaText: "1 диван", areaText: "42 м2",
+  tariffTitle: "Безповоротний тариф", tariffDescription: "Тариф передбачає 100% передоплату без можливості повернення...",
+};
+
 function validate(m: UnitMedia): string | null {
   if (m.photos.length > MAX_PHOTOS) return `Максимум ${MAX_PHOTOS} фото`;
   if (m.photos.some((p) => p.length > 1000 || !isAllowedPhoto(p))) return "Є недопустиме посилання на фото (лише HTTPS або завантажені файли, до 1000 символів)";
   if (m.videoUrl.length > 1000) return "Посилання на відео довше 1000 символів";
   const v = videoUrlError(m.videoUrl); if (v) return v;
   if (m.description.length > 10000) return "Опис довший 10000 символів";
+  const d = m.details ?? {};
+  for (const [k, max] of DETAIL_LIMITS) if ((d[k] ?? "").length > max) return `Поле «${DETAIL_LABELS[k]}» довше ${max} символів`;
+  if ((d.amenities ?? []).length > 30) return "Максимум 30 зручностей";
+  if ((d.amenities ?? []).some((a) => a.length > 100)) return "Зручність довша 100 символів";
   return null;
 }
 
@@ -127,7 +142,8 @@ export function ServioCategoryMedia({ organizationId, role, dirty, accent, onUpl
   const submit = () => {
     if (!item || !sourceId || locked || busyRef.current || saving || conflict) return;
     const k = keyOf(item); const sc = scope; const d = drafts[k]; if (!d) return;
-    const sent = d.media; const bad = validate(sent);
+    const sent: UnitMedia = d.media.details ? { ...d.media, details: { ...d.media.details, amenities: (d.media.details.amenities ?? []).map((a) => a.trim()).filter(Boolean) } } : d.media;
+    const bad = validate(sent);
     if (bad) { setMsg({ key: k, ok: false, text: bad }); return; }
     setSaving(k); setMsg(null);
     saveM.mutate({ data: { sourceId, hotelId: item.hotelId, categoryId: item.categoryId, expectedRevision: d.baseRevision, media: sent } }, {
@@ -136,7 +152,7 @@ export function ServioCategoryMedia({ organizationId, role, dirty, accent, onUpl
         setDrafts((p) => {
           const cur = p[k]; if (!cur) return p;
           const n = { ...p };
-          if (same(cur.media, sent)) delete n[k]; else n[k] = { ...cur, base: res.media, baseRevision: res.revision, conflict: false };
+          if (same(cur.media, d.media)) delete n[k]; else n[k] = { ...cur, base: res.media, baseRevision: res.revision, conflict: false };
           return n;
         });
         setMsg({ key: k, ok: true, text: `Збережено, ревізія ${res.revision}` });
@@ -258,6 +274,28 @@ export function ServioCategoryMedia({ organizationId, role, dirty, accent, onUpl
             {!ro && media.description ? <button type="button" className="text-red-600 hover:underline" onClick={() => patch({ description: "" })} data-testid="button-servio-desc-clear">Очистити опис</button> : <span />}
             <span>{media.description.length}/10000</span>
           </div>
+        </div>
+
+        <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-3" data-testid="panel-servio-category-details">
+          <p className="text-xs font-medium text-stone-600">Характеристики для гостей · лише текст на сторінці, не змінює наявність, ціни чи місткість у Servio</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {DETAIL_LIMITS.map(([k, max]) => (
+              <div key={k} className={`space-y-1 ${k === "tariffDescription" ? "sm:col-span-2" : ""}`}>
+                <Label htmlFor={`servio-d-${k}`} className="text-[11px] text-stone-500">{DETAIL_LABELS[k]}</Label>
+                {k === "tariffDescription"
+                  ? <Textarea id={`servio-d-${k}`} data-testid={`input-servio-detail-${k}`} rows={3} maxLength={max} readOnly={ro} value={media.details?.[k] ?? ""} placeholder={DETAIL_PH[k]} onChange={(e) => patch({ details: { ...media.details, [k]: e.target.value } })} />
+                  : <Input id={`servio-d-${k}`} data-testid={`input-servio-detail-${k}`} maxLength={max} readOnly={ro} value={media.details?.[k] ?? ""} placeholder={DETAIL_PH[k]} onChange={(e) => patch({ details: { ...media.details, [k]: e.target.value } })} />}
+              </div>
+            ))}
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="servio-d-amenities" className="text-[11px] text-stone-500">Зручності, по одній у рядку (до 30)</Label>
+              <Textarea id="servio-d-amenities" data-testid="input-servio-detail-amenities" rows={3} readOnly={ro} value={(media.details?.amenities ?? []).join("\n")}
+                onChange={(e) => patch({ details: { ...media.details, amenities: e.target.value.split("\n").slice(0, 30) } })} placeholder={"Сауна\nКухня"} />
+            </div>
+          </div>
+          {!ro && media.details && Object.keys(media.details).length > 0 && (
+            <button type="button" className="text-[11px] text-red-600 hover:underline" onClick={() => patch({ details: {} })} data-testid="button-servio-details-clear">Очистити характеристики</button>
+          )}
         </div>
 
         {canEdit && (

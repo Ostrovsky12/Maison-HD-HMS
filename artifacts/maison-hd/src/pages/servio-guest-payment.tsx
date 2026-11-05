@@ -5,6 +5,7 @@ import {
 } from "@workspace/api-client-react";
 import type { BookingServioGuestView } from "@workspace/api-client-react";
 import { redirectToLiqPay } from "@/lib/booking-payment";
+import { CANONICAL_PAYMENT_NOTICE, PAYMENT_WINDOW_LABEL, supplementaryText } from "@/lib/payment-window";
 import { captureGuestAccess, forgetGuestAccess, newCacheId, validRoute } from "@/lib/servio-guest-payment";
 import {
   AlertTriangle, BedDouble, CalendarDays, CheckCircle2, Clock, CreditCard, Loader2, Lock, Mail, Phone, RefreshCw, ShieldAlert,
@@ -21,6 +22,7 @@ const STATE_TEXT: Record<string, { title: string; body: string; tone: "ok" | "wa
   billing: { title: "Рахунок формується", body: "Фінальна сума ще не готова. Сторінка оновиться автоматично.", tone: "wait" },
   bill_ready: { title: "Рахунок готовий до оплати", body: "Перевірте деталі, ознайомтеся з умовами та підтвердьте оплату.", tone: "wait" },
   awaiting_payment: { title: "Очікуємо підтвердження оплати", body: "Якщо ви ще не завершили оплату на сторінці LiqPay, можна продовжити. Якщо оплатили, дочекайтеся підтвердження нижче, повторно не платіть.", tone: "wait" },
+  expiring: { title: "Час на оплату минув, перевіряємо стан", body: "Ми звіряємо, чи надійшла оплата, перед скасуванням. Не оплачуйте повторно, сторінка оновиться автоматично.", tone: "warn" },
   confirming: { title: "Оплата перевіряється", body: "Ми отримали сигнал від платіжної системи й звіряємо його з готелем. Не оплачуйте повторно.", tone: "wait" },
   confirmed: { title: "Бронювання підтверджено", body: "Оплату підтверджено підписаним повідомленням LiqPay.", tone: "ok" },
   review: { title: "Потрібна перевірка готелем", body: "Стан оплати потребує ручної звірки. Не оплачуйте повторно, готель зв'яжеться з вами.", tone: "warn" },
@@ -98,6 +100,13 @@ function Skeleton() {
   );
 }
 
+function useNow(active: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { if (!active) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [active]);
+  return now;
+}
+const mmss = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+
 export default function ServioGuestPaymentPage() {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
   const routeOk = validRoute(slug, id);
@@ -140,6 +149,9 @@ export default function ServioGuestPaymentPage() {
   session.current = cacheId;
 
   const r = view?.reservation;
+  const deadlineMs = r?.paymentDeadline ? Date.parse(r.paymentDeadline) : NaN;
+  const hasDeadline = Number.isFinite(deadlineMs);
+  const now = useNow(hasDeadline);
   const consentKey = r ? `${r.total}:${r.currency}:${r.policyVersion}:${r.state}:${r.acknowledgementText.length}` : "";
   const prevConsent = useRef(consentKey);
   useEffect(() => {
@@ -165,7 +177,10 @@ export default function ServioGuestPaymentPage() {
   const res = view.reservation;
   const stale = q.isError; // last poll failed; showing an older snapshot
   const fresh = !stale && (unknownAt === null || q.dataUpdatedAt > unknownAt);
-  const payable = (res.state === "bill_ready" || res.state === "awaiting_payment") && res.total !== null && res.total > 0;
+  const remaining = hasDeadline ? deadlineMs - now : null;
+  const expired = remaining !== null && remaining <= 0;
+  const payable = (res.state === "bill_ready" || res.state === "awaiting_payment") && res.total !== null && res.total > 0 && !expired;
+  const extraText = supplementaryText(view.paymentWindowText);
   const hasLegal = !!view.terms.trim() && !!view.privacy.trim() && !!res.acknowledgementText.trim() && !!res.policyVersion;
   const busy = checkout.isPending || redirecting;
   const canSubmit = payable && hasLegal && fresh && agreeTerms && agreeNr && !busy;
@@ -176,6 +191,7 @@ export default function ServioGuestPaymentPage() {
 
   const pay = () => {
     if (!canSubmit || inFlight.current || res.total === null) return;
+    if (hasDeadline && Date.now() >= deadlineMs) return;
     inFlight.current = true; setErr(null);
     const mySession = session.current;
     checkout.mutate({ slug: encodeURIComponent(slug), id, data: { expectedTotal: res.total, agreeTerms: true, agreeNonRefundable: true, tariffPolicyVersion: res.policyVersion } }, {
@@ -204,6 +220,13 @@ export default function ServioGuestPaymentPage() {
 
   return (
     <Shell hotel={view.hotelName} phone={view.phone} email={view.email}>
+      {r?.state === "confirmed" && r.notifications && (
+        <p data-testid="guest-servio-email-status" role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+          {r.notifications?.guest === "sent"
+            ? "Підтвердження бронювання та оплати відправлено на email, вказаний під час бронювання."
+            : "Оплату й бронювання підтверджено. Лист на ваш email очікує відправлення; повторно оплачувати не потрібно."}
+        </p>
+      )}
       {!access.persisted && (
         <p role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950 flex gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden />Браузер не дозволяє зберегти доступ у цій вкладці. Після повернення з LiqPay може знадобитися знову відкрити оригінальне приватне посилання.
@@ -230,6 +253,18 @@ export default function ServioGuestPaymentPage() {
           </div>
         </div>
       </section>
+
+      {remaining !== null && (res.state === "bill_ready" || res.state === "awaiting_payment" || res.state === "expiring") && (
+        <section className={`mt-4 rounded-2xl border p-5 ${expired || res.state === "expiring" ? "border-orange-300 bg-orange-50" : "border-amber-300 bg-amber-50"}`} data-testid="guest-servio-deadline">
+          {remaining !== null && !expired && res.state !== "expiring" ? (
+            <p className="flex items-baseline justify-between gap-3"><span className="text-sm font-medium">Залишилось часу на оплату</span><span className="font-mono text-3xl font-semibold" role="timer" aria-live="off" data-testid="text-guest-servio-countdown">{mmss(remaining)}</span></p>
+          ) : expired || res.state === "expiring" ? (
+            <p className="text-sm font-medium" role="status">Час на оплату минув. Перехід до оплати зупинено. Перевіряємо стан бронювання; якщо оплату не підтверджено, його буде скасовано.</p>
+          ) : null}
+          <p className="text-xs mt-2 text-red-800 whitespace-pre-line">{extraText || CANONICAL_PAYMENT_NOTICE}</p>
+          <p className="text-xs mt-1 text-stone-700">{PAYMENT_WINDOW_LABEL}</p>
+        </section>
+      )}
 
       <section className="mt-4 rounded-2xl border border-stone-200 bg-white p-5 md:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">

@@ -54,6 +54,8 @@ function normalizeConfig(c: Record<string, unknown> | undefined) {
     privacy: str(cfg.privacy),
     servioBaseUrl: str(cfg.servioBaseUrl),
     servioHotelId: str(cfg.servioHotelId),
+    servioSellerPropertyId: typeof cfg.servioSellerPropertyId === "number" ? cfg.servioSellerPropertyId : null,
+    paymentWindowText: str(cfg.paymentWindowText),
     unitMedia: normalizeUnitMedia(cfg.unitMedia),
     appearance: normalizeAppearance(cfg.appearance),
   };
@@ -246,13 +248,11 @@ export default function BookingStudioPage() {
         {/* Readiness + publication strip */}
         <div className="grid md:grid-cols-[1.4fr_1fr] gap-4">
           <Section n="01" title="Готовність до публікації" hint="Перевіряється сервером після збереження">
-            {readiness.canPublish && !isServio && !dirty ? (
+            {readiness.canPublish && !dirty ? (
               <div className="flex items-center gap-2 text-sm text-emerald-800"><CheckCircle2 className="w-4 h-4" />Усі умови виконано. Сторінку можна публікувати.</div>
             ) : (
               <ul className="space-y-1.5" data-testid="list-readiness-issues">
-                {(isServio
-                  ? ["Продажі Servio заблоковані до перевірки API та підтримуваного сценарію бронювання."]
-                  : dirty
+                {(dirty
                     ? ["Збережіть зміни, щоб сервер повторно перевірив готовність до публікації."]
                     : readiness.issues.length ? readiness.issues : ["Сервер не повідомив про готовність"]).map((i, idx) => (
                   <li key={idx} className="flex gap-2 text-sm text-stone-700"><span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />{i}</li>
@@ -264,7 +264,7 @@ export default function BookingStudioPage() {
                 <p className="text-sm font-medium text-stone-800">Публікація</p>
                 <p className="text-xs text-stone-500">Вимкнена сторінка повертає 404 для гостей</p>
               </div>
-              <Switch data-testid="switch-published" checked={form.published} onCheckedChange={(v) => set("published", v)} disabled={isServio && !form.published} />
+              <Switch data-testid="switch-published" checked={form.published} onCheckedChange={(v) => set("published", v)} disabled={!form.published && (dirty || !readiness.canPublish)} />
             </div>
             {form.published && !readiness.canPublish && (
               <p className="text-xs text-amber-700 mt-2">Сервер відхилить публікацію, доки не усунуто зауваження вище.</p>
@@ -296,11 +296,20 @@ export default function BookingStudioPage() {
           <Section n="02a" title="Servio — конфігурація" hint="Збережіть реквізити й запустіть безпечну перевірку доступу">
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex gap-2 mb-4" data-testid="text-servio-status">
               <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>Продажі Servio ще недоступні. Перевірка нижче підтверджує лише Ping і читання категорій, а не повний цикл бронювання.</span>
+              <span>Перевірка нижче читає підключення й категорії. Для відкриття продажів потрібні також продавець, LiqPay, пошта та правила. Публікація не виконується автоматично.</span>
             </div>
             <div className="grid md:grid-cols-2 gap-4">
               <Field label="Базова адреса API"><Input data-testid="input-servio-url" value={form.servioBaseUrl} onChange={(e) => set("servioBaseUrl", e.target.value)} placeholder="https://..." /></Field>
               <Field label="ID готелю в Servio"><Input data-testid="input-servio-hotel" value={form.servioHotelId} onChange={(e) => set("servioHotelId", e.target.value)} /></Field>
+              <Field label="Продавець бронювань Servio">
+                <select data-testid="select-servio-seller" value={form.servioSellerPropertyId ?? ""}
+                  onChange={(e) => set("servioSellerPropertyId", e.target.value ? Number(e.target.value) : null)}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                  <option value="">Оберіть об’єкт із налаштованою юридичною особою</option>
+                  {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground mt-1">Лише прив’язка продавця й LiqPay. Наявність і ціни беруться з Servio, не з локального календаря.</p>
+              </Field>
               <Field label="Токен доступу" hint={norm.hasServioToken ? "Токен збережено. Порожнє поле залишає його без змін." : "Токен не збережено."}>
                 <Input data-testid="input-servio-token" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} disabled={clearToken} placeholder={norm.hasServioToken ? "••••••••" : ""} />
               </Field>
@@ -346,6 +355,9 @@ export default function BookingStudioPage() {
             <Section n="04" title="Правові тексти" hint="Гість погоджується з обома перед відправкою заявки">
               <div className="space-y-4">
                 <Field label="Умови бронювання та скасування"><Textarea data-testid="input-terms" rows={5} value={form.terms} onChange={(e) => set("terms", e.target.value)} /></Field>
+                <Field label="Повідомлення про оплату протягом 10 хвилин" hint="Текст показується в умовах тарифу та перед оплатою. Порожнє поле — стандартне повідомлення. Серверний строк оплати залишається 10 хвилин незалежно від формулювання.">
+                  <Textarea data-testid="input-payment-window-text" rows={3} maxLength={2000} value={form.paymentWindowText ?? ""} onChange={(e) => set("paymentWindowText", e.target.value)} />
+                </Field>
                 <Field label="Політика конфіденційності"><Textarea data-testid="input-privacy" rows={5} value={form.privacy} onChange={(e) => set("privacy", e.target.value)} /></Field>
               </div>
             </Section>

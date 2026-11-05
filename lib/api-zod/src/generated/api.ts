@@ -77,6 +77,10 @@ export const saveBookingEngineSettingsBodyServioBaseUrlMax = 1000;
 
 export const saveBookingEngineSettingsBodyServioHotelIdMax = 50;
 
+export const saveBookingEngineSettingsBodyServioSellerPropertyIdMax = 2147483647;
+
+export const saveBookingEngineSettingsBodyPaymentWindowTextMax = 2000;
+
 export const saveBookingEngineSettingsBodyServioTokenMax = 2000;
 
 export const saveBookingEngineSettingsBodyUnitMediaPhotosItemMax = 1000;
@@ -86,6 +90,24 @@ export const saveBookingEngineSettingsBodyUnitMediaPhotosMax = 30;
 export const saveBookingEngineSettingsBodyUnitMediaVideoUrlMax = 1000;
 
 export const saveBookingEngineSettingsBodyUnitMediaDescriptionMax = 10000;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsDisplayNameMax = 150;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsOccupancyTextMax = 200;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsBedsTextMax = 300;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsSofaTextMax = 200;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsAreaTextMax = 100;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsAmenitiesItemMax = 150;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsAmenitiesMax = 30;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsTariffTitleMax = 150;
+
+export const saveBookingEngineSettingsBodyUnitMediaDetailsTariffDescriptionMax = 5000;
 
 export const SaveBookingEngineSettingsBody = zod.object({
   provider: zod.enum(["maison", "servio"]),
@@ -140,6 +162,15 @@ export const SaveBookingEngineSettingsBody = zod.object({
   servioHotelId: zod
     .string()
     .max(saveBookingEngineSettingsBodyServioHotelIdMax),
+  servioSellerPropertyId: zod
+    .number()
+    .min(1)
+    .max(saveBookingEngineSettingsBodyServioSellerPropertyIdMax)
+    .nullish(),
+  paymentWindowText: zod
+    .string()
+    .max(saveBookingEngineSettingsBodyPaymentWindowTextMax)
+    .optional(),
   servioToken: zod
     .string()
     .max(saveBookingEngineSettingsBodyServioTokenMax)
@@ -162,6 +193,52 @@ export const SaveBookingEngineSettingsBody = zod.object({
         description: zod
           .string()
           .max(saveBookingEngineSettingsBodyUnitMediaDescriptionMax),
+        details: zod
+          .object({
+            displayName: zod
+              .string()
+              .max(saveBookingEngineSettingsBodyUnitMediaDetailsDisplayNameMax)
+              .optional(),
+            occupancyText: zod
+              .string()
+              .max(
+                saveBookingEngineSettingsBodyUnitMediaDetailsOccupancyTextMax,
+              )
+              .optional(),
+            bedsText: zod
+              .string()
+              .max(saveBookingEngineSettingsBodyUnitMediaDetailsBedsTextMax)
+              .optional(),
+            sofaText: zod
+              .string()
+              .max(saveBookingEngineSettingsBodyUnitMediaDetailsSofaTextMax)
+              .optional(),
+            areaText: zod
+              .string()
+              .max(saveBookingEngineSettingsBodyUnitMediaDetailsAreaTextMax)
+              .optional(),
+            amenities: zod
+              .array(
+                zod
+                  .string()
+                  .max(
+                    saveBookingEngineSettingsBodyUnitMediaDetailsAmenitiesItemMax,
+                  ),
+              )
+              .max(saveBookingEngineSettingsBodyUnitMediaDetailsAmenitiesMax)
+              .optional(),
+            tariffTitle: zod
+              .string()
+              .max(saveBookingEngineSettingsBodyUnitMediaDetailsTariffTitleMax)
+              .optional(),
+            tariffDescription: zod
+              .string()
+              .max(
+                saveBookingEngineSettingsBodyUnitMediaDetailsTariffDescriptionMax,
+              )
+              .optional(),
+          })
+          .optional(),
       }),
     )
     .optional(),
@@ -584,11 +661,21 @@ export const ListBookingServioReservationsResponseItem = zod.object({
     .describe(
       "Whether an administrator has issued private guest access; never includes the bearer token",
     ),
+  notifications: zod
+    .record(zod.string(), zod.enum(["pending", "sending", "sent", "failed"]))
+    .optional(),
+  paymentDeadline: zod
+    .string()
+    .nullish()
+    .describe(
+      "Immutable server deadline for payment; null for older controlled reservations",
+    ),
   state: zod.enum([
     "creating",
     "billing",
     "bill_ready",
     "awaiting_payment",
+    "expiring",
     "confirming",
     "confirmed",
     "review",
@@ -652,6 +739,8 @@ export const createBookingServioReservationBodyTwoPhoneMin = 7;
 export const createBookingServioReservationBodyTwoPhoneMax = 30;
 
 export const createBookingServioReservationBodyTwoEmailMax = 200;
+
+export const createBookingServioReservationBodyTwoSpecialRequestsMax = 1000;
 
 export const createBookingServioReservationBodyTwoExpectedTotalExclusiveMin = 0;
 export const createBookingServioReservationBodyTwoExpectedTotalMax = 10000000;
@@ -729,6 +818,10 @@ export const CreateBookingServioReservationBody = zod
         .string()
         .email()
         .max(createBookingServioReservationBodyTwoEmailMax),
+      specialRequests: zod
+        .string()
+        .max(createBookingServioReservationBodyTwoSpecialRequestsMax)
+        .optional(),
       expectedTotal: zod
         .number()
         .gt(createBookingServioReservationBodyTwoExpectedTotalExclusiveMin)
@@ -749,11 +842,21 @@ export const CreateBookingServioReservationResponse = zod.object({
     .describe(
       "Whether an administrator has issued private guest access; never includes the bearer token",
     ),
+  notifications: zod
+    .record(zod.string(), zod.enum(["pending", "sending", "sent", "failed"]))
+    .optional(),
+  paymentDeadline: zod
+    .string()
+    .nullish()
+    .describe(
+      "Immutable server deadline for payment; null for older controlled reservations",
+    ),
   state: zod.enum([
     "creating",
     "billing",
     "bill_ready",
     "awaiting_payment",
+    "expiring",
     "confirming",
     "confirmed",
     "review",
@@ -802,11 +905,21 @@ export const CheckoutBookingServioReservationResponse = zod.object({
       .describe(
         "Whether an administrator has issued private guest access; never includes the bearer token",
       ),
+    notifications: zod
+      .record(zod.string(), zod.enum(["pending", "sending", "sent", "failed"]))
+      .optional(),
+    paymentDeadline: zod
+      .string()
+      .nullish()
+      .describe(
+        "Immutable server deadline for payment; null for older controlled reservations",
+      ),
     state: zod.enum([
       "creating",
       "billing",
       "bill_ready",
       "awaiting_payment",
+      "expiring",
       "confirming",
       "confirmed",
       "review",
@@ -846,11 +959,21 @@ export const CancelBookingServioReservationResponse = zod.object({
     .describe(
       "Whether an administrator has issued private guest access; never includes the bearer token",
     ),
+  notifications: zod
+    .record(zod.string(), zod.enum(["pending", "sending", "sent", "failed"]))
+    .optional(),
+  paymentDeadline: zod
+    .string()
+    .nullish()
+    .describe(
+      "Immutable server deadline for payment; null for older controlled reservations",
+    ),
   state: zod.enum([
     "creating",
     "billing",
     "bill_ready",
     "awaiting_payment",
+    "expiring",
     "confirming",
     "confirmed",
     "review",
@@ -880,6 +1003,24 @@ export const getBookingServioCategoryMediaResponseCategoriesItemMediaPhotosMax =
 export const getBookingServioCategoryMediaResponseCategoriesItemMediaVideoUrlMax = 1000;
 
 export const getBookingServioCategoryMediaResponseCategoriesItemMediaDescriptionMax = 10000;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsDisplayNameMax = 150;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsOccupancyTextMax = 200;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsBedsTextMax = 300;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsSofaTextMax = 200;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsAreaTextMax = 100;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsAmenitiesItemMax = 150;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsAmenitiesMax = 30;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsTariffTitleMax = 150;
+
+export const getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsTariffDescriptionMax = 5000;
 
 export const GetBookingServioCategoryMediaResponse = zod.object({
   ready: zod.boolean(),
@@ -912,6 +1053,64 @@ export const GetBookingServioCategoryMediaResponse = zod.object({
           .max(
             getBookingServioCategoryMediaResponseCategoriesItemMediaDescriptionMax,
           ),
+        details: zod
+          .object({
+            displayName: zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsDisplayNameMax,
+              )
+              .optional(),
+            occupancyText: zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsOccupancyTextMax,
+              )
+              .optional(),
+            bedsText: zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsBedsTextMax,
+              )
+              .optional(),
+            sofaText: zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsSofaTextMax,
+              )
+              .optional(),
+            areaText: zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsAreaTextMax,
+              )
+              .optional(),
+            amenities: zod
+              .array(
+                zod
+                  .string()
+                  .max(
+                    getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsAmenitiesItemMax,
+                  ),
+              )
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsAmenitiesMax,
+              )
+              .optional(),
+            tariffTitle: zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsTariffTitleMax,
+              )
+              .optional(),
+            tariffDescription: zod
+              .string()
+              .max(
+                getBookingServioCategoryMediaResponseCategoriesItemMediaDetailsTariffDescriptionMax,
+              )
+              .optional(),
+          })
+          .optional(),
       }),
       revision: zod.number(),
     }),
@@ -930,6 +1129,24 @@ export const saveBookingServioCategoryMediaBodyMediaPhotosMax = 30;
 export const saveBookingServioCategoryMediaBodyMediaVideoUrlMax = 1000;
 
 export const saveBookingServioCategoryMediaBodyMediaDescriptionMax = 10000;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsDisplayNameMax = 150;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsOccupancyTextMax = 200;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsBedsTextMax = 300;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsSofaTextMax = 200;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsAreaTextMax = 100;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsAmenitiesItemMax = 150;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsAmenitiesMax = 30;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsTariffTitleMax = 150;
+
+export const saveBookingServioCategoryMediaBodyMediaDetailsTariffDescriptionMax = 5000;
 
 export const SaveBookingServioCategoryMediaBody = zod.object({
   sourceId: zod
@@ -953,6 +1170,50 @@ export const SaveBookingServioCategoryMediaBody = zod.object({
     description: zod
       .string()
       .max(saveBookingServioCategoryMediaBodyMediaDescriptionMax),
+    details: zod
+      .object({
+        displayName: zod
+          .string()
+          .max(saveBookingServioCategoryMediaBodyMediaDetailsDisplayNameMax)
+          .optional(),
+        occupancyText: zod
+          .string()
+          .max(saveBookingServioCategoryMediaBodyMediaDetailsOccupancyTextMax)
+          .optional(),
+        bedsText: zod
+          .string()
+          .max(saveBookingServioCategoryMediaBodyMediaDetailsBedsTextMax)
+          .optional(),
+        sofaText: zod
+          .string()
+          .max(saveBookingServioCategoryMediaBodyMediaDetailsSofaTextMax)
+          .optional(),
+        areaText: zod
+          .string()
+          .max(saveBookingServioCategoryMediaBodyMediaDetailsAreaTextMax)
+          .optional(),
+        amenities: zod
+          .array(
+            zod
+              .string()
+              .max(
+                saveBookingServioCategoryMediaBodyMediaDetailsAmenitiesItemMax,
+              ),
+          )
+          .max(saveBookingServioCategoryMediaBodyMediaDetailsAmenitiesMax)
+          .optional(),
+        tariffTitle: zod
+          .string()
+          .max(saveBookingServioCategoryMediaBodyMediaDetailsTariffTitleMax)
+          .optional(),
+        tariffDescription: zod
+          .string()
+          .max(
+            saveBookingServioCategoryMediaBodyMediaDetailsTariffDescriptionMax,
+          )
+          .optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -963,6 +1224,24 @@ export const saveBookingServioCategoryMediaResponseMediaPhotosMax = 30;
 export const saveBookingServioCategoryMediaResponseMediaVideoUrlMax = 1000;
 
 export const saveBookingServioCategoryMediaResponseMediaDescriptionMax = 10000;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsDisplayNameMax = 150;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsOccupancyTextMax = 200;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsBedsTextMax = 300;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsSofaTextMax = 200;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsAreaTextMax = 100;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsAmenitiesItemMax = 150;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsAmenitiesMax = 30;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsTariffTitleMax = 150;
+
+export const saveBookingServioCategoryMediaResponseMediaDetailsTariffDescriptionMax = 5000;
 
 export const SaveBookingServioCategoryMediaResponse = zod.object({
   hotelId: zod.number(),
@@ -982,6 +1261,52 @@ export const SaveBookingServioCategoryMediaResponse = zod.object({
     description: zod
       .string()
       .max(saveBookingServioCategoryMediaResponseMediaDescriptionMax),
+    details: zod
+      .object({
+        displayName: zod
+          .string()
+          .max(saveBookingServioCategoryMediaResponseMediaDetailsDisplayNameMax)
+          .optional(),
+        occupancyText: zod
+          .string()
+          .max(
+            saveBookingServioCategoryMediaResponseMediaDetailsOccupancyTextMax,
+          )
+          .optional(),
+        bedsText: zod
+          .string()
+          .max(saveBookingServioCategoryMediaResponseMediaDetailsBedsTextMax)
+          .optional(),
+        sofaText: zod
+          .string()
+          .max(saveBookingServioCategoryMediaResponseMediaDetailsSofaTextMax)
+          .optional(),
+        areaText: zod
+          .string()
+          .max(saveBookingServioCategoryMediaResponseMediaDetailsAreaTextMax)
+          .optional(),
+        amenities: zod
+          .array(
+            zod
+              .string()
+              .max(
+                saveBookingServioCategoryMediaResponseMediaDetailsAmenitiesItemMax,
+              ),
+          )
+          .max(saveBookingServioCategoryMediaResponseMediaDetailsAmenitiesMax)
+          .optional(),
+        tariffTitle: zod
+          .string()
+          .max(saveBookingServioCategoryMediaResponseMediaDetailsTariffTitleMax)
+          .optional(),
+        tariffDescription: zod
+          .string()
+          .max(
+            saveBookingServioCategoryMediaResponseMediaDetailsTariffDescriptionMax,
+          )
+          .optional(),
+      })
+      .optional(),
   }),
   revision: zod.number(),
 });
@@ -1019,11 +1344,21 @@ export const GetBookingServioGuestReservationResponse = zod.object({
       .describe(
         "Whether an administrator has issued private guest access; never includes the bearer token",
       ),
+    notifications: zod
+      .record(zod.string(), zod.enum(["pending", "sending", "sent", "failed"]))
+      .optional(),
+    paymentDeadline: zod
+      .string()
+      .nullish()
+      .describe(
+        "Immutable server deadline for payment; null for older controlled reservations",
+      ),
     state: zod.enum([
       "creating",
       "billing",
       "bill_ready",
       "awaiting_payment",
+      "expiring",
       "confirming",
       "confirmed",
       "review",
@@ -1052,6 +1387,7 @@ export const GetBookingServioGuestReservationResponse = zod.object({
   terms: zod.string(),
   privacy: zod.string(),
   accessExpiresAt: zod.string(),
+  paymentWindowText: zod.string().optional(),
 });
 
 export const CheckoutBookingServioGuestReservationParams = zod.object({
@@ -1091,11 +1427,21 @@ export const CheckoutBookingServioGuestReservationResponse = zod.object({
       .describe(
         "Whether an administrator has issued private guest access; never includes the bearer token",
       ),
+    notifications: zod
+      .record(zod.string(), zod.enum(["pending", "sending", "sent", "failed"]))
+      .optional(),
+    paymentDeadline: zod
+      .string()
+      .nullish()
+      .describe(
+        "Immutable server deadline for payment; null for older controlled reservations",
+      ),
     state: zod.enum([
       "creating",
       "billing",
       "bill_ready",
       "awaiting_payment",
+      "expiring",
       "confirming",
       "confirmed",
       "review",
@@ -1120,6 +1466,278 @@ export const CheckoutBookingServioGuestReservationResponse = zod.object({
   url: zod.string(),
   data: zod.string(),
   signature: zod.string(),
+});
+
+export const SearchPublicServioBookingParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const searchPublicServioBookingBodyCheckInRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const searchPublicServioBookingBodyCheckOutRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const searchPublicServioBookingBodyAdultsMax = 20;
+
+export const searchPublicServioBookingBodyChildAgesItemMin = 0;
+export const searchPublicServioBookingBodyChildAgesItemMax = 17;
+
+export const searchPublicServioBookingBodyChildAgesMax = 10;
+
+export const SearchPublicServioBookingBody = zod.object({
+  checkIn: zod.string().regex(searchPublicServioBookingBodyCheckInRegExp),
+  checkOut: zod.string().regex(searchPublicServioBookingBodyCheckOutRegExp),
+  adults: zod.number().min(1).max(searchPublicServioBookingBodyAdultsMax),
+  childAges: zod
+    .array(
+      zod
+        .number()
+        .min(searchPublicServioBookingBodyChildAgesItemMin)
+        .max(searchPublicServioBookingBodyChildAgesItemMax),
+    )
+    .max(searchPublicServioBookingBodyChildAgesMax),
+});
+
+export const searchPublicServioBookingResponseQueryCheckInRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const searchPublicServioBookingResponseQueryCheckOutRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const searchPublicServioBookingResponseQueryAdultsMax = 20;
+
+export const searchPublicServioBookingResponseQueryChildAgesItemMin = 0;
+export const searchPublicServioBookingResponseQueryChildAgesItemMax = 17;
+
+export const searchPublicServioBookingResponseQueryChildAgesMax = 10;
+
+export const searchPublicServioBookingResponseQueryCompanyIdMin = 0;
+export const searchPublicServioBookingResponseQueryCompanyIdMax = 2147483647;
+
+export const searchPublicServioBookingResponseQueryCompanyCodeIdMin = 0;
+export const searchPublicServioBookingResponseQueryCompanyCodeIdMax = 2147483647;
+
+export const searchPublicServioBookingResponseQueryConditionIdMin = 0;
+export const searchPublicServioBookingResponseQueryConditionIdMax = 2147483647;
+
+export const SearchPublicServioBookingResponse = zod.object({
+  status: zod.enum(["complete", "partial", "failed"]),
+  code: zod.string(),
+  message: zod.string(),
+  checkedAt: zod.string(),
+  query: zod.object({
+    checkIn: zod
+      .string()
+      .regex(searchPublicServioBookingResponseQueryCheckInRegExp),
+    checkOut: zod
+      .string()
+      .regex(searchPublicServioBookingResponseQueryCheckOutRegExp),
+    adults: zod
+      .number()
+      .min(1)
+      .max(searchPublicServioBookingResponseQueryAdultsMax),
+    childAges: zod
+      .array(
+        zod
+          .number()
+          .min(searchPublicServioBookingResponseQueryChildAgesItemMin)
+          .max(searchPublicServioBookingResponseQueryChildAgesItemMax),
+      )
+      .max(searchPublicServioBookingResponseQueryChildAgesMax),
+    useExtraBed: zod.boolean(),
+    companyId: zod
+      .number()
+      .min(searchPublicServioBookingResponseQueryCompanyIdMin)
+      .max(searchPublicServioBookingResponseQueryCompanyIdMax),
+    companyCodeId: zod
+      .number()
+      .min(searchPublicServioBookingResponseQueryCompanyCodeIdMin)
+      .max(searchPublicServioBookingResponseQueryCompanyCodeIdMax),
+    conditionId: zod
+      .number()
+      .min(searchPublicServioBookingResponseQueryConditionIdMin)
+      .max(searchPublicServioBookingResponseQueryConditionIdMax),
+  }),
+  hotelId: zod.number(),
+  currency: zod.string().nullable(),
+  categories: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      freeRooms: zod.number(),
+      mainPlaces: zod.number(),
+      nearestDate: zod.string().nullable(),
+      rates: zod.array(
+        zod.object({
+          priceListId: zod.number(),
+          name: zod.string(),
+          conditionId: zod.number(),
+          nonRefundable: zod.boolean(),
+          specialRate: zod.boolean(),
+          total: zod.number(),
+          charges: zod.array(
+            zod.object({
+              serviceId: zod.number(),
+              serviceName: zod.string(),
+              date: zod.string(),
+              amount: zod.number(),
+            }),
+          ),
+          restrictions: zod.array(
+            zod.object({
+              code: zod.string(),
+              message: zod.string(),
+              blocksSale: zod.boolean(),
+            }),
+          ),
+          saleAllowed: zod.boolean().nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+
+export const CreatePublicServioBookingParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const createPublicServioBookingBodyOneCheckInRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const createPublicServioBookingBodyOneCheckOutRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+export const createPublicServioBookingBodyOneAdultsMax = 20;
+
+export const createPublicServioBookingBodyOneChildAgesItemMin = 0;
+export const createPublicServioBookingBodyOneChildAgesItemMax = 17;
+
+export const createPublicServioBookingBodyOneChildAgesMax = 10;
+
+export const createPublicServioBookingBodyTwoCategoryIdMax = 2147483647;
+
+export const createPublicServioBookingBodyTwoPriceListIdMax = 2147483647;
+
+export const createPublicServioBookingBodyTwoRateConditionIdMin = 0;
+export const createPublicServioBookingBodyTwoRateConditionIdMax = 2147483647;
+
+export const createPublicServioBookingBodyTwoFirstNameMax = 50;
+
+export const createPublicServioBookingBodyTwoLastNameMax = 50;
+
+export const createPublicServioBookingBodyTwoPhoneRegExp = new RegExp(
+  "^[+0-9 ()-]{7,30}$",
+);
+export const createPublicServioBookingBodyTwoEmailMax = 200;
+
+export const createPublicServioBookingBodyTwoSpecialRequestsMax = 1000;
+
+export const createPublicServioBookingBodyTwoExpectedTotalExclusiveMin = 0;
+export const createPublicServioBookingBodyTwoExpectedTotalMax = 10000000;
+
+export const CreatePublicServioBookingBody = zod
+  .object({
+    checkIn: zod.string().regex(createPublicServioBookingBodyOneCheckInRegExp),
+    checkOut: zod
+      .string()
+      .regex(createPublicServioBookingBodyOneCheckOutRegExp),
+    adults: zod.number().min(1).max(createPublicServioBookingBodyOneAdultsMax),
+    childAges: zod
+      .array(
+        zod
+          .number()
+          .min(createPublicServioBookingBodyOneChildAgesItemMin)
+          .max(createPublicServioBookingBodyOneChildAgesItemMax),
+      )
+      .max(createPublicServioBookingBodyOneChildAgesMax),
+  })
+  .and(
+    zod.object({
+      requestId: zod.string().uuid(),
+      categoryId: zod
+        .number()
+        .min(1)
+        .max(createPublicServioBookingBodyTwoCategoryIdMax),
+      priceListId: zod
+        .number()
+        .min(1)
+        .max(createPublicServioBookingBodyTwoPriceListIdMax),
+      rateConditionId: zod
+        .number()
+        .min(createPublicServioBookingBodyTwoRateConditionIdMin)
+        .max(createPublicServioBookingBodyTwoRateConditionIdMax),
+      firstName: zod
+        .string()
+        .min(1)
+        .max(createPublicServioBookingBodyTwoFirstNameMax),
+      lastName: zod
+        .string()
+        .min(1)
+        .max(createPublicServioBookingBodyTwoLastNameMax),
+      phone: zod.string().regex(createPublicServioBookingBodyTwoPhoneRegExp),
+      email: zod.string().email().max(createPublicServioBookingBodyTwoEmailMax),
+      specialRequests: zod
+        .string()
+        .max(createPublicServioBookingBodyTwoSpecialRequestsMax)
+        .optional(),
+      expectedTotal: zod
+        .number()
+        .gt(createPublicServioBookingBodyTwoExpectedTotalExclusiveMin)
+        .max(createPublicServioBookingBodyTwoExpectedTotalMax),
+      agreeTerms: zod.boolean(),
+      agreeNonRefundable: zod.boolean(),
+      tariffPolicyVersion: zod.string(),
+    }),
+  );
+
+export const CreatePublicServioBookingResponse = zod.object({
+  reservation: zod.object({
+    id: zod.string(),
+    requestId: zod.string(),
+    hasGuestAccess: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether an administrator has issued private guest access; never includes the bearer token",
+      ),
+    notifications: zod
+      .record(zod.string(), zod.enum(["pending", "sending", "sent", "failed"]))
+      .optional(),
+    paymentDeadline: zod
+      .string()
+      .nullish()
+      .describe(
+        "Immutable server deadline for payment; null for older controlled reservations",
+      ),
+    state: zod.enum([
+      "creating",
+      "billing",
+      "bill_ready",
+      "awaiting_payment",
+      "expiring",
+      "confirming",
+      "confirmed",
+      "review",
+      "failed",
+      "cancelling",
+      "cancelled",
+    ]),
+    message: zod.string(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    categoryName: zod.string(),
+    rateName: zod.string(),
+    checkIn: zod.string(),
+    checkOut: zod.string(),
+    total: zod.number().nullable(),
+    currency: zod.string(),
+    account: zod.string().nullable(),
+    mode: zod.enum(["test", "live"]),
+    policyVersion: zod.string(),
+    acknowledgementText: zod.string(),
+  }),
+  url: zod.string().nullable(),
 });
 
 export const GetPublicBookingEngineParams = zod.object({

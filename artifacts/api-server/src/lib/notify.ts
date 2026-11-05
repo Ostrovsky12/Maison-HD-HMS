@@ -120,12 +120,16 @@ export interface SendEmailOpts {
   subject: string;
   html: string;
   text?: string;
+  expectedFrom?: string;
+  messageId?: string;
 }
 
 export async function sendEmail(orgId: number, opts: SendEmailOpts): Promise<{ ok: boolean; error?: string }> {
   const cfg = await getEmailConfig(orgId);
   if (!cfg?.enabled) return { ok: false, error: "Email не налаштовано або вимкнено" };
   if (!cfg.host || !cfg.user || !cfg.pass) return { ok: false, error: "Неповна конфігурація SMTP" };
+  if (opts.expectedFrom && (cfg.from || cfg.user).trim().toLowerCase() !== opts.expectedFrom.toLowerCase())
+    return { ok: false, error: "Відправник SMTP змінився; перевірте пошту бронювання" };
 
   try {
     const transporter = nodemailer.createTransport({
@@ -133,6 +137,8 @@ export async function sendEmail(orgId: number, opts: SendEmailOpts): Promise<{ o
       port: cfg.port || 587,
       secure: cfg.secure ?? false,
       auth: { user: cfg.user, pass: cfg.pass },
+      connectionTimeout: 10_000,
+      socketTimeout: 20_000,
       tls: { rejectUnauthorized: false },
     });
 
@@ -142,6 +148,7 @@ export async function sendEmail(orgId: number, opts: SendEmailOpts): Promise<{ o
       subject: opts.subject,
       html: opts.html,
       text: opts.text,
+      messageId: opts.messageId,
     });
 
     return { ok: true };

@@ -141,6 +141,9 @@ import type {
   PreviewPosterMenuImport200,
   PricingPreview,
   Property,
+  PublicServioReservationInput,
+  PublicServioReservationResult,
+  PublicServioSearchInput,
   Rate,
   RunNightAuditBody,
   SearchGuests200,
@@ -1490,6 +1493,176 @@ export const useCheckoutBookingServioGuestReservation = <
   return useMutation(
     getCheckoutBookingServioGuestReservationMutationOptions(options),
   );
+};
+
+export const getSearchPublicServioBookingUrl = (slug: string) => {
+  return `/api/public/booking-engine/${slug}/servio/search`;
+};
+
+export const searchPublicServioBooking = async (
+  slug: string,
+  publicServioSearchInput: PublicServioSearchInput,
+  options?: RequestInit,
+): Promise<BookingServioSearchResult> => {
+  return customFetch<BookingServioSearchResult>(
+    getSearchPublicServioBookingUrl(slug),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(publicServioSearchInput),
+    },
+  );
+};
+
+export const getSearchPublicServioBookingMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof searchPublicServioBooking>>,
+    TError,
+    { slug: string; data: BodyType<PublicServioSearchInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof searchPublicServioBooking>>,
+  TError,
+  { slug: string; data: BodyType<PublicServioSearchInput> },
+  TContext
+> => {
+  const mutationKey = ["searchPublicServioBooking"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof searchPublicServioBooking>>,
+    { slug: string; data: BodyType<PublicServioSearchInput> }
+  > = (props) => {
+    const { slug, data } = props ?? {};
+
+    return searchPublicServioBooking(slug, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SearchPublicServioBookingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof searchPublicServioBooking>>
+>;
+export type SearchPublicServioBookingMutationBody =
+  BodyType<PublicServioSearchInput>;
+export type SearchPublicServioBookingMutationError = ErrorType<unknown>;
+
+export const useSearchPublicServioBooking = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof searchPublicServioBooking>>,
+    TError,
+    { slug: string; data: BodyType<PublicServioSearchInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof searchPublicServioBooking>>,
+  TError,
+  { slug: string; data: BodyType<PublicServioSearchInput> },
+  TContext
+> => {
+  return useMutation(getSearchPublicServioBookingMutationOptions(options));
+};
+
+export const getCreatePublicServioBookingUrl = (slug: string) => {
+  return `/api/public/booking-engine/${slug}/servio/reservations`;
+};
+
+export const createPublicServioBooking = async (
+  slug: string,
+  publicServioReservationInput: PublicServioReservationInput,
+  options?: RequestInit,
+): Promise<PublicServioReservationResult> => {
+  return customFetch<PublicServioReservationResult>(
+    getCreatePublicServioBookingUrl(slug),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(publicServioReservationInput),
+    },
+  );
+};
+
+export const getCreatePublicServioBookingMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPublicServioBooking>>,
+    TError,
+    { slug: string; data: BodyType<PublicServioReservationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createPublicServioBooking>>,
+  TError,
+  { slug: string; data: BodyType<PublicServioReservationInput> },
+  TContext
+> => {
+  const mutationKey = ["createPublicServioBooking"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createPublicServioBooking>>,
+    { slug: string; data: BodyType<PublicServioReservationInput> }
+  > = (props) => {
+    const { slug, data } = props ?? {};
+
+    return createPublicServioBooking(slug, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreatePublicServioBookingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createPublicServioBooking>>
+>;
+export type CreatePublicServioBookingMutationBody =
+  BodyType<PublicServioReservationInput>;
+export type CreatePublicServioBookingMutationError = ErrorType<unknown>;
+
+export const useCreatePublicServioBooking = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPublicServioBooking>>,
+    TError,
+    { slug: string; data: BodyType<PublicServioReservationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createPublicServioBooking>>,
+  TError,
+  { slug: string; data: BodyType<PublicServioReservationInput> },
+  TContext
+> => {
+  return useMutation(getCreatePublicServioBookingMutationOptions(options));
 };
 
 export const getGetPublicBookingEngineUrl = (

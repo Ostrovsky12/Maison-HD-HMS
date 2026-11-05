@@ -10,6 +10,7 @@ export interface LiqPayParams {
   serverUrl?: string;
   publicKey?: string;
   privateKey?: string;
+  expiredDate?: string;
 }
 
 function getKeys(overridePublic?: string, overridePrivate?: string) {
@@ -30,6 +31,7 @@ export function generateLiqPayForm(params: LiqPayParams): { data: string; signat
     order_id: params.orderId,
     result_url: params.resultUrl || "",
     server_url: params.serverUrl || "",
+    ...(params.expiredDate ? { expired_date: params.expiredDate } : {}),
   };
 
   const dataBase64 = Buffer.from(JSON.stringify(payload)).toString("base64");

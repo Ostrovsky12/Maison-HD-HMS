@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "wouter";
 import { useGetPublicBookingEngine } from "@workspace/api-client-react";
 import { UnitCard, type PublicUnit } from "@/components/booking/unit-card";
+import { ServioCategoryCard, type ServioCharge } from "@/components/booking/servio-category-card";
+import { CANONICAL_PAYMENT_NOTICE, PAYMENT_WINDOW_LABEL, supplementaryText } from "@/lib/payment-window";
+import type { BookingRoomDetails } from "@workspace/api-client-react";
 import { SearchBar, MAX_PARTY } from "@/components/booking/search-bar";
 import { NonRefundableConsent } from "@/components/booking/nonrefundable-consent";
 import { PaymentStatusView } from "@/components/booking/payment-status-view";
@@ -18,7 +21,10 @@ import {
   AlertTriangle, ArrowLeft, BedDouble, ChevronRight, Pencil, CalendarDays, Clock, CreditCard, Home, Loader2, Lock, Mail, MapPin, Phone, RefreshCw, Users,
 } from "lucide-react";
 
-type Unit = PublicUnit;
+type Unit = PublicUnit & {
+  servio?: { categoryId: number; priceListId: number; rateConditionId: number };
+  servioGroup?: { key: string; categoryName: string; rateName: string; charges: ServioCharge[]; details?: BookingRoomDetails };
+};
 
 const BASE = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
 const API = BASE.replace("/maison-hd", "") + "/api/public";
@@ -75,8 +81,9 @@ export default function BookingPublicPage() {
   const name = s(cfg.displayName) || orgName || "Бронювання";
   const ap: BookingAppearanceValue | null = cfg.appearance && typeof cfg.appearance === "object" && (cfg.appearance as Record<string, unknown>).preset === "dogoda" ? normalizeAppearance(cfg.appearance) : null;
   const previewLocked = data?.preview === true && data?.salesEnabled === false;
+  const isServio = cfg.provider === "servio";
   const accent = ap ? ap.buttonColor : /^#[0-9a-fA-F]{6}$/.test(s(cfg.accentColor)) ? s(cfg.accentColor) : "#1f4e5f";
-  const properties: { id: number; name: string }[] = Array.isArray(data?.properties) ? data!.properties : [];
+  const properties: { id: number; name: string }[] = !isServio && Array.isArray(data?.properties) ? data!.properties : [];
   const policy = useMemo(() => parseTariffPolicy(data?.tariffPolicy), [data]);
 
   const today = useMemo(() => new Date(), []);
@@ -152,10 +159,41 @@ export default function BookingPublicPage() {
     try {
       const p = new URLSearchParams({ slug, engine: "1", checkIn: ci, checkOut: co, guests: String(totalGuests) });
       if (propertyId) p.set("propertyId", propertyId);
-      const r = await fetch(`${API}/availability?${p}`);
+      const r = isServio
+        ? await fetch(`${API}/booking-engine/${encodeURIComponent(slug)}/servio/search`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checkIn: ci, checkOut: co, adults: guests, childAges: kids }),
+        })
+        : await fetch(`${API}/availability?${p}`);
       if (seq !== searchSeq.current) return;
       if (!r.ok) throw new Error((await readError(r)).msg);
       const j = await r.json();
+      if (isServio) {
+        if (j.status === "failed") throw new Error(s(j.message) || "Servio тимчасово недоступний");
+        if (j.status === "partial" && !j.currency) throw new Error(s(j.message) || "Servio не повернув підтверджених цін");
+        const nights = (Date.parse(co) - Date.parse(ci)) / 86400000;
+        const catalog = Array.isArray(data?.accommodationCatalog) ? data.accommodationCatalog : [];
+        let id = 0;
+        const units: Unit[] = (Array.isArray(j.categories) ? j.categories : []).flatMap((c: any) => {
+          const media = catalog.find((item: any) => item.id === `servio:${j.hotelId}:${c.id}`);
+          return (Array.isArray(c.rates) ? c.rates : []).map((rate: any) => ({
+            id: ++id, name: s(c.name), category: s(rate.name), capacity: n(c.mainPlaces), maxCapacity: null,
+            description: s(media?.description), photos: photoList(media?.photos), videoUrl: s(media?.videoUrl),
+            basePrice: 0, totalPrice: n(rate.total), propertyName: name,
+            squareMeters: null, hasBalcony: null, hasView: null,
+            servio: { categoryId: n(c.id), priceListId: n(rate.priceListId), rateConditionId: n(rate.conditionId) },
+            servioGroup: {
+              key: `servio:${j.hotelId}:${c.id}`, categoryName: s(c.name), rateName: s(rate.name),
+              charges: (Array.isArray(rate.charges) ? rate.charges : []).map((x: any) => ({ serviceName: s(x.serviceName), date: s(x.date), amount: n(x.amount) })),
+              details: media?.details && typeof media.details === "object" ? media.details as BookingRoomDetails : undefined,
+            },
+          }));
+        });
+        if (seq !== searchSeq.current) return;
+        setResults({ units, nights, key, checkIn: ci, checkOut: co });
+        if (ap) setStep(2);
+        return;
+      }
       const units: Unit[] = (Array.isArray(j?.units) ? j.units : []).map((u: any) => ({
         id: n(u.id), name: s(u.name), category: s(u.category), capacity: n(u.capacity), description: s(u.description),
         basePrice: n(u.basePrice), totalPrice: n(u.totalPrice), propertyName: s(u.propertyName),
@@ -199,12 +237,14 @@ export default function BookingPublicPage() {
     } catch { setCheckoutErr("Не вдалося розпочати оплату. Бронювання збережено, повторіть оплату."); setRedirecting(false); }
   };
 
-  const contactOk = form.email.trim() !== "" || form.phone.trim() !== "";
+  const contactOk = isServio
+    ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) && /^[+0-9 ()-]{7,30}$/.test(form.phone.trim())
+    : form.email.trim() !== "" || form.phone.trim() !== "";
   const canSubmit = !!chosen && !!policy && !pending && !resultsOutdated && !stale && !!form.firstName.trim() && !!form.lastName.trim() && contactOk && agree && nrAgree && !submitting && !redirecting;
   const missing: string[] = [];
   if (chosen) {
     if (!form.firstName.trim() || !form.lastName.trim()) missing.push("ім'я та прізвище");
-    if (!contactOk) missing.push("email або телефон");
+    if (!contactOk) missing.push(isServio ? "коректні email і телефон" : "email або телефон");
     if (!agree) missing.push("згода з умовами та політикою конфіденційності");
     if (!nrAgree) missing.push("підтвердження неповоротного тарифу");
   }
@@ -224,6 +264,37 @@ export default function BookingPublicPage() {
     const bookingRequestId = getRequestId(key);
     let created: PendingCheckout | null = null;
     try {
+      if (isServio) {
+        if (!chosen.servio) throw new Error("Оновіть пошук Servio перед бронюванням.");
+        const r = await fetch(`${API}/booking-engine/${encodeURIComponent(slug)}/servio/reservations`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...chosen.servio, checkIn, checkOut, adults: guests, childAges: kids,
+            firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(), email: form.email.trim(),
+            specialRequests: form.specialRequests.trim(),
+            expectedTotal: chosen.totalPrice, agreeTerms: true, agreeNonRefundable: true,
+            tariffPolicyVersion: policy.version, requestId: bookingRequestId,
+          }),
+        });
+        if (!r.ok) {
+          const err = await readError(r);
+          if (err.code === "PRICE_CHANGED" || err.code === "SOLD_OUT") {
+            dropRequestId(key); setChosen(null); setNrAgreedKey(null); setStep(2); setStale(err.msg);
+            setResults(x => x ? { ...x, key: "" } : x);
+          } else setSubmitErr(err.msg);
+          return;
+        }
+        const result = await r.json();
+        // Only the final authoritative bill can be paid. Keep the same request
+        // identity on reload or a lost response; never automatically create again.
+        const url = s(result.url);
+        const expected = `/booking/${encodeURIComponent(slug)}/servio/`;
+        if (!url.startsWith(expected) || !/^#[a-z]/.test(url.slice(url.indexOf("#")))) {
+          setSubmitErr("Бронювання обробляється. Не створюйте іншу спробу й не платіть повторно; зверніться до готелю."); return;
+        }
+        window.location.assign(`${BASE}${url}`);
+        return;
+      }
       let r: Response;
       try {
         r = await fetch(`${API}/bookings`, {
@@ -269,7 +340,7 @@ export default function BookingPublicPage() {
     e.preventDefault();
     if (!policy) { setContactErr("Онлайн-оплата зараз недоступна. Зв'яжіться з готелем напряму."); return; }
     if (!form.firstName.trim() || !form.lastName.trim()) { setContactErr("Вкажіть ім'я та прізвище."); return; }
-    if (!contactOk) { setContactErr("Вкажіть email або телефон для зв'язку."); return; }
+    if (!contactOk) { setContactErr(isServio ? "Вкажіть коректні email та телефон: на email надійде підтвердження." : "Вкажіть email або телефон для зв'язку."); return; }
     if (!emailOk) { setContactErr("Перевірте формат email."); return; }
     setContactErr(null); setStep(4);
   };
@@ -439,7 +510,28 @@ export default function BookingPublicPage() {
                   <div className="rounded-3xl border border-dashed border-stone-300 bg-white p-10 text-center text-stone-600" data-testid="text-no-units">
                     На ці дати немає вільних будиночків для {party}. Спробуйте інші дати{phone || email ? " або зв'яжіться з нами" : ""}.
                   </div>
-                ) : results.units.map((u) => (
+                ) : isServio ? (() => {
+                  const groups: { key: string; units: Unit[] }[] = [];
+                  for (const u of results.units) {
+                    const k = u.servioGroup?.key ?? `rate:${u.id}`;
+                    const g = groups.find((x) => x.key === k);
+                    if (g) g.units.push(u); else groups.push({ key: k, units: [u] });
+                  }
+                  return groups.map((g) => {
+                    const f = g.units[0];
+                    return (
+                      <ServioCategoryCard key={g.key} categoryKey={g.key} name={f.name} photos={f.photos} description={f.description} details={f.servioGroup?.details}
+                        capacity={f.capacity} accent={accent} supplementary={supplementaryText(cfg.paymentWindowText)} disabled={!!pending || previewLocked}
+                        selectedId={chosen && g.units.some((u) => u.id === chosen.id) ? chosen.id : null}
+                        rates={g.units.map((u) => ({ id: u.id, rateName: u.servioGroup?.rateName ?? u.category, total: u.totalPrice, charges: u.servioGroup?.charges ?? [] }))}
+                        onSelect={(id) => {
+                          const u = g.units.find((x) => x.id === id); if (!u) return;
+                          if (chosen?.id !== u.id) { setNrAgreedKey(null); setAgree(false); }
+                          setChosen(u); setStale(null); setSubmitErr(null); go(3);
+                        }} />
+                    );
+                  });
+                })() : results.units.map((u) => (
                   <UnitCard key={u.id} unit={u} nights={results.nights} accent={accent} active={chosen?.id === u.id} disabled={!!pending || previewLocked}
                     policyBadge={policy ? "Неповоротний · 100% передоплата" : undefined}
                     onSelect={() => {
@@ -465,7 +557,7 @@ export default function BookingPublicPage() {
                       <input data-testid={`input-${k}`} type={t} autoComplete={ac} value={form[k]} onChange={(e) => { setForm((f) => ({ ...f, [k]: e.target.value })); setContactErr(null); }} className={inputCls} /></label>
                   ))}
                 </div>
-                <p className="text-xs text-stone-500">Потрібен email або телефон, щоб ми могли з вами зв'язатися.</p>
+                <p className="text-xs text-stone-500">{isServio ? "Потрібні email і телефон. Підтвердження бронювання та оплати надійде на email." : "Потрібен email або телефон, щоб ми могли з вами зв'язатися."}</p>
                 <label className="text-xs text-stone-600 space-y-1 block"><span>Побажання</span>
                   <textarea data-testid="input-requests" rows={3} maxLength={1000} value={form.specialRequests} onChange={(e) => setForm((f) => ({ ...f, specialRequests: e.target.value }))}
                     className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-stone-900" /></label>
@@ -491,6 +583,17 @@ export default function BookingPublicPage() {
                   <div><dt className="text-xs text-stone-500">Гості</dt><dd>{party}</dd></div>
                   <div><dt className="text-xs text-stone-500">Гість</dt><dd>{form.firstName.trim()} {form.lastName.trim()}</dd></div>
                   <div><dt className="text-xs text-stone-500">Контакти</dt><dd className="break-all">{[form.email.trim(), form.phone.trim()].filter(Boolean).join(" · ")}</dd></div>
+                  {isServio && chosen.servioGroup && (
+                    <div className="sm:col-span-2 border-t border-stone-200 pt-3 space-y-1.5" data-testid="panel-review-charges">
+                      <dt className="text-xs text-stone-500">Тариф: {chosen.servioGroup.rateName}</dt>
+                      {chosen.servioGroup.charges.map((c, i) => <dd key={i} className="grid grid-cols-[1fr_auto_auto] gap-3"><span>{c.serviceName}</span><span>{fmtDate(c.date.slice(0, 10))}</span><span className="font-mono">{money(c.amount)}</span></dd>)}
+                      <dd className="flex justify-between font-semibold pt-1"><span>Всього</span><span className="font-mono" data-testid="text-review-total">{money(chosen.totalPrice)}</span></dd>
+                      {cfg.provider === "servio" && <>
+                        <dd className="text-xs text-red-700 whitespace-pre-line" data-testid="text-payment-window">{supplementaryText(cfg.paymentWindowText) || CANONICAL_PAYMENT_NOTICE}</dd>
+                        <dd className="text-xs text-stone-600">{PAYMENT_WINDOW_LABEL}</dd>
+                      </>}
+                    </div>
+                  )}
                   {form.specialRequests.trim() && <div className="sm:col-span-2"><dt className="text-xs text-stone-500">Побажання</dt><dd className="whitespace-pre-line">{form.specialRequests.trim()}</dd></div>}
                 </dl>
                 <fieldset className="space-y-2">

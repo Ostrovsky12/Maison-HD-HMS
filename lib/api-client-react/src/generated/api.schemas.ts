@@ -145,6 +145,127 @@ export interface LocalPublicBookingInput {
   tariffPolicyVersion: string;
 }
 
+export interface PublicServioSearchInput {
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  checkIn: string;
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  checkOut: string;
+  /**
+   * @minimum 1
+   * @maximum 20
+   */
+  adults: number;
+  /** @maxItems 10 */
+  childAges: number[];
+}
+
+export type PublicServioReservationInput = PublicServioSearchInput & {
+  requestId: string;
+  /**
+   * @minimum 1
+   * @maximum 2147483647
+   */
+  categoryId: number;
+  /**
+   * @minimum 1
+   * @maximum 2147483647
+   */
+  priceListId: number;
+  /**
+   * @minimum 0
+   * @maximum 2147483647
+   */
+  rateConditionId: number;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  firstName: string;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  lastName: string;
+  /** @pattern ^[+0-9 ()-]{7,30}$ */
+  phone: string;
+  /** @maxLength 200 */
+  email: string;
+  /** @maxLength 1000 */
+  specialRequests?: string;
+  /**
+   * @maximum 10000000
+   * @exclusiveMinimum 0
+   */
+  expectedTotal: number;
+  agreeTerms: boolean;
+  agreeNonRefundable: boolean;
+  tariffPolicyVersion: string;
+};
+
+export type BookingServioReservationState =
+  (typeof BookingServioReservationState)[keyof typeof BookingServioReservationState];
+
+export const BookingServioReservationState = {
+  creating: "creating",
+  billing: "billing",
+  bill_ready: "bill_ready",
+  awaiting_payment: "awaiting_payment",
+  expiring: "expiring",
+  confirming: "confirming",
+  confirmed: "confirmed",
+  review: "review",
+  failed: "failed",
+  cancelling: "cancelling",
+  cancelled: "cancelled",
+} as const;
+
+export type BookingServioReservationMode =
+  (typeof BookingServioReservationMode)[keyof typeof BookingServioReservationMode];
+
+export const BookingServioReservationMode = {
+  test: "test",
+  live: "live",
+} as const;
+
+export type BookingServioReservationNotifications = {
+  [key: string]: "pending" | "sending" | "sent" | "failed";
+};
+
+export interface BookingServioReservation {
+  id: string;
+  requestId: string;
+  /** Whether an administrator has issued private guest access; never includes the bearer token */
+  hasGuestAccess?: boolean;
+  notifications?: BookingServioReservationNotifications;
+  /**
+   * Immutable server deadline for payment; null for older controlled reservations
+   * @nullable
+   */
+  paymentDeadline?: string | null;
+  state: BookingServioReservationState;
+  message: string;
+  createdAt: string;
+  updatedAt: string;
+  categoryName: string;
+  rateName: string;
+  checkIn: string;
+  checkOut: string;
+  /** @nullable */
+  total: number | null;
+  currency: string;
+  /** @nullable */
+  account: string | null;
+  mode: BookingServioReservationMode;
+  policyVersion: string;
+  acknowledgementText: string;
+}
+
+export interface PublicServioReservationResult {
+  reservation: BookingServioReservation;
+  /** @nullable */
+  url: string | null;
+}
+
 export interface BookingServioSearchInput {
   /** @pattern ^\d{4}-\d{2}-\d{2}$ */
   checkIn: string;
@@ -217,6 +338,8 @@ export type BookingServioReservationInput = BookingServioPreflightInput & {
   phone: string;
   /** @maxLength 200 */
   email: string;
+  /** @maxLength 1000 */
+  specialRequests?: string;
   /**
    * @maximum 10000000
    * @exclusiveMinimum 0
@@ -238,6 +361,25 @@ export interface BookingServioCheckoutInput {
   tariffPolicyVersion: string;
 }
 
+export interface BookingRoomDetails {
+  /** @maxLength 150 */
+  displayName?: string;
+  /** @maxLength 200 */
+  occupancyText?: string;
+  /** @maxLength 300 */
+  bedsText?: string;
+  /** @maxLength 200 */
+  sofaText?: string;
+  /** @maxLength 100 */
+  areaText?: string;
+  /** @maxItems 30 */
+  amenities?: string[];
+  /** @maxLength 150 */
+  tariffTitle?: string;
+  /** @maxLength 5000 */
+  tariffDescription?: string;
+}
+
 export interface BookingUnitMedia {
   /** @maxItems 30 */
   photos: string[];
@@ -245,6 +387,7 @@ export interface BookingUnitMedia {
   videoUrl: string;
   /** @maxLength 10000 */
   description: string;
+  details?: BookingRoomDetails;
 }
 
 export interface BookingServioCategoryMediaItem {
@@ -291,53 +434,6 @@ export type BookingServioGuestCheckoutInput = BookingServioCheckoutInput & {
   agreeTerms: boolean;
 };
 
-export type BookingServioReservationState =
-  (typeof BookingServioReservationState)[keyof typeof BookingServioReservationState];
-
-export const BookingServioReservationState = {
-  creating: "creating",
-  billing: "billing",
-  bill_ready: "bill_ready",
-  awaiting_payment: "awaiting_payment",
-  confirming: "confirming",
-  confirmed: "confirmed",
-  review: "review",
-  failed: "failed",
-  cancelling: "cancelling",
-  cancelled: "cancelled",
-} as const;
-
-export type BookingServioReservationMode =
-  (typeof BookingServioReservationMode)[keyof typeof BookingServioReservationMode];
-
-export const BookingServioReservationMode = {
-  test: "test",
-  live: "live",
-} as const;
-
-export interface BookingServioReservation {
-  id: string;
-  requestId: string;
-  /** Whether an administrator has issued private guest access; never includes the bearer token */
-  hasGuestAccess?: boolean;
-  state: BookingServioReservationState;
-  message: string;
-  createdAt: string;
-  updatedAt: string;
-  categoryName: string;
-  rateName: string;
-  checkIn: string;
-  checkOut: string;
-  /** @nullable */
-  total: number | null;
-  currency: string;
-  /** @nullable */
-  account: string | null;
-  mode: BookingServioReservationMode;
-  policyVersion: string;
-  acknowledgementText: string;
-}
-
 export interface BookingServioGuestView {
   reservation: BookingServioReservation;
   hotelName: string;
@@ -347,6 +443,7 @@ export interface BookingServioGuestView {
   terms: string;
   privacy: string;
   accessExpiresAt: string;
+  paymentWindowText?: string;
 }
 
 export interface BookingServioCheckout {
@@ -551,6 +648,14 @@ export interface BookingEngineInput {
   servioBaseUrl: string;
   /** @maxLength 50 */
   servioHotelId: string;
+  /**
+   * @minimum 1
+   * @maximum 2147483647
+   * @nullable
+   */
+  servioSellerPropertyId?: number | null;
+  /** @maxLength 2000 */
+  paymentWindowText?: string;
   /** @maxLength 2000 */
   servioToken?: string;
   clearServioToken?: boolean;

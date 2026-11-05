@@ -63,6 +63,19 @@ describe("independent Servio category media", () => {
     expect(categories[0].media).toEqual(media);
     expect(categories[1].media.description).toBe("");
   });
+  it("saves, reloads, edits and clears guest characteristics and tariff copy without editing Servio inventory", async () => {
+    const details = { displayName: "Будинок з 1 спальнею", occupancyText: "до 4 гостей", sofaText: "1 диван",
+      bedsText: "2 односпальних або 1 двоспальне ліжко", areaText: "42 м²", amenities: ["Сауна", "Кухня"],
+      tariffTitle: "Безповоротний тариф", tariffDescription: "100% передоплата. Туристичний збір — за правилами готелю." };
+    expect((await request(app).put("/").send({ ...input(), media: { ...media, details } })).status).toBe(200);
+    expect((await request(app).get("/")).body.categories[0].media.details).toEqual(details);
+    const edited = { ...details, areaText: "43 м²", tariffDescription: "Оновлені умови", amenities: [] };
+    expect((await request(app).put("/").send({ ...input(), expectedRevision: 1, media: { ...media, details: edited } })).status).toBe(200);
+    expect((await request(app).get("/")).body.categories[0].media.details).toEqual(edited);
+    expect((await request(app).put("/").send({ ...input(), expectedRevision: 2, media })).status).toBe(200);
+    expect((await request(app).get("/")).body.categories[0].media.details).toBeUndefined();
+    expect(clientQuery.mock.calls.filter(([sql]) => /^(UPDATE|INSERT|DELETE)/.test(sql)).every(([sql]) => sql.startsWith("UPDATE organizations"))).toBe(true);
+  });
   it("rejects stale revisions without silently replacing another editor's work", async () => {
     await request(app).put("/").send(input());
     expect((await request(app).put("/").send({ ...input(), media: { ...media, description: "Stale" } })).status).toBe(409);

@@ -32,7 +32,8 @@ router.put("/", requireRole("super_admin", "owner", "admin"), async (req: any, r
       await client.query("ROLLBACK");
       res.status(409).json({ error: "Підключення, категорія або матеріали змінилися. Оновіть дані перед збереженням; ваші зміни не перезаписано." }); return;
     }
-    const saved = { media: { photos: [...new Set(media.photos)], videoUrl: media.videoUrl, description: media.description }, revision: category.revision + 1 };
+    const saved = { media: { photos: [...new Set(media.photos)], videoUrl: media.videoUrl, description: media.description,
+      ...(media.details ? { details: media.details } : {}) }, revision: category.revision + 1 };
     const sources = config.servioCategoryMedia ?? {};
     const next = { ...sources, [sourceId]: { ...(sources[sourceId] ?? {}), [`${hotelId}:${categoryId}`]: saved } };
     // Merge under the tenant row lock. No units, properties, rates or Servio API writes.

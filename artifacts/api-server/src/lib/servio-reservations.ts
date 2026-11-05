@@ -7,17 +7,25 @@ import { generateLiqPayForm, verifyLiqPayCallbackWithKey } from "./liqpay.js";
 import { servioMoney } from "./servio-availability.js";
 import { servioWriteRequest, type ServioWriteRequest } from "./servio-connection.js";
 import { billPayload, parseServioBill, providerSuccess, reservationPayload, servioAccount, ServioRejected, type ServioBill } from "./servio-reservation-protocol.js";
+import { createServioGuestAccess, encodeServioGuestAccess } from "./servio-guest-access.js";
+import { servioInventoryKey, withServioInventory } from "./servio-inventory.js";
 
 export type ReservationConnection = {
   base: string; token: string; hotelId: number; publicKey: string; secretKey: string;
   propertyId: number; legalEntityId: number; mode: "live" | "test"; origin: string;
   checkInTime: string; checkOutTime: string;
   terms?: string; privacy?: string;
+  guestHotel?: { slug: string; hotelName: string; sellerName: string; phone: string; email: string };
+  notificationMailbox?: string;
+  paymentWindowText?: string;
 };
 export type Attempt = {
   id: string; organization_id: number; request_id: string; request_hash: string; state: BookingServioReservation["state"];
-  account: string | null; payload: { input: BookingServioReservationInput; categoryName: string; rateName: string };
+  account: string | null; payload: { input: BookingServioReservationInput; categoryName: string; rateName: string; source?: string };
   connection: string; guest_access?: string | null; bill: ServioBill | null; consent: any; payment: any; issue: string | null; created_at: Date | string; updated_at: Date | string;
+  notification_delivery?: Record<string, { status: "pending" | "sending" | "sent" | "failed" }>;
+  payment_deadline?: Date | string | null;
+  inventory_key?: string | null;
 };
 export type AttemptPatch = { state: Attempt["state"]; account?: string; bill?: ServioBill; consent?: any; payment?: any; issue?: string };
 export interface AttemptStore {
@@ -25,35 +33,37 @@ export interface AttemptStore {
   get(id: string, orgId: number): Promise<Attempt | null>;
   transition(id: string, orgId: number, from: Attempt["state"][], patch: AttemptPatch): Promise<Attempt | null>;
 }
-export const attemptStore: AttemptStore = {
+export function createAttemptStore(client: Pick<typeof pool, "query">): AttemptStore { return {
   async insert(row) {
-    const inserted = (await pool.query(`INSERT INTO servio_booking_attempts
-      (id,organization_id,request_id,request_hash,state,payload,connection)
-      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
+    const inserted = (await client.query(`INSERT INTO servio_booking_attempts
+      (id,organization_id,request_id,request_hash,state,payload,connection,guest_access,payment_deadline,inventory_key)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)
       ON CONFLICT (organization_id,request_id) DO NOTHING RETURNING *`,
-      [row.id, row.organization_id, row.request_id, row.request_hash, row.state, JSON.stringify(row.payload), row.connection])).rows[0];
+      [row.id, row.organization_id, row.request_id, row.request_hash, row.state, JSON.stringify(row.payload), row.connection, row.guest_access ?? null, row.payment_deadline ?? null, row.inventory_key ?? null])).rows[0];
     if (inserted) return { row: inserted, inserted: true };
-    const existing = (await pool.query("SELECT * FROM servio_booking_attempts WHERE organization_id=$1 AND request_id=$2", [row.organization_id, row.request_id])).rows[0];
+    const existing = (await client.query("SELECT * FROM servio_booking_attempts WHERE organization_id=$1 AND request_id=$2", [row.organization_id, row.request_id])).rows[0];
     if (!existing || existing.request_hash !== row.request_hash) throw new Error("request_conflict");
     return { row: existing, inserted: false };
   },
   async get(id, orgId) {
-    return (await pool.query("SELECT * FROM servio_booking_attempts WHERE id=$1 AND organization_id=$2", [id, orgId])).rows[0] ?? null;
+    return (await client.query("SELECT * FROM servio_booking_attempts WHERE id=$1 AND organization_id=$2", [id, orgId])).rows[0] ?? null;
   },
   async transition(id, orgId, from, patch) {
-    return (await pool.query(`UPDATE servio_booking_attempts SET state=$4,
+    return (await client.query(`UPDATE servio_booking_attempts SET state=$4,
       account=coalesce($5,account),bill=coalesce($6::jsonb,bill),consent=coalesce($7::jsonb,consent),
       payment=coalesce($8::jsonb,payment),issue=$9,updated_at=now()
       WHERE id=$1 AND organization_id=$2 AND state=ANY($3::text[]) RETURNING *`,
       [id, orgId, from, patch.state, patch.account ?? null, patch.bill ? JSON.stringify(patch.bill) : null,
         patch.consent ? JSON.stringify(patch.consent) : null, patch.payment ? JSON.stringify(patch.payment) : null, patch.issue ?? null])).rows[0] ?? null;
   },
-};
+}; }
+export const attemptStore: AttemptStore = createAttemptStore(pool);
 const messages: Record<string, string> = {
   creating: "Запит створення бронювання відправляється. Не створюйте іншу спробу для того самого гостя.",
   billing: "Бронь створено; Servio готує остаточні нарахування.",
   bill_ready: "Остаточний рахунок отримано. Перевірте суму й окремо підтвердьте умови перед переходом до оплати.",
   awaiting_payment: "Платіжне посилання сформовано. Повернення з LiqPay не означає, що оплату підтверджено.",
+  expiring: "10 хвилин на оплату минули. Перевіряємо стан платежу перед звільненням бронювання. Не оплачуйте старе посилання.",
   confirming: "LiqPay підтвердив оплату. Передаємо гарантування в Servio; не повторюйте оплату.",
   confirmed: "LiqPay підтвердив 100% оплати, Servio прийняв гарантування бронювання.",
   review: "Потрібна ручна звірка. Не повторюйте бронювання або оплату автоматично.",
@@ -70,7 +80,9 @@ export function reservationView(row: Attempt): BookingServioReservation {
   const stale = ["creating", "billing", "confirming", "cancelling"].includes(row.state) && Date.now() - new Date(row.updated_at).getTime() > 120_000;
   return {
     id: row.id, requestId: row.request_id, state: stale ? "review" : row.state,
-    message: row.issue === "sandbox_payment" ? "LiqPay повернув тестову оплату. Реальні кошти не отримано; гарантування Servio не виконувалося."
+    message: row.state === "cancelled" && row.issue === "payment_window_expired"
+      ? "Бронювання скасовано: оплату не підтверджено протягом 10 хвилин. Оновіть пошук і перевірте актуальну наявність."
+      : row.issue === "sandbox_payment" ? "LiqPay повернув тестову оплату. Реальні кошти не отримано; гарантування Servio не виконувалося."
       : stale ? "Операція перервалася або ще не завершена. Потрібна звірка із Servio; автоматично запит не повторюється." : messages[row.state],
     createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
     categoryName: row.payload.categoryName, rateName: row.payload.rateName,
@@ -79,6 +91,11 @@ export function reservationView(row: Attempt): BookingServioReservation {
     mode: attemptConnection(row).mode, policyVersion: BOOKING_TARIFF_POLICY.version,
     acknowledgementText: BOOKING_TARIFF_POLICY.acknowledgementText,
     hasGuestAccess: !!row.guest_access,
+    paymentDeadline: row.payment_deadline ? new Date(row.payment_deadline).toISOString() : null,
+    ...(row.payload.source === "public_booking" ? {
+      notifications: Object.fromEntries(["guest", "admin", "review"].map(kind =>
+        [kind, row.notification_delivery?.[kind]?.status ?? "pending"])),
+    } : {}),
   };
 }
 export function hashReservationRequest(input: BookingServioReservationInput) {
@@ -89,13 +106,24 @@ export async function createServioReservation(
   orgId: number, input: BookingServioReservationInput, connection: ReservationConnection,
   categoryName: string, rate: BookingServioRate, store: AttemptStore = attemptStore, send: ServioWriteRequest = servioWriteRequest,
 ): Promise<Attempt> {
+  if (store === attemptStore) {
+    return withServioInventory(orgId, input, connection, hashReservationRequest(input), client =>
+      createServioReservation(orgId, input, connection, categoryName, rate, createAttemptStore(client), send));
+  }
   const id = randomUUID(), now = new Date();
   const candidate: Attempt = {
     id, organization_id: orgId, request_id: input.requestId, request_hash: hashReservationRequest(input),
     state: "creating", account: null, payload: { input, categoryName, rateName: rate.name },
     connection: encrypt(JSON.stringify(connection))!, bill: null, consent: null, payment: null, issue: null,
     created_at: now, updated_at: now,
+    inventory_key: servioInventoryKey(connection, input.categoryId),
   };
+  if (connection.guestHotel) {
+    candidate.payload.source = "public_booking";
+    const { slug, ...hotel } = connection.guestHotel;
+    candidate.guest_access = encodeServioGuestAccess(createServioGuestAccess(slug, id, hotel));
+    candidate.payment_deadline = new Date(now.getTime() + 10 * 60_000);
+  }
   const inserted = await store.insert(candidate);
   if (!inserted.inserted) return inserted.row;
   let row = inserted.row;
@@ -123,6 +151,7 @@ export async function createServioReservation(
   }
 }
 export async function checkoutServioReservation(row: Attempt, store: AttemptStore = attemptStore, actor: "administrator" | "guest" = "administrator") {
+  if (row.payment_deadline && new Date(row.payment_deadline).getTime() <= Date.now()) throw new Error("payment_window_expired");
   if (!row.bill || !["bill_ready", "awaiting_payment"].includes(row.state)) throw new Error("not_payable");
   const connection = attemptConnection(row);
   if (!row.consent) {
@@ -159,6 +188,7 @@ export async function checkoutServioReservation(row: Attempt, store: AttemptStor
     publicKey: connection.publicKey, privateKey: connection.secretKey,
     resultUrl: `${connection.origin}${resultPath}`,
     serverUrl: `${connection.origin}/api/public/booking-engine/servio/payment-callback`,
+    ...(row.payment_deadline ? { expiredDate: new Date(row.payment_deadline).toISOString().slice(0, 19).replace("T", " ") } : {}),
   });
   return { reservation: reservationView(row), ...form };
 }
@@ -193,14 +223,34 @@ export async function recordServioPayment(
       state: "review", payment: { ...row.payment, additionalPaymentId: paymentId }, issue: "additional_payment",
     }) ?? row;
   }
+  if (row.state === "review" && row.payment?.status !== "success") {
+    return await store.transition(row.id, row.organization_id, ["review"], {
+      state: "review", payment: { status: "success", paymentId, amountMinor: row.bill.totalMinor,
+        receivedAt: new Date().toISOString() }, issue: row.issue || "payment_requires_review",
+    }) ?? (await store.get(row.id, row.organization_id)) ?? row;
+  }
   if (["confirmed", "confirming", "review"].includes(row.state)) return row;
+  // A late success must never re-guarantee a reservation already being released.
+  // Keep the real payment visible for administrators rather than silently losing it.
+  if (["cancelling", "cancelled"].includes(row.state)) {
+    return await store.transition(row.id, row.organization_id, ["cancelling", "cancelled"], {
+      state: "review", payment: { status: "success", paymentId, amountMinor: row.bill.totalMinor,
+        receivedAt: new Date().toISOString() }, issue: "paid_after_cancellation",
+    }) ?? (await store.get(row.id, row.organization_id)) ?? row;
+  }
   const rrn = typeof payment.rrn === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(payment.rrn) ? payment.rrn : null;
-  const claimed = await store.transition(row.id, row.organization_id, ["awaiting_payment"], {
+  const claimed = await store.transition(row.id, row.organization_id, ["awaiting_payment", "expiring"], {
     state: rrn ? "confirming" : "review",
     payment: { status: "success", paymentId, rrn, amountMinor: row.bill.totalMinor, receivedAt: new Date().toISOString() },
     ...(rrn ? {} : { issue: "rrn_missing" }),
   });
-  if (!claimed || !rrn) return claimed ?? (await store.get(row.id, row.organization_id)) ?? row;
+  if (!claimed) {
+    const latest = await store.get(row.id, row.organization_id);
+    if (latest && ["cancelling", "cancelled", "review"].includes(latest.state))
+      return recordServioPayment(latest, payment, store, send);
+    return latest ?? row;
+  }
+  if (!rrn) return claimed;
   try {
     providerSuccess(await send(connection.base, connection.token, "SetReservationType", {
       Account: row.account, Amount: row.bill.firstDayAmount, RRN: rrn, Services: row.bill.services,
