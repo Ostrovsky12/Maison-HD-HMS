@@ -806,7 +806,7 @@ function DiscountTypesTab() {
 }
 
 // ── Notifications Tab ──────────────────────────────────────────────
-function NotificationsTab() {
+function NotificationsTab({ emailOnly = false, showEmail = true }: { emailOnly?: boolean; showEmail?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"email" | "telegram" | "sms" | null>(null);
   const [testing, setTesting] = useState<"email" | "telegram" | "sms" | null>(null);
@@ -887,7 +887,7 @@ function NotificationsTab() {
     <div className="space-y-6">
 
       {/* Email / SMTP */}
-      <Card>
+      {showEmail && <Card>
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -973,8 +973,8 @@ function NotificationsTab() {
             </Button>
           </div>
         </CardContent>
-      </Card>
-
+      </Card>}
+      {!emailOnly && <>
       {/* Telegram */}
       <Card>
         <CardHeader className="pb-4">
@@ -1150,6 +1150,7 @@ function NotificationsTab() {
           </ul>
         </CardContent>
       </Card>
+      </>}
     </div>
   );
 }
@@ -2851,6 +2852,7 @@ export default function SettingsPage() {
             <TabsList className="mb-6 bg-muted/50 p-1 flex-wrap gap-1 h-auto">
               <TabsTrigger value="profile" className="gap-1.5"><User className="w-3.5 h-3.5" /> Профіль</TabsTrigger>
               <TabsTrigger value="hotel" className="gap-1.5"><Hotel className="w-3.5 h-3.5" /> Дані готелю</TabsTrigger>
+              <TabsTrigger value="email" className="gap-1.5"><Mail className="w-3.5 h-3.5" /> Пошта</TabsTrigger>
               {(user.role === "owner" || user.role === "manager") && (
                 <TabsTrigger value="team" className="gap-1.5"><Users2 className="w-3.5 h-3.5" /> Персонал</TabsTrigger>
               )}
@@ -2917,14 +2919,17 @@ export default function SettingsPage() {
                 </Card>
               </TabsContent>
             )}
+            <TabsContent value="email">
+              <NotificationsTab emailOnly />
+            </TabsContent>
             {(mod("telegram") || mod("liqpay") || mod("binotel")) && (
               <TabsContent value="notifications">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2"><Bell className="w-4 h-4" /> Сповіщення & Інтеграції</CardTitle>
-                    <CardDescription>Email, Telegram, SMS-сповіщення, LiqPay та Binotel — підключення та налаштування для вашого об'єкту.</CardDescription>
+                    <CardDescription>Telegram, SMS-сповіщення, LiqPay та Binotel — підключення та налаштування для вашого об'єкту. SMTP налаштовується у вкладці «Пошта».</CardDescription>
                   </CardHeader>
-                  <CardContent><NotificationsTab /></CardContent>
+                  <CardContent><NotificationsTab showEmail={false} /></CardContent>
                 </Card>
               </TabsContent>
             )}
