@@ -423,7 +423,7 @@ export default function BookingPublicPage() {
   const banner = data?.salesEnabled === false && (
     <div role="status" className="sticky top-0 z-40 px-5 py-2.5 text-center text-sm" style={{ background: "#292D05", color: "#FFF4E5" }} data-testid="banner-private-preview">
       {previewLocked ? "Приватний перегляд для команди. Продажі закриті: пошук, бронювання й оплата вимкнені."
-        : "Сторінка відкрита для перегляду. Онлайн-бронювання та оплата ще не підключені — зверніться до готелю."}
+        : "Пошук вільних дат і цін доступний. Онлайн-оплата ще не підключена — для бронювання зверніться до готелю."}
     </div>
   );
   const pendingPanel = pending && (

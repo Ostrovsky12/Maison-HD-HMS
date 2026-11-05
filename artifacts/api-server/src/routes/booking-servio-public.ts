@@ -7,7 +7,7 @@ import {
   CreateBookingServioReservationBody,
 } from "@workspace/api-zod";
 import { engineConfig, engineIssues } from "../lib/booking-engine.js";
-import { servioSalesReadiness } from "../lib/servio-sales.js";
+import { servioSalesReadiness, servioSearchReadiness } from "../lib/servio-sales.js";
 import { servioBaseUrl, servioHotelId } from "../lib/servio-connection.js";
 import { validServioSearch, searchServioAvailability } from "../lib/servio-availability.js";
 import { acceptsBookingTariff } from "../lib/booking-tariff.js";
@@ -59,9 +59,9 @@ router.post("/:slug/servio/search", searchLimit, async (req, res) => {
     if (!org || !config || config.provider !== "servio" || !config.published) {
       res.status(404).json({ error: "Онлайн-бронювання ще не відкрите." }); return;
     }
-    const ready = await servioSalesReadiness(org.id, org.slug, config);
-    if (ready.issues.length || engineIssues(config, 0, 0).length) {
-      res.status(503).json({ error: "Онлайн-бронювання тимчасово недоступне. Зверніться до готелю." }); return;
+    const ready = servioSearchReadiness(config);
+    if (ready.issues.length) {
+      res.status(503).json({ error: "Пошук тимчасово недоступний: готелю потрібно перевірити підключення Servio." }); return;
     }
     const token = decrypt(config.servioToken);
     if (!token) throw new Error("connection_unavailable");

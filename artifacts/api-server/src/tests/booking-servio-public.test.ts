@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const f = vi.hoisted(() => ({ query: vi.fn(), ready: vi.fn(), search: vi.fn(), create: vi.fn() }));
 vi.mock("@workspace/db", () => ({ pool: { query: f.query } }));
 vi.mock("express-rate-limit", () => ({ default: () => (_q: any, _s: any, next: any) => next() }));
-vi.mock("../lib/servio-sales.js", () => ({ servioSalesReadiness: f.ready }));
+vi.mock("../lib/servio-sales.js", async original => ({
+  ...await original<typeof import("../lib/servio-sales.js")>(), servioSalesReadiness: f.ready,
+}));
 vi.mock("../routes/booking-checkout.js", () => ({ bookingPaymentOrigin: () => "https://example.invalid" }));
 vi.mock("../lib/servio-availability.js", async original => ({
   ...await original<typeof import("../lib/servio-availability.js")>(), searchServioAvailability: f.search,
@@ -34,7 +36,11 @@ beforeEach(() => {
     terms: "Terms", privacy: "Privacy", servioBaseUrl: "https://example.servio.support/ReservationService_1_10",
     servioHotelId: "7", servioToken: encrypt("fixture-token"), servioSellerPropertyId: 4 };
   config.servioSellerFingerprint = servioFingerprint(config);
-  config.servioVerification = { fingerprint: servioFingerprint(config), result: { status: "connected", categories: [{ id: 11, hotelId: 7, name: "House" }] } };
+  config.servioVerification = { fingerprint: servioFingerprint(config), result: {
+    status: "connected", code: "CONNECTED", message: "Ready", pingOk: true,
+    checkedAt: "2026-01-01T00:00:00.000Z", hotelId: 7,
+    categories: [{ id: 11, hotelId: 7, name: "House" }],
+  } };
   org = { id: 7, slug: "dogoda", name: "DOGODA", booking_engine_config: config };
   ready = { issues: [], mailbox: "welcome@dogoda.ua", categories: [{ id: 11, hotelId: 7, name: "House" }],
     seller: { id: 4, legal_entity_id: 8, name: "Hotel seller", liqpay_public_key: "public-key", liqpay_private_key: encrypt("fixture-secret") } };
@@ -63,9 +69,30 @@ describe("public Servio booking", () => {
   });
   it.each(["draft", "configuration", "ages"])("blocks %s without a provider mutation", async kind => {
     if (kind === "draft") org.booking_engine_config.published = false;
-    if (kind === "configuration") ready.issues = ["no mail"];
+    if (kind === "configuration") delete org.booking_engine_config.servioVerification;
     const res = await request(app).post("/dogoda/servio/search").send(kind === "ages" ? { ...search, childAges: [null] } : search);
     expect(res.status).toBeGreaterThanOrEqual(400); expect(f.create).not.toHaveBeenCalled();
+  });
+  it("searches without seller, LiqPay, SMTP or legal texts, but still blocks reservation creation", async () => {
+    delete org.booking_engine_config.servioSellerPropertyId;
+    org.booking_engine_config.terms = "";
+    org.booking_engine_config.privacy = "";
+    ready.issues = ["no seller", "no LiqPay", "no mail", "no legal texts"];
+    const res = await request(app).post("/dogoda/servio/search").send(search);
+    expect(res.status).toBe(200);
+    expect(res.body.categories).toHaveLength(1);
+    expect(f.ready).not.toHaveBeenCalled();
+    expect(f.search).toHaveBeenCalledOnce();
+    expect(f.create).not.toHaveBeenCalled();
+    const reserve = await request(app).post("/dogoda/servio/reservations").send(input);
+    expect(reserve.status).toBeGreaterThanOrEqual(400);
+    expect(f.create).not.toHaveBeenCalled();
+  });
+  it("blocks search with stale verification after a Servio connection change", async () => {
+    org.booking_engine_config.servioHotelId = "8";
+    const res = await request(app).post("/dogoda/servio/search").send(search);
+    expect(res.status).toBe(503);
+    expect(f.search).not.toHaveBeenCalled();
   });
   it.each(["refundable", "unknown", "sold_out", "currency"])("never offers %s rates", async kind => {
     const category = snapshot.categories[0], rate = category.rates[0];

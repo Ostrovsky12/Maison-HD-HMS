@@ -14,13 +14,20 @@ export function bookingMailbox(slug: string, cfg: EmailConfig | null): string | 
   return slug === "dogoda" && from !== "welcome@dogoda.ua" ? null : from;
 }
 
-export async function servioSalesReadiness(orgId: number, slug: string, config: BookingEngineConfig, client: any = pool) {
+export function servioSearchReadiness(config: BookingEngineConfig) {
   const issues: string[] = [];
   const fingerprint = servioFingerprint(config);
   const check = config.servioVerification?.fingerprint === fingerprint
     ? GetBookingServioStatusResponse.safeParse(config.servioVerification.result) : null;
   if (!config.servioToken || !check?.success || check.data.status !== "connected" || !check.data.categories.length)
     issues.push("Перевірте поточне підключення й категорії Servio.");
+  return { issues, categories: check?.success ? check.data.categories : [] };
+}
+
+export async function servioSalesReadiness(orgId: number, slug: string, config: BookingEngineConfig, client: any = pool) {
+  const search = servioSearchReadiness(config);
+  const issues = [...search.issues];
+  const fingerprint = servioFingerprint(config);
   if (!config.servioSellerPropertyId || config.servioSellerFingerprint !== fingerprint)
     issues.push("Збережіть явну прив’язку продавця до поточного готелю Servio.");
   const seller = config.servioSellerPropertyId ? (await client.query(`SELECT p.id,p.legal_entity_id,
@@ -39,5 +46,5 @@ export async function servioSalesReadiness(orgId: number, slug: string, config: 
   if (!mailbox) issues.push(slug === "dogoda"
     ? "Налаштуйте SMTP готелю з відправником welcome@dogoda.ua для листів гостю й адміністраторам."
     : "Налаштуйте вихідну пошту готелю для підтверджень гостю й адміністраторам.");
-  return { issues, seller, mailbox, categories: check?.success ? check.data.categories : [] };
+  return { issues, seller, mailbox, categories: search.categories };
 }
