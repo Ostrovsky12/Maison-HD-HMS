@@ -1,6 +1,7 @@
 import type { BookingServioPreflight, BookingServioPreflightInput, BookingServioSearchResult } from "@workspace/api-zod";
 import type { BookingEngineConfig } from "./booking-engine.js";
 import { BOOKING_TARIFF_POLICY } from "./booking-tariff.js";
+import { isServioSiteTariff } from "./servio-site-tariff.js";
 
 export type ServioPreflightMerchant = {
   mapped: boolean;
@@ -27,10 +28,9 @@ export function servioPreflight(
     snapshot.status === "failed" ? snapshot.message : "Для обраної категорії немає підтверджених вільних місць.");
   add("selected_rate", !!rate, "Обраний прайс та умова договору знайдені в новій відповіді Servio.",
     "Обраний тариф більше не доступний або його відповідь не вдалося перевірити. Повторіть пошук.");
-  add("nonrefundable", rate ? rate.nonRefundable === true : null,
-    "Servio явно позначає тариф неповоротним.",
-    rate ? "Servio не позначає цей тариф неповоротним. Назва тарифу не замінює ознаку IsNonReturnRate; він не відповідає правилам цього модуля."
-      : "Неповоротність тарифу ще не перевірено.");
+  add("site_tariff", rate ? isServioSiteTariff(rate) : null,
+    "Обрано тариф NR Site для онлайн-бронювання. Умови для гостя визначає модуль.",
+    "Для онлайн-бронювання потрібен тариф NR Site із Servio.");
   add("sale_restrictions", rate?.saleAllowed ?? null,
     "Перевірені обмеження Servio не блокують обраний тариф.",
     rate?.saleAllowed === false ? "Servio блокує продаж цього тарифу." : "Не всі обмеження Servio перевірені; продаж не дозволено.");

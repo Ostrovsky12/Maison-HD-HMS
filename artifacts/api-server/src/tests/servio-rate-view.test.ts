@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import { servioRateViewOnlyReason } from "../../../maison-hd/src/lib/servio-rate-view";
 
 describe("Servio price viewing versus booking", () => {
-  const eligible = { nonRefundable: true, saleAllowed: true, total: 200 };
+  const eligible = { name: "NR Site", nonRefundable: true, saleAllowed: true, total: 200 };
   it("allows a verified nonrefundable quote to be selected", () => {
     expect(servioRateViewOnlyReason(eligible)).toBeUndefined();
   });
-  it("labels a refundable provider quote as view-only, not nonrefundable", () => {
-    expect(servioRateViewOnlyReason({ ...eligible, nonRefundable: false })).toContain("не підтвердив неповоротність");
+  it("does not use the provider refund flag to block NR Site", () => {
+    expect(servioRateViewOnlyReason({ ...eligible, nonRefundable: false })).toBeUndefined();
+  });
+  it("does not allow a different price list even with a true provider refund flag", () => {
+    expect(servioRateViewOnlyReason({ ...eligible, name: "Standard" })).toContain("NR Site");
+  });
+  it("ignores harmless casing and whitespace, not extra name suffixes", () => {
+    expect(servioRateViewOnlyReason({ ...eligible, name: " nr   SITE " })).toBeUndefined();
+    expect(servioRateViewOnlyReason({ ...eligible, name: "NR Site Promo" })).toContain("NR Site");
   });
   it.each([null, false, undefined])("keeps unverified or blocked sale status %s view-only", saleAllowed => {
     expect(servioRateViewOnlyReason({ ...eligible, saleAllowed })).toContain("Лише перегляд");

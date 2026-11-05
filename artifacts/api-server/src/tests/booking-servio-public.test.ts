@@ -47,7 +47,7 @@ beforeEach(() => {
   snapshot = { status: "complete", code: "ok", message: "ok", checkedAt: new Date().toISOString(),
     query: { ...search, useExtraBed: false, companyId: 0, companyCodeId: 0, conditionId: 0 }, hotelId: 7, currency: "UAH",
     categories: [{ id: 11, name: "House", freeRooms: 1, mainPlaces: 2, nearestDate: null,
-      rates: [{ priceListId: 12, name: "NR", conditionId: 0, nonRefundable: true, specialRate: false,
+      rates: [{ priceListId: 12, name: "NR Site", conditionId: 0, nonRefundable: true, specialRate: false,
         total: 200, charges: [], restrictions: [], saleAllowed: true }] }] };
   row = { view: { id, requestId: id, state: "bill_ready", message: "Ready", createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(), categoryName: "House", rateName: "NR", checkIn: input.checkIn, checkOut: input.checkOut,
@@ -102,7 +102,6 @@ describe("public Servio booking", () => {
     expect(res.status).toBe(200); expect(res.body.categories[0].rates).toEqual([]);
   });
   it.each([
-    ["nonRefundable", false],
     ["saleAllowed", null],
     ["saleAllowed", false],
   ])("shows %s=%s quotes for viewing but refuses reservation creation", async (field, value) => {
@@ -118,13 +117,30 @@ describe("public Servio booking", () => {
     expect(reserve.status).toBeGreaterThanOrEqual(400);
     expect(f.create).not.toHaveBeenCalled();
   });
-  it("preserves eligible and view-only quotes in the same category", async () => {
-    snapshot.categories[0].rates.push({ ...snapshot.categories[0].rates[0], priceListId: 13, nonRefundable: false, total: 250 });
+  it("only displays NR Site, never another price list even if it is nonrefundable", async () => {
+    snapshot.categories[0].rates[0].nonRefundable = false;
+    snapshot.categories[0].rates.push({ ...snapshot.categories[0].rates[0], name: "Standard", priceListId: 13, nonRefundable: true, total: 250 });
     const res = await request(app).post("/dogoda/servio/search").send(search);
     expect(res.status).toBe(200);
-    expect(res.body.categories[0].rates).toHaveLength(2);
-    expect(res.body.categories[0].rates.map((rate: any) => rate.nonRefundable)).toEqual([true, false]);
+    expect(res.body.categories[0].rates).toHaveLength(1);
+    expect(res.body.categories[0].rates[0]).toMatchObject({ name: "NR Site", nonRefundable: false, total: 200 });
     expect(res.body.code).not.toBe("view_only_rates");
+  });
+  it("allows NR Site with a false provider refund flag while preserving guest consent", async () => {
+    snapshot.categories[0].rates[0].nonRefundable = false;
+    const res = await request(app).post("/dogoda/servio/reservations").send(input);
+    expect(res.status).toBe(200);
+    expect(f.create).toHaveBeenCalledOnce();
+    expect(f.create.mock.calls[0][1].agreeNonRefundable).toBe(true);
+  });
+  it("refuses a forged selection of a different price list", async () => {
+    snapshot.categories[0].rates[0].name = "Standard";
+    const searchResult = await request(app).post("/dogoda/servio/search").send(search);
+    expect(searchResult.body.categories[0].rates).toEqual([]);
+    expect(searchResult.body.message).toContain("NR Site");
+    const res = await request(app).post("/dogoda/servio/reservations").send(input);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(f.create).not.toHaveBeenCalled();
   });
   it("does not label actual zero availability as a tariff failure", async () => {
     snapshot.categories[0].freeRooms = 0;

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { isServioSiteTariff } from "../lib/servio-site-tariff.js";
 import rateLimit from "express-rate-limit";
 import { pool } from "@workspace/db";
 import {
@@ -34,7 +35,7 @@ const normalizedSearch = (input: any) => ({
   useExtraBed: false, companyId: 0, companyCodeId: 0, conditionId: 0,
 });
 export function eligibleServioRate(rate: any, category: any, currency: string | null) {
-  return !!category && category.freeRooms > 0 && !!rate && rate.nonRefundable === true && rate.saleAllowed === true
+  return !!category && category.freeRooms > 0 && isServioSiteTariff(rate) && rate.saleAllowed === true
     && rate.total > 0 && !!currency && ["UAH", "ГРН", "ГРН.", "₴"].includes(currency.trim().toUpperCase());
 }
 function response(row: Attempt) {
@@ -70,11 +71,13 @@ router.post("/:slug/servio/search", searchLimit, async (req, res) => {
       checkInTime: config.checkInTime, checkOutTime: config.checkOutTime,
     }, normalizedSearch(parsed.data), ready.categories);
     await applyServioLocalCapacity(snapshot, { base: servioBaseUrl(config.servioBaseUrl), hotelId: servioHotelId(config.servioHotelId) });
-    // Provider quotes can be viewed without making them eligible for checkout.
+    // Only the designated NR Site price list belongs on this website.
+    snapshot.categories = snapshot.categories.map(category => ({
+      ...category, rates: category.rates.filter(isServioSiteTariff),
+    }));
     const excludedReasons = new Set<string>();
     for (const category of snapshot.categories.filter(category => category.freeRooms > 0)) {
       for (const rate of category.rates) {
-        if (rate.nonRefundable !== true) excludedReasons.add("не підтверджено неповоротність тарифу");
         if (rate.saleAllowed === null) excludedReasons.add("не вдалося перевірити всі обмеження Servio");
         if (rate.saleAllowed === false) excludedReasons.add("умови Servio не дозволяють продаж на обрані дати");
         if (!(rate.total > 0)) excludedReasons.add("немає додатної підтвердженої ціни");
@@ -91,7 +94,7 @@ router.post("/:slug/servio/search", searchLimit, async (req, res) => {
       && !snapshot.categories.some(category => category.rates.length)) {
       snapshot.status = "partial";
       snapshot.code = "no_eligible_rates";
-      snapshot.message = `Вільні місця є, але онлайн-тариф недоступний: ${[...excludedReasons].join("; ") || "Servio не повернув підтверджених цін"}. Зверніться до готелю.`;
+      snapshot.message = `Вільні місця є, але тариф NR Site недоступний: ${[...excludedReasons].join("; ") || "Servio не повернув підтверджених цін NR Site"}. Зверніться до готелю.`;
     } else if (snapshot.categories.some(category => category.rates.length)
       && !snapshot.categories.some(category => category.rates.some(rate => eligibleServioRate(rate, category, snapshot.currency)))) {
       snapshot.code = "view_only_rates";

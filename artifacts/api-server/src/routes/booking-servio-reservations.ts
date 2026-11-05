@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { isServioSiteTariff } from "../lib/servio-site-tariff.js";
 import rateLimit from "express-rate-limit";
 import { pool } from "@workspace/db";
 import {
@@ -79,7 +80,7 @@ router.post("/", limiter, async (req: any, res) => {
     }, SearchBookingServioAvailabilityBody.parse(input), verified.data.categories);
     const category = snapshot.categories.find(row => row.id === input.categoryId);
     const rate = category?.rates.find(row => row.priceListId === input.priceListId && row.conditionId === input.rateConditionId);
-    if (snapshot.status === "failed" || !category || category.freeRooms < 1 || !rate || !rate.nonRefundable || rate.saleAllowed !== true
+    if (snapshot.status === "failed" || !category || category.freeRooms < 1 || !rate || !isServioSiteTariff(rate) || rate.saleAllowed !== true
       || !snapshot.currency || !["UAH", "ГРН", "ГРН.", "₴"].includes(snapshot.currency.trim().toUpperCase())
       || rate.total <= 0 || Math.round(rate.total * 100) !== Math.round(input.expectedTotal * 100)) {
       res.status(409).json({ error: "Наявність, неповоротність, умови або ціна змінилися чи не підтверджені Servio. Повторіть пошук. Бронювання не створене." }); return;

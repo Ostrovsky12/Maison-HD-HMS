@@ -881,7 +881,7 @@ export default function BookingPublicPage() {
                   <div className="mt-3 flex items-center gap-2 text-sm text-stone-600"><CalendarDays className="w-4 h-4" />{fmtDate(checkIn)} – {fmtDate(checkOut)}</div>
                   <div className="mt-1 flex items-center gap-2 text-sm text-stone-600"><Users className="w-4 h-4" />{guests} дорослих</div>
                   <p className="text-sm text-stone-500 mt-4">Оберіть номер, щоб побачити підсумок і перейти до оплати.</p>
-                  {policy && <p className="mt-4 rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-900">{isServio ? "Для онлайн-бронювання потрібен підтверджений неповоротний тариф. Інші ціни показуються лише для перегляду." : <><b>Неповоротний тариф:</b> 100% оплата онлайн при бронюванні, без повернення коштів і зміни дат.</>}</p>}
+                  {policy && <p className="mt-4 rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-900"><b>Умови онлайн-бронювання:</b> 100% оплата онлайн при бронюванні, без повернення коштів і зміни дат.</p>}
                 </div>
               )}
             </div>

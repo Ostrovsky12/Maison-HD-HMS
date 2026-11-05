@@ -50,7 +50,7 @@ beforeEach(() => {
   } };
   seller = { id: 4, legal_entity_id: 8, liqpay_public_key: "fixture-public", liqpay_private_key: encrypt("fixture-secret") };
   config.liqpayVerification = { "8": { status: "connected", fingerprint: liqpayCredentialFingerprint(seller.liqpay_public_key, seller.liqpay_private_key) } };
-  rate = { priceListId: 90, conditionId: 1, total: 200, nonRefundable: true, saleAllowed: true, name: "NR", charges: [] };
+  rate = { priceListId: 90, conditionId: 1, total: 200, nonRefundable: true, saleAllowed: true, name: "NR Site", charges: [] };
   f.query.mockImplementation(async (sql: string) => ({ rows: sql.includes("FROM organizations") ? [{ name: "Fixture", booking_engine_config: config }]
     : sql.includes("FROM properties") ? seller ? [seller] : [] : [] }));
   f.search.mockImplementation(async () => ({ status: "complete", currency: "грн", categories: [{ id: 11, name: "House", freeRooms: 2, rates: [rate] }] }));
@@ -85,10 +85,15 @@ describe("controlled Servio route boundaries", () => {
   });
   it.each(["price", "refundable", "unknown_restrictions"])("rechecks %s before creating a reservation", async variant => {
     if (variant === "price") rate.total = 250;
-    if (variant === "refundable") rate.nonRefundable = false;
+    if (variant === "refundable") rate.name = "Standard";
     if (variant === "unknown_restrictions") rate.saleAllowed = null;
     expect((await request(app).post("/reservations").send(input)).status).toBe(409);
     expect(f.create).not.toHaveBeenCalled();
+  });
+  it("accepts NR Site without relying on the provider refund flag", async () => {
+    rate.nonRefundable = false;
+    expect((await request(app).post("/reservations").send(input)).status).toBe(200);
+    expect(f.create).toHaveBeenCalledOnce();
   });
   it("requires new acknowledgement of the FINAL bill, not the earlier quote", async () => {
     const consent = { expectedTotal: 200, agreeNonRefundable: true, tariffPolicyVersion: BOOKING_TARIFF_POLICY.version };

@@ -33,11 +33,17 @@ describe("Servio preflight never authorizes selling or accepts a tariff by its n
     expect(response.total).toBeNull();
     expect(response.checks.find(check => check.code === "selected_rate")?.status).toBe("blocked");
   });
-  it("blocks a refundable rate named NR Site", () => {
+  it("accepts NR Site independently of its provider refund flag", () => {
     const data = snapshot(); data.categories[0].rates[0].nonRefundable = false;
     const response = servioPreflight(input, data, config, merchant, true);
+    expect(response.inputChecksPassed).toBe(true);
+    expect(response.checks.find(check => check.code === "site_tariff")?.status).toBe("passed");
+  });
+  it("blocks a different price list even when its refund flag is true", () => {
+    const data = snapshot(); data.categories[0].rates[0].name = "Standard";
+    const response = servioPreflight(input, data, config, merchant, true);
     expect(response.inputChecksPassed).toBe(false);
-    expect(response.checks.find(check => check.code === "nonrefundable")?.status).toBe("blocked");
+    expect(response.checks.find(check => check.code === "site_tariff")?.status).toBe("blocked");
   });
   it.each([false, null])("does not allow blocked or unknown sale restrictions (%j)", allowed => {
     const data = snapshot(); data.categories[0].rates[0].saleAllowed = allowed;

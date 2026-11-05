@@ -1,9 +1,9 @@
 /** Displaying a provider quote is not permission to create a reservation. */
 export function servioRateViewOnlyReason(rate: {
-  nonRefundable?: unknown; saleAllowed?: unknown; total?: unknown;
+  name?: unknown; nonRefundable?: unknown; saleAllowed?: unknown; total?: unknown;
 }): string | undefined {
-  if (rate.nonRefundable !== true)
-    return "Лише перегляд: Servio не підтвердив неповоротність цього тарифу.";
+  if (typeof rate.name !== "string" || rate.name.trim().replace(/\s+/g, " ").toLowerCase() !== "nr site")
+    return "Лише перегляд: для онлайн-бронювання використовується тариф NR Site.";
   if (rate.saleAllowed === false)
     return "Лише перегляд: обмеження Servio не дозволяють онлайн-бронювання на ці дати.";
   if (rate.saleAllowed !== true)
