@@ -256,7 +256,7 @@ export default function BookingPublicPage() {
   const contactOk = isServio
     ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) && /^[+0-9 ()-]{7,30}$/.test(form.phone.trim())
     : form.email.trim() !== "" || form.phone.trim() !== "";
-  const canSubmit = !!chosen && !!policy && !pending && !resultsOutdated && !stale && !!form.firstName.trim() && !!form.lastName.trim() && contactOk && agree && nrAgree && !submitting && !redirecting;
+  const canSubmit = data?.salesEnabled !== false && !!chosen && !!policy && !pending && !resultsOutdated && !stale && !!form.firstName.trim() && !!form.lastName.trim() && contactOk && agree && nrAgree && !submitting && !redirecting;
   const missing: string[] = [];
   if (chosen) {
     if (!form.firstName.trim() || !form.lastName.trim()) missing.push("ім'я та прізвище");
@@ -420,9 +420,10 @@ export default function BookingPublicPage() {
     );
   }
 
-  const banner = previewLocked && (
+  const banner = data?.salesEnabled === false && (
     <div role="status" className="sticky top-0 z-40 px-5 py-2.5 text-center text-sm" style={{ background: "#292D05", color: "#FFF4E5" }} data-testid="banner-private-preview">
-      Приватний перегляд для команди. Продажі закриті: пошук, бронювання й оплата вимкнені.
+      {previewLocked ? "Приватний перегляд для команди. Продажі закриті: пошук, бронювання й оплата вимкнені."
+        : "Сторінка відкрита для перегляду. Онлайн-бронювання та оплата ще не підключені — зверніться до готелю."}
     </div>
   );
   const pendingPanel = pending && (
@@ -675,11 +676,7 @@ export default function BookingPublicPage() {
 
   return (
     <Shell ap={ap}>
-      {previewLocked && (
-        <div role="status" className="sticky top-0 z-40 px-5 py-2.5 text-center text-sm" style={{ background: "#292D05", color: "#FFF4E5" }} data-testid="banner-private-preview">
-          Приватний перегляд для команди. Продажі закриті: пошук, бронювання й оплата вимкнені. Медіа можна переглядати.
-        </div>
-      )}
+      {banner}
       {header}
 
       <section className="relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${accent} 0%, ${accent}e6 55%, #1c1917 140%)` }}>

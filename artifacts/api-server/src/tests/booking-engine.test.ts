@@ -326,22 +326,27 @@ describe("configuration and tenant isolation", () => {
     const reload = await request(app).get("/api/booking-engine/settings").set("Authorization", "Bearer test");
     expect(reload.body.config.displayName).toBe("Published hotel");
   });
-  it("allows a Servio draft but rejects live Servio publication", async () => {
+  it("allows owner publication of Servio with readiness warnings", async () => {
     const draft = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
       .send({ ...ready(), provider: "servio" });
     expect(draft.status).toBe(200);
-    expect(draft.body.readiness.canPublish).toBe(false);
+    expect(draft.body.readiness.canPublish).toBe(true);
+    expect(draft.body.readiness.issues.length).toBeGreaterThan(0);
     const published = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
       .send({ ...ready(), provider: "servio", published: true });
-    expect(published.status).toBe(409);
-    expect(org.booking_engine_config.published).toBe(false);
+    expect(published.status).toBe(200);
+    expect(org.booking_engine_config.published).toBe(true);
+    const page = await request(app).get("/api/public/booking-engine/test-hotel");
+    expect(page.status).toBe(200);
+    expect(page.body.salesEnabled).toBe(false);
   });
-  it("requires legal texts and real inventory for publication", async () => {
+  it("keeps missing legal texts and inventory as warnings, not publication blockers", async () => {
     units = 0;
     const res = await request(app).put("/api/booking-engine/settings").set("Authorization", "Bearer test")
       .send({ ...ready(), terms: "", privacy: "", published: true });
-    expect(res.status).toBe(409);
-    expect(res.body.issues.length).toBeGreaterThanOrEqual(3);
+    expect(res.status).toBe(200);
+    expect(res.body.config.published).toBe(true);
+    expect(res.body.readiness.issues.length).toBeGreaterThanOrEqual(3);
   });
   it.each(["http://example.test", "javascript:alert(1)", "https://u:password@example.test", "https://example.test/#token"])(
     "rejects unsafe endpoint syntax %s", async url => {

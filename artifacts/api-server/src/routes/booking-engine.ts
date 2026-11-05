@@ -46,7 +46,7 @@ async function view(orgId: number, client: any = pool) {
     FROM units u JOIN properties p ON p.id=u.property_id WHERE p.organization_id=$1 ORDER BY p.id,u.id`, [orgId])).rows;
   return { organization: { id: org.id, name: org.name, slug: org.slug },
     config: { ...safe, hasServioToken: !!servioToken, dogodaBrandAvailable: dogodaBrandAvailable(org) },
-    readiness: { canPublish: issues.length === 0, issues, servioSupported: true }, properties, units };
+    readiness: { canPublish: true, issues, servioSupported: true }, properties, units };
 }
 
 router.get("/settings", async (req: any, res): Promise<void> => {
@@ -180,21 +180,7 @@ router.put("/settings", async (req: any, res): Promise<void> => {
       }
       Object.assign(config, { servioSellerFingerprint: servioFingerprint(config) });
     }
-    const existing = await view(req.user.organizationId, client);
-    const issues = engineIssues(config, existing!.properties.length,
-      (await client.query(`SELECT count(*)::int AS count FROM units u JOIN properties p ON p.id=u.property_id
-        WHERE p.organization_id=$1 AND u.status='active' AND coalesce(u.is_hidden,false)=false AND u.base_price>=0`,
-      [req.user.organizationId])).rows[0]?.count || 0);
-    if (config.published && issues.length) {
-      await client.query("ROLLBACK"); res.status(409).json({ error: issues.join(" "), issues }); return;
-    }
-    if (config.published && config.provider === "servio") {
-      const readiness = await servioSalesReadiness(req.user.organizationId, rows[0].slug, config, client);
-      if (readiness.issues.length) {
-        await client.query("ROLLBACK");
-        res.status(409).json({ error: readiness.issues.join(" "), issues: readiness.issues }); return;
-      }
-    }
+    // The owner controls page visibility; sales endpoints retain their own readiness guards.
     await client.query("UPDATE organizations SET booking_engine_config=$2::jsonb,updated_at=NOW() WHERE id=$1",
       [req.user.organizationId, JSON.stringify(config)]);
     const result = await view(req.user.organizationId, client);
@@ -257,8 +243,10 @@ publicEngineRouter.get("/:slug", (req, res, next) => {
       return { id: `unit:${unit.id}`, name: unit.name, category: unit.category ?? "",
         description: media?.description || unit.description || "", photos: media?.photos ?? [], videoUrl: media?.videoUrl ?? "" };
     });
+  const salesIssues = engineIssues(config, properties.length, visibleUnits.length);
+  if (config.provider === "servio") salesIssues.push(...(await servioSalesReadiness(org.id, org.slug, config)).issues);
   res.json({ organization: { name: org.name, slug: org.slug }, config: publicEngineConfig(config, visibleUnits.map((unit: any) => unit.id)), properties, currency: "UAH",
-    accommodationCatalog, preview, salesEnabled: !preview && config.published,
+    accommodationCatalog, preview, salesEnabled: !preview && config.published && salesIssues.length === 0,
     tariffPolicy: BOOKING_TARIFF_POLICY });
 });
 export default router;

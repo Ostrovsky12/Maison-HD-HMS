@@ -251,13 +251,13 @@ export default function BookingStudioPage() {
 
         {/* Readiness + publication strip */}
         <div className="grid md:grid-cols-[1.4fr_1fr] gap-4">
-          <Section n="01" title="Готовність до публікації" hint="Перевіряється сервером після збереження">
-            {readiness.canPublish && !dirty ? (
-              <div className="flex items-center gap-2 text-sm text-emerald-800"><CheckCircle2 className="w-4 h-4" />Усі умови виконано. Сторінку можна публікувати.</div>
+          <Section n="01" title="Готовність до приймання бронювань" hint="Попередження не блокують публікацію сторінки">
+            {!readiness.issues.length && !dirty ? (
+              <div className="flex items-center gap-2 text-sm text-emerald-800"><CheckCircle2 className="w-4 h-4" />Усі умови виконано. Приймання бронювань готове.</div>
             ) : (
               <ul className="space-y-1.5" data-testid="list-readiness-issues">
                 {(dirty
-                    ? ["Збережіть зміни, щоб сервер повторно перевірив готовність до публікації."]
+                    ? ["Збережіть зміни, щоб сервер повторно перевірив готовність до приймання бронювань."]
                     : readiness.issues.length ? readiness.issues : ["Сервер не повідомив про готовність"]).map((i, idx) => (
                   <li key={idx} className="flex gap-2 text-sm text-stone-700"><span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />{i}</li>
                 ))}
@@ -266,9 +266,10 @@ export default function BookingStudioPage() {
             <div className="mt-4 pt-4 border-t border-stone-200 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-stone-800">Публікація</p>
+                <p className="text-xs text-muted-foreground">Ви вирішуєте, коли відкрити сторінку. Попередження вище не блокують публікацію; оплата потребує налаштованого LiqPay.</p>
                 <p className="text-xs text-stone-500">Вимкнена сторінка повертає 404 для гостей</p>
               </div>
-              <Switch data-testid="switch-published" checked={form.published} onCheckedChange={(v) => set("published", v)} disabled={!form.published && (dirty || !readiness.canPublish)} />
+              <Switch data-testid="switch-published" checked={form.published} onCheckedChange={(v) => set("published", v)} />
             </div>
             {form.published && !readiness.canPublish && (
               <p className="text-xs text-amber-700 mt-2">Сервер відхилить публікацію, доки не усунуто зауваження вище.</p>
