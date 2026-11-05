@@ -24,6 +24,7 @@
 - [Servio overbooking boundary](servio-overbooking-boundary.md) — shared durable admission prevents local double sales; provider lag and external channels require conservative reconciliation.
 - [Незавершені бронювання](booking-draft-recovery.md) — користувач обрав автозбереження контактів з видимим попередженням для ручного опрацювання.
 - [Verification resource budget](workspace-verification-budget.md) — keep wide checks serial and bounded to avoid restarting the shared workspace.
+- [GitHub updates](github-updates.md) — користувач вимагає фіксувати оновлення проєкту в GitHub; native Git може працювати навіть без доступу через конектор.
 - [Sandbox network diagnostics](sandbox-network-diagnostics.md) — missing AbortSignal can look like upstream failure when broad catches hide reference errors
 - [Fiscal migration boundary](fiscal-migration-boundary.md) — journaled changes target dev; managed production receives Publish diffs and startup only verifies compatibility.
 - [Generated contract validation](generated-contract-validation.md) — runtime schemas can work while TypeScript reads stale declarations after an upstream library build failure.
