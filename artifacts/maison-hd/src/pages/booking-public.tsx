@@ -186,6 +186,7 @@ export default function BookingPublicPage() {
       const j = await r.json();
       if (isServio) {
         if (j.status === "failed") throw new Error(s(j.message) || "Servio тимчасово недоступний");
+        if (j.code === "no_eligible_rates") throw new Error(s(j.message) || "Вільні місця є, але онлайн-тариф недоступний. Зверніться до готелю.");
         if (j.status === "partial" && !j.currency) throw new Error(s(j.message) || "Servio не повернув підтверджених цін");
         const nights = (Date.parse(co) - Date.parse(ci)) / 86400000;
         const catalog = Array.isArray(data?.accommodationCatalog) ? data.accommodationCatalog : [];

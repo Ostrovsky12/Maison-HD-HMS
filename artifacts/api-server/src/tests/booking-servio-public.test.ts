@@ -103,6 +103,28 @@ describe("public Servio booking", () => {
     const res = await request(app).post("/dogoda/servio/search").send(search);
     expect(res.status).toBe(200); expect(res.body.categories[0].rates).toEqual([]);
   });
+  it.each([
+    ["nonRefundable", false, "не підтверджено неповоротність"],
+    ["saleAllowed", null, "не вдалося перевірити всі обмеження"],
+    ["saleAllowed", false, "умови Servio не дозволяють продаж"],
+  ])("distinguishes available rooms from unavailable tariffs: %s=%s", async (field, value, reason) => {
+    (snapshot.categories[0].rates[0] as any)[field as string] = value;
+    const res = await request(app).post("/dogoda/servio/search").send(search);
+    expect(res.status).toBe(200);
+    expect(res.body.code).toBe("no_eligible_rates");
+    expect(res.body.status).toBe("partial");
+    expect(res.body.message).toContain("Вільні місця є");
+    expect(res.body.message).toContain(reason);
+    expect(res.body.categories[0].freeRooms).toBeGreaterThan(0);
+    expect(res.body.categories[0].rates).toEqual([]);
+    expect(f.create).not.toHaveBeenCalled();
+  });
+  it("does not label actual zero availability as a tariff failure", async () => {
+    snapshot.categories[0].freeRooms = 0;
+    const res = await request(app).post("/dogoda/servio/search").send(search);
+    expect(res.status).toBe(200);
+    expect(res.body.code).not.toBe("no_eligible_rates");
+  });
   it("creates a reservation from a revalidated rate, using only the configured seller", async () => {
     const res = await request(app).post("/dogoda/servio/reservations").send({ ...input, propertyId: 999, organizationId: 999 });
     expect(res.status).toBe(200);
