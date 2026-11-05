@@ -4,6 +4,8 @@ export const MAX_PARTY = 20;
 
 type Props = {
   properties: { id: number; name: string }[];
+  /** Display-only hotel name for provider inventory; never a local property ID. */
+  hotelName?: string;
   propertyId: string; setPropertyId: (v: string) => void;
   checkIn: string; setCheckIn: (v: string) => void;
   checkOut: string; setCheckOut: (v: string) => void;
@@ -43,7 +45,7 @@ export function SearchBar(p: Props) {
         ) : (
           <div className={`${seg} dg-search-field dg-search-property`}>
             <span className={lbl}><Building2 className="w-3.5 h-3.5" />Об'єкт</span>
-            <p className="text-sm text-stone-700 mt-0.5 truncate">{p.properties[0]?.name ?? "—"}</p>
+            <p data-testid="text-search-property" className="text-sm text-stone-700 mt-0.5 truncate" title={p.hotelName || p.properties[0]?.name}>{p.hotelName || p.properties[0]?.name || "—"}</p>
           </div>
         )}
         <span className="hidden md:block w-px h-8 bg-stone-200" />

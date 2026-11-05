@@ -503,7 +503,7 @@ export default function BookingPublicPage() {
             <section className="dg-rise" aria-labelledby="dg-step1">
               <p className="dg-hand hidden md:block text-2xl" style={{ color: "var(--dg-button)" }}>pick your dates</p>
               <h2 id="dg-step1" className="text-3xl md:text-4xl tracking-tight mb-6">Коли приїдете і скільки вас?</h2>
-              <SearchBar properties={properties} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}
+              <SearchBar properties={properties} hotelName={isServio ? name : undefined} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}
                 checkOut={checkOut} setCheckOut={setCheckOut} guests={guests} setGuests={setGuests} minDate={ymd(today)} searching={searching} onSearch={search} accent={accent}
                 childAges={childAges} setChildAges={setChildAges} locked={previewLocked} lockedNote="Приватний перегляд: продажі закриті, тому пошук вільних дат вимкнено." />
               {stale && !chosen && (
@@ -695,7 +695,7 @@ export default function BookingPublicPage() {
       </section>
 
       <div className="max-w-6xl mx-auto px-4 md:px-5 -mt-12 md:-mt-14 relative z-10">
-        <SearchBar properties={properties} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}
+        <SearchBar properties={properties} hotelName={isServio ? name : undefined} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}
           checkOut={checkOut} setCheckOut={setCheckOut} guests={guests} setGuests={setGuests} minDate={ymd(today)} searching={searching} onSearch={search} accent={accent} />
       </div>
 
