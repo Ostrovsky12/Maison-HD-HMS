@@ -3,6 +3,7 @@ import { useParams } from "wouter";
 import { useGetPublicBookingEngine } from "@workspace/api-client-react";
 import { UnitCard, type PublicUnit } from "@/components/booking/unit-card";
 import { ServioCategoryCard, type ServioCharge } from "@/components/booking/servio-category-card";
+import { servioRateViewOnlyReason } from "@/lib/servio-rate-view";
 import { CANONICAL_PAYMENT_NOTICE, PAYMENT_WINDOW_LABEL, supplementaryText } from "@/lib/payment-window";
 import type { BookingRoomDetails } from "@workspace/api-client-react";
 import { SearchBar, MAX_PARTY } from "@/components/booking/search-bar";
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 
 type Unit = PublicUnit & {
+  viewOnlyReason?: string;
   servio?: { categoryId: number; priceListId: number; rateConditionId: number };
   servioGroup?: { key: string; categoryName: string; rateName: string; charges: ServioCharge[]; details?: BookingRoomDetails };
 };
@@ -195,6 +197,7 @@ export default function BookingPublicPage() {
           const media = catalog.find((item: any) => item.id === `servio:${j.hotelId}:${c.id}`);
           return (Array.isArray(c.rates) ? c.rates : []).map((rate: any) => ({
             id: ++id, name: s(c.name), category: s(rate.name), capacity: n(c.mainPlaces), maxCapacity: null,
+            viewOnlyReason: servioRateViewOnlyReason(rate),
             description: s(media?.description), photos: photoList(media?.photos), videoUrl: s(media?.videoUrl),
             basePrice: 0, totalPrice: n(rate.total), propertyName: name,
             squareMeters: null, hasBalcony: null, hasView: null,
@@ -257,7 +260,7 @@ export default function BookingPublicPage() {
   const contactOk = isServio
     ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) && /^[+0-9 ()-]{7,30}$/.test(form.phone.trim())
     : form.email.trim() !== "" || form.phone.trim() !== "";
-  const canSubmit = data?.salesEnabled !== false && !!chosen && !!policy && !pending && !resultsOutdated && !stale && !!form.firstName.trim() && !!form.lastName.trim() && contactOk && agree && nrAgree && !submitting && !redirecting;
+  const canSubmit = data?.salesEnabled !== false && !!chosen && !chosen.viewOnlyReason && !!policy && !pending && !resultsOutdated && !stale && !!form.firstName.trim() && !!form.lastName.trim() && contactOk && agree && nrAgree && !submitting && !redirecting;
   const missing: string[] = [];
   if (chosen) {
     if (!form.firstName.trim() || !form.lastName.trim()) missing.push("ім'я та прізвище");
@@ -472,7 +475,7 @@ export default function BookingPublicPage() {
             <p className="flex items-center gap-2 text-stone-600"><CalendarDays className="w-4 h-4 shrink-0" />{fmtDate(checkIn)} – {fmtDate(checkOut)}{hasResults ? ` · ${nights} ноч.` : ""}</p>
             <p className="flex items-start gap-2 text-stone-600" data-testid="text-summary-party"><Users className="w-4 h-4 shrink-0 mt-0.5" />{party}</p>
             {chosen && <div className="flex justify-between items-baseline border-t border-stone-200 pt-3"><span className="font-semibold">Разом</span><span className="text-xl font-semibold font-mono" data-testid="text-summary-total">{money(chosen.totalPrice)}</span></div>}
-            {policy && <p className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-900"><b>Неповоротний тариф:</b> 100% оплата онлайн, без повернення коштів і зміни дат.</p>}
+            {policy && (!isServio || chosen) && <p className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-900"><b>Неповоротний тариф:</b> 100% оплата онлайн, без повернення коштів і зміни дат.</p>}
             {eff > 1 && <button type="button" onClick={() => go(1)} className="inline-flex items-center gap-1.5 text-xs underline" data-testid="button-edit-search"><Pencil className="w-3.5 h-3.5" />Змінити дати або гостей</button>}
           </div>
         </div>
@@ -547,9 +550,9 @@ export default function BookingPublicPage() {
                       <ServioCategoryCard key={g.key} categoryKey={g.key} name={f.name} photos={f.photos} description={f.description} details={f.servioGroup?.details}
                         capacity={f.capacity} accent={accent} supplementary={supplementaryText(cfg.paymentWindowText)} disabled={!!pending || previewLocked}
                         selectedId={chosen && g.units.some((u) => u.id === chosen.id) ? chosen.id : null}
-                        rates={g.units.map((u) => ({ id: u.id, rateName: u.servioGroup?.rateName ?? u.category, total: u.totalPrice, charges: u.servioGroup?.charges ?? [] }))}
+                        rates={g.units.map((u) => ({ id: u.id, rateName: u.servioGroup?.rateName ?? u.category, total: u.totalPrice, charges: u.servioGroup?.charges ?? [], viewOnlyReason: u.viewOnlyReason }))}
                         onSelect={(id) => {
-                          const u = g.units.find((x) => x.id === id); if (!u) return;
+                          const u = g.units.find((x) => x.id === id); if (!u || u.viewOnlyReason) return;
                           if (chosen?.id !== u.id) { setNrAgreedKey(null); setAgree(false); }
                           setChosen(u); setStale(null); setSubmitErr(null); go(3);
                         }} />
@@ -690,7 +693,7 @@ export default function BookingPublicPage() {
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5"><Clock className="w-3.5 h-3.5" />Заїзд з {s(cfg.checkInTime, "14:00")}</span>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5"><Clock className="w-3.5 h-3.5" />Виїзд до {s(cfg.checkOutTime, "12:00")}</span>
             {properties.length > 1 && <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5"><MapPin className="w-3.5 h-3.5" />{properties.length} об'єкти</span>}
-            {policy && <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-red-800 font-semibold"><CreditCard className="w-3.5 h-3.5" />Неповоротний тариф, 100% онлайн-оплата</span>}
+            {policy && (!isServio || chosen) && <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-red-800 font-semibold"><CreditCard className="w-3.5 h-3.5" />Неповоротний тариф, 100% онлайн-оплата</span>}
           </div>
         </div>
       </section>
@@ -767,9 +770,9 @@ export default function BookingPublicPage() {
                     На ці дати немає вільних номерів для {guests} дорослих. Спробуйте інші дати{phone || email ? " або зв'яжіться з готелем" : ""}.
                   </div>
                 ) : results.units.map((u) => (
-                  <UnitCard key={u.id} unit={u} nights={results.nights} accent={accent} active={chosen?.id === u.id} disabled={!!resultsOutdated || !!pending}
-                    policyBadge={policy ? "Неповоротний · 100% передоплата" : undefined}
-                    onSelect={() => { setChosen(u); setStale(null); setSubmitErr(null); setTimeout(() => document.querySelector('[data-testid="form-booking"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); }} />
+                  <UnitCard key={u.id} unit={u} nights={results.nights} accent={accent} active={chosen?.id === u.id} disabled={!!resultsOutdated || !!pending || !!u.viewOnlyReason}
+                    viewOnlyReason={u.viewOnlyReason} policyBadge={u.viewOnlyReason ? undefined : policy ? "Неповоротний · 100% передоплата" : undefined}
+                    onSelect={() => { if (u.viewOnlyReason) return; setChosen(u); setStale(null); setSubmitErr(null); setTimeout(() => document.querySelector('[data-testid="form-booking"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); }} />
                 ))}
               </section>
             )}
@@ -878,7 +881,7 @@ export default function BookingPublicPage() {
                   <div className="mt-3 flex items-center gap-2 text-sm text-stone-600"><CalendarDays className="w-4 h-4" />{fmtDate(checkIn)} – {fmtDate(checkOut)}</div>
                   <div className="mt-1 flex items-center gap-2 text-sm text-stone-600"><Users className="w-4 h-4" />{guests} дорослих</div>
                   <p className="text-sm text-stone-500 mt-4">Оберіть номер, щоб побачити підсумок і перейти до оплати.</p>
-                  {policy && <p className="mt-4 rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-900"><b>Неповоротний тариф:</b> 100% оплата онлайн при бронюванні, без повернення коштів і зміни дат.</p>}
+                  {policy && <p className="mt-4 rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-900">{isServio ? "Для онлайн-бронювання потрібен підтверджений неповоротний тариф. Інші ціни показуються лише для перегляду." : <><b>Неповоротний тариф:</b> 100% оплата онлайн при бронюванні, без повернення коштів і зміни дат.</>}</p>}
                 </div>
               )}
             </div>

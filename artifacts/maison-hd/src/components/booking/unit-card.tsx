@@ -13,9 +13,9 @@ export type PublicUnit = {
 const money = (v: number) => new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 2 }).format(v) + " грн";
 const nightsWord = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? "ніч" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "ночі" : "ночей");
 
-type Props = { unit: PublicUnit; nights: number; accent: string; active: boolean; disabled: boolean; onSelect: () => void; policyBadge?: string };
+type Props = { unit: PublicUnit; nights: number; accent: string; active: boolean; disabled: boolean; onSelect: () => void; policyBadge?: string; viewOnlyReason?: string };
 
-export function UnitCard({ unit: u, nights, accent, active, disabled, onSelect, policyBadge }: Props) {
+export function UnitCard({ unit: u, nights, accent, active, disabled, onSelect, policyBadge, viewOnlyReason }: Props) {
   const [expanded, setExpanded] = useState(false);
   const longDesc = u.description.length > 220 || u.description.split("\n").length > 3;
   const amenities: { icon: typeof Users; label: string }[] = [];
@@ -53,12 +53,13 @@ export function UnitCard({ unit: u, nights, accent, active, disabled, onSelect, 
         <div className="mt-auto pt-5 flex items-end justify-between gap-3 border-t border-stone-200/80">
           <div>
             <p className="text-2xl font-semibold font-mono" data-testid={`text-total-${u.id}`}>{money(u.totalPrice)}</p>
-            <p className="text-xs text-stone-500">за {nights} {nightsWord(nights)}, онлайн-тариф</p>
+            <p className="text-xs text-stone-500">за {nights} {nightsWord(nights)}, {viewOnlyReason ? "ціна Servio для перегляду" : "онлайн-тариф"}</p>
+            {viewOnlyReason && <p className="mt-1 text-xs text-amber-900">{viewOnlyReason}</p>}
             {policyBadge && <p className="mt-1 inline-block text-[11px] font-semibold text-red-800 bg-red-50 border border-red-200 rounded-md px-2 py-0.5">{policyBadge}</p>}
           </div>
-          <button type="button" data-testid={`button-select-unit-${u.id}`} disabled={disabled} onClick={onSelect}
+          <button type="button" data-testid={`button-select-unit-${u.id}`} disabled={disabled || !!viewOnlyReason} onClick={() => { if (!viewOnlyReason) onSelect(); }}
             className="rounded-xl px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 inline-flex items-center gap-1.5" style={{ background: accent }}>
-            {active ? <><Check className="w-4 h-4" />Обрано</> : "Обрати"}
+            {viewOnlyReason ? "Лише перегляд" : active ? <><Check className="w-4 h-4" />Обрано</> : "Обрати"}
           </button>
         </div>
       </div>

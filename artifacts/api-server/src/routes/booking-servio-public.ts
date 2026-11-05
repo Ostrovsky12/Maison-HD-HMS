@@ -70,7 +70,7 @@ router.post("/:slug/servio/search", searchLimit, async (req, res) => {
       checkInTime: config.checkInTime, checkOutTime: config.checkOutTime,
     }, normalizedSearch(parsed.data), ready.categories);
     await applyServioLocalCapacity(snapshot, { base: servioBaseUrl(config.servioBaseUrl), hotelId: servioHotelId(config.servioHotelId) });
-    // Never offer a price with unknown sale restrictions or substitute a local rate.
+    // Provider quotes can be viewed without making them eligible for checkout.
     const excludedReasons = new Set<string>();
     for (const category of snapshot.categories.filter(category => category.freeRooms > 0)) {
       for (const rate of category.rates) {
@@ -83,13 +83,19 @@ router.post("/:slug/servio/search", searchLimit, async (req, res) => {
     if (!snapshot.currency || !["UAH", "ГРН", "ГРН.", "₴"].includes(snapshot.currency.trim().toUpperCase()))
       excludedReasons.add("валюта тарифу не підтримується для оплати");
     snapshot.categories = snapshot.categories.map(category => ({
-      ...category, rates: category.rates.filter(rate => eligibleServioRate(rate, category, snapshot.currency)),
+      ...category, rates: category.rates.filter(rate => category.freeRooms > 0
+        && Number.isFinite(rate.total) && rate.total > 0 && !!snapshot.currency
+        && ["UAH", "ГРН", "ГРН.", "₴"].includes(snapshot.currency.trim().toUpperCase())),
     }));
     if (snapshot.categories.some(category => category.freeRooms > 0)
       && !snapshot.categories.some(category => category.rates.length)) {
       snapshot.status = "partial";
       snapshot.code = "no_eligible_rates";
       snapshot.message = `Вільні місця є, але онлайн-тариф недоступний: ${[...excludedReasons].join("; ") || "Servio не повернув підтверджених цін"}. Зверніться до готелю.`;
+    } else if (snapshot.categories.some(category => category.rates.length)
+      && !snapshot.categories.some(category => category.rates.some(rate => eligibleServioRate(rate, category, snapshot.currency)))) {
+      snapshot.code = "view_only_rates";
+      snapshot.message = "Ціни отримані із Servio для перегляду. Умови цих тарифів ще не дозволяють онлайн-оформлення.";
     }
     res.json(SearchPublicServioBookingResponse.parse(snapshot));
   } catch {

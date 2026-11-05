@@ -94,30 +94,37 @@ describe("public Servio booking", () => {
     expect(res.status).toBe(503);
     expect(f.search).not.toHaveBeenCalled();
   });
-  it.each(["refundable", "unknown", "sold_out", "currency"])("never offers %s rates", async kind => {
+  it.each(["sold_out", "currency"])("does not display %s prices as available UAH quotes", async kind => {
     const category = snapshot.categories[0], rate = category.rates[0];
-    if (kind === "refundable") rate.nonRefundable = false;
-    if (kind === "unknown") rate.saleAllowed = null;
     if (kind === "sold_out") category.freeRooms = 0;
     if (kind === "currency") snapshot.currency = "USD";
     const res = await request(app).post("/dogoda/servio/search").send(search);
     expect(res.status).toBe(200); expect(res.body.categories[0].rates).toEqual([]);
   });
   it.each([
-    ["nonRefundable", false, "не підтверджено неповоротність"],
-    ["saleAllowed", null, "не вдалося перевірити всі обмеження"],
-    ["saleAllowed", false, "умови Servio не дозволяють продаж"],
-  ])("distinguishes available rooms from unavailable tariffs: %s=%s", async (field, value, reason) => {
+    ["nonRefundable", false],
+    ["saleAllowed", null],
+    ["saleAllowed", false],
+  ])("shows %s=%s quotes for viewing but refuses reservation creation", async (field, value) => {
     (snapshot.categories[0].rates[0] as any)[field as string] = value;
     const res = await request(app).post("/dogoda/servio/search").send(search);
     expect(res.status).toBe(200);
-    expect(res.body.code).toBe("no_eligible_rates");
-    expect(res.body.status).toBe("partial");
-    expect(res.body.message).toContain("Вільні місця є");
-    expect(res.body.message).toContain(reason);
+    expect(res.body.code).toBe("view_only_rates");
     expect(res.body.categories[0].freeRooms).toBeGreaterThan(0);
-    expect(res.body.categories[0].rates).toEqual([]);
+    expect(res.body.categories[0].rates).toHaveLength(1);
+    expect(res.body.categories[0].rates[0]).toMatchObject({ [field as string]: value, total: 200 });
     expect(f.create).not.toHaveBeenCalled();
+    const reserve = await request(app).post("/dogoda/servio/reservations").send(input);
+    expect(reserve.status).toBeGreaterThanOrEqual(400);
+    expect(f.create).not.toHaveBeenCalled();
+  });
+  it("preserves eligible and view-only quotes in the same category", async () => {
+    snapshot.categories[0].rates.push({ ...snapshot.categories[0].rates[0], priceListId: 13, nonRefundable: false, total: 250 });
+    const res = await request(app).post("/dogoda/servio/search").send(search);
+    expect(res.status).toBe(200);
+    expect(res.body.categories[0].rates).toHaveLength(2);
+    expect(res.body.categories[0].rates.map((rate: any) => rate.nonRefundable)).toEqual([true, false]);
+    expect(res.body.code).not.toBe("view_only_rates");
   });
   it("does not label actual zero availability as a tariff failure", async () => {
     snapshot.categories[0].freeRooms = 0;

@@ -5,7 +5,7 @@ import { UnitGallery } from "./unit-gallery";
 import { CANONICAL_PAYMENT_NOTICE, PAYMENT_WINDOW_LABEL } from "@/lib/payment-window";
 
 export type ServioCharge = { serviceName: string; date: string; amount: number };
-export type ServioRateOption = { id: number; rateName: string; total: number; charges: ServioCharge[] };
+export type ServioRateOption = { id: number; rateName: string; total: number; charges: ServioCharge[]; viewOnlyReason?: string };
 
 const money = (v: number) => new Intl.NumberFormat("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v) + " грн";
 const shortDate = (v: string) => { const d = new Date(v.slice(0, 10) + "T00:00:00"); return isNaN(d.getTime()) ? v : d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" }); };
@@ -68,7 +68,7 @@ export function ServioCategoryCard(p: Props) {
             <div className="mt-3 space-y-3">
               {p.rates.map((r) => {
                 const sel = p.selectedId === r.id;
-                const rTitle = d.tariffTitle?.trim() || r.rateName;
+                const rTitle = r.viewOnlyReason ? r.rateName : d.tariffTitle?.trim() || r.rateName;
                 const sum = r.charges.reduce((a, c) => a + c.amount, 0);
                 return (
                   <div key={r.id} className="rounded-2xl p-4 border" style={{ background: "color-mix(in srgb, var(--dg-button, #cfe8c9) 22%, transparent)", borderColor: sel ? "var(--dg-text, #222)" : "transparent" }} data-testid={`card-rate-${r.id}`}>
@@ -77,32 +77,35 @@ export function ServioCategoryCard(p: Props) {
                         <p className="font-medium">{rTitle}</p>
                         {rTitle !== r.rateName && <p className="text-[11px] text-stone-500">Servio: {r.rateName}</p>}
                       </div>
-                      {d.tariffDescription?.trim() && (
+                      {!r.viewOnlyReason && d.tariffDescription?.trim() && (
                         <button type="button" onClick={() => setRateDesc((x) => (x === r.id ? null : r.id))} className="shrink-0 inline-flex items-center gap-1 text-xs" data-testid={`button-rate-desc-${r.id}`}>
                           {rateDesc === r.id ? "Згорнути" : "Детальніше"}<ChevronDown className={`w-3.5 h-3.5 ${rateDesc === r.id ? "rotate-180" : ""}`} />
                         </button>
                       )}
                     </div>
-                    {d.tariffDescription?.trim() && <p className={`mt-2 text-xs leading-relaxed whitespace-pre-line text-stone-600 ${rateDesc === r.id ? "" : "line-clamp-1"}`}>{d.tariffDescription}</p>}
+                    {r.viewOnlyReason ? <p className="mt-2 text-xs text-amber-900" data-testid={`text-rate-view-only-${r.id}`}>{r.viewOnlyReason}</p>
+                      : d.tariffDescription?.trim() && <p className={`mt-2 text-xs leading-relaxed whitespace-pre-line text-stone-600 ${rateDesc === r.id ? "" : "line-clamp-1"}`}>{d.tariffDescription}</p>}
                     {info === r.id && (
                       <div className="mt-3 rounded-xl bg-white border border-stone-300 p-3 text-xs space-y-1.5" data-testid={`panel-rate-info-${r.id}`}>
                         <p className="font-semibold text-sm">Деталі</p>
                         {r.charges.length ? r.charges.map((c, i) => (
                           <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-2"><span>{c.serviceName}</span><span>{shortDate(c.date)}</span><span className="font-mono">{money(c.amount)}</span></div>
                         )) : <p className="text-stone-500">Servio не передав розбивку за послугами.</p>}
-                        {r.charges.length > 0 && Math.abs(sum - r.total) > 0.005 && <p className="text-stone-500">Підсумок Servio відрізняється від суми рядків; до сплати буде підсумок Servio.</p>}
+                        {r.charges.length > 0 && Math.abs(sum - r.total) > 0.005 && <p className="text-stone-500">Підсумок Servio відрізняється від суми рядків; показано підсумок Servio.</p>}
                         <div className="flex justify-between border-t border-stone-200 pt-1.5 font-semibold"><span>Всього</span><span className="font-mono">{money(r.total)}</span></div>
-                        <p className="rounded-lg px-2 py-1.5 text-center whitespace-pre-line" style={{ background: "var(--dg-button, #e9d96a)" }}>{p.supplementary || CANONICAL_PAYMENT_NOTICE}</p>
-                        <p className="text-stone-600">{PAYMENT_WINDOW_LABEL}</p>
-                        <p className="text-center">Оплата на сайті</p>
+                        {r.viewOnlyReason ? <p className="text-amber-900">{r.viewOnlyReason} Для бронювання зверніться до готелю.</p> : <>
+                          <p className="rounded-lg px-2 py-1.5 text-center whitespace-pre-line" style={{ background: "var(--dg-button, #e9d96a)" }}>{p.supplementary || CANONICAL_PAYMENT_NOTICE}</p>
+                          <p className="text-stone-600">{PAYMENT_WINDOW_LABEL}</p>
+                          <p className="text-center">Оплата на сайті</p>
+                        </>}
                       </div>
                     )}
                     <div className="mt-3 flex items-center justify-end gap-2">
                       <span className="font-semibold font-mono" data-testid={`text-rate-total-${r.id}`}>{money(r.total)}</span>
                       <button type="button" aria-label="Деталі ціни та оплати" aria-expanded={info === r.id} onClick={() => setInfo((x) => (x === r.id ? null : r.id))}
                         className="w-8 h-8 rounded-full grid place-items-center" style={{ background: "var(--dg-button, #e9d96a)" }} data-testid={`button-rate-info-${r.id}`}><Info className="w-4 h-4" /></button>
-                      <button type="button" disabled={p.disabled} onClick={() => p.onSelect(r.id)} className="rounded-full px-5 h-10 text-sm font-semibold bg-stone-900 text-[#fbfaf7] disabled:opacity-50 inline-flex items-center gap-1.5" data-testid={`button-select-rate-${r.id}`}>
-                        {sel && <Check className="w-4 h-4" />}{sel ? "Обрано" : "Обрати"}
+                      <button type="button" disabled={p.disabled || !!r.viewOnlyReason} onClick={() => { if (!r.viewOnlyReason) p.onSelect(r.id); }} className="rounded-full px-5 h-10 text-sm font-semibold bg-stone-900 text-[#fbfaf7] disabled:opacity-50 inline-flex items-center gap-1.5" data-testid={`button-select-rate-${r.id}`}>
+                        {sel && <Check className="w-4 h-4" />}{r.viewOnlyReason ? "Лише перегляд" : sel ? "Обрано" : "Обрати"}
                       </button>
                     </div>
                   </div>
