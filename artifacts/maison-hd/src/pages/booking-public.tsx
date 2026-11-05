@@ -7,6 +7,7 @@ import { servioRateViewOnlyReason } from "@/lib/servio-rate-view";
 import { CANONICAL_PAYMENT_NOTICE, PAYMENT_WINDOW_LABEL, supplementaryText } from "@/lib/payment-window";
 import type { BookingRoomDetails } from "@workspace/api-client-react";
 import { SearchBar, MAX_PARTY } from "@/components/booking/search-bar";
+import { MAX_NIGHTS } from "@/components/booking/date-range-field";
 import { NonRefundableConsent } from "@/components/booking/nonrefundable-consent";
 import { PaymentStatusView } from "@/components/booking/payment-status-view";
 import { photoList } from "@/lib/booking-media";
@@ -168,6 +169,9 @@ export default function BookingPublicPage() {
     setSearchErr(null); setStale(null); setChosen(null); setSubmitErr(null); setNrAgreedKey(null);
     if (ap) setAgree(false);
     if (!(checkOut > checkIn)) { setSearchErr("Дата виїзду має бути пізніше дати заїзду"); return; }
+    if (ap && Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86400000) > MAX_NIGHTS) {
+      setSearchErr(`Оберіть період до ${MAX_NIGHTS} ночі.`); return;
+    }
     if (checkIn < ymd(today)) { setSearchErr("Дата заїзду не може бути в минулому"); return; }
     if (kids.some((a) => a === null || !Number.isInteger(a) || a < 0 || a > 17)) { setSearchErr("Вкажіть вік кожної дитини (від 0 до 17 років)."); return; }
     if (totalGuests > MAX_PARTY) { setSearchErr(`Не більше ${MAX_PARTY} гостей в одному бронюванні.`); return; }
@@ -491,11 +495,10 @@ export default function BookingPublicPage() {
 
     return (
       <Shell ap={ap}>
-        {banner}
         {header}
         <main className="max-w-6xl mx-auto px-4 md:px-5 py-6 md:py-10">
           <h1 className="sr-only" data-testid="text-dogoda-title">{name}: бронювання</h1>
-          <div className="mb-6 overflow-x-auto"><DogodaSteps step={eff} onGo={go} /></div>
+          <div className="mb-6 overflow-x-auto flex justify-center"><DogodaSteps step={eff} onGo={go} /></div>
           {!policy && (
             <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 flex gap-2" data-testid="text-policy-unavailable">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />Онлайн-оплата зараз недоступна, тому бронювання тимчасово неможливе. Зв'яжіться з нами напряму.
@@ -509,7 +512,7 @@ export default function BookingPublicPage() {
               <h2 id="dg-step1" className="text-3xl md:text-4xl tracking-tight mb-6">Коли приїдете і скільки вас?</h2>
               <SearchBar properties={properties} hotelName={isServio ? name : undefined} propertyId={propertyId} setPropertyId={setPropertyId} checkIn={checkIn} setCheckIn={setCheckIn}
                 checkOut={checkOut} setCheckOut={setCheckOut} guests={guests} setGuests={setGuests} minDate={ymd(today)} searching={searching} onSearch={search} accent={accent}
-                childAges={childAges} setChildAges={setChildAges} locked={previewLocked} lockedNote="Приватний перегляд: продажі закриті, тому пошук вільних дат вимкнено." />
+                childAges={childAges} setChildAges={setChildAges} rangeCalendar locked={previewLocked} lockedNote="Приватний перегляд: продажі закриті, тому пошук вільних дат вимкнено." />
               {stale && !chosen && (
                 <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900" data-testid="text-price-changed">
                   <p className="font-medium">{stale}</p>
@@ -519,7 +522,7 @@ export default function BookingPublicPage() {
               {searchErr && <p className="mt-4 text-sm text-red-700" role="alert" data-testid="text-search-error">{searchErr}</p>}
               {searching && <div className="mt-8 space-y-6 animate-pulse">{[0, 1].map((i) => <div key={i} className="h-64 bg-stone-200 rounded-3xl" />)}</div>}
               {!searching && (
-                <p className="mt-6 text-sm dg-muted flex items-center gap-2"><Clock className="w-4 h-4" />Заїзд з {s(cfg.checkInTime, "14:00")}, виїзд до {s(cfg.checkOutTime, "12:00")}. Покажемо лише вільні варіанти з ціною за весь період.</p>
+                <p className="mt-6 text-sm dg-muted text-center" data-testid="text-search-hint">Покажемо лише вільні варіанти з ціною за весь період.</p>
               )}
             </section>
           )}
@@ -648,6 +651,11 @@ export default function BookingPublicPage() {
                     <p className="mt-1">Ваші дані збережено. Виконайте пошук ще раз і оберіть будиночок.</p>
                     <button type="button" onClick={() => { go(1); void search(); }} className="mt-2 underline">Оновити пошук</button>
                   </div>
+                )}
+                {data?.salesEnabled === false && (
+                  <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="text-checkout-unavailable">
+                    {previewLocked ? "Приватний перегляд: продажі закриті, бронювання й оплата вимкнені." : "Онлайн-оплата ще не підключена. Щоб забронювати, зв'яжіться з нами напряму."}
+                  </p>
                 )}
                 {submitErr && <p className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-900" data-testid="text-submit-error">{submitErr}</p>}
                 <div className="rounded-2xl bg-stone-900 text-white p-4 md:p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between" style={{ color: "var(--dg-surface)" }}>

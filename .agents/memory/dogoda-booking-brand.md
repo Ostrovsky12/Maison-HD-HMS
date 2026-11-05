@@ -15,8 +15,20 @@ The guest module must open directly with dates and guests, including adding chil
 
 **How to apply:** Treat DOGODA booking as a sequential transaction, not a landing page. Keep accommodation media with the post-search selection, even when revisiting the brand design.
 
-On mobile, remove decorative English copy, center text, keep arrival/departure side by side, and keep adults/children side by side. Preserve the desktop layout.
+Center the guest page headings, labels, and descriptive copy on both desktop and mobile. On mobile, remove decorative English copy, keep arrival/departure side by side, and keep adults/children side by side.
 
-**Why:** The user explicitly requested this mobile arrangement.
+**Why:** The user first requested this mobile arrangement, then explicitly asked «відцентруй всі написи, щоб гарно виглядало на сторінці».
 
-**How to apply:** Keep these adjustments scoped to DOGODA's mobile breakpoint, not other hotels or desktop.
+**How to apply:** Keep the composition DOGODA-specific; center descriptive text but preserve readable input text and aligned amounts.
+
+Do not display a single arrival/departure time for DOGODA's whole property. Show its complete configured establishment name, without an ellipsis.
+
+**Why:** The user said the hotel and houses have different arrival/departure times and asked for the full establishment name.
+
+**How to apply:** Omit shared time claims in the guest search presentation; do not change operational times in Servio or backend settings as a styling fix.
+
+Remove the upper guest-facing viewing/payment-readiness strip.
+
+**Why:** The user explicitly asked to remove it immediately so it is not forgotten.
+
+**How to apply:** Do not restore the prominent strip during later payment-readiness work. Preserve disabled checkout safeguards and explain missing payment readiness in context at checkout instead.

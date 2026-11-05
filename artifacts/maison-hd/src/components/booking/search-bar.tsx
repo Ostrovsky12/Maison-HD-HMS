@@ -1,3 +1,4 @@
+import { DateRangeFields } from "@/components/booking/date-range-field";
 import { CalendarDays, Building2, Baby, Minus, Plus, Search, Users, X } from "lucide-react";
 
 export const MAX_PARTY = 20;
@@ -15,6 +16,8 @@ type Props = {
   childAges?: (number | null)[]; setChildAges?: (v: (number | null)[]) => void;
   /** Closed sales: search button is honestly disabled. */
   locked?: boolean; lockedNote?: string;
+  /** DOGODA: custom Ukrainian range calendar instead of native date inputs. */
+  rangeCalendar?: boolean;
 };
 
 const seg = "flex-1 min-w-0 px-5 py-3 rounded-full hover:bg-stone-100 focus-within:bg-white focus-within:shadow-[0_6px_20px_-6px_rgba(0,0,0,0.25)] transition";
@@ -33,7 +36,7 @@ export function SearchBar(p: Props) {
   const setAge = (i: number, v: number | null) => p.setChildAges?.(ages.map((a, j) => (j === i ? v : a)));
   return (
     <form role="search" onSubmit={(e) => { e.preventDefault(); if (!p.locked) p.onSearch(); }}
-      className={`dg-search ${withKids && ages.length ? "rounded-[28px]" : "rounded-[28px] md:rounded-full"} bg-white border border-stone-200 shadow-[0_10px_40px_-12px_rgba(30,30,30,0.25)] p-2`}>
+      className={`dg-search relative ${withKids && ages.length ? "rounded-[28px]" : "rounded-[28px] md:rounded-full"} bg-white border border-stone-200 shadow-[0_10px_40px_-12px_rgba(30,30,30,0.25)] p-2`}>
       <div className="dg-search-fields flex flex-col md:flex-row md:items-center gap-1">
         {p.properties.length > 1 ? (
           <label className={`${seg} dg-search-field dg-search-property`}>
@@ -45,9 +48,13 @@ export function SearchBar(p: Props) {
         ) : (
           <div className={`${seg} dg-search-field dg-search-property`}>
             <span className={lbl}><Building2 className="w-3.5 h-3.5" />Об'єкт</span>
-            <p data-testid="text-search-property" className="text-sm text-stone-700 mt-0.5 truncate" title={p.hotelName || p.properties[0]?.name}>{p.hotelName || p.properties[0]?.name || "—"}</p>
+            <p data-testid="text-search-property" className={`text-sm text-stone-700 mt-0.5 ${p.rangeCalendar ? "dg-prop-name" : "truncate"}`} title={p.hotelName || p.properties[0]?.name}>{p.hotelName || p.properties[0]?.name || "—"}</p>
           </div>
         )}
+        {p.rangeCalendar ? <>
+          <span className="hidden md:block w-px h-8 bg-stone-200" />
+          <DateRangeFields checkIn={p.checkIn} setCheckIn={p.setCheckIn} checkOut={p.checkOut} setCheckOut={p.setCheckOut} minDate={p.minDate} />
+        </> : <>
         <span className="hidden md:block w-px h-8 bg-stone-200" />
         <label className={`${seg} dg-search-field dg-search-date`}>
           <span className={lbl}><CalendarDays className="w-3.5 h-3.5" />Заїзд</span>
@@ -58,6 +65,7 @@ export function SearchBar(p: Props) {
           <span className={lbl}><CalendarDays className="w-3.5 h-3.5" />Виїзд{nights > 0 ? <span className="normal-case tracking-normal font-normal text-stone-500">· {nights} ноч.</span> : null}</span>
           <input data-testid="input-checkout" type="date" min={p.checkIn} value={p.checkOut} onChange={(e) => p.setCheckOut(e.target.value)} className={inp} />
         </label>
+        </>}
         <span className="hidden md:block w-px h-8 bg-stone-200" />
         <div className={`${seg} dg-search-field dg-search-party md:flex-[0.9]`}>
           <span className={lbl}><Users className="w-3.5 h-3.5" />Дорослих</span>

@@ -85,3 +85,17 @@ mtime_ms = 1793768582362
 storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:b611ff1f-342c-4c82-a9e7-87ef30a9353c/5aa8ac7a-a4c0-4090-9a5c-0d88f9d2ac27/4d9f85ff-e474-4bc0-914b-56346f9301b1"
 storage_version_token = "1793768604960496"
 content_type = "text/html"
+
+[[outputs]]
+id = "fpj3_4rwOvRPD8JLtBo0t"
+uri = "file://generated-artifacts/dogoda-confirmation-preview.html"
+type = "html"
+title = "DOGODA — приклад листа підтвердження"
+description = "Чинний шаблон листа після успішної оплати та підтвердження Servio. Усі дані прикладу демонстраційні; лист не надсилався."
+logical_id = "d40bfb3f-2740-4780-8c3c-805f8da80d92"
+content_hash = "sha256:41f60124fca42c81c8cf2f1abc9e5bf7e4041a73dd745b3f3790a962d1a3a568"
+size = 4615
+mtime_ms = 1793889092006
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:b611ff1f-342c-4c82-a9e7-87ef30a9353c/d40bfb3f-2740-4780-8c3c-805f8da80d92/9f27523a-6be3-4175-a676-31a8668f3fc0"
+storage_version_token = "1793889124892907"
+content_type = "text/html"

@@ -80,3 +80,88 @@
   .dogoda-root .dg-card:hover .dg-card-img { transform: none; }
   .dogoda-root * { scroll-behavior: auto !important; }
 }
+
+/* ---- Centered composition (all breakpoints, DOGODA only) ---- */
+.dogoda-root main { text-align: center; }
+.dogoda-root main textarea, .dogoda-root main input[type="text"], .dogoda-root main input[type="email"], .dogoda-root main input[type="tel"] { text-align: left; }
+.dogoda-root main p.flex, .dogoda-root main .flex.gap-2:not(.justify-between) { justify-content: center; }
+.dogoda-root main legend { margin-inline: auto; }
+.dogoda-root main #dg-step1 { text-wrap: balance; }
+.dogoda-root main .justify-between > *:last-child { text-align: right; }
+.dogoda-root .dg-search-field > span, .dogoda-root .dg-search-property { justify-content: center; text-align: center; }
+.dogoda-root .dg-search-counter { justify-content: center; }
+.dogoda-root .dg-prop-name { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.dogoda-root .dg-card .text-left { text-align: center; }
+.dogoda-root .dg-card .text-left > .flex.items-start.justify-between { flex-direction: column; align-items: center; }
+.dogoda-root .dg-card ul.flex, .dogoda-root .dg-card .justify-end { justify-content: center; }
+.dogoda-root [data-testid="nav-steps"] { margin-inline: auto; }
+
+/* ---- Range calendar ---- */
+.dogoda-root .dg-dates { display: flex; align-items: stretch; flex: 2.2; min-width: 0; gap: 2px; }
+.dogoda-root .dg-date-trigger { flex: 1; min-width: 0; border-radius: 999px; transition: background .2s, box-shadow .2s; }
+.dogoda-root .dg-date-trigger:hover { background: color-mix(in srgb, var(--dg-muted) 12%, transparent); }
+.dogoda-root .dg-date-trigger.is-active { background: var(--dg-surface); box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--dg-text) 45%, transparent), inset 0 0 0 1.5px var(--dg-button); }
+.dogoda-root .dg-date-btn { width: 100%; padding: 10px 16px; display: flex; flex-direction: column; align-items: center; gap: 1px; border-radius: inherit; cursor: pointer; }
+.dogoda-root .dg-date-lbl { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.dogoda-root .dg-date-val { font-size: 17px; line-height: 1.2; white-space: nowrap; }
+.dogoda-root .dg-date-wd { font-size: 11px; opacity: .6; }
+.dogoda-root .dg-date-sep { align-self: center; display: flex; flex-direction: column; align-items: center; font-size: 10px; line-height: 1.1; opacity: .7; min-width: 34px; }
+.dogoda-root .dg-date-sep b { font-size: 15px; font-weight: 600; opacity: 1; color: var(--dg-text); }
+.dogoda-root .dg-cal {
+  position: fixed; z-index: 50; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(680px, calc(100vw - 32px)); padding: 18px 20px 14px; border-radius: 28px; text-align: center;
+  max-height: calc(100dvh - 32px); overflow-y: auto;
+  background: var(--dg-surface); color: var(--dg-text);
+  border: 1px solid color-mix(in srgb, var(--dg-muted) 35%, transparent);
+  box-shadow: 0 30px 70px -24px color-mix(in srgb, var(--dg-text) 50%, transparent);
+  animation: dg-cal-in .28s cubic-bezier(.2,.7,.2,1) both;
+}
+@keyframes dg-cal-in { from { opacity: 0; transform: translate(-50%, calc(-50% - 6px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
+.dogoda-root .dg-cal-head { display: flex; align-items: center; justify-content: center; position: relative; }
+.dogoda-root .dg-cal-tabs { display: inline-flex; align-items: center; gap: 6px; padding: 4px; border-radius: 999px; background: color-mix(in srgb, var(--dg-muted) 14%, var(--dg-bg)); }
+.dogoda-root .dg-cal-tabs button { display: flex; flex-direction: column; align-items: center; padding: 6px 18px; border-radius: 999px; font-size: 14px; line-height: 1.2; transition: background .2s; }
+.dogoda-root .dg-cal-tabs button small { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .65; }
+.dogoda-root .dg-cal-tabs button[aria-selected="true"] { background: var(--dg-surface); box-shadow: 0 4px 12px -6px color-mix(in srgb, var(--dg-text) 40%, transparent); }
+.dogoda-root .dg-cal-x { position: absolute; right: -4px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; }
+.dogoda-root .dg-cal-x:hover { background: color-mix(in srgb, var(--dg-muted) 15%, transparent); }
+.dogoda-root .dg-cal-hint { margin: 10px 0 4px; font-size: 13px; opacity: .7; }
+.dogoda-root .dg-dp { position: relative; }
+.dogoda-root .dg-dp-months { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.dogoda-root .dg-dp-month { min-width: 0; }
+.dogoda-root .dg-dp-caption { height: 44px; display: flex; align-items: center; justify-content: center; }
+.dogoda-root .dg-dp-caption-label { font-size: 18px; text-transform: capitalize; }
+.dogoda-root .dg-dp-nav { position: absolute; inset: 0 0 auto 0; height: 44px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; z-index: 1; }
+.dogoda-root .dg-dp-navbtn { pointer-events: auto; width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--dg-muted) 40%, transparent); }
+.dogoda-root .dg-dp-navbtn:disabled { opacity: .25; }
+.dogoda-root .dg-dp-grid { border-collapse: separate; border-spacing: 0 3px; margin-inline: auto; }
+.dogoda-root .dg-dp-wd { width: 44px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; opacity: .55; padding-bottom: 4px; }
+.dogoda-root .dg-dp-day { padding: 0; width: 44px; height: 42px; text-align: center; position: relative; }
+.dogoda-root .dg-dp-btn { width: 40px; height: 40px; margin: 1px 2px; border-radius: 999px; font-size: 14px; font-variant-numeric: tabular-nums; position: relative; z-index: 1; transition: background .15s, transform .15s; }
+.dogoda-root .dg-dp-day:not(.is-off):not(.is-sel) .dg-dp-btn:hover { background: color-mix(in srgb, var(--dg-button) 30%, transparent); transform: scale(1.06); }
+.dogoda-root .dg-dp-day.is-today .dg-dp-btn::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 99px; background: currentColor; opacity: .6; }
+.dogoda-root .dg-dp-day.is-off .dg-dp-btn { opacity: .28; text-decoration: line-through; text-decoration-thickness: 1px; cursor: not-allowed; }
+.dogoda-root .dg-dp-day.is-mid { background: color-mix(in srgb, var(--dg-button) 26%, var(--dg-surface)); }
+.dogoda-root .dg-dp-day.is-start, .dogoda-root .dg-dp-day.is-end { background: color-mix(in srgb, var(--dg-button) 26%, var(--dg-surface)); }
+.dogoda-root .dg-dp-day.is-start { border-radius: 999px 0 0 999px; }
+.dogoda-root .dg-dp-day.is-end { border-radius: 0 999px 999px 0; }
+.dogoda-root .dg-dp-day.is-start.is-end { border-radius: 999px; }
+.dogoda-root .dg-dp-day.is-start .dg-dp-btn, .dogoda-root .dg-dp-day.is-end .dg-dp-btn { background: var(--dg-text); color: var(--dg-surface); font-weight: 600; }
+.dogoda-root .dg-dp-week .dg-dp-day.is-mid:first-child { border-radius: 999px 0 0 999px; }
+.dogoda-root .dg-dp-week .dg-dp-day.is-mid:last-child { border-radius: 0 999px 999px 0; }
+.dogoda-root .is-hidden { visibility: hidden; }
+.dogoda-root .dg-cal-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--dg-muted) 30%, transparent); font-size: 14px; }
+.dogoda-root .dg-cal-done { padding: 10px 22px; border-radius: 999px; background: var(--dg-button); color: var(--dg-text); font-weight: 600; font-size: 14px; }
+@media (max-width: 767px) {
+  .dogoda-root .dg-dp-months { grid-template-columns: minmax(0, 1fr); }
+  .dogoda-root .dg-dates { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 4px; }
+  .dogoda-root .dg-date-trigger { border-radius: 18px; background: color-mix(in srgb, var(--dg-muted) 7%, var(--dg-surface)); }
+  .dogoda-root .dg-date-btn { padding: 12px 6px; }
+  .dogoda-root .dg-date-val { font-size: 15px; white-space: normal; }
+  .dogoda-root .dg-cal { position: fixed; top: auto; bottom: 0; left: 0; right: 0; width: 100%; transform: none; border-radius: 28px 28px 0 0; padding: 16px 12px calc(14px + env(safe-area-inset-bottom)); max-height: 88dvh; overflow-y: auto; animation-name: dg-sheet-in; }
+  @keyframes dg-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .dogoda-root .dg-cal-tabs button { padding: 6px 12px; font-size: 13px; }
+  .dogoda-root .dg-dp-wd, .dogoda-root .dg-dp-day { width: calc((100vw - 32px) / 7); max-width: 48px; }
+  .dogoda-root .dg-cal-x { right: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .dogoda-root .dg-cal { animation: none; } }
+.dogoda-root .dg-search-field.dg-date-trigger { padding: 0; }
