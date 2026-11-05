@@ -65,6 +65,20 @@ Do not permit simultaneous editing of a managed bill in Maison HD and on the POS
 
 **How to apply:** Detect divergence and hold for review rather than overwrite. Preserve uncertain writes for reconciliation, never retry them as new bills, and do not independently fiscalize a linked local bill.
 
+## Order creation and terminal printing contracts
+
+Poster support recommends the documentation section `transactions/createOrder`, whose actual HTTP endpoint is `POST /api/orders` with JSON and camelCase fields. Its official response example contains `response.id`, while support described `transaction_id`; their equivalence for later transaction mutations is not established by that reply.
+
+**Why:** A method-name substitution would retain the old form encoding and response parser. The Ukrainian creation description and English closing description also still disagree.
+
+**How to apply:** Confirm unpaid/open behavior without payments, the ID mapping for subsequent additions, and how to obtain the terminal order ID before replacing the existing adapter. A correctly shaped old-method request does not prove permission to invoke it; the official general error table describes code 20 as insufficient method permissions, not missing fields.
+
+`Poster.orders.sendToKitchen` takes a terminal order ID expressed as a millisecond timestamp, not an interchangeable server receipt number. Its documented success does not establish physical printer delivery; printer-command failures may appear only at the venue's POS.
+
+**Why:** The official POS method documentation explicitly limits failure visibility, despite support's broader statement about errors in the method response.
+
+**How to apply:** Keep command submission separate from confirmed printing in UI and retry logic. Do not report a printed ticket solely from `success: true`, and do not blindly replay after uncertain printer delivery.
+
 ## Financial data interpretation
 
 Determine currency units and the meaning of counters separately for each Poster endpoint; do not apply a universal conversion or equate visitors with receipts.
