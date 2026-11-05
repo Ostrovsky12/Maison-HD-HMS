@@ -99,6 +99,12 @@ Servio checkout needs an explicit tenant-owned seller assignment independent of 
 
 **How to apply:** Treat cabinet preflight seller selection as a candidate, not a permanent assignment. Before issuing a checkout, persist an explicit owner-confirmed assignment to the Servio identity and retain the seller/credential snapshot through payment reconciliation. Never infer it from matching IDs or the first local property.
 
+Для оплат цього бронювання користувач обрав іншого продавця — ТОВ «ДОГОДА ЮЕЙ», а не запропоноване ТОВ «Догода Резортс».
+
+**Why:** Користувач відповів: «Додам іншого продавця ТОВ “ДОГОДА ЮЕЙ”».
+
+**How to apply:** Не прив’язувати наявні ключі іншого продавця лише тому, що вони вже збережені. Вибір користувача не означає, що юридична особа, її ключі чи прив’язка вже налаштовані.
+
 Do not assume Servio's reservation-guarantee amount field means the entire prepaid stay.
 
 **Why:** The vendor describes `SetReservationType.Amount` and `SetReservationBill.Amount` as the first day's amount while the module requires 100% payment. Bill formation also returns adjusted service charges after tax calculation.
