@@ -1,0 +1,167 @@
+/* DOGODA-only scope. Every selector is prefixed with .dogoda-root — no global regressions. */
+.dogoda-root {
+  background: var(--dg-bg);
+  color: var(--dg-text);
+  font-family: var(--dg-font);
+  -webkit-font-smoothing: antialiased;
+}
+.dogoda-root.dg-font-brand { --dg-font: "DOGODA Orchidea", ui-serif, Georgia, serif; }
+.dogoda-root.dg-font-system { --dg-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+.dogoda-root h1, .dogoda-root h2, .dogoda-root h3, .dogoda-root h4, .dogoda-root h5, .dogoda-root h6 {
+  font-family: var(--dg-font);
+}
+.dogoda-root .dg-hand { font-family: "DOGODA Ernie", var(--dg-font); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.dogoda-root .dg-muted { color: color-mix(in srgb, var(--dg-text) 55%, var(--dg-muted)); }
+.dogoda-root .dg-surface { background: var(--dg-surface); }
+.dogoda-root .dg-btn { background: var(--dg-button); color: var(--dg-text); }
+.dogoda-root button.text-white[style] { color: var(--dg-text); }
+.dogoda-root .dg-line { border-color: color-mix(in srgb, var(--dg-muted) 45%, transparent); }
+
+/* Re-tint the shared generic booking UI only inside DOGODA */
+.dogoda-root .bg-white { background-color: var(--dg-surface); }
+.dogoda-root .bg-white\/60, .dogoda-root .bg-white\/70, .dogoda-root .bg-white\/90 { background-color: color-mix(in srgb, var(--dg-surface) 80%, transparent); }
+.dogoda-root .border-stone-200, .dogoda-root .border-stone-300 { border-color: color-mix(in srgb, var(--dg-muted) 40%, transparent); }
+.dogoda-root .text-stone-500, .dogoda-root .text-stone-600 { color: color-mix(in srgb, var(--dg-text) 62%, var(--dg-muted)); }
+.dogoda-root .text-stone-900, .dogoda-root .text-stone-800, .dogoda-root .text-stone-700 { color: var(--dg-text); }
+.dogoda-root .bg-stone-900 { background-color: var(--dg-text); }
+.dogoda-root .bg-stone-200 { background-color: color-mix(in srgb, var(--dg-muted) 30%, var(--dg-bg)); }
+.dogoda-root .font-mono { font-family: var(--dg-font); font-variant-numeric: tabular-nums; }
+.dogoda-root .rounded-3xl { border-radius: 28px; }
+.dogoda-root :focus-visible { outline: 2px solid var(--dg-button); outline-offset: 3px; }
+.dogoda-root input:focus, .dogoda-root textarea:focus, .dogoda-root select:focus { border-color: var(--dg-text); }
+
+.dogoda-root .dg-grain::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .18; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='.5'/></svg>");
+}
+.dogoda-root .dg-rise { animation: dg-rise .9s cubic-bezier(.2,.7,.2,1) both; }
+.dogoda-root .dg-rise-2 { animation-delay: .12s; }
+.dogoda-root .dg-rise-3 { animation-delay: .24s; }
+@keyframes dg-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.dogoda-root .dg-card-img { transition: transform .9s cubic-bezier(.2,.7,.2,1); }
+.dogoda-root .dg-card:hover .dg-card-img { transform: scale(1.035); }
+/* Mobile only: a compact, centered two-column search, without changing desktop or other hotels. */
+@media (max-width: 767px) {
+  .dogoda-root { text-align: center; }
+  .dogoda-root input, .dogoda-root textarea, .dogoda-root select { text-align: center; font-size: 16px; }
+  .dogoda-root select { text-align-last: center; }
+  .dogoda-root [data-testid="banner-private-preview"] { position: static; font-size: 12px; line-height: 1.5; }
+  .dogoda-root header > div { position: relative; height: 80px; }
+  .dogoda-root .dg-public-brand { margin-inline: auto; }
+  .dogoda-root .dg-public-brand img { height: 56px; width: auto; }
+  .dogoda-root .dg-public-contacts { position: absolute; right: 12px; }
+  .dogoda-root .dg-public-contacts a { padding: 8px; }
+  .dogoda-root [data-testid="nav-steps"] { justify-content: center; gap: 4px; }
+  .dogoda-root [data-testid="nav-steps"] li { gap: 4px; }
+  .dogoda-root [data-testid="nav-steps"] li > span { width: 8px; }
+  .dogoda-root [data-testid="nav-steps"] button { padding: 4px 8px 4px 4px; gap: 4px; font-size: 11px; }
+  .dogoda-root #dg-step1 { font-size: 28px; line-height: 1.2; letter-spacing: -.02em; text-wrap: balance; margin: 0 auto 24px; max-width: 22ch; }
+  .dogoda-root .dg-search { padding: 10px; border-radius: 26px; }
+  .dogoda-root .dg-search-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .dogoda-root .dg-search-field { padding: 14px 8px; border-radius: 18px; }
+  .dogoda-root .dg-search-field > span { justify-content: center; flex-wrap: wrap; gap: 4px; }
+  .dogoda-root .dg-search-property { grid-column: 1 / -1; padding-block: 10px 16px; border-bottom: 1px solid color-mix(in srgb, var(--dg-muted) 25%, transparent); border-radius: 0; }
+  .dogoda-root .dg-search-date, .dogoda-root .dg-search-party { background: color-mix(in srgb, var(--dg-muted) 7%, var(--dg-surface)); }
+  .dogoda-root .dg-search input[type="date"] { display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 28px; padding: 0; -webkit-appearance: none; }
+  .dogoda-root .dg-search input[type="date"]::-webkit-date-and-time-value { text-align: center; }
+  .dogoda-root .dg-search input[type="date"]::-webkit-datetime-edit { padding: 0; }
+  .dogoda-root .dg-search-counter { justify-content: center; gap: 4px; margin-top: 8px; }
+  .dogoda-root .dg-search-counter button { width: 40px; height: 40px; flex-shrink: 0; }
+  .dogoda-root .dg-search-counter input, .dogoda-root .dg-search-counter > span { width: 20px; min-width: 0; padding: 0; }
+  .dogoda-root .dg-search-counter input { appearance: textfield; -moz-appearance: textfield; }
+  .dogoda-root .dg-search-counter input::-webkit-inner-spin-button, .dogoda-root .dg-search-counter input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .dogoda-root .dg-search-action { grid-column: 1 / -1; width: 100%; height: 52px; margin-top: 4px; }
+  .dogoda-root [data-testid="panel-child-ages"] > div { justify-content: center; }
+  .dogoda-root main p.flex, .dogoda-root main a[href^="tel:"], .dogoda-root main a[href^="mailto:"] { justify-content: center; }
+  .dogoda-root footer > div { flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dogoda-root .dg-rise, .dogoda-root .dg-card-img { animation: none; transition: none; }
+  .dogoda-root .dg-card:hover .dg-card-img { transform: none; }
+  .dogoda-root * { scroll-behavior: auto !important; }
+}
+
+/* ---- Centered composition (all breakpoints, DOGODA only) ---- */
+.dogoda-root main { text-align: center; }
+.dogoda-root main textarea, .dogoda-root main input[type="text"], .dogoda-root main input[type="email"], .dogoda-root main input[type="tel"] { text-align: left; }
+.dogoda-root main p.flex, .dogoda-root main .flex.gap-2:not(.justify-between) { justify-content: center; }
+.dogoda-root main legend { margin-inline: auto; }
+.dogoda-root main #dg-step1 { text-wrap: balance; }
+.dogoda-root main .justify-between > *:last-child { text-align: right; }
+.dogoda-root .dg-search-field > span, .dogoda-root .dg-search-property { justify-content: center; text-align: center; }
+.dogoda-root .dg-search-counter { justify-content: center; }
+.dogoda-root .dg-prop-name { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.dogoda-root .dg-card .text-left { text-align: center; }
+.dogoda-root .dg-card .text-left > .flex.items-start.justify-between { flex-direction: column; align-items: center; }
+.dogoda-root .dg-card ul.flex, .dogoda-root .dg-card .justify-end { justify-content: center; }
+.dogoda-root [data-testid="nav-steps"] { margin-inline: auto; }
+
+/* ---- Range calendar ---- */
+.dogoda-root .dg-dates { display: flex; align-items: stretch; flex: 2.2; min-width: 0; gap: 2px; }
+.dogoda-root .dg-date-trigger { flex: 1; min-width: 0; border-radius: 999px; transition: background .2s, box-shadow .2s; }
+.dogoda-root .dg-date-trigger:hover { background: color-mix(in srgb, var(--dg-muted) 12%, transparent); }
+.dogoda-root .dg-date-trigger.is-active { background: var(--dg-surface); box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--dg-text) 45%, transparent), inset 0 0 0 1.5px var(--dg-button); }
+.dogoda-root .dg-date-btn { width: 100%; padding: 10px 16px; display: flex; flex-direction: column; align-items: center; gap: 1px; border-radius: inherit; cursor: pointer; }
+.dogoda-root .dg-date-lbl { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.dogoda-root .dg-date-val { font-size: 17px; line-height: 1.2; white-space: nowrap; }
+.dogoda-root .dg-date-wd { font-size: 11px; opacity: .6; }
+.dogoda-root .dg-date-sep { align-self: center; display: flex; flex-direction: column; align-items: center; font-size: 10px; line-height: 1.1; opacity: .7; min-width: 34px; }
+.dogoda-root .dg-date-sep b { font-size: 15px; font-weight: 600; opacity: 1; color: var(--dg-text); }
+.dogoda-root .dg-cal {
+  position: fixed; z-index: 50; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(680px, calc(100vw - 32px)); padding: 18px 20px 14px; border-radius: 28px; text-align: center;
+  max-height: calc(100dvh - 32px); overflow-y: auto;
+  background: var(--dg-surface); color: var(--dg-text);
+  border: 1px solid color-mix(in srgb, var(--dg-muted) 35%, transparent);
+  box-shadow: 0 30px 70px -24px color-mix(in srgb, var(--dg-text) 50%, transparent);
+  animation: dg-cal-in .28s cubic-bezier(.2,.7,.2,1) both;
+}
+@keyframes dg-cal-in { from { opacity: 0; transform: translate(-50%, calc(-50% - 6px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
+.dogoda-root .dg-cal-head { display: flex; align-items: center; justify-content: center; position: relative; }
+.dogoda-root .dg-cal-tabs { display: inline-flex; align-items: center; gap: 6px; padding: 4px; border-radius: 999px; background: color-mix(in srgb, var(--dg-muted) 14%, var(--dg-bg)); }
+.dogoda-root .dg-cal-tabs button { display: flex; flex-direction: column; align-items: center; padding: 6px 18px; border-radius: 999px; font-size: 14px; line-height: 1.2; transition: background .2s; }
+.dogoda-root .dg-cal-tabs button small { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .65; }
+.dogoda-root .dg-cal-tabs button[aria-selected="true"] { background: var(--dg-surface); box-shadow: 0 4px 12px -6px color-mix(in srgb, var(--dg-text) 40%, transparent); }
+.dogoda-root .dg-cal-x { position: absolute; right: -4px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; }
+.dogoda-root .dg-cal-x:hover { background: color-mix(in srgb, var(--dg-muted) 15%, transparent); }
+.dogoda-root .dg-cal-hint { margin: 10px 0 4px; font-size: 13px; opacity: .7; }
+.dogoda-root .dg-dp { position: relative; }
+.dogoda-root .dg-dp-months { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.dogoda-root .dg-dp-month { min-width: 0; }
+.dogoda-root .dg-dp-caption { height: 44px; display: flex; align-items: center; justify-content: center; }
+.dogoda-root .dg-dp-caption-label { font-size: 18px; text-transform: capitalize; }
+.dogoda-root .dg-dp-nav { position: absolute; inset: 0 0 auto 0; height: 44px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; z-index: 1; }
+.dogoda-root .dg-dp-navbtn { pointer-events: auto; width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--dg-muted) 40%, transparent); }
+.dogoda-root .dg-dp-navbtn:disabled { opacity: .25; }
+.dogoda-root .dg-dp-grid { border-collapse: separate; border-spacing: 0 3px; margin-inline: auto; }
+.dogoda-root .dg-dp-wd { width: 44px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; opacity: .55; padding-bottom: 4px; }
+.dogoda-root .dg-dp-day { padding: 0; width: 44px; height: 42px; text-align: center; position: relative; }
+.dogoda-root .dg-dp-btn { width: 40px; height: 40px; margin: 1px 2px; border-radius: 999px; font-size: 14px; font-variant-numeric: tabular-nums; position: relative; z-index: 1; transition: background .15s, transform .15s; }
+.dogoda-root .dg-dp-day:not(.is-off):not(.is-sel) .dg-dp-btn:hover { background: color-mix(in srgb, var(--dg-button) 30%, transparent); transform: scale(1.06); }
+.dogoda-root .dg-dp-day.is-today .dg-dp-btn::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 99px; background: currentColor; opacity: .6; }
+.dogoda-root .dg-dp-day.is-off .dg-dp-btn { opacity: .28; text-decoration: line-through; text-decoration-thickness: 1px; cursor: not-allowed; }
+.dogoda-root .dg-dp-day.is-mid { background: color-mix(in srgb, var(--dg-button) 26%, var(--dg-surface)); }
+.dogoda-root .dg-dp-day.is-start, .dogoda-root .dg-dp-day.is-end { background: color-mix(in srgb, var(--dg-button) 26%, var(--dg-surface)); }
+.dogoda-root .dg-dp-day.is-start { border-radius: 999px 0 0 999px; }
+.dogoda-root .dg-dp-day.is-end { border-radius: 0 999px 999px 0; }
+.dogoda-root .dg-dp-day.is-start.is-end { border-radius: 999px; }
+.dogoda-root .dg-dp-day.is-start .dg-dp-btn, .dogoda-root .dg-dp-day.is-end .dg-dp-btn { background: var(--dg-text); color: var(--dg-surface); font-weight: 600; }
+.dogoda-root .dg-dp-week .dg-dp-day.is-mid:first-child { border-radius: 999px 0 0 999px; }
+.dogoda-root .dg-dp-week .dg-dp-day.is-mid:last-child { border-radius: 0 999px 999px 0; }
+.dogoda-root .is-hidden { visibility: hidden; }
+.dogoda-root .dg-cal-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--dg-muted) 30%, transparent); font-size: 14px; }
+.dogoda-root .dg-cal-done { padding: 10px 22px; border-radius: 999px; background: var(--dg-button); color: var(--dg-text); font-weight: 600; font-size: 14px; }
+@media (max-width: 767px) {
+  .dogoda-root .dg-dp-months { grid-template-columns: minmax(0, 1fr); }
+  .dogoda-root .dg-dates { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 4px; }
+  .dogoda-root .dg-date-trigger { border-radius: 18px; background: color-mix(in srgb, var(--dg-muted) 7%, var(--dg-surface)); }
+  .dogoda-root .dg-date-btn { padding: 12px 6px; }
+  .dogoda-root .dg-date-val { font-size: 15px; white-space: normal; }
+  .dogoda-root .dg-cal { position: fixed; top: auto; bottom: 0; left: 0; right: 0; width: 100%; transform: none; border-radius: 28px 28px 0 0; padding: 16px 12px calc(14px + env(safe-area-inset-bottom)); max-height: 88dvh; overflow-y: auto; animation-name: dg-sheet-in; }
+  @keyframes dg-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .dogoda-root .dg-cal-tabs button { padding: 6px 12px; font-size: 13px; }
+  .dogoda-root .dg-dp-wd, .dogoda-root .dg-dp-day { width: calc((100vw - 32px) / 7); max-width: 48px; }
+  .dogoda-root .dg-cal-x { right: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .dogoda-root .dg-cal { animation: none; } }
+.dogoda-root .dg-search-field.dg-date-trigger { padding: 0; }

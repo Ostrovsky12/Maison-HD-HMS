@@ -1,0 +1,148 @@
+@import "./_group.css";
+
+.dg-grid-preview {
+  min-height: 100dvh;
+  padding: 24px 28px 30px;
+  color: var(--dg-text);
+  background:
+    radial-gradient(ellipse at 7% 9%, rgba(255, 244, 229, .72), transparent 32rem),
+    var(--dg-bg);
+  font-family: var(--dg-font);
+}
+.dg-grid-shell { width: min(100%, 1080px); margin: 0 auto; }
+.dg-grid-heading { text-align: center; padding: 9px 0 26px; }
+.dg-step-label {
+  display: inline-flex; align-items: center; gap: 10px;
+  color: color-mix(in srgb, var(--dg-text), transparent 37%);
+  font: 600 10px/1.4 system-ui, sans-serif; letter-spacing: .16em;
+}
+.dg-step-label span:first-child { color: var(--dg-button); }
+.dg-step-label i { width: 24px; height: 1px; background: color-mix(in srgb, var(--dg-text), transparent 72%); }
+.dg-grid-heading h1 { margin: 12px 0 5px; font-size: clamp(30px, 4vw, 42px); line-height: 1.06; font-weight: 500; letter-spacing: -.035em; }
+.dg-grid-intro { margin: 0; font-size: 15px; line-height: 1.5; color: color-mix(in srgb, var(--dg-text), transparent 20%); }
+.dg-search-context {
+  display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+  margin-top: 15px; padding: 8px 13px; border: 1px solid color-mix(in srgb, var(--dg-text), transparent 87%);
+  border-radius: 999px; background: rgba(255,244,229,.48); font: 11px/1.2 system-ui,sans-serif;
+  color: color-mix(in srgb, var(--dg-text), transparent 35%);
+}
+.dg-search-context span:first-child { color: var(--dg-text); font-weight: 600; }
+.dg-context-dot { color: var(--dg-button); font-size: 17px; line-height: 8px; }
+.dg-selection-note {
+  display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%;
+  margin: 0 auto 14px; padding: 9px 14px; border-radius: 30px;
+  color: var(--dg-text); background: rgba(255,244,229,.84); border: 1px solid rgba(41,45,5,.1);
+  font: 12px/1.35 system-ui,sans-serif;
+}
+.dg-selection-note svg { color: var(--dg-button); flex: 0 0 auto; }
+.dg-selection-hint { color: color-mix(in srgb, var(--dg-text), transparent 45%); }
+.dg-grid-controls { display: none; }
+.dg-room-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.dg-room-card {
+  min-width: 0; overflow: hidden; border: 1px solid rgba(41,45,5,.13); border-radius: 20px;
+  background: var(--dg-surface); box-shadow: 0 5px 18px rgba(73, 59, 28, .055);
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.dg-room-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(73,59,28,.09); }
+.dg-room-card.is-selected { border-color: var(--dg-button); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dg-button), transparent 62%), 0 7px 18px rgba(73,59,28,.07); }
+.dg-room-media { position: relative; height: 142px; overflow: hidden; background: #f1dec2; }
+.dg-room-media > img { width: 100%; height: 100%; object-fit: cover; object-position: center 48%; display: block; }
+.dg-room-placeholder {
+  width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: linear-gradient(135deg, #f0d7b8 0%, #e9cba5 52%, #f4e4cf 100%);
+  color: rgba(41,45,5,.52); font: 10px/1.2 system-ui,sans-serif; letter-spacing: .07em;
+}
+.dg-placeholder-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: rgba(41,45,5,.68); border: 1px solid rgba(41,45,5,.19); }
+.dg-room-placeholder i { color: var(--dg-button); font-style: normal; }
+.dg-selected-chip {
+  position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 10px; border-radius: 30px; background: var(--dg-surface); color: var(--dg-text);
+  font: 600 10px/1 system-ui,sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+.dg-selected-chip svg { color: var(--dg-button); }
+.dg-room-content { padding: 15px 17px 16px; }
+.dg-room-topline { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.dg-room-topline h2 { margin: 0; font-size: clamp(18px, 2vw, 21px); line-height: 1.18; font-weight: 500; letter-spacing: -.02em; }
+.dg-capacity { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding-top: 3px; color: color-mix(in srgb, var(--dg-text), transparent 26%); font: 11px/1.2 system-ui,sans-serif; white-space: nowrap; }
+.dg-capacity svg { color: var(--dg-button); }
+.dg-room-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 15px; min-height: 35px; padding: 8px 0 10px; color: color-mix(in srgb, var(--dg-text), transparent 26%); font: 11px/1.35 system-ui,sans-serif; }
+.dg-room-facts span { display: inline-flex; gap: 6px; align-items: center; }
+.dg-room-facts svg { flex: 0 0 auto; color: var(--dg-button); }
+.dg-room-footer { display: flex; align-items: end; justify-content: space-between; gap: 10px; padding: 10px 0 11px; border-top: 1px solid rgba(41,45,5,.11); }
+.dg-price { display: flex; flex-direction: column; gap: 2px; }
+.dg-price span, .dg-dialog-total span { color: color-mix(in srgb, var(--dg-text), transparent 41%); font: 10px/1.3 system-ui,sans-serif; }
+.dg-price strong { font: 600 21px/1.1 system-ui,sans-serif; letter-spacing: -.04em; }
+.dg-details-link { display: inline-flex; align-items: center; gap: 1px; border: 0; padding: 5px 0 3px 6px; background: transparent; color: var(--dg-text); font: 600 11px/1 system-ui,sans-serif; cursor: pointer; }
+.dg-details-link svg { color: var(--dg-button); }
+.dg-room-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dg-tariff-label { color: color-mix(in srgb, var(--dg-text), transparent 38%); font: 10px/1.3 system-ui,sans-serif; }
+.dg-select-button, .dg-dialog-select {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 94px; min-height: 37px;
+  padding: 0 17px; border: 0; border-radius: 999px; background: var(--dg-text); color: var(--dg-surface);
+  font: 600 12px/1 system-ui,sans-serif; cursor: pointer; transition: transform .18s ease, background .18s ease;
+}
+.dg-select-button:hover, .dg-dialog-select:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--dg-text), var(--dg-button) 23%); }
+.dg-room-card.is-selected .dg-select-button { background: var(--dg-button); color: #fff8ef; }
+.dg-wishes { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 22px auto 0; text-align: left; }
+.dg-wishes-spark { color: var(--dg-button); font: 22px/1 Georgia,serif; }
+.dg-wishes p { margin: 0; color: color-mix(in srgb, var(--dg-text), transparent 23%); font-size: 12px; line-height: 1.55; }
+.dg-wishes strong { color: var(--dg-text); font-size: 13px; font-weight: 500; }
+.dg-demo-note { margin: 18px 0 0; text-align: center; color: color-mix(in srgb, var(--dg-text), transparent 57%); font: 10px/1.4 system-ui,sans-serif; }
+.dg-dialog-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(35,34,21,.48); }
+.dg-room-dialog { position: relative; width: min(100%, 570px); max-height: min(90dvh, 760px); overflow-y: auto; border-radius: 22px; background: var(--dg-surface); box-shadow: 0 18px 70px rgba(25,22,15,.25); outline: none; }
+.dg-dialog-close { position: absolute; z-index: 2; top: 12px; right: 12px; display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 50%; background: rgba(255,244,229,.95); color: var(--dg-text); cursor: pointer; }
+.dg-dialog-photo { display: block; width: 100%; height: 205px; object-fit: cover; }
+.dg-dialog-placeholder { display: grid; place-items: center; height: 145px; color: rgba(41,45,5,.55); background: linear-gradient(135deg,#f0d7b8,#e9cba5,#f4e4cf); }
+.dg-dialog-content { padding: 22px 25px 25px; }
+.dg-dialog-kicker { margin: 0 0 7px; color: var(--dg-button); font: 600 9px/1.4 system-ui,sans-serif; letter-spacing: .16em; }
+.dg-dialog-content h2 { margin: 0; font-size: 27px; line-height: 1.12; font-weight: 500; }
+.dg-dialog-facts { display: flex; flex-wrap: wrap; gap: 10px 17px; margin-top: 15px; color: color-mix(in srgb,var(--dg-text),transparent 22%); font: 12px/1.4 system-ui,sans-serif; }
+.dg-dialog-facts span { display: inline-flex; align-items: center; gap: 6px; }
+.dg-dialog-facts svg { color: var(--dg-button); }
+.dg-dialog-description { margin: 17px 0 0; color: color-mix(in srgb,var(--dg-text),transparent 19%); font-size: 14px; line-height: 1.55; }
+.dg-amenities { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.dg-amenities span { padding: 6px 10px; border: 1px solid rgba(41,45,5,.14); border-radius: 30px; font: 11px/1.2 system-ui,sans-serif; }
+.dg-dialog-rate { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-top: 20px; padding: 14px 0; border-top: 1px solid rgba(41,45,5,.13); border-bottom: 1px solid rgba(41,45,5,.13); }
+.dg-dialog-rate > div:first-child { display: flex; flex-direction: column; gap: 4px; }
+.dg-dialog-rate > div:first-child strong { font-size: 14px; font-weight: 500; }
+.dg-dialog-rate > div:first-child span { color: color-mix(in srgb,var(--dg-text),transparent 39%); font: 11px/1.35 system-ui,sans-serif; }
+.dg-dialog-total { display: flex; flex-direction: column; align-items: end; gap: 4px; }
+.dg-dialog-total strong { font: 600 19px/1.1 system-ui,sans-serif; white-space: nowrap; }
+.dg-dialog-select { width: 100%; margin-top: 17px; min-height: 44px; }
+.dg-grid-preview button:focus-visible { outline: 2px solid var(--dg-button); outline-offset: 3px; }
+
+@media (max-width: 700px) {
+  .dg-grid-preview { padding: 14px 0 23px; overflow: hidden; }
+  .dg-grid-shell { width: 100%; }
+  .dg-grid-heading { padding: 10px 18px 18px; }
+  .dg-step-label { font-size: 9px; }
+  .dg-grid-heading h1 { margin-top: 11px; font-size: 32px; }
+  .dg-grid-intro { max-width: 300px; margin: 0 auto; font-size: 14px; }
+  .dg-search-context { margin-top: 12px; font-size: 10px; }
+  .dg-selection-note { margin: 0 16px 12px; font-size: 11px; }
+  .dg-selection-hint { display: none; }
+  .dg-grid-controls { display: flex; align-items: center; justify-content: space-between; margin: 0 19px 10px; color: color-mix(in srgb,var(--dg-text),transparent 41%); font: 600 10px/1 system-ui,sans-serif; letter-spacing: .08em; }
+  .dg-grid-controls i { color: var(--dg-button); font-style: normal; }
+  .dg-grid-controls > div { display: flex; gap: 7px; }
+  .dg-grid-controls button { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid rgba(41,45,5,.18); border-radius: 50%; background: var(--dg-surface); color: var(--dg-text); cursor: pointer; }
+  .dg-grid-controls button:disabled { opacity: .38; cursor: default; }
+  .dg-room-grid { display: flex; gap: 12px; overflow-x: auto; padding: 0 19px 12px; scroll-snap-type: x mandatory; scroll-padding: 19px; scrollbar-width: none; }
+  .dg-room-grid::-webkit-scrollbar { display: none; }
+  .dg-room-card { flex: 0 0 min(86vw, 370px); scroll-snap-align: start; border-radius: 18px; }
+  .dg-room-media { height: 150px; }
+  .dg-room-content { padding: 14px 15px 15px; }
+  .dg-room-topline h2 { font-size: 20px; }
+  .dg-room-facts { min-height: 36px; }
+  .dg-wishes { margin: 18px 19px 0; justify-content: flex-start; }
+  .dg-wishes p { font-size: 11px; }
+  .dg-wishes strong { font-size: 12px; }
+  .dg-demo-note { margin: 15px 20px 0; font-size: 9px; }
+  .dg-dialog-backdrop { padding: 12px; align-items: end; }
+  .dg-room-dialog { max-height: 91dvh; border-radius: 20px 20px 15px 15px; }
+  .dg-dialog-photo { height: 175px; }
+  .dg-dialog-content { padding: 18px 19px 20px; }
+  .dg-dialog-content h2 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dg-room-card, .dg-select-button, .dg-dialog-select { transition: none; }
+}

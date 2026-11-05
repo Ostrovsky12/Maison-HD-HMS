@@ -32,3 +32,9 @@ Remove the upper guest-facing viewing/payment-readiness strip.
 **Why:** The user explicitly asked to remove it immediately so it is not forgotten.
 
 **How to apply:** Do not restore the prominent strip during later payment-readiness work. Preserve disabled checkout safeguards and explain missing payment readiness in context at checkout instead.
+
+Guest-facing DOGODA copy must not show the internal tariff name «NR Site» or tell guests administrators may call them. The user states that the selectable additional services are free. Wishes copy should emphasize service and an ideal stay, with only a brief note that some wishes may need additional payment.
+
+**Why:** The user said «Доп послуги-вони безкоштовні» and «Ми про сервіс».
+
+**How to apply:** Keep the internal Servio NR Site selection intact; separate provider identifiers from guest display copy, including confirmation emails. Do not imply that free selectable services have a surcharge, or promise that every custom wish is free.

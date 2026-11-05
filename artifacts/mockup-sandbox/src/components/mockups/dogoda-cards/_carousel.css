@@ -1,0 +1,165 @@
+@import "./_group.css";
+
+.dogoda-carousel {
+  min-height: 100dvh;
+  padding: clamp(20px, 4vw, 54px) 20px 46px;
+  color: var(--dg-text);
+  background:
+    radial-gradient(ellipse at 50% -15%, rgba(255,255,255,.74), transparent 48%),
+    var(--dg-bg);
+  font-family: var(--dg-font);
+  overflow: hidden;
+}
+.dogoda-carousel * { box-sizing: border-box; }
+.dogoda-carousel button { font: inherit; color: inherit; cursor: pointer; }
+.dogoda-carousel button:focus-visible { outline: 2px solid var(--dg-button); outline-offset: 3px; }
+.dogoda-carousel .dc-shell { width: min(100%, 1060px); margin: 0 auto; }
+.dogoda-carousel .dc-demo-note {
+  width: fit-content; max-width: 100%; margin: 0 auto 25px; padding: 7px 12px;
+  border: 1px solid rgba(41,45,5,.13); border-radius: 99px;
+  color: rgba(41,45,5,.66); font: 11px/1.4 system-ui, sans-serif; text-align: center;
+}
+.dogoda-carousel .dc-step {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  color: rgba(41,45,5,.65); font: 11px/1.3 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
+}
+.dogoda-carousel .dc-step-mark { width: 27px; height: 1px; background: rgba(41,45,5,.28); }
+.dogoda-carousel .dc-heading { margin: 15px auto 10px; text-align: center; }
+.dogoda-carousel .dc-heading h1 {
+  margin: 0; font-family: var(--dg-font); font-weight: 500; font-size: clamp(30px, 4vw, 47px);
+  line-height: 1.1; letter-spacing: -.035em;
+}
+.dogoda-carousel .dc-heading p { margin: 8px 0 0; font: 14px/1.5 system-ui, sans-serif; color: rgba(41,45,5,.7); }
+.dogoda-carousel .dc-property { margin-top: 23px; text-align: center; font: 12px/1.5 system-ui, sans-serif; color: rgba(41,45,5,.68); }
+.dogoda-carousel .dc-property strong { display: block; color: var(--dg-text); font-weight: 650; font-size: 14px; }
+
+.dogoda-carousel .dc-carousel { position: relative; margin: 17px -2px 0; }
+.dogoda-carousel .dc-viewport {
+  overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; scrollbar-width: none;
+  padding: 8px max(6px, calc((100% - 760px) / 2)) 14px;
+  scroll-padding-inline: max(6px, calc((100% - 760px) / 2));
+}
+.dogoda-carousel .dc-viewport::-webkit-scrollbar { display: none; }
+.dogoda-carousel .dc-track { display: flex; gap: 18px; width: max-content; }
+.dogoda-carousel .dc-card {
+  flex: 0 0 min(760px, calc(100vw - 56px)); width: min(760px, calc(100vw - 56px));
+  scroll-snap-align: center; overflow: hidden; border: 1px solid rgba(41,45,5,.13); border-radius: 24px;
+  background: var(--dg-surface); box-shadow: 0 14px 34px rgba(79,53,22,.08);
+  transition: transform .25s ease, opacity .25s ease;
+}
+.dogoda-carousel .dc-card[data-active="false"] { transform: scale(.975); opacity: .68; }
+.dogoda-carousel .dc-card-main { display: grid; grid-template-columns: minmax(215px, 34%) 1fr; min-height: 258px; }
+.dogoda-carousel .dc-photo {
+  position: relative; min-height: 258px; overflow: hidden; background: #e9cda9; cursor: zoom-in;
+}
+.dogoda-carousel .dc-photo img { display: block; width: 100%; height: 100%; position: absolute; inset: 0; object-fit: cover; }
+.dogoda-carousel .dc-no-photo {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center;
+  background: linear-gradient(150deg, #edd2ad 0%, #e9c49a 52%, #dfb78b 100%);
+}
+.dogoda-carousel .dc-no-photo::before,.dogoda-carousel .dc-no-photo::after {
+  content: ""; position: absolute; border: 1px solid rgba(41,45,5,.16); border-radius: 50%;
+}
+.dogoda-carousel .dc-no-photo::before { width: 160px; height: 160px; }
+.dogoda-carousel .dc-no-photo::after { width: 116px; height: 116px; }
+.dogoda-carousel .dc-no-photo span { position: relative; max-width: 130px; font: 11px/1.45 system-ui,sans-serif; color: rgba(41,45,5,.66); }
+.dogoda-carousel .dc-photo-open {
+  position: absolute; right: 11px; bottom: 11px; display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 11px; border: 0; border-radius: 99px; background: rgba(255,244,229,.94);
+  font: 11px system-ui,sans-serif;
+}
+.dogoda-carousel .dc-card-content { min-width: 0; padding: 22px 24px 19px; display: flex; flex-direction: column; }
+.dogoda-carousel .dc-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dogoda-carousel .dc-title-row h2 { margin: 0; font-size: clamp(23px, 2.7vw, 31px); line-height: 1.05; font-weight: 500; letter-spacing: -.025em; }
+.dogoda-carousel .dc-position { flex: 0 0 auto; padding: 6px 9px; border-radius: 99px; background: rgba(223,125,60,.12); font: 10px system-ui,sans-serif; }
+.dogoda-carousel .dc-facts { display: flex; flex-wrap: wrap; gap: 7px; margin: 16px 0 0; }
+.dogoda-carousel .dc-fact {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 9px; border-radius: 99px; background: rgba(41,45,5,.055);
+  font: 11px/1.35 system-ui,sans-serif; color: rgba(41,45,5,.83);
+}
+.dogoda-carousel .dc-details { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.dogoda-carousel .dc-description { max-width: 440px; margin: 13px 0 0; color: rgba(41,45,5,.77); font: 12px/1.55 system-ui,sans-serif; }
+.dogoda-carousel .dc-disclosure {
+  width: fit-content; margin-top: 10px; padding: 0; border: 0; background: transparent;
+  color: #95512b !important; font: 11px/1.4 system-ui,sans-serif; text-decoration: underline; text-underline-offset: 3px;
+}
+.dogoda-carousel .dc-amenities { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+.dogoda-carousel .dc-amenities li { border: 1px solid rgba(41,45,5,.16); border-radius: 99px; padding: 5px 8px; font: 10px system-ui,sans-serif; }
+.dogoda-carousel .dc-rate-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: auto; padding-top: 15px; border-top: 1px solid rgba(41,45,5,.13);
+}
+.dogoda-carousel .dc-rate-label { font: 11px/1.45 system-ui,sans-serif; color: rgba(41,45,5,.7); }
+.dogoda-carousel .dc-price { margin-top: 2px; font: 500 23px/1.1 var(--dg-font); letter-spacing: -.02em; }
+.dogoda-carousel .dc-price-period { margin-top: 3px; font: 10px system-ui,sans-serif; color: rgba(41,45,5,.6); }
+.dogoda-carousel .dc-select {
+  min-height: 42px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 0 16px; border: 0; border-radius: 99px; background: var(--dg-button); color: #fff8ee !important;
+  font: 12px/1 system-ui,sans-serif; transition: transform .18s ease, background .18s ease;
+}
+.dogoda-carousel .dc-select:hover { transform: translateY(-1px); background: #c8682d; }
+.dogoda-carousel .dc-select[data-selected="true"] { background: #435231; }
+.dogoda-carousel .dc-rules {
+  margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(41,45,5,.045);
+  font: 11px/1.5 system-ui,sans-serif; color: rgba(41,45,5,.75);
+}
+.dogoda-carousel .dc-rules strong { color: var(--dg-text); }
+.dogoda-carousel .dc-controls { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 2px; }
+.dogoda-carousel .dc-arrow {
+  width: 39px; height: 39px; display: grid; place-items: center; border: 1px solid rgba(41,45,5,.2);
+  border-radius: 50%; background: rgba(255,244,229,.62); transition: background .2s ease, transform .2s ease;
+}
+.dogoda-carousel .dc-arrow:hover { transform: translateY(-1px); background: var(--dg-surface); }
+.dogoda-carousel .dc-counter { min-width: 90px; text-align: center; font: 11px system-ui,sans-serif; color: rgba(41,45,5,.7); }
+.dogoda-carousel .dc-dots { display: flex; gap: 5px; justify-content: center; margin-top: 12px; }
+.dogoda-carousel .dc-dot { width: 5px; height: 5px; padding: 0; border: 0; border-radius: 99px; background: rgba(41,45,5,.24); }
+.dogoda-carousel .dc-dot[aria-current="true"] { width: 21px; background: var(--dg-button); }
+.dogoda-carousel .dc-wishes { margin: 29px auto 0; text-align: center; max-width: 590px; }
+.dogoda-carousel .dc-wishes p { margin: 0; font-size: 19px; line-height: 1.25; }
+.dogoda-carousel .dc-wishes small { display: block; margin-top: 6px; font: 11px/1.5 system-ui,sans-serif; color: rgba(41,45,5,.69); }
+.dogoda-carousel .dc-selection {
+  max-width: 470px; margin: 13px auto 0; padding: 9px 13px; border: 1px solid rgba(67,82,49,.24);
+  border-radius: 14px; text-align: center; background: rgba(255,244,229,.65); font: 11px/1.45 system-ui,sans-serif;
+}
+.dogoda-carousel .dc-dialog {
+  width: min(920px, 94vw) !important; max-width: 920px !important; padding: 0 !important;
+  border: 1px solid rgba(255,255,255,.2) !important; border-radius: 18px !important; overflow: hidden;
+  background: #292d05 !important; color: #fff4e5 !important;
+}
+.dogoda-carousel .dc-dialog h2 { padding: 20px 24px 14px; font: 22px var(--dg-font); }
+.dogoda-carousel .dc-dialog p { padding: 0 24px 14px; font: 12px/1.5 system-ui,sans-serif; color: rgba(255,244,229,.7); }
+.dogoda-carousel .dc-dialog-image { position: relative; aspect-ratio: 16/10; background: #242719; }
+.dogoda-carousel .dc-dialog-image img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; }
+.dogoda-carousel .dc-empty-gallery { min-height: 320px; display: grid; place-items: center; text-align: center; font: 13px/1.5 system-ui,sans-serif; color: rgba(255,244,229,.72); }
+
+@media (max-width: 680px) {
+  .dogoda-carousel { padding: 15px 0 30px; }
+  .dogoda-carousel .dc-demo-note { margin: 0 14px 17px; width: auto; }
+  .dogoda-carousel .dc-heading { padding: 0 20px; margin-top: 12px; }
+  .dogoda-carousel .dc-heading h1 { font-size: 32px; }
+  .dogoda-carousel .dc-heading p { font-size: 12px; }
+  .dogoda-carousel .dc-property { margin-top: 19px; padding: 0 20px; }
+  .dogoda-carousel .dc-carousel { margin: 11px 0 0; }
+  .dogoda-carousel .dc-viewport { padding: 7px 10vw 12px; scroll-padding-inline: 10vw; }
+  .dogoda-carousel .dc-track { gap: 12px; }
+  .dogoda-carousel .dc-card { flex-basis: 80vw; width: 80vw; border-radius: 19px; }
+  .dogoda-carousel .dc-card-main { display: flex; flex-direction: column; min-height: 0; }
+  .dogoda-carousel .dc-photo { min-height: 0; height: 150px; }
+  .dogoda-carousel .dc-card-content { padding: 16px 16px 15px; }
+  .dogoda-carousel .dc-title-row h2 { font-size: 22px; }
+  .dogoda-carousel .dc-position { padding: 5px 7px; }
+  .dogoda-carousel .dc-facts { margin-top: 11px; gap: 5px; }
+  .dogoda-carousel .dc-fact { padding: 5px 7px; font-size: 10px; }
+  .dogoda-carousel .dc-description { margin-top: 10px; font-size: 11px; }
+  .dogoda-carousel .dc-disclosure { margin-top: 8px; }
+  .dogoda-carousel .dc-rate-row { margin-top: 14px; padding-top: 12px; }
+  .dogoda-carousel .dc-price { font-size: 21px; }
+  .dogoda-carousel .dc-select { min-height: 39px; padding: 0 12px; }
+  .dogoda-carousel .dc-controls { margin-top: 2px; }
+  .dogoda-carousel .dc-wishes { margin: 24px 20px 0; }
+  .dogoda-carousel .dc-wishes p { font-size: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dogoda-carousel *, .dogoda-carousel *::before, .dogoda-carousel *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}

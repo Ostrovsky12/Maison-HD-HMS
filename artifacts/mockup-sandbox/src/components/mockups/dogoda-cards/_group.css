@@ -1,0 +1,5 @@
+@import "./_original.css";
+@font-face { font-family: "DOGODA Orchidea"; src: url("/__mockup/images/dogoda-cards/OrchideaPro-Medium.otf") format("opentype"); font-display: swap; }
+.dogoda-cards-preview { --dg-bg:#FFDDB2; --dg-surface:#FFF4E5; --dg-text:#292D05; --dg-muted:#A19958; --dg-button:#DF7D3C; --dg-font:"DOGODA Orchidea",Georgia,serif; min-height:100dvh; }
+.dogoda-cards-preview .preview-note { font:11px/1.5 system-ui,sans-serif; text-align:center; opacity:.65; padding:10px 16px; }
+.dogoda-cards-preview button:focus-visible { outline:2px solid #DF7D3C; outline-offset:4px; }
