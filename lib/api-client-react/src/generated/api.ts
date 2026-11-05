@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AcceptGuestOrder200,
   AddBookingAddonRequest,
   Addon,
   AnalyticsSummary,
@@ -92,6 +93,8 @@ import type {
   Guest,
   GuestDetail,
   GuestListResponse,
+  GuestOrderConfirmationInput,
+  GuestOrderConfirmationResult,
   GuideAdminStats,
   GuideCategory,
   GuideHome,
@@ -182,6 +185,173 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getAcceptGuestOrderUrl = (id: number) => {
+  return `/api/fb/public/guest-orders/${id}/accept`;
+};
+
+export const acceptGuestOrder = async (
+  id: number,
+  guestOrderConfirmationInput: GuestOrderConfirmationInput,
+  options?: RequestInit,
+): Promise<AcceptGuestOrder200> => {
+  return customFetch<AcceptGuestOrder200>(getAcceptGuestOrderUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(guestOrderConfirmationInput),
+  });
+};
+
+export const getAcceptGuestOrderMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptGuestOrder>>,
+    TError,
+    { id: number; data: BodyType<GuestOrderConfirmationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acceptGuestOrder>>,
+  TError,
+  { id: number; data: BodyType<GuestOrderConfirmationInput> },
+  TContext
+> => {
+  const mutationKey = ["acceptGuestOrder"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acceptGuestOrder>>,
+    { id: number; data: BodyType<GuestOrderConfirmationInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return acceptGuestOrder(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcceptGuestOrderMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acceptGuestOrder>>
+>;
+export type AcceptGuestOrderMutationBody =
+  BodyType<GuestOrderConfirmationInput>;
+export type AcceptGuestOrderMutationError = ErrorType<void>;
+
+export const useAcceptGuestOrder = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptGuestOrder>>,
+    TError,
+    { id: number; data: BodyType<GuestOrderConfirmationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof acceptGuestOrder>>,
+  TError,
+  { id: number; data: BodyType<GuestOrderConfirmationInput> },
+  TContext
+> => {
+  return useMutation(getAcceptGuestOrderMutationOptions(options));
+};
+
+export const getConfirmGuestOrderItemsUrl = (id: number) => {
+  return `/api/fb/orders/${id}/confirm-guest-items`;
+};
+
+export const confirmGuestOrderItems = async (
+  id: number,
+  guestOrderConfirmationInput: GuestOrderConfirmationInput,
+  options?: RequestInit,
+): Promise<GuestOrderConfirmationResult> => {
+  return customFetch<GuestOrderConfirmationResult>(
+    getConfirmGuestOrderItemsUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(guestOrderConfirmationInput),
+    },
+  );
+};
+
+export const getConfirmGuestOrderItemsMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmGuestOrderItems>>,
+    TError,
+    { id: number; data: BodyType<GuestOrderConfirmationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmGuestOrderItems>>,
+  TError,
+  { id: number; data: BodyType<GuestOrderConfirmationInput> },
+  TContext
+> => {
+  const mutationKey = ["confirmGuestOrderItems"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmGuestOrderItems>>,
+    { id: number; data: BodyType<GuestOrderConfirmationInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return confirmGuestOrderItems(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmGuestOrderItemsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmGuestOrderItems>>
+>;
+export type ConfirmGuestOrderItemsMutationBody =
+  BodyType<GuestOrderConfirmationInput>;
+export type ConfirmGuestOrderItemsMutationError = ErrorType<void>;
+
+export const useConfirmGuestOrderItems = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmGuestOrderItems>>,
+    TError,
+    { id: number; data: BodyType<GuestOrderConfirmationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmGuestOrderItems>>,
+  TError,
+  { id: number; data: BodyType<GuestOrderConfirmationInput> },
+  TContext
+> => {
+  return useMutation(getConfirmGuestOrderItemsMutationOptions(options));
+};
 
 export const getSavePublicBookingDraftUrl = (slug: string) => {
   return `/api/public/booking-engine/${slug}/draft`;

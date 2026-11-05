@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./acceptGuestOrder200";
+export * from "./acceptGuestOrder200Order";
 export * from "./addBookingAddonRequest";
 export * from "./addon";
 export * from "./analyticsSummary";
@@ -140,6 +142,8 @@ export * from "./guest";
 export * from "./guestDetail";
 export * from "./guestListResponse";
 export * from "./guestLoyaltyLevel";
+export * from "./guestOrderConfirmationInput";
+export * from "./guestOrderConfirmationResult";
 export * from "./guestSearchResult";
 export * from "./guideAdminStats";
 export * from "./guideCategory";

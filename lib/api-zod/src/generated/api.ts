@@ -7,6 +7,44 @@
  */
 import * as zod from "zod";
 
+export const AcceptGuestOrderParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const acceptGuestOrderBodyItemIdsMax = 100;
+
+export const AcceptGuestOrderBody = zod.object({
+  itemIds: zod
+    .array(zod.number().min(1))
+    .min(1)
+    .max(acceptGuestOrderBodyItemIdsMax),
+});
+
+export const AcceptGuestOrderResponse = zod.object({
+  order: zod.record(zod.string(), zod.unknown()).optional(),
+});
+
+export const ConfirmGuestOrderItemsParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const confirmGuestOrderItemsBodyItemIdsMax = 100;
+
+export const ConfirmGuestOrderItemsBody = zod.object({
+  itemIds: zod
+    .array(zod.number().min(1))
+    .min(1)
+    .max(confirmGuestOrderItemsBodyItemIdsMax),
+});
+
+export const confirmGuestOrderItemsResponseConfirmedCountMin = 0;
+
+export const ConfirmGuestOrderItemsResponse = zod.object({
+  confirmedCount: zod
+    .number()
+    .min(confirmGuestOrderItemsResponseConfirmedCountMin),
+});
+
 export const SavePublicBookingDraftParams = zod.object({
   slug: zod.coerce.string(),
 });
@@ -1989,6 +2027,7 @@ export const GetPosterOrderBridgeOrderResponse = zod.object({
     zod.object({
       status: zod.enum([
         "pending",
+        "awaiting_confirmation",
         "synced",
         "blocked",
         "review",
@@ -2060,6 +2099,7 @@ export const SendPosterOrderBridgeOrderResponse = zod.object({
     zod.object({
       status: zod.enum([
         "pending",
+        "awaiting_confirmation",
         "synced",
         "blocked",
         "review",

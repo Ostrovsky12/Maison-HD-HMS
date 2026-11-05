@@ -20,6 +20,7 @@ function transaction(options: {
   item?: any;
   modifiers?: any[];
   table?: any;
+  order?: any;
 }) {
   const calls: Array<[string, any[] | undefined]> = [];
   const client = {
@@ -28,6 +29,7 @@ function transaction(options: {
       if (statement === "BEGIN" || statement === "COMMIT" || statement === "ROLLBACK") return { rows: [] };
       if (statement.includes("FROM organizations")) return { rows: [{ id: 1, name: "A", slug: "a" }] };
       if (statement.includes("FROM fb_tables")) return { rows: options.table ? [options.table] : [] };
+      if (statement.includes("FROM fb_orders")) return { rows: options.order ? [options.order] : [] };
       if (statement.includes("FROM fb_items")) return { rows: options.item ? [options.item] : [] };
       if (statement.includes("FROM fb_modifier_options")) {
         return {
@@ -72,6 +74,30 @@ beforeEach(() => {
 });
 
 describe("POST /api/public/menu-order", () => {
+  it("holds every canonical QR item for waiter confirmation", async () => {
+    const tx = transaction({ item: basicItem });
+    vi.mocked(pool.connect).mockResolvedValue(tx.client as any);
+    expect((await request(app).post("/api/public/menu-order").send(basePayload)).status).toBe(201);
+    expect(tx.calls.find(([q]) => q.includes("INSERT INTO fb_orders"))?.[0]).toContain("'new_guest'");
+    expect(tx.calls.find(([q]) => q.includes("INSERT INTO fb_order_items"))?.[0]).toContain("requires_confirmation");
+    expect(tx.calls.find(([q]) => q.includes("INSERT INTO fb_order_items"))?.[0]).toContain(",true)");
+  });
+  it("adds a pending guest basket to the same already-open waiter bill", async () => {
+    const tx = transaction({ item: basicItem, table: { id: 3, number: 1, current_order_id: 91 },
+      order: { id: 91, status: "open", paid_amount: 0 } });
+    vi.mocked(pool.connect).mockResolvedValue(tx.client as any);
+    const response = await request(app).post("/api/public/menu-order").send({ ...basePayload, tableId: 3 });
+    expect(response.status).toBe(201); expect(response.body.orderId).toBe(91);
+    expect(tx.calls.some(([q]) => q.includes("INSERT INTO fb_orders"))).toBe(false);
+    expect(tx.calls.some(([q]) => q.includes("UPDATE fb_orders SET total_amount="))).toBe(true);
+  });
+  it("does not append to a bill which has already started payment", async () => {
+    const tx = transaction({ item: basicItem, table: { id: 3, number: 1, current_order_id: 91 },
+      order: { id: 91, status: "open", paid_amount: 1 } });
+    vi.mocked(pool.connect).mockResolvedValue(tx.client as any);
+    expect((await request(app).post("/api/public/menu-order").send({ ...basePayload, tableId: 3 })).status).toBe(409);
+    expect(tx.calls.some(([q]) => q.includes("INSERT INTO fb_order_items"))).toBe(false);
+  });
   it("uses the server price and name, never client values", async () => {
     const tx = transaction({ item: basicItem });
     vi.mocked(pool.connect).mockResolvedValue(tx.client as any);

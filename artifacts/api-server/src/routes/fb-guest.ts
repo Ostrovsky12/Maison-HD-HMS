@@ -9,6 +9,9 @@ import { generateLiqPayForm, verifyLiqPayCallbackWithKey, parseLiqPayData, sendL
 import { decrypt } from "../lib/encrypt.js";
 import rateLimit from "express-rate-limit";
 import { isPosterManagedOrder } from "../lib/poster-order-bridge.js";
+import { canConfirmGuestItems, confirmGuestItems, GuestConfirmationError, hasUnconfirmedGuestItems } from "../lib/fb-guest-confirmation.js";
+import { ConfirmGuestOrderItemsBody } from "@workspace/api-zod";
+import { logger } from "../lib/logger.js";
 
 const router = Router();
 
@@ -44,6 +47,7 @@ async function createPrintJobs(
   tableNumber: string | null,
   tableLocation: string | null,
   guestName: string | null,
+  reviewedItemIds: number[],
 ) {
   // Fetch items with station info (category hierarchy: item.station → parent_cat.station → cat.station)
   const { rows: orderItems } = await pool.query(
@@ -69,8 +73,10 @@ async function createPrintJobs(
      LEFT JOIN fb_items fi ON fi.id = oi.item_id
      LEFT JOIN fb_categories cat ON cat.id = fi.category_id
      LEFT JOIN fb_categories parent_cat ON parent_cat.id = cat.parent_id
-     WHERE oi.order_id = $1`,
-    [orderId],
+      WHERE oi.order_id = $1 AND oi.organization_id=$2 AND oi.id=ANY($3::int[]) AND oi.status<>'cancelled'
+        AND (NOT oi.requires_confirmation OR oi.confirmed_at IS NOT NULL)
+        AND EXISTS (SELECT 1 FROM fb_orders qo WHERE qo.id=oi.order_id AND qo.organization_id=$2 AND qo.status<>'new_guest')`,
+    [orderId, orgId, reviewedItemIds],
   );
   if (!orderItems.length) return;
 
@@ -385,10 +391,8 @@ router.post("/public/guest-orders", orderLimiter, async (req, res) => {
       [orgId!, resolvedTableId, guestName || "Гість (QR)", parseInt(guestCount) || 1, notes || null, safeTipPct, resolvedOutletId],
     );
     const order = orderRows[0];
-    if (sharedOrder && typeof notes === "string" && notes.trim()) {
-      await client.query("UPDATE fb_orders SET notes=concat_ws(E'\\n',NULLIF(notes,''),$3) WHERE id=$1 AND organization_id=$2",
-        [order.id, orgId!, notes.trim().slice(0, 2000)]);
-    }
+    // Guest notes travel with their pending items, never with the already
+    // approved order comment (which the bridge may transmit immediately).
 
     if (resolvedTableId) {
       await client.query(
@@ -412,9 +416,10 @@ router.post("/public/guest-orders", orderLimiter, async (req, res) => {
       const unitPrice = (parseFloat(price) + modDelta).toFixed(2);
       const total = (parseFloat(unitPrice) * qty).toFixed(2);
       await client.query(
-        `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, status, modifiers)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)`,
-        [order.id, item.itemId, orgId, name, unitPrice, qty, total, item.notes || null,
+        `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, status, modifiers, requires_confirmation)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, true)`,
+        [order.id, item.itemId, orgId, name, unitPrice, qty, total,
+         [item.notes, sharedOrder && item === items[0] ? notes : null].filter(x => typeof x === "string" && x.trim()).join("\n").slice(0, 2000) || null,
          mods.length ? JSON.stringify(mods) : null],
       );
     }
@@ -470,6 +475,9 @@ router.post("/public/liqpay-checkout", paymentLimiter, async (req, res) => {
     );
     if (!orderRows[0]) return res.status(404).json({ error: "No open order for this table" });
     const order = orderRows[0];
+    if (await hasUnconfirmedGuestItems(orgId, order.id)) {
+      return res.status(409).json({ error: "Замовлення очікує підтвердження офіціанта. Оплата поки недоступна." });
+    }
     if (await isPosterManagedOrder(orgId, order.id)) {
       return res.status(409).json({ error: "Цей рахунок обслуговує Poster. Для оплати зверніться до офіціанта. Онлайн-оплата через Poster ще не підключена." });
     }
@@ -711,7 +719,7 @@ router.get("/public/pending-orders", requireAuth, async (req: any, res) => {
               ) FILTER (WHERE oi.id IS NOT NULL), '[]') AS items
        FROM fb_orders o
        LEFT JOIN fb_tables ft ON ft.id = o.table_id
-       LEFT JOIN fb_order_items oi ON oi.order_id = o.id
+        LEFT JOIN fb_order_items oi ON oi.order_id = o.id AND oi.status<>'cancelled'
        WHERE o.organization_id = $1 AND o.status = 'new_guest'
        GROUP BY o.id, ft.number, ft.location
        ORDER BY o.opened_at ASC`,
@@ -724,30 +732,38 @@ router.get("/public/pending-orders", requireAuth, async (req: any, res) => {
 });
 
 // ─── PATCH /fb/public/guest-orders/:id/accept ────────────────────────────────
-// Cashier accepts → status 'open', creates print jobs for kitchen/bar printers
+// Legacy cashier uses the same reviewed-ID approval boundary as Mobile Waiter.
 router.patch("/public/guest-orders/:id/accept", requireAuth, async (req: any, res) => {
   const orgId = req.user?.organizationId;
-  const orderId = parseInt(req.params.id);
+  const orderId = Number(req.params.id);
+  if (!canConfirmGuestItems(req.user?.role)) return res.status(403).json({ error: "Потрібні права працівника закладу." });
+  const parsed = ConfirmGuestOrderItemsBody.safeParse(req.body);
+  if (!parsed.success || !Number.isSafeInteger(orderId) || orderId < 1
+    || parsed.data.itemIds.some(id => !Number.isSafeInteger(id))
+    || new Set(parsed.data.itemIds).size !== parsed.data.itemIds.length) {
+    return res.status(400).json({ error: "Оновіть замовлення й передайте лише перевірені позиції." });
+  }
   try {
+    const approval = await confirmGuestItems(orgId, orderId, req.user.userId, parsed.data.itemIds);
     const { rows } = await pool.query(
-      `UPDATE fb_orders SET status = 'open', updated_at = NOW()
-       WHERE id = $1 AND organization_id = $2 AND status = 'new_guest'
-       RETURNING *, (SELECT number FROM fb_tables WHERE id = fb_orders.table_id) AS table_number,
-                   (SELECT location FROM fb_tables WHERE id = fb_orders.table_id) AS table_location`,
+      `SELECT o.*, ft.number AS table_number, ft.location AS table_location FROM fb_orders o
+       LEFT JOIN fb_tables ft ON ft.id=o.table_id AND ft.organization_id=o.organization_id
+       WHERE o.id=$1 AND o.organization_id=$2`,
       [orderId, orgId],
     );
     if (!rows[0]) return res.status(404).json({ error: "Order not found or already processed" });
 
-    // Async — don't block the response on print job creation errors
-    createPrintJobs(
-      orgId, orderId,
-      rows[0].table_number, rows[0].table_location,
-      rows[0].guest_name,
-    ).catch(err => console.error("[print-jobs] Failed to create print jobs:", err));
+    // Never print a second, local ticket for a bill managed by Poster.
+    if (approval.confirmedCount > 0 && !(await isPosterManagedOrder(orgId, orderId))) {
+      createPrintJobs(orgId, orderId, rows[0].table_number, rows[0].table_location, rows[0].guest_name, approval.confirmedIds)
+        .catch(() => logger.warn({ organizationId: orgId, orderId }, "Guest order local print queue unavailable"));
+    }
 
     res.json({ order: rows[0] });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+  } catch (error) {
+    res.status(error instanceof GuestConfirmationError ? error.status : 503).json({
+      error: error instanceof GuestConfirmationError ? error.message : "Не вдалося підтвердити страви. Оновіть замовлення.",
+    });
   }
 });
 

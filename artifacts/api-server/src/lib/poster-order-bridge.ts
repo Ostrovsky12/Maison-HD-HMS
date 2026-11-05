@@ -2,6 +2,7 @@ import { pool } from "@workspace/db";
 import { logger } from "./logger.js";
 import { createHash } from "node:crypto";
 import { PosterWriteError, posterCode, posterDiagnostic, providerErrorCode, type PosterDiagnostic } from "./poster-diagnostics.js";
+import { awaitsWaiterConfirmation } from "./fb-guest-confirmation.js";
 
 export type BridgeConfig = {
   enabled: boolean; spotId: number; tabletId: number; waiterId: number;
@@ -76,7 +77,7 @@ export function bridgePlan(order: any, items: any[], config: BridgeConfig) {
   const quantities: Record<string, number> = {};
   const prices: Record<string, number> = {};
   const notes: string[] = [];
-  for (const item of items.filter(i => i.status !== "cancelled")) {
+  for (const item of items.filter(i => i.status !== "cancelled" && !awaitsWaiterConfirmation(order, i))) {
     const productId = config.productMap[String(item.item_id)];
     if (!productId) throw new Error(`Не зіставлено страву «${String(item.name).slice(0, 100)}» з Poster.`);
     const mods = typeof item.modifiers === "string" ? JSON.parse(item.modifiers) : item.modifiers;
@@ -152,6 +153,13 @@ export async function dispatchPosterOrder(orgId: number, orderId: number) {
       return state;
     }
     const items = (await client.query("SELECT * FROM fb_order_items WHERE order_id=$1 AND organization_id=$2 ORDER BY id", [orderId, orgId])).rows;
+    if (items.some(item => awaitsWaiterConfirmation(order, item))
+      && !items.some(item => item.status !== "cancelled" && !awaitsWaiterConfirmation(order, item))) {
+      state.status = "awaiting_confirmation";
+      state.message = "QR-замовлення очікує підтвердження офіціанта. У Poster його ще не передано.";
+      await saveState(client, orgId, orderId, state);
+      return state;
+    }
     const plan = bridgePlan(order, items, config);
     const accountBinding = createHash("sha256").update(account.apiKey).digest("hex");
     if (state.remoteOrderId && state.accountBinding !== accountBinding) {

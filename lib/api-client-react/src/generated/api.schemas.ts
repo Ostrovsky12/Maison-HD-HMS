@@ -5,6 +5,19 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export interface GuestOrderConfirmationInput {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  itemIds: number[];
+}
+
+export interface GuestOrderConfirmationResult {
+  /** @minimum 0 */
+  confirmedCount: number;
+}
+
 export type BookingDraftInputNoticeVersion =
   (typeof BookingDraftInputNoticeVersion)[keyof typeof BookingDraftInputNoticeVersion];
 
@@ -885,6 +898,7 @@ export type PosterDispatchStateStatus =
 
 export const PosterDispatchStateStatus = {
   pending: "pending",
+  awaiting_confirmation: "awaiting_confirmation",
   synced: "synced",
   blocked: "blocked",
   review: "review",
@@ -2413,6 +2427,12 @@ export interface GuideAdminStats {
   pendingReview: number;
   approved: number;
 }
+
+export type AcceptGuestOrder200Order = { [key: string]: unknown };
+
+export type AcceptGuestOrder200 = {
+  order?: AcceptGuestOrder200Order;
+};
 
 export type ListBookingDraftsParams = {
   /**

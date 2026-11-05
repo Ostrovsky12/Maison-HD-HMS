@@ -1027,7 +1027,7 @@ router.post("/menu-order", async (req, res) => {
       const validTableId = integer(tableId, 2_147_483_647);
       if (!validTableId) throw Object.assign(new Error("Некоректний стіл"), { status: 400 });
       const { rows } = await client.query(
-        `SELECT id, number FROM fb_tables
+        `SELECT id, number, current_order_id FROM fb_tables
          WHERE id = $1 AND organization_id = $2 AND is_active = true FOR UPDATE`,
         [validTableId, orgId],
       );
@@ -1112,10 +1112,16 @@ router.post("/menu-order", async (req, res) => {
     }
     const tipCents = Math.round(subtotalCents * safeTipPct / 100);
     const money = (cents: number) => (cents / 100).toFixed(2);
-    const { rows: orderRows } = await client.query(
+    const shared = tableRecord?.current_order_id
+      ? (await client.query(`SELECT * FROM fb_orders WHERE id=$1 AND organization_id=$2 AND table_id=$3
+          AND status NOT IN ('billed','cancelled') FOR UPDATE`, [tableRecord.current_order_id, orgId, tableRecord.id])).rows[0]
+      : null;
+    if (shared && Number(shared.paid_amount || 0) > 0)
+      throw Object.assign(new Error("Рахунок уже оплачується. Зверніться до офіціанта."), { status: 409 });
+    const { rows: orderRows } = shared ? { rows: [shared] } : await client.query(
       `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, room_number,
         status, total_amount, tip_amount, tip_pct, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,'new_guest',$7,$8,$9,$10) RETURNING id`,
       [orgId, tableRecord?.id || null, tableRecord ? "dine_in" : "room_service", guestName || "Гість (QR)",
        integer(guestCount, 100) || 1, tableRecord ? `Стіл ${tableRecord.number}` : null,
        money(subtotalCents), money(tipCents), String(safeTipPct), typeof notes === "string" ? notes.slice(0, 5000) : null],
@@ -1123,12 +1129,17 @@ router.post("/menu-order", async (req, res) => {
     const order = orderRows[0];
     for (const row of validatedItems) {
       await client.query(
-        `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, modifiers)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        `INSERT INTO fb_order_items (order_id, item_id, organization_id, name, price, quantity, total_price, notes, modifiers, requires_confirmation)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true)`,
         [order.id, row.item.id, orgId, row.item.name, money(row.unitCents), row.quantity,
-         money(row.totalCents), row.notes, row.modifiers.length ? JSON.stringify(row.modifiers) : null],
+          money(row.totalCents),
+          [row.notes, shared && row === validatedItems[0] && typeof notes === "string" ? notes : null].filter(Boolean).join("\n").slice(0, 2000) || null,
+          row.modifiers.length ? JSON.stringify(row.modifiers) : null],
       );
     }
+    if (shared) await client.query(`UPDATE fb_orders SET total_amount=(
+      SELECT coalesce(sum(total_price::numeric),0) FROM fb_order_items WHERE order_id=$1 AND status<>'cancelled'),
+      updated_at=now() WHERE id=$1 AND organization_id=$2`, [order.id, orgId]);
     if (tableRecord) await client.query(
       "UPDATE fb_tables SET status = 'occupied', current_order_id = $1 WHERE id = $2 AND organization_id = $3",
       [order.id, tableRecord.id, orgId],

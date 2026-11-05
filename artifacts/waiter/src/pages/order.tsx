@@ -60,8 +60,10 @@ export default function Order() {
   const order = data?.order;
   const items: any[] = data?.items || [];
   const activeItems = items.filter(i => i.status !== "cancelled");
-  const unsentItems = activeItems.filter(i => i.status === "pending" && !i.sent_at);
-  const splittableItems = activeItems.filter(i => i.status === "pending" && !i.sent_at);
+  const needsConfirmation = (item: any) => !item.confirmed_at && (item.requires_confirmation === true || order?.status === "new_guest");
+  const pendingGuestItems = activeItems.filter(needsConfirmation);
+  const unsentItems = activeItems.filter(i => i.status === "pending" && !i.sent_at && !needsConfirmation(i));
+  const splittableItems = activeItems.filter(i => i.status === "pending" && !i.sent_at && !needsConfirmation(i));
 
   // Open orders excluding current
   const openOrders: any[] = (openOrdersData?.orders || []).filter(
@@ -72,6 +74,18 @@ export default function Order() {
     mutationFn: (itemId: number) =>
       apiFetch(`/fb/order-items/${itemId}`, { method: "PATCH", body: JSON.stringify({ status: "cancelled" }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["waiter-order", orderId] }); },
+  });
+  const confirmGuest = useMutation({
+    mutationFn: () => apiFetch(`/fb/orders/${orderId}/confirm-guest-items`, {
+      method: "POST", body: JSON.stringify({ itemIds: pendingGuestItems.map(i => i.id) }),
+    }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["waiter-order", orderId] }),
+        qc.invalidateQueries({ queryKey: ["waiter-open-orders"] }),
+        qc.invalidateQueries({ queryKey: ["poster-order-status", Number(orderId)] }),
+      ]);
+    },
   });
 
   async function printBill() {
@@ -410,7 +424,9 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
             <p className="text-sm">Замовлення порожнє</p>
           </div>
         ) : activeItems.map(item => {
-          const st = ITEM_STATUS[item.status] || ITEM_STATUS.pending;
+          const st = needsConfirmation(item)
+            ? { label: "Чекає підтвердження", color: "text-amber-800 bg-amber-50 border border-amber-200" }
+            : ITEM_STATUS[item.status] || ITEM_STATUS.pending;
           const qty = parseFloat(item.quantity || 1);
           const qtyLabel = qty % 1 !== 0 ? qty.toFixed(2).replace(/\.?0+$/, "") : String(qty);
           return (
@@ -440,6 +456,20 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
       {/* Bottom actions */}
       <div className="px-4 pb-6 pt-3 space-y-3 border-t bg-background safe-bottom">
         <PosterOrderStatus orderId={Number(orderId)} />
+        {(pendingGuestItems.length > 0 || confirmGuest.isError) && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3" data-testid="panel-qr-confirmation">
+            <h3 className="font-semibold">Нові позиції від гостя: {pendingGuestItems.length}</h3>
+            <p className="text-sm text-amber-900">Перевірте страви й кількість. До підтвердження ці позиції не передаються в Poster або на кухню.</p>
+            {confirmGuest.isError && <p role="alert" className="text-sm text-red-700">{(confirmGuest.error as Error).message}</p>}
+            <button type="button" data-testid="button-confirm-qr-order"
+              disabled={confirmGuest.isPending || pendingGuestItems.length === 0}
+              onClick={() => confirmGuest.mutate()}
+              className="w-full rounded-xl bg-amber-800 px-4 py-3 font-semibold text-white disabled:opacity-50">
+              {confirmGuest.isPending ? "Підтвердження…" : "Підтвердити QR-замовлення"}
+            </button>
+            <p className="text-xs text-amber-900">Підтвердження не означає друку: стан передавання в Poster показано окремо.</p>
+          </section>
+        )}
 
         {/* Add items */}
         {order.status !== "billed" && order.status !== "cancelled" && (

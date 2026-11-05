@@ -2061,7 +2061,10 @@ export default function FbCashier() {
   const handleAccept = async (id: number) => {
     setAccepting(id);
     try {
-      await apiFetch(`/public/guest-orders/${id}/accept`, { method: "PATCH" });
+      const reviewed = pendingOrders.find(o => o.id === id);
+      await apiFetch(`/public/guest-orders/${id}/accept`, {
+        method: "PATCH", body: JSON.stringify({ itemIds: (reviewed?.items || []).map(i => i.id) }),
+      });
       setPendingOrders(prev => prev.filter(o => o.id !== id));
       knownIds.current.delete(id);
       setTimeout(fetchActive, 600);

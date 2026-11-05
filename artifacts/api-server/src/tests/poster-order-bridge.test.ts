@@ -53,6 +53,33 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Poster open-order dispatch", () => {
+  it("never contacts Poster for a QR basket awaiting waiter approval", async () => {
+    order.status = "new_guest";
+    items[0].requires_confirmation = true;
+    expect(await dispatchPosterOrder(39, 5)).toMatchObject({ status: "awaiting_confirmation" });
+    expect(fixture.fetch).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+  });
+  it("also blocks a legacy unconfirmed new_guest basket", async () => {
+    order.status = "new_guest";
+    expect(await dispatchPosterOrder(39, 5)).toMatchObject({ status: "awaiting_confirmation" });
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("keeps unapproved additions out of the existing Poster bill, then exports them exactly once", async () => {
+    await dispatchPosterOrder(39, 5); writes = [];
+    items.push({ ...item, quantity: 3, requires_confirmation: true, confirmed_at: null });
+    await dispatchPosterOrder(39, 5);
+    expect(writes).toEqual([]); expect(order.poster_sync.quantities["200"]).toBe(2);
+    items[1].confirmed_at = new Date().toISOString();
+    await dispatchPosterOrder(39, 5);
+    expect(order.poster_sync.quantities["200"]).toBe(5);
+    expect(writes).toEqual(["transactions.changeTransactionProductCount"]);
+    writes = []; await dispatchPosterOrder(39, 5); expect(writes).toEqual([]);
+  });
+  it("does not block approved dishes because a pending guest addition has an unmapped product", async () => {
+    items.push({ ...item, item_id: 999, requires_confirmation: true, confirmed_at: null });
+    expect(await dispatchPosterOrder(39, 5)).toMatchObject({ status: "synced", quantities: { "200": 2 } });
+  });
   it("creates one remote bill and subsequent waiter/QR additions use the same bill", async () => {
     expect(await dispatchPosterOrder(39, 5)).toMatchObject({ status: "synced", remoteOrderId: 500, quantities: { "200": 2 } });
     expect(writes).toEqual(["transactions.createTransaction", "transactions.changeComment", "transactions.addTransactionProduct", "transactions.changeTransactionProductCount"]);

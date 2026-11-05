@@ -514,7 +514,7 @@ export default function QrMenuPage() {
       
       <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-sm mb-8 relative z-10 border border-stone-100">
          <p className="text-[#2D2A26] font-medium text-sm leading-relaxed">
-           Замовлення передано на кухню.<br/>Ми приготуємо його з турботою.
+           Замовлення передано офіціанту на підтвердження.<br/>Після перевірки його передадуть на приготування.
          </p>
       </div>
 

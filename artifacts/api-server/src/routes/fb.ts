@@ -3,6 +3,8 @@ import { db, pool } from "@workspace/db";
 import { fbCategoriesTable, fbItemsTable, fbTablesTable, fbOrdersTable, fbOrderItemsTable } from "@workspace/db";
 import { eq, and, desc, asc, sql, gte, lte, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
+import { canConfirmGuestItems, confirmGuestItems, GuestConfirmationError, hasUnconfirmedGuestItems } from "../lib/fb-guest-confirmation.js";
+import { ConfirmGuestOrderItemsBody } from "@workspace/api-zod";
 import { allocatePositiveFiscalItems, orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
 import { submitDocument } from "./prro.js";
 import { isPosterManagedOrder } from "../lib/poster-order-bridge.js";
@@ -18,6 +20,11 @@ router.use("/orders/:id", requireAuth, async (req: any, res, next) => {
     || (req.method === "PATCH" && (["billed", "cancelled"].includes(req.body?.status) || req.body?.paidAmount !== undefined));
   if (!destructive) return next();
   try {
+    if (!(req.method === "PATCH" && req.body?.status === "cancelled" && req.body?.paidAmount === undefined)
+      && (await hasUnconfirmedGuestItems(getOrg(req), Number(req.params.id))
+        || (req.body?.sourceOrderId && await hasUnconfirmedGuestItems(getOrg(req), Number(req.body.sourceOrderId))))) {
+      return res.status(409).json({ error: "Спочатку підтвердьте або скасуйте нові QR-позиції. Оплата й поділ поки недоступні." });
+    }
     if (await isPosterManagedOrder(getOrg(req), Number(req.params.id))
       || (req.body?.sourceOrderId && await isPosterManagedOrder(getOrg(req), Number(req.body.sourceOrderId)))) {
       return res.status(409).json({ error: "Рахунок пов’язаний із Poster. Оплату, закриття та поділ виконуйте на касі Poster до підключення синхронізації оплат." });
@@ -723,6 +730,10 @@ router.get("/orders", requireAuth, async (req: any, res) => {
       notes: fbOrdersTable.notes, openedAt: fbOrdersTable.openedAt, closedAt: fbOrdersTable.closedAt,
       createdAt: fbOrdersTable.createdAt, tableId: fbOrdersTable.tableId,
       tableNumber: fbTablesTable.number, tableLocation: fbTablesTable.location,
+      pendingConfirmationCount: sql<number>`(SELECT count(*)::int FROM fb_order_items qi
+        WHERE qi.order_id=${fbOrdersTable.id} AND qi.organization_id=${fbOrdersTable.organizationId}
+        AND qi.status<>'cancelled' AND qi.confirmed_at IS NULL
+        AND (qi.requires_confirmation OR ${fbOrdersTable.status}='new_guest'))`,
     })
       .from(fbOrdersTable)
       .leftJoin(fbTablesTable, eq(fbOrdersTable.tableId, fbTablesTable.id))
@@ -841,6 +852,11 @@ router.patch("/orders/:id", requireAuth, async (req: any, res) => {
     const orderId = parseInt(req.params.id);
     const { status, paidAmount, staffNotes } = req.body;
     const db_ = (db as any).$client;
+    if (status && !["new_guest", "cancelled"].includes(status)) {
+      const pending = (await db_.query(`SELECT id FROM fb_orders WHERE id=$1 AND organization_id=$2 AND status='new_guest'`,
+        [orderId, orgId])).rows.length;
+      if (pending) return res.status(409).json({ error: "Спочатку підтвердьте QR-замовлення офіціантом." });
+    }
 
     const setClauses: string[] = ["updated_at = NOW()"];
     const vals: any[] = [];
@@ -870,6 +886,27 @@ router.patch("/orders/:id", requireAuth, async (req: any, res) => {
 
     res.json({ order });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/orders/:id/confirm-guest-items", requireAuth, async (req: any, res): Promise<void> => {
+  if (!canConfirmGuestItems(req.user?.role)) {
+    res.status(403).json({ error: "Підтвердження доступне працівникам закладу." }); return;
+  }
+  const parsed = ConfirmGuestOrderItemsBody.safeParse(req.body), orderId = Number(req.params.id);
+  if (!parsed.success || !Number.isSafeInteger(orderId) || orderId < 1
+    || parsed.data.itemIds.some(id => !Number.isSafeInteger(id))
+    || new Set(parsed.data.itemIds).size !== parsed.data.itemIds.length) {
+    res.status(400).json({ error: "Перевірте список страв для підтвердження." }); return;
+  }
+  try {
+    const result = await confirmGuestItems(getOrg(req), orderId, req.user.userId, parsed.data.itemIds);
+    res.json({ confirmedCount: result.confirmedCount });
+  }
+  catch (error) {
+    res.status(error instanceof GuestConfirmationError ? error.status : 503).json({
+      error: error instanceof GuestConfirmationError ? error.message : "Не вдалося підтвердити страви. Оновіть рахунок перед повтором.",
+    });
+  }
 });
 
 // ─── Add item to order ────────────────────────────────────────────────────────
@@ -953,7 +990,9 @@ router.get("/kitchen", requireAuth, async (req: any, res) => {
       .leftJoin(fbTablesTable, eq(fbOrdersTable.tableId, fbTablesTable.id))
       .where(and(
         eq(fbOrderItemsTable.organizationId, orgId),
-        sql`${fbOrderItemsTable.status} IN ('pending', 'cooking')`
+        sql`${fbOrderItemsTable.status} IN ('pending', 'cooking')`,
+        sql`(NOT ${fbOrderItemsTable.requiresConfirmation} OR ${fbOrderItemsTable.confirmedAt} IS NOT NULL)`,
+        ne(fbOrdersTable.status, "new_guest")
       ))
       .orderBy(asc(fbOrderItemsTable.createdAt));
 
@@ -993,9 +1032,14 @@ router.patch("/order-items/:id", requireAuth, async (req: any, res) => {
     const { rows: [item] } = await db_.query(
       `UPDATE fb_order_items SET ${setClauses.join(", ")}
        WHERE id = $2 AND organization_id = $3
+         AND ($1='cancelled' OR (
+           (NOT requires_confirmation OR confirmed_at IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM fb_orders qo WHERE qo.id=fb_order_items.order_id
+             AND qo.organization_id=$3 AND qo.status='new_guest')))
        RETURNING id, order_id, status, sent_at, ready_at, served_at`,
       vals
     );
+    if (!item) return res.status(409).json({ error: "Страва ще не підтверджена офіціантом або вже недоступна." });
     res.json({ item });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

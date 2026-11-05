@@ -117,6 +117,11 @@ export default function Tables() {
                       </div>
                       <div>
                         <div className="font-bold text-base">{d.title}</div>
+                        {Number(t.pendingConfirmationCount) > 0 && (
+                          <span data-testid={`badge-qr-pending-${t.id}`} className="block text-xs font-semibold text-amber-800 mt-1">
+                            QR: очікує підтвердження · {t.pendingConfirmationCount}
+                          </span>
+                        )}
                         {t.guestName && (
                           <div className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
                             <Users className="w-3.5 h-3.5" />

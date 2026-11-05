@@ -11,6 +11,7 @@ export type PosterDispatchStateStatus =
 
 export const PosterDispatchStateStatus = {
   pending: "pending",
+  awaiting_confirmation: "awaiting_confirmation",
   synced: "synced",
   blocked: "blocked",
   review: "review",

@@ -49,6 +49,45 @@ tags:
     description: DOGODA Guest Nature Guide
 
 paths:
+  /fb/public/guest-orders/{id}/accept:
+    patch:
+      operationId: acceptGuestOrder
+      tags: [restaurant]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GuestOrderConfirmationInput" }
+      responses:
+        "200":
+          description: Legacy cashier approval of reviewed items only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order: { type: object, additionalProperties: true }
+        "409": { description: Items changed or bill closed }
+  /fb/orders/{id}/confirm-guest-items:
+    post:
+      operationId: confirmGuestOrderItems
+      tags: [restaurant]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GuestOrderConfirmationInput" }
+      responses:
+        "200":
+          description: Only the reviewed item IDs are confirmed; does not prove Poster printing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GuestOrderConfirmationResult" }
+        "409": { description: Items changed or bill closed }
   /public/booking-engine/{slug}/draft:
     post:
       operationId: savePublicBookingDraft
@@ -3039,6 +3078,21 @@ components:
       bearerFormat: JWT
 
   schemas:
+    GuestOrderConfirmationInput:
+      type: object
+      required: [itemIds]
+      properties:
+        itemIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+    GuestOrderConfirmationResult:
+      type: object
+      required: [confirmedCount]
+      properties:
+        confirmedCount: { type: integer, minimum: 0 }
     BookingDraftInput:
       type: object
       required: [token, revision, noticeVersion, guestName, phone, email, checkIn, checkOut, adults, children, categoryName, rateName, totalAmount, currency, stage]
@@ -3613,7 +3667,7 @@ components:
       type: object
       required: [status]
       properties:
-        status: { type: string, enum: [pending, synced, blocked, review, closed_remote, disabled] }
+        status: { type: string, enum: [pending, awaiting_confirmation, synced, blocked, review, closed_remote, disabled] }
         remoteOrderId: { type: integer }
         message: { type: string }
         lastSync: { type: string }
