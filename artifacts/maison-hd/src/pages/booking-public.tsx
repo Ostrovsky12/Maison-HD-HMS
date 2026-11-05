@@ -3,6 +3,8 @@ import { useParams } from "wouter";
 import { useGetPublicBookingEngine } from "@workspace/api-client-react";
 import { UnitCard, type PublicUnit } from "@/components/booking/unit-card";
 import { ServioCategoryCard, type ServioCharge } from "@/components/booking/servio-category-card";
+import { CategoryCarousel } from "@/components/booking/dogoda/category-carousel";
+import { guestRateName } from "@/lib/guest-rate-name";
 import { servioRateViewOnlyReason } from "@/lib/servio-rate-view";
 import { CANONICAL_PAYMENT_NOTICE, PAYMENT_WINDOW_LABEL, supplementaryText } from "@/lib/payment-window";
 import type { BookingRoomDetails } from "@workspace/api-client-react";
@@ -42,7 +44,7 @@ const money = (v: number) => new Intl.NumberFormat("uk-UA", { maximumFractionDig
 const fmtDate = (v: string) => { const d = new Date(v + "T00:00:00"); return isNaN(d.getTime()) ? v : d.toLocaleDateString("uk-UA", { weekday: "short", day: "numeric", month: "short" }); };
 
 async function readError(r: Response): Promise<{ msg: string; code: string }> {
-  try { const j = await r.json(); return { msg: s(j?.error) || s(j?.message) || `Помилка ${r.status}`, code: s(j?.code) }; }
+  try { const j = await r.json(); return { msg: guestRateName(s(j?.error) || s(j?.message) || `Помилка ${r.status}`), code: s(j?.code) }; }
   catch { return { msg: `Помилка ${r.status}`, code: "" }; }
 }
 
@@ -123,6 +125,13 @@ export default function BookingPublicPage() {
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
   const [returnRef, setReturnRef] = useState<ReturnRef | null>(null);
+  // Wait until React has replaced the step. Smooth scrolling before the render
+  // can be interrupted by layout shifts and leave the next page halfway down.
+  useEffect(() => {
+    if (!ap) return;
+    const frame = requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
+    return () => cancelAnimationFrame(frame);
+  }, [step, slug, !!pending, !!returnRef, !!data, !!ap]);
   const draft = useBookingDraft(slug, API, !!data && !isPreviewUrl && !previewLocked && !!chosen && !pending && !returnRef, {
     guestName: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(), phone: form.phone.trim(), email: form.email.trim(),
     checkIn, checkOut, adults: guests, children: childAges.length,
@@ -191,16 +200,16 @@ export default function BookingPublicPage() {
       if (!r.ok) throw new Error((await readError(r)).msg);
       const j = await r.json();
       if (isServio) {
-        if (j.status === "failed") throw new Error(s(j.message) || "Servio тимчасово недоступний");
-        if (j.code === "no_eligible_rates") throw new Error(s(j.message) || "Вільні місця є, але онлайн-тариф недоступний. Зверніться до готелю.");
-        if (j.status === "partial" && !j.currency) throw new Error(s(j.message) || "Servio не повернув підтверджених цін");
+        if (j.status === "failed") throw new Error(guestRateName(s(j.message)) || "Servio тимчасово недоступний");
+        if (j.code === "no_eligible_rates") throw new Error(guestRateName(s(j.message)) || "Вільні місця є, але онлайн-тариф недоступний. Зверніться до готелю.");
+        if (j.status === "partial" && !j.currency) throw new Error(guestRateName(s(j.message)) || "Servio не повернув підтверджених цін");
         const nights = (Date.parse(co) - Date.parse(ci)) / 86400000;
         const catalog = Array.isArray(data?.accommodationCatalog) ? data.accommodationCatalog : [];
         let id = 0;
         const units: Unit[] = (Array.isArray(j.categories) ? j.categories : []).flatMap((c: any) => {
           const media = catalog.find((item: any) => item.id === `servio:${j.hotelId}:${c.id}`);
           return (Array.isArray(c.rates) ? c.rates : []).map((rate: any) => ({
-            id: ++id, name: s(c.name), category: s(rate.name), capacity: n(c.mainPlaces), maxCapacity: null,
+            id: ++id, name: s(c.name), category: guestRateName(s(rate.name)), capacity: n(c.mainPlaces), maxCapacity: null,
             viewOnlyReason: servioRateViewOnlyReason(rate),
             description: s(media?.description), photos: photoList(media?.photos), videoUrl: s(media?.videoUrl),
             basePrice: 0, totalPrice: n(rate.total), propertyName: name,
@@ -464,7 +473,7 @@ export default function BookingPublicPage() {
     const party = `${guests} ${guests === 1 ? "дорослий" : "дорослих"}${childrenCount ? ` · ${childrenCount} ${childrenCount === 1 ? "дитина" : childrenCount < 5 ? "дитини" : "дітей"} (${kids.map((a) => (a === null ? "?" : ageWord(a))).join(", ")})` : ""}`;
     const hasResults = !!results && !resultsOutdated;
     const eff: DogodaStep = chosen && step >= 3 && hasResults ? (step === 4 ? 4 : 3) : hasResults && step >= 2 ? 2 : (stale && chosen && step === 4 ? 4 : 1);
-    const go = (x: DogodaStep) => { setStep(x); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    const go = (x: DogodaStep) => { setStep(x); };
     const back = (to: DogodaStep, label: string) => (
       <button type="button" onClick={() => go(to)} className="inline-flex items-center gap-1.5 text-sm underline" data-testid={`button-back-${to}`}><ArrowLeft className="w-4 h-4" />{label}</button>
     );
@@ -528,7 +537,7 @@ export default function BookingPublicPage() {
           )}
 
           {eff === 2 && results && (
-            <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-8 items-start">
+            <div className={isServio ? "min-w-0 space-y-5" : "grid lg:grid-cols-[minmax(0,1fr)_320px] gap-8 items-start"}>
               <section id="results" className="space-y-6 min-w-0 dg-rise" aria-labelledby="dg-step2">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h2 id="dg-step2" className="text-2xl md:text-3xl tracking-tight">
@@ -536,6 +545,7 @@ export default function BookingPublicPage() {
                   </h2>
                   {back(1, "Змінити дати")}
                 </div>
+                {isServio && <p className="text-sm dg-muted">{fmtDate(checkIn)} – {fmtDate(checkOut)} · {party}</p>}
                 {results.units.length === 0 ? (
                   <div className="rounded-3xl border border-dashed border-stone-300 bg-white p-10 text-center text-stone-600" data-testid="text-no-units">
                     На ці дати немає вільних будиночків для {party}. Спробуйте інші дати{phone || email ? " або зв'яжіться з нами" : ""}.
@@ -547,10 +557,10 @@ export default function BookingPublicPage() {
                     const g = groups.find((x) => x.key === k);
                     if (g) g.units.push(u); else groups.push({ key: k, units: [u] });
                   }
-                  return groups.map((g) => {
+                  return <CategoryCarousel initialIndex={Math.max(0, groups.findIndex((g) => g.units.some((u) => u.id === chosen?.id)))}>{groups.map((g) => {
                     const f = g.units[0];
                     return (
-                      <ServioCategoryCard key={g.key} categoryKey={g.key} name={f.name} photos={f.photos} description={f.description} details={f.servioGroup?.details}
+                      <ServioCategoryCard compact key={g.key} categoryKey={g.key} name={f.name} photos={f.photos} description={f.description} details={f.servioGroup?.details}
                         capacity={f.capacity} accent={accent} supplementary={supplementaryText(cfg.paymentWindowText)} disabled={!!pending || previewLocked}
                         selectedId={chosen && g.units.some((u) => u.id === chosen.id) ? chosen.id : null}
                         rates={g.units.map((u) => ({ id: u.id, rateName: u.servioGroup?.rateName ?? u.category, total: u.totalPrice, charges: u.servioGroup?.charges ?? [], viewOnlyReason: u.viewOnlyReason }))}
@@ -560,7 +570,7 @@ export default function BookingPublicPage() {
                           setChosen(u); setStale(null); setSubmitErr(null); go(3);
                         }} />
                     );
-                  });
+                  })}</CategoryCarousel>;
                 })() : results.units.map((u) => (
                   <UnitCard key={u.id} unit={u} nights={results.nights} accent={accent} active={chosen?.id === u.id} disabled={!!pending || previewLocked}
                     policyBadge={policy ? "Неповоротний · 100% передоплата" : undefined}
@@ -570,7 +580,7 @@ export default function BookingPublicPage() {
                     }} />
                 ))}
               </section>
-              {summary}
+              {!isServio && summary}
             </div>
           )}
 
@@ -589,10 +599,11 @@ export default function BookingPublicPage() {
                   ))}
                 </div>
                 <p className="text-xs text-stone-500">{isServio ? "Потрібні email і телефон. Підтвердження бронювання та оплати надійде на email." : "Потрібен email або телефон, щоб ми могли з вами зв'язатися."}</p>
-                <AdditionalServicesPicker services={services} selected={selectedServices} onChange={setSelectedServices} />
+                <AdditionalServicesPicker services={services} selected={selectedServices} onChange={setSelectedServices} showNotice={false} />
                 <label className="text-xs text-stone-600 space-y-1 block"><span>Побажання</span>
                   <textarea data-testid="input-requests" rows={3} maxLength={1000} value={form.specialRequests} onChange={(e) => setForm((f) => ({ ...f, specialRequests: e.target.value }))}
-                    className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-stone-900" /></label>
+                    aria-describedby="dogoda-wishes-note" className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-stone-900" /></label>
+                <p id="dogoda-wishes-note" className="text-xs leading-relaxed text-stone-500">Подбаємо про ваш ідеальний відпочинок. Окремі побажання узгодимо додатково, зокрема їхню вартість.</p>
                 {contactErr && <p className="text-sm text-red-700" role="alert" data-testid="text-contact-error">{contactErr}</p>}
                 <button type="submit" data-testid="button-to-review" className="rounded-xl px-6 py-3.5 text-sm font-semibold text-white inline-flex items-center gap-2" style={{ background: accent }}>
                   Перевірити бронювання<ChevronRight className="w-4 h-4" />
@@ -617,7 +628,7 @@ export default function BookingPublicPage() {
                   <div><dt className="text-xs text-stone-500">Контакти</dt><dd className="break-all">{[form.email.trim(), form.phone.trim()].filter(Boolean).join(" · ")}</dd></div>
                   {isServio && chosen.servioGroup && (
                     <div className="sm:col-span-2 border-t border-stone-200 pt-3 space-y-1.5" data-testid="panel-review-charges">
-                      <dt className="text-xs text-stone-500">Тариф: {chosen.servioGroup.rateName}</dt>
+                      <dt className="text-xs text-stone-500">Тариф: {guestRateName(chosen.servioGroup.rateName)}</dt>
                       {chosen.servioGroup.charges.map((c, i) => <dd key={i} className="grid grid-cols-[1fr_auto_auto] gap-3"><span>{c.serviceName}</span><span>{fmtDate(c.date.slice(0, 10))}</span><span className="font-mono">{money(c.amount)}</span></dd>)}
                       <dd className="flex justify-between font-semibold pt-1"><span>Всього</span><span className="font-mono" data-testid="text-review-total">{money(chosen.totalPrice)}</span></dd>
                       {cfg.provider === "servio" && <>

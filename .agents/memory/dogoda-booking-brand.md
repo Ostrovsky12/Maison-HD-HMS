@@ -38,3 +38,9 @@ Guest-facing DOGODA copy must not show the internal tariff name «NR Site» or t
 **Why:** The user said «Доп послуги-вони безкоштовні» and «Ми про сервіс».
 
 **How to apply:** Keep the internal Servio NR Site selection intact; separate provider identifiers from guest display copy, including confirmation emails. Do not imply that free selectable services have a surcharge, or promise that every custom wish is free.
+
+Use compact horizontal carousel browsing for DOGODA room/house selection, not a two-column comparison grid.
+
+**Why:** The user explicitly chose «Карусель» after comparing both design proposals.
+
+**How to apply:** Preserve deliberate swipe/arrow navigation without autoplay, with discoverable adjacent choices and details on demand. Keep the existing search-to-contact-to-review flow.

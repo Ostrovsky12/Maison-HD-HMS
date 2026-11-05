@@ -30,8 +30,8 @@ export function AdditionalServicesEditor({ value, onChange }: {
   </div>;
 }
 
-export function AdditionalServicesPicker({ services, selected, onChange, disabled = false }: {
-  services: BookingAdditionalService[]; selected: string[]; onChange: (selected: string[]) => void; disabled?: boolean;
+export function AdditionalServicesPicker({ services, selected, onChange, disabled = false, showNotice = true }: {
+  services: BookingAdditionalService[]; selected: string[]; onChange: (selected: string[]) => void; disabled?: boolean; showNotice?: boolean;
 }) {
   const available = services.filter(item => item.enabled);
   if (!available.length) return null;
@@ -43,6 +43,6 @@ export function AdditionalServicesPicker({ services, selected, onChange, disable
       <span className="min-w-0 break-words"><span className="block text-sm font-medium">{item.name}</span>
         {item.description && <span className="mt-1 block text-xs text-stone-500">{item.description}</span>}</span>
     </label>)}
-    <p className="text-xs leading-relaxed text-stone-500">{SERVICE_REQUEST_NOTICE}</p>
+    {showNotice && <p className="text-xs leading-relaxed text-stone-500">{SERVICE_REQUEST_NOTICE}</p>}
   </fieldset>;
 }

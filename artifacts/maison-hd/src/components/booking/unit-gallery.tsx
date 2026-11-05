@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Expand, Home, ImageOff } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -7,6 +7,7 @@ type Props = { photos: string[]; title: string; category?: string; unitId: numbe
 export function UnitGallery({ photos, title, category, unitId, accent }: Props) {
   const [idx, setIdx] = useState(0);
   const [open, setOpen] = useState(false);
+  const expandButton = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState<Record<number, boolean>>({});
   const count = photos.length;
   const go = (d: number) => setIdx((i) => (i + d + count) % count);
@@ -35,7 +36,7 @@ export function UnitGallery({ photos, title, category, unitId, accent }: Props) 
         )}
         {category && <span className="absolute top-3 left-3 bg-black/60 text-white text-[11px] px-2 py-0.5 rounded-md font-medium">{category}</span>}
         <span className="absolute bottom-3 left-3 bg-black/60 text-white text-[11px] px-2 py-0.5 rounded-md font-mono" data-testid={`text-photo-count-${unitId}`}>{idx + 1} / {count}</span>
-        <button type="button" aria-label="Відкрити на весь екран" data-testid={`button-gallery-expand-${unitId}`}
+        <button ref={expandButton} type="button" aria-label="Відкрити на весь екран" data-testid={`button-gallery-expand-${unitId}`}
           onClick={() => setOpen(true)} className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/55 text-white flex items-center justify-center hover:bg-black/75">
           <Expand className="w-4 h-4" />
         </button>
@@ -51,6 +52,7 @@ export function UnitGallery({ photos, title, category, unitId, accent }: Props) 
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-5xl w-[96vw] p-0 bg-stone-950 border-stone-800 text-white overflow-hidden"
+          onCloseAutoFocus={(event) => { event.preventDefault(); expandButton.current?.focus({ preventScroll: true }); }}
           onKeyDown={(e) => { if (e.key === "ArrowLeft") go(-1); if (e.key === "ArrowRight") go(1); }}>
           <DialogTitle className="sr-only">{title}</DialogTitle>
           <DialogDescription className="sr-only">Фото {idx + 1} з {count}. Стрілки вліво і вправо перемикають фото.</DialogDescription>

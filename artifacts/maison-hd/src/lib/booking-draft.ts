@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BookingDraftInput } from "@workspace/api-client-react";
 
-export const BOOKING_DRAFT_NOTICE = "Контактні дані та ваш вибір зберігаються автоматично під час заповнення. Якщо ви не завершите бронювання, готель може зв’язатися з вами, щоб допомогти. Чернетка не резервує номер. Дані журналу зберігаються до 90 днів.";
+export const BOOKING_DRAFT_NOTICE = "Контактні дані та ваш вибір зберігаються автоматично під час заповнення. Чернетка не резервує номер. Дані журналу зберігаються до 90 днів.";
 type Details = Omit<BookingDraftInput, "token" | "revision" | "noticeVersion">;
 
 export function useBookingDraft(slug: string, api: string, enabled: boolean, details: Details) {

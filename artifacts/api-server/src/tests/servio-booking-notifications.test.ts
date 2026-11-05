@@ -27,6 +27,15 @@ beforeEach(() => {
   });
 });
 describe("paid Servio booking email", () => {
+  it("hides internal NR Site naming from guests without changing the stored provider rate", () => {
+    row.payload.rateName = "NR Site";
+    const mail = servioBookingEmail(row, "DOGODA", "guest");
+    expect(mail.text).not.toContain("NR Site");
+    expect(mail.html).not.toContain("NR Site");
+    expect(mail.text).toContain("Неповоротний");
+    expect(row.payload.rateName).toBe("NR Site");
+    expect(servioBookingEmail(row, "DOGODA", "admin").text).toContain("NR Site");
+  });
   it("sends separate guest and hotel confirmations from the hotel's own mailbox", async () => {
     await deliverServioBookingNotifications();
     expect(f.send).toHaveBeenCalledTimes(2);

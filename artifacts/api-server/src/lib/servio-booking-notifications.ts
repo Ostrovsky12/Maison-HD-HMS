@@ -17,7 +17,7 @@ export function servioBookingEmail(row: Attempt, hotel: string, kind: DeliveryKi
       : `Оплату отримано — бронювання №${row.account} підтверджено · ${hotel}`;
   const details = [
     ["Комплекс", hotel], ["Бронювання Servio", row.account], ["Розміщення", row.payload.categoryName],
-    ["Тариф", row.payload.rateName], ["Заїзд", input.checkIn], ["Виїзд", input.checkOut],
+    ["Тариф", admin ? row.payload.rateName : row.payload.rateName.replace(/\bNR\s+Site\b/gi, "Неповоротний")], ["Заїзд", input.checkIn], ["Виїзд", input.checkOut],
     ["Гість", `${input.firstName} ${input.lastName}`], ["Телефон", input.phone], ["Email гостя", input.email],
     ...(input.specialRequests?.trim() ? [["Побажання", input.specialRequests.trim()]] : []),
     ["Дорослих", input.adults], ["Дітей", input.childAges.length],

@@ -10,11 +10,11 @@ describe("Servio price viewing versus booking", () => {
     expect(servioRateViewOnlyReason({ ...eligible, nonRefundable: false })).toBeUndefined();
   });
   it("does not allow a different price list even with a true provider refund flag", () => {
-    expect(servioRateViewOnlyReason({ ...eligible, name: "Standard" })).toContain("NR Site");
+    expect(servioRateViewOnlyReason({ ...eligible, name: "Standard" })).toContain("недоступний");
   });
   it("ignores harmless casing and whitespace, not extra name suffixes", () => {
     expect(servioRateViewOnlyReason({ ...eligible, name: " nr   SITE " })).toBeUndefined();
-    expect(servioRateViewOnlyReason({ ...eligible, name: "NR Site Promo" })).toContain("NR Site");
+    expect(servioRateViewOnlyReason({ ...eligible, name: "NR Site Promo" })).toContain("недоступний");
   });
   it.each([null, false, undefined])("keeps unverified or blocked sale status %s view-only", saleAllowed => {
     expect(servioRateViewOnlyReason({ ...eligible, saleAllowed })).toContain("Лише перегляд");
