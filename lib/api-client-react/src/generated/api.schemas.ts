@@ -5,6 +5,128 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export type BookingDraftInputNoticeVersion =
+  (typeof BookingDraftInputNoticeVersion)[keyof typeof BookingDraftInputNoticeVersion];
+
+export const BookingDraftInputNoticeVersion = {
+  "booking-draft-v1": "booking-draft-v1",
+} as const;
+
+export type BookingDraftInputStage =
+  (typeof BookingDraftInputStage)[keyof typeof BookingDraftInputStage];
+
+export const BookingDraftInputStage = {
+  contacts: "contacts",
+  review: "review",
+} as const;
+
+export interface BookingDraftInput {
+  token: string;
+  /**
+   * @minimum 0
+   * @maximum 9007199254740991
+   */
+  revision: number;
+  noticeVersion: BookingDraftInputNoticeVersion;
+  /** @maxLength 180 */
+  guestName: string;
+  /** @maxLength 40 */
+  phone: string;
+  /** @maxLength 254 */
+  email: string;
+  /** @pattern ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ */
+  checkIn: string;
+  /** @pattern ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ */
+  checkOut: string;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  adults: number;
+  /**
+   * @minimum 0
+   * @maximum 20
+   */
+  children: number;
+  /** @maxLength 200 */
+  categoryName: string;
+  /** @maxLength 200 */
+  rateName: string;
+  /**
+   * @minimum 0
+   * @maximum 100000000
+   */
+  totalAmount: number;
+  /** @pattern ^[A-Z]{3}$ */
+  currency: string;
+  stage: BookingDraftInputStage;
+}
+
+export type BookingDraftUpdateStatus =
+  (typeof BookingDraftUpdateStatus)[keyof typeof BookingDraftUpdateStatus];
+
+export const BookingDraftUpdateStatus = {
+  new: "new",
+  working: "working",
+  contacted: "contacted",
+  closed: "closed",
+} as const;
+
+export interface BookingDraftUpdate {
+  status?: BookingDraftUpdateStatus;
+  /** @maxLength 4000 */
+  notes: string;
+  /**
+   * @minLength 20
+   * @maxLength 32
+   */
+  expectedUpdatedAt: string;
+}
+
+export type BookingDraftStatus =
+  (typeof BookingDraftStatus)[keyof typeof BookingDraftStatus];
+
+export const BookingDraftStatus = {
+  new: "new",
+  working: "working",
+  contacted: "contacted",
+  closed: "closed",
+  converted: "converted",
+} as const;
+
+export interface BookingDraftDetails {
+  guestName: string;
+  phone: string;
+  email: string;
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children: number;
+  categoryName: string;
+  rateName: string;
+  totalAmount: number;
+  currency: string;
+}
+
+export interface BookingDraft {
+  id: string;
+  details: BookingDraftDetails;
+  status: BookingDraftStatus;
+  notes: string;
+  stage: string;
+  lastSeen: string;
+  createdAt: string;
+  updatedAt: string;
+  active: boolean;
+}
+
+export interface BookingDraftList {
+  items: BookingDraft[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export interface BookingLiqpayInput {
   /** @minimum 1 */
   propertyId: number;
@@ -2291,6 +2413,27 @@ export interface GuideAdminStats {
   pendingReview: number;
   approved: number;
 }
+
+export type ListBookingDraftsParams = {
+  /**
+   * @minimum 0
+   */
+  offset?: number;
+  filter?: ListBookingDraftsFilter;
+};
+
+export type ListBookingDraftsFilter =
+  (typeof ListBookingDraftsFilter)[keyof typeof ListBookingDraftsFilter];
+
+export const ListBookingDraftsFilter = {
+  all: "all",
+  abandoned: "abandoned",
+  new: "new",
+  working: "working",
+  contacted: "contacted",
+  closed: "closed",
+  converted: "converted",
+} as const;
 
 export type GetBookingEngineOverview200 = { [key: string]: unknown };
 

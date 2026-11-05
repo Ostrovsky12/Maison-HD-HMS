@@ -18,6 +18,7 @@ import {
 } from "../lib/servio-reservations.js";
 import { decodeServioGuestAccess } from "../lib/servio-guest-access.js";
 import { servioInventoryError, applyServioLocalCapacity } from "../lib/servio-inventory.js";
+import { linkBookingDraft } from "../lib/booking-drafts.js";
 
 const router = Router();
 router.use("/:slug/servio", (_req, res, next) => {
@@ -104,6 +105,7 @@ router.post("/:slug/servio/reservations", createLimit, async (req: any, res) => 
       if (prior.request_hash !== hashReservationRequest(input)) {
         res.status(409).json({ error: "Цю спробу вже використано з іншими даними. Зверніться до готелю." }); return;
       }
+      await linkBookingDraft(org.id, req.get("X-Booking-Draft"), { attemptId: prior.id }, req.log);
       res.json(response(prior)); return;
     }
     if (!config.published || data.checkIn < new Date().toISOString().slice(0, 10)) {
@@ -140,6 +142,7 @@ router.post("/:slug/servio/reservations", createLimit, async (req: any, res) => 
       paymentWindowText: config.paymentWindowText,
     }, category!.name, rate);
     req.log.info({ organizationId: org.id, attemptId: row.id, state: row.state }, "Public Servio reservation processed");
+    await linkBookingDraft(org.id, req.get("X-Booking-Draft"), { attemptId: row.id }, req.log);
     res.json(response(row));
   } catch (error) {
     const conflict = servioInventoryError(error);

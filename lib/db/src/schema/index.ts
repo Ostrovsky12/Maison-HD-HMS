@@ -42,3 +42,4 @@ export * from "./packages";
 export * from "./loyalty";
 export * from "./staff-schedule";
 export * from "./prro";
+export * from "./booking-drafts";

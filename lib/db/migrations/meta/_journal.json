@@ -107,6 +107,14 @@
       "tag": "0013_servio_inventory_admission",
       "scope": "booking-engine",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793890000003,
+      "tag": "0014_booking_drafts",
+      "scope": "booking-engine",
+      "breakpoints": true
     }
   ]
 }

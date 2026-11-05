@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { startPosterOrderBridge } from "./lib/poster-order-bridge.js";
 import { startServioBookingNotifications } from "./lib/servio-booking-notifications.js";
 import { startServioPaymentExpiry } from "./lib/servio-payment-expiry.js";
+import { startBookingDraftCleanup } from "./lib/booking-drafts.js";
 import { setupVoiceWebsocket } from "./routes/voice-agent.js";
 import { autoSeedIfEmpty, syncSuperAdmin, seedOrg39LegalEntities } from "./lib/auto-seed";
 import { seedGuideDataIfEmpty } from "./routes/guide.js";
@@ -974,6 +975,7 @@ async function bootstrap() {
     startPosterOrderBridge();
     startServioBookingNotifications();
     startServioPaymentExpiry();
+    startBookingDraftCleanup(logger);
   });
 
   // Graceful shutdown — closeAllConnections drops keep-alive connections instantly

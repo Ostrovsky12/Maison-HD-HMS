@@ -14,6 +14,7 @@ import { BOOKING_TARIFF_POLICY } from "../lib/booking-tariff.js";
 import bookingLiqpaySettings from "./booking-liqpay-settings.js";
 import bookingServio from "./booking-servio.js";
 import { servioCategoryMediaList } from "../lib/servio-category-media.js";
+import { bookingDrafts, publicBookingDrafts } from "./booking-drafts.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("super_admin", "owner", "manager", "admin"));
@@ -26,6 +27,7 @@ router.use((req: any, res, next) => {
 });
 router.use("/liqpay", bookingLiqpaySettings);
 router.use("/servio", bookingServio);
+router.use("/drafts", bookingDrafts);
 
 async function view(orgId: number, client: any = pool) {
   const { rows } = await client.query(
@@ -218,6 +220,7 @@ router.get("/overview", async (req: any, res): Promise<void> => {
 });
 
 export const publicEngineRouter = Router();
+publicEngineRouter.use(publicBookingDrafts);
 publicEngineRouter.use(bookingServioGuest);
 publicEngineRouter.use(bookingServioPublic);
 publicEngineRouter.post("/servio/payment-callback", servioReservationPaymentCallback);

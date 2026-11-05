@@ -13,6 +13,7 @@ import { normalizeAppearance, type BookingAppearanceValue } from "@/lib/booking-
 import { DogodaTheme } from "@/components/booking/dogoda/dogoda-theme";
 import { DogodaSteps, type DogodaStep } from "@/components/booking/dogoda/dogoda-steps";
 import { DogodaLogo } from "@/components/booking/dogoda/dogoda-logo";
+import { useBookingDraft, BOOKING_DRAFT_NOTICE } from "@/lib/booking-draft";
 import {
   captureReturnFromUrl, clearPending, clearReturn, loadPending, loadReturn, parseTariffPolicy, redirectToLiqPay, savePending,
   type PendingCheckout, type ReturnRef,
@@ -114,6 +115,16 @@ export default function BookingPublicPage() {
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
   const [returnRef, setReturnRef] = useState<ReturnRef | null>(null);
+  const draft = useBookingDraft(slug, API, !!data && !isPreviewUrl && !previewLocked && !!chosen && !pending && !returnRef, {
+    guestName: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(), phone: form.phone.trim(), email: form.email.trim(),
+    checkIn, checkOut, adults: guests, children: childAges.length,
+    categoryName: chosen?.servioGroup?.categoryName || chosen?.name || "", rateName: chosen?.servioGroup?.rateName || "",
+    totalAmount: chosen?.totalPrice || 0, currency: "UAH", stage: step >= 4 ? "review" : "contacts",
+  });
+  const draftNotice = <p data-testid="notice-booking-draft" className="text-xs leading-relaxed text-stone-500">
+    {BOOKING_DRAFT_NOTICE}
+    {draft.saveState === "error" && <span role="status" className="block text-amber-800">Чернетку поки не вдалося зберегти. Це не перешкоджає бронюванню.</span>}
+  </p>;
 
   useEffect(() => {
     if (!slug) return;
@@ -266,8 +277,9 @@ export default function BookingPublicPage() {
     try {
       if (isServio) {
         if (!chosen.servio) throw new Error("Оновіть пошук Servio перед бронюванням.");
+        await draft.flush();
         const r = await fetch(`${API}/booking-engine/${encodeURIComponent(slug)}/servio/reservations`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json", "X-Booking-Draft": draft.token },
           body: JSON.stringify({
             ...chosen.servio, checkIn, checkOut, adults: guests, childAges: kids,
             firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(), email: form.email.trim(),
@@ -292,13 +304,15 @@ export default function BookingPublicPage() {
         if (!url.startsWith(expected) || !/^#[a-z]/.test(url.slice(url.indexOf("#")))) {
           setSubmitErr("Бронювання обробляється. Не створюйте іншу спробу й не платіть повторно; зверніться до готелю."); return;
         }
+        draft.markSubmitted();
         window.location.assign(`${BASE}${url}`);
         return;
       }
       let r: Response;
       try {
+        await draft.flush();
         r = await fetch(`${API}/bookings`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json", "X-Booking-Draft": draft.token },
           body: JSON.stringify({ ...payload, bookingRequestId }),
         });
       } catch {
@@ -318,6 +332,7 @@ export default function BookingPublicPage() {
       const j = await r.json();
       const b = j?.booking ?? {};
       if (!(n(b.id) > 0) || !s(b.guestAccessCode)) { setSubmitErr("Сервер не повернув дані бронювання. Зверніться до готелю перед повторною спробою."); return; }
+      draft.markSubmitted();
       dropRequestId(key);
       created = {
         bookingId: n(b.id), guestAccessCode: s(b.guestAccessCode), bookingRef: s(b.bookingRef) || `#${b.id}`,
@@ -551,6 +566,7 @@ export default function BookingPublicPage() {
                   <h2 id="dg-step3" className="text-2xl md:text-3xl tracking-tight">Хто приїде?</h2>
                   {back(2, "До будиночків")}
                 </div>
+                {draftNotice}
                 <div className="grid sm:grid-cols-2 gap-3">
                   {([["firstName", "Ім'я *", "text", "given-name"], ["lastName", "Прізвище *", "text", "family-name"], ["email", "Email", "email", "email"], ["phone", "Телефон", "tel", "tel"]] as const).map(([k, l, t, ac]) => (
                     <label key={k} className="text-xs text-stone-600 space-y-1"><span>{l}</span>
@@ -761,6 +777,7 @@ export default function BookingPublicPage() {
 
                 <fieldset className="space-y-3">
                   <legend className="text-sm font-semibold mb-2">1. Дані гостя</legend>
+                  {draftNotice}
                   <div className="grid sm:grid-cols-2 gap-3">
                     {([["firstName", "Ім'я *", "text", "given-name"], ["lastName", "Прізвище *", "text", "family-name"], ["email", "Email", "email", "email"], ["phone", "Телефон", "tel", "tel"]] as const).map(([k, l, t, ac]) => (
                       <label key={k} className="text-xs text-stone-600 space-y-1"><span>{l}</span>

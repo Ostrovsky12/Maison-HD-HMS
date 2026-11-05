@@ -15,6 +15,7 @@ import { sendGuestConfirmationEmail, sendGuestConfirmationSms, notifyBookingCrea
 import { orchestrateFiscalization, isSubmissionEligible } from "../services/prro-orchestrator.js";
 import { submitDocument } from "./prro.js";
 import { engineConfig, engineSalesGuard, engineQuote, validBookingDates } from "../lib/booking-engine.js";
+import { linkBookingDraft } from "../lib/booking-drafts.js";
 import { createHash } from "node:crypto";
 import { parseBookingParty } from "../lib/booking-party.js";
 import { BOOKING_TARIFF_POLICY, acceptsBookingTariff, bookingMerchant } from "../lib/booking-tariff.js";
@@ -430,6 +431,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
         if (previous) {
           await client.query("COMMIT");
           if (previous.utm_campaign !== requestFingerprint) return res.status(409).json({ error: "Запит із цим номером уже використано для іншого бронювання." });
+          await linkBookingDraft(org.id, req.get("X-Booking-Draft"), { bookingId: previous.id }, req.log);
           return res.status(200).json({ booking: {
             id: previous.id, bookingRef: previous.booking_ref, guestAccessCode: previous.guest_access_code,
             firstName: previous.first_name, lastName: previous.last_name, email: previous.email,
@@ -572,6 +574,7 @@ router.post("/bookings", bookingCreateLimiter, async (req, res) => {
     } finally {
       client.release();
     }
+    if (engineMode) await linkBookingDraft(org.id, req.get("X-Booking-Draft"), { bookingId: booking.id }, req.log);
 
     // Fire automation event + notifications (non-blocking)
     if ((booking as any).id) {

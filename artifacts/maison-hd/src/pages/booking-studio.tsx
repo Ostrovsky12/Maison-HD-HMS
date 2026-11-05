@@ -18,6 +18,7 @@ import { LiqpaySettings } from "@/components/booking/liqpay-settings";
 import { ServioCategoryMedia } from "@/components/booking/servio-category-media";
 import { ServioCheck } from "@/components/booking/servio-check";
 import { ServioReservationJournal } from "@/components/booking/servio-reservations";
+import { BookingDraftsJournal } from "@/components/booking/booking-drafts";
 import { ServioAvailability } from "@/components/booking/servio-availability";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -328,6 +329,9 @@ export default function BookingStudioPage() {
         )}
         {norm.form.provider === "servio" && ["owner", "admin", "super_admin"].includes(String(me.data?.role ?? "")) && (
           <ServioReservationJournal key={`servio-journal:${organizationId ?? "none"}`} organizationId={organizationId} />
+        )}
+        {["owner", "admin", "super_admin", "manager"].includes(String(me.data?.role ?? "")) && (
+          <BookingDraftsJournal key={`booking-drafts:${organizationId ?? "none"}`} organizationId={organizationId} />
         )}
 
         <LiqpaySettings key={`liqpay-settings:${organizationId ?? "none"}`} organizationId={organizationId} role={(me.data as { role?: string } | undefined)?.role} />

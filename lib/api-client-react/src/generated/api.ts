@@ -26,6 +26,9 @@ import type {
   BookingAddon,
   BookingCalendarResponse,
   BookingDetail,
+  BookingDraftInput,
+  BookingDraftList,
+  BookingDraftUpdate,
   BookingEngineInput,
   BookingEngineLiqpayCallbackBody,
   BookingEngineView,
@@ -105,6 +108,7 @@ import type {
   Invoice,
   KpiHistory,
   ListAuditLogsParams,
+  ListBookingDraftsParams,
   ListBookingsParams,
   ListForecastsParams,
   ListGuestsParams,
@@ -178,6 +182,336 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getSavePublicBookingDraftUrl = (slug: string) => {
+  return `/api/public/booking-engine/${slug}/draft`;
+};
+
+export const savePublicBookingDraft = async (
+  slug: string,
+  bookingDraftInput: BookingDraftInput,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getSavePublicBookingDraftUrl(slug), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bookingDraftInput),
+  });
+};
+
+export const getSavePublicBookingDraftMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof savePublicBookingDraft>>,
+    TError,
+    { slug: string; data: BodyType<BookingDraftInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof savePublicBookingDraft>>,
+  TError,
+  { slug: string; data: BodyType<BookingDraftInput> },
+  TContext
+> => {
+  const mutationKey = ["savePublicBookingDraft"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof savePublicBookingDraft>>,
+    { slug: string; data: BodyType<BookingDraftInput> }
+  > = (props) => {
+    const { slug, data } = props ?? {};
+
+    return savePublicBookingDraft(slug, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SavePublicBookingDraftMutationResult = NonNullable<
+  Awaited<ReturnType<typeof savePublicBookingDraft>>
+>;
+export type SavePublicBookingDraftMutationBody = BodyType<BookingDraftInput>;
+export type SavePublicBookingDraftMutationError = ErrorType<void>;
+
+export const useSavePublicBookingDraft = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof savePublicBookingDraft>>,
+    TError,
+    { slug: string; data: BodyType<BookingDraftInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof savePublicBookingDraft>>,
+  TError,
+  { slug: string; data: BodyType<BookingDraftInput> },
+  TContext
+> => {
+  return useMutation(getSavePublicBookingDraftMutationOptions(options));
+};
+
+export const getListBookingDraftsUrl = (params?: ListBookingDraftsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/booking-engine/drafts?${stringifiedParams}`
+    : `/api/booking-engine/drafts`;
+};
+
+export const listBookingDrafts = async (
+  params?: ListBookingDraftsParams,
+  options?: RequestInit,
+): Promise<BookingDraftList> => {
+  return customFetch<BookingDraftList>(getListBookingDraftsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListBookingDraftsQueryKey = (
+  params?: ListBookingDraftsParams,
+) => {
+  return [`/api/booking-engine/drafts`, ...(params ? [params] : [])] as const;
+};
+
+export const getListBookingDraftsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listBookingDrafts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListBookingDraftsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBookingDrafts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListBookingDraftsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listBookingDrafts>>
+  > = ({ signal }) => listBookingDrafts(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listBookingDrafts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListBookingDraftsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listBookingDrafts>>
+>;
+export type ListBookingDraftsQueryError = ErrorType<unknown>;
+
+export function useListBookingDrafts<
+  TData = Awaited<ReturnType<typeof listBookingDrafts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListBookingDraftsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBookingDrafts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListBookingDraftsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getUpdateBookingDraftUrl = (id: string) => {
+  return `/api/booking-engine/drafts/${id}`;
+};
+
+export const updateBookingDraft = async (
+  id: string,
+  bookingDraftUpdate: BookingDraftUpdate,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getUpdateBookingDraftUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bookingDraftUpdate),
+  });
+};
+
+export const getUpdateBookingDraftMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateBookingDraft>>,
+    TError,
+    { id: string; data: BodyType<BookingDraftUpdate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateBookingDraft>>,
+  TError,
+  { id: string; data: BodyType<BookingDraftUpdate> },
+  TContext
+> => {
+  const mutationKey = ["updateBookingDraft"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateBookingDraft>>,
+    { id: string; data: BodyType<BookingDraftUpdate> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateBookingDraft(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateBookingDraftMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateBookingDraft>>
+>;
+export type UpdateBookingDraftMutationBody = BodyType<BookingDraftUpdate>;
+export type UpdateBookingDraftMutationError = ErrorType<void>;
+
+export const useUpdateBookingDraft = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateBookingDraft>>,
+    TError,
+    { id: string; data: BodyType<BookingDraftUpdate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateBookingDraft>>,
+  TError,
+  { id: string; data: BodyType<BookingDraftUpdate> },
+  TContext
+> => {
+  return useMutation(getUpdateBookingDraftMutationOptions(options));
+};
+
+export const getDeleteBookingDraftUrl = (id: string) => {
+  return `/api/booking-engine/drafts/${id}`;
+};
+
+export const deleteBookingDraft = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteBookingDraftUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteBookingDraftMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteBookingDraft>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteBookingDraft>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteBookingDraft"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteBookingDraft>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteBookingDraft(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteBookingDraftMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteBookingDraft>>
+>;
+
+export type DeleteBookingDraftMutationError = ErrorType<void>;
+
+export const useDeleteBookingDraft = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteBookingDraft>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteBookingDraft>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteBookingDraftMutationOptions(options));
+};
 
 export const getGetBookingEngineSettingsUrl = () => {
   return `/api/booking-engine/settings`;

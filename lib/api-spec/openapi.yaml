@@ -49,6 +49,54 @@ tags:
     description: DOGODA Guest Nature Guide
 
 paths:
+  /public/booking-engine/{slug}/draft:
+    post:
+      operationId: savePublicBookingDraft
+      tags: [integrations]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingDraftInput" }
+      responses:
+        "204": { description: Draft saved without reserving inventory or sending messages }
+        "400": { description: Invalid draft }
+        "404": { description: Booking page unavailable }
+  /booking-engine/drafts:
+    get:
+      operationId: listBookingDrafts
+      tags: [integrations]
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: filter, in: query, schema: { type: string, enum: [all, abandoned, new, working, contacted, closed, converted], default: all } }
+      responses:
+        "200":
+          description: Tenant-scoped unfinished booking journal
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingDraftList" }
+  /booking-engine/drafts/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateBookingDraft
+      tags: [integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingDraftUpdate" }
+      responses:
+        "204": { description: Follow-up status and notes saved }
+        "404": { description: Draft not found in this organization }
+    delete:
+      operationId: deleteBookingDraft
+      tags: [integrations]
+      responses:
+        "204": { description: Contact draft deleted without cancelling any booking }
+        "404": { description: Draft not found in this organization }
   /booking-engine/settings:
     get:
       operationId: getBookingEngineSettings
@@ -2991,6 +3039,68 @@ components:
       bearerFormat: JWT
 
   schemas:
+    BookingDraftInput:
+      type: object
+      required: [token, revision, noticeVersion, guestName, phone, email, checkIn, checkOut, adults, children, categoryName, rateName, totalAmount, currency, stage]
+      properties:
+        token: { type: string, format: uuid }
+        revision: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        noticeVersion: { type: string, enum: [booking-draft-v1] }
+        guestName: { type: string, maxLength: 180 }
+        phone: { type: string, maxLength: 40 }
+        email: { type: string, maxLength: 254 }
+        checkIn: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        checkOut: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        adults: { type: integer, minimum: 1, maximum: 50 }
+        children: { type: integer, minimum: 0, maximum: 20 }
+        categoryName: { type: string, maxLength: 200 }
+        rateName: { type: string, maxLength: 200 }
+        totalAmount: { type: number, minimum: 0, maximum: 100000000 }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        stage: { type: string, enum: [contacts, review] }
+    BookingDraftUpdate:
+      type: object
+      required: [notes, expectedUpdatedAt]
+      properties:
+        status: { type: string, enum: [new, working, contacted, closed] }
+        notes: { type: string, maxLength: 4000 }
+        expectedUpdatedAt: { type: string, minLength: 20, maxLength: 32 }
+    BookingDraft:
+      type: object
+      required: [id, details, status, notes, stage, lastSeen, createdAt, updatedAt, active]
+      properties:
+        id: { type: string, format: uuid }
+        details: { $ref: "#/components/schemas/BookingDraftDetails" }
+        status: { type: string, enum: [new, working, contacted, closed, converted] }
+        notes: { type: string }
+        stage: { type: string }
+        lastSeen: { type: string }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        active: { type: boolean }
+    BookingDraftDetails:
+      type: object
+      required: [guestName, phone, email, checkIn, checkOut, adults, children, categoryName, rateName, totalAmount, currency]
+      properties:
+        guestName: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        checkIn: { type: string }
+        checkOut: { type: string }
+        adults: { type: integer }
+        children: { type: integer }
+        categoryName: { type: string }
+        rateName: { type: string }
+        totalAmount: { type: number }
+        currency: { type: string }
+    BookingDraftList:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/BookingDraft" } }
+        total: { type: integer }
+        offset: { type: integer }
+        limit: { type: integer }
     BookingLiqpayInput:
       type: object
       required: [propertyId, legalEntityId, publicKey]

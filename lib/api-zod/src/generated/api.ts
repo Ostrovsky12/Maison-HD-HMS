@@ -7,6 +7,144 @@
  */
 import * as zod from "zod";
 
+export const SavePublicBookingDraftParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const savePublicBookingDraftBodyRevisionMin = 0;
+export const savePublicBookingDraftBodyRevisionMax = 9007199254740991;
+
+export const savePublicBookingDraftBodyGuestNameMax = 180;
+
+export const savePublicBookingDraftBodyPhoneMax = 40;
+
+export const savePublicBookingDraftBodyEmailMax = 254;
+
+export const savePublicBookingDraftBodyCheckInRegExp = new RegExp(
+  "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+);
+export const savePublicBookingDraftBodyCheckOutRegExp = new RegExp(
+  "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+);
+export const savePublicBookingDraftBodyAdultsMax = 50;
+
+export const savePublicBookingDraftBodyChildrenMin = 0;
+export const savePublicBookingDraftBodyChildrenMax = 20;
+
+export const savePublicBookingDraftBodyCategoryNameMax = 200;
+
+export const savePublicBookingDraftBodyRateNameMax = 200;
+
+export const savePublicBookingDraftBodyTotalAmountMin = 0;
+export const savePublicBookingDraftBodyTotalAmountMax = 100000000;
+
+export const savePublicBookingDraftBodyCurrencyRegExp = new RegExp(
+  "^[A-Z]{3}$",
+);
+
+export const SavePublicBookingDraftBody = zod.object({
+  token: zod.string().uuid(),
+  revision: zod
+    .number()
+    .min(savePublicBookingDraftBodyRevisionMin)
+    .max(savePublicBookingDraftBodyRevisionMax),
+  noticeVersion: zod.enum(["booking-draft-v1"]),
+  guestName: zod.string().max(savePublicBookingDraftBodyGuestNameMax),
+  phone: zod.string().max(savePublicBookingDraftBodyPhoneMax),
+  email: zod.string().max(savePublicBookingDraftBodyEmailMax),
+  checkIn: zod.string().regex(savePublicBookingDraftBodyCheckInRegExp),
+  checkOut: zod.string().regex(savePublicBookingDraftBodyCheckOutRegExp),
+  adults: zod.number().min(1).max(savePublicBookingDraftBodyAdultsMax),
+  children: zod
+    .number()
+    .min(savePublicBookingDraftBodyChildrenMin)
+    .max(savePublicBookingDraftBodyChildrenMax),
+  categoryName: zod.string().max(savePublicBookingDraftBodyCategoryNameMax),
+  rateName: zod.string().max(savePublicBookingDraftBodyRateNameMax),
+  totalAmount: zod
+    .number()
+    .min(savePublicBookingDraftBodyTotalAmountMin)
+    .max(savePublicBookingDraftBodyTotalAmountMax),
+  currency: zod.string().regex(savePublicBookingDraftBodyCurrencyRegExp),
+  stage: zod.enum(["contacts", "review"]),
+});
+
+export const listBookingDraftsQueryOffsetDefault = 0;
+export const listBookingDraftsQueryOffsetMin = 0;
+
+export const listBookingDraftsQueryFilterDefault = `all`;
+
+export const ListBookingDraftsQueryParams = zod.object({
+  offset: zod.coerce
+    .number()
+    .min(listBookingDraftsQueryOffsetMin)
+    .default(listBookingDraftsQueryOffsetDefault),
+  filter: zod
+    .enum([
+      "all",
+      "abandoned",
+      "new",
+      "working",
+      "contacted",
+      "closed",
+      "converted",
+    ])
+    .default(listBookingDraftsQueryFilterDefault),
+});
+
+export const ListBookingDraftsResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      details: zod.object({
+        guestName: zod.string(),
+        phone: zod.string(),
+        email: zod.string(),
+        checkIn: zod.string(),
+        checkOut: zod.string(),
+        adults: zod.number(),
+        children: zod.number(),
+        categoryName: zod.string(),
+        rateName: zod.string(),
+        totalAmount: zod.number(),
+        currency: zod.string(),
+      }),
+      status: zod.enum(["new", "working", "contacted", "closed", "converted"]),
+      notes: zod.string(),
+      stage: zod.string(),
+      lastSeen: zod.string(),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+      active: zod.boolean(),
+    }),
+  ),
+  total: zod.number(),
+  offset: zod.number(),
+  limit: zod.number(),
+});
+
+export const UpdateBookingDraftParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const updateBookingDraftBodyNotesMax = 4000;
+
+export const updateBookingDraftBodyExpectedUpdatedAtMin = 20;
+export const updateBookingDraftBodyExpectedUpdatedAtMax = 32;
+
+export const UpdateBookingDraftBody = zod.object({
+  status: zod.enum(["new", "working", "contacted", "closed"]).optional(),
+  notes: zod.string().max(updateBookingDraftBodyNotesMax),
+  expectedUpdatedAt: zod
+    .string()
+    .min(updateBookingDraftBodyExpectedUpdatedAtMin)
+    .max(updateBookingDraftBodyExpectedUpdatedAtMax),
+});
+
+export const DeleteBookingDraftParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
 export const GetBookingEngineSettingsResponse = zod.object({
   organization: zod.object({
     id: zod.number(),

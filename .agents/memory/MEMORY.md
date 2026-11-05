@@ -22,6 +22,8 @@
 - [Poster order integration](poster-order-integration.md) — QR guests and Mobile Waiter share orders; Poster handles kitchen/bar tickets and paid-bill fiscalization
 - [Servio booking module](servio-booking-module.md) — reuse online booking with Servio rather than require PMS migration; API licensing costs remain unconfirmed.
 - [Servio overbooking boundary](servio-overbooking-boundary.md) — shared durable admission prevents local double sales; provider lag and external channels require conservative reconciliation.
+- [Незавершені бронювання](booking-draft-recovery.md) — користувач обрав автозбереження контактів з видимим попередженням для ручного опрацювання.
+- [Verification resource budget](workspace-verification-budget.md) — keep wide checks serial and bounded to avoid restarting the shared workspace.
 - [Sandbox network diagnostics](sandbox-network-diagnostics.md) — missing AbortSignal can look like upstream failure when broad catches hide reference errors
 - [Fiscal migration boundary](fiscal-migration-boundary.md) — journaled changes target dev; managed production receives Publish diffs and startup only verifies compatibility.
 - [Generated contract validation](generated-contract-validation.md) — runtime schemas can work while TypeScript reads stale declarations after an upstream library build failure.
