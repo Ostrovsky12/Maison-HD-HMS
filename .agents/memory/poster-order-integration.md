@@ -17,7 +17,7 @@ Mobile Waiter is a separate staff ordering interface. Staff can create orders th
 
 The cashier station handles opening and closing the cash shift, X reports, and closing receipts.
 
-**Why:** The user explicitly corrected the earlier interpretation and described these two distinct workflows. The earlier «Після підтвердження офіціантом» must not be interpreted as an extra Mobile Waiter approval step for QR or an extra cashier approval for staff dispatch.
+**Why:** The user explicitly corrected the earlier interpretation and described these two distinct workflows, then confirmed the restated model with «Так, тепер правильно». The earlier «Після підтвердження офіціантом» must not be interpreted as an extra Mobile Waiter approval step for QR or an extra cashier approval for staff dispatch.
 
 **How to apply:** Keep guest QR acceptance on the Poster cashier station and staff dispatch in Mobile Waiter. Neither receipt creation alone nor an open parent bill authorizes dispatch of unreviewed guest additions. Staff dispatch covers only the item IDs actually reviewed. Shared visibility is a product requirement; verify synchronization and physical printing without inventing additional approval steps.
 
