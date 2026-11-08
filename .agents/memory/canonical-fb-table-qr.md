@@ -18,3 +18,9 @@ The user proposes that a waiter scan the same QR sticker from Mobile Waiter to o
 **Why:** The user described this grouping and shared-QR workflow to clarify the intended product behavior, rather than authorizing a new implementation or a production test.
 
 **How to apply:** Keep service-point identity scoped to the organization and group; repeated numbers in different groups must not collide. Treat the same sticker as a guest menu entry and an authenticated staff scanner target, never as staff authorization. Resolve the current service/order session rather than permanently embedding a receipt ID in a reusable sticker. This requirement does not remove cashier-station acceptance of guest QR submissions or add cashier acceptance to Mobile Waiter staff dispatch.
+
+For shared-QR payment, configured gateway keys are not sufficient readiness: settlement must be tied to an immutable order/session and the actual receipt-closing lifecycle.
+
+**Why:** A permanent sticker serves successive guests, while an asynchronous payment result may arrive after the table has moved to a different bill. Charging without reliable settlement/closure can leave an unpaid-looking open account and permit duplicate collection.
+
+**How to apply:** Keep payment unavailable until the integration can verify and idempotently settle that exact order and amount. Never apply callbacks to whichever account happens to be latest at the table, and never independently fiscalize a bill already owned by Poster.

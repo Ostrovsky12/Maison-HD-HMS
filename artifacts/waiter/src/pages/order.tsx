@@ -33,6 +33,8 @@ export default function Order() {
   const { user } = useAuth();
   const [qrMode, setQrMode] = useState<QRMode>(null);
   const [sending, setSending] = useState(false);
+  const [dispatchMessage, setDispatchMessage] = useState("");
+  const [dispatchError, setDispatchError] = useState("");
 
   // Split state
   const [showSplit, setShowSplit] = useState(false);
@@ -205,21 +207,24 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
   }
 
   async function sendToKitchen() {
+    if (sending || !unsentItems.length) return;
     setSending(true);
+    setDispatchMessage(""); setDispatchError("");
     try {
-      await apiFetch(`/fb/orders/${orderId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "in_kitchen" }),
+      const result = await apiFetch(`/fb/orders/${orderId}/dispatch-items`, {
+        method: "POST", body: JSON.stringify({ itemIds: unsentItems.map(item => item.id) }),
       });
-      for (const item of unsentItems) {
-        await apiFetch(`/fb/order-items/${item.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ status: "cooking" }),
-        });
-      }
-      qc.invalidateQueries({ queryKey: ["waiter-order", orderId] });
-      qc.invalidateQueries({ queryKey: ["waiter-open-orders"] });
-    } finally { setSending(false); }
+      setDispatchMessage(result.message);
+    } catch (error) {
+      setDispatchError(error instanceof Error ? error.message : "Відправлення не підтверджено. Перевірте статус.");
+    } finally {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["waiter-order", orderId] }),
+        qc.invalidateQueries({ queryKey: ["waiter-open-orders"] }),
+        qc.invalidateQueries({ queryKey: ["poster-order-status", Number(orderId)] }),
+      ]);
+      setSending(false);
+    }
   }
 
   async function doSplit() {
@@ -426,6 +431,8 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
         ) : activeItems.map(item => {
           const st = needsConfirmation(item)
             ? { label: "Чекає підтвердження", color: "text-amber-800 bg-amber-50 border border-amber-200" }
+            : item.sent_at && item.status === "pending"
+            ? { label: "Відправлення зареєстровано", color: "text-blue-700 bg-blue-50" }
             : ITEM_STATUS[item.status] || ITEM_STATUS.pending;
           const qty = parseFloat(item.quantity || 1);
           const qtyLabel = qty % 1 !== 0 ? qty.toFixed(2).replace(/\.?0+$/, "") : String(qty);
@@ -461,12 +468,16 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
             <h3 className="font-semibold">Нові позиції від гостя: {pendingGuestItems.length}</h3>
             <p className="text-sm text-amber-900">Перевірте страви й кількість. До підтвердження ці позиції не передаються в Poster або на кухню.</p>
             {confirmGuest.isError && <p role="alert" className="text-sm text-red-700">{(confirmGuest.error as Error).message}</p>}
-            <button type="button" data-testid="button-confirm-qr-order"
+            {data?.posterManaged ? (
+              <p className="text-sm text-amber-950" data-testid="text-qr-poster-acceptance">
+                QR-замовлення має прийматися на касі Poster. Передавання QR на касу ще не підключене; підтвердження тут недоступне.
+              </p>
+            ) : <button type="button" data-testid="button-confirm-qr-order"
               disabled={confirmGuest.isPending || pendingGuestItems.length === 0}
               onClick={() => confirmGuest.mutate()}
               className="w-full rounded-xl bg-amber-800 px-4 py-3 font-semibold text-white disabled:opacity-50">
               {confirmGuest.isPending ? "Підтвердження…" : "Підтвердити QR-замовлення"}
-            </button>
+            </button>}
             <p className="text-xs text-amber-900">Підтвердження не означає друку: стан передавання в Poster показано окремо.</p>
           </section>
         )}
@@ -480,12 +491,14 @@ ${cfg.footer_text ? `<hr/><div class="c sm">${cfg.footer_text}</div>` : ""}
         )}
 
         {/* Send to kitchen */}
+        {dispatchMessage && <p role="status" className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">{dispatchMessage}</p>}
+        {dispatchError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{dispatchError}</p>}
         {unsentItems.length > 0 && (
           <button onClick={sendToKitchen} disabled={sending}
             className="w-full py-3.5 rounded-2xl bg-orange-500 text-white font-bold text-base active:scale-95 transition-transform disabled:opacity-60 flex items-center justify-center gap-2">
             {sending
               ? <><Loader2 className="w-5 h-5 animate-spin" /> Відправка...</>
-              : <><ChefHat className="w-5 h-5" /> Відправити на кухню ({unsentItems.length})</>
+              : <><ChefHat className="w-5 h-5" /> Відправити встречку ({unsentItems.length})</>
             }
           </button>
         )}

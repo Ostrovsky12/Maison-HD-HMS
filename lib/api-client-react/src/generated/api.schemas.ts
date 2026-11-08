@@ -5,6 +5,78 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export interface FbServicePoint {
+  id: number;
+  number: string;
+  /** @nullable */
+  groupId: number | null;
+  /** @nullable */
+  groupName: string | null;
+  /** @nullable */
+  location: string | null;
+}
+
+export interface FbServiceBillSummary {
+  id: number;
+  totalAmount: number;
+  status: string;
+}
+
+export interface FbServiceBillItem {
+  id: number;
+  name: string;
+  quantity: number;
+  total: number;
+  awaitingAcceptance: boolean;
+  released: boolean;
+}
+
+export interface FbServicePointBill {
+  point: FbServicePoint;
+  order: FbServiceBillSummary | null;
+  paymentAvailable: boolean;
+  paymentMessage: string;
+  items: FbServiceBillItem[];
+}
+
+export interface FbServicePointScan {
+  /**
+   * @minLength 1
+   * @maxLength 2048
+   */
+  qr: string;
+}
+
+export interface FbServicePointView {
+  point: FbServicePoint;
+  /** @nullable */
+  orderId: number | null;
+}
+
+export interface FbServicePointOrder {
+  orderId: number;
+  created: boolean;
+}
+
+export interface FbServicePointOpen {
+  /** @minimum 1 */
+  outletId?: number;
+}
+
+export interface FbOrderDispatch {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  itemIds: number[];
+}
+
+export interface FbOrderDispatchResult {
+  releasedCount: number;
+  posterManaged: boolean;
+  message: string;
+}
+
 export interface GuestOrderConfirmationInput {
   /**
    * @minItems 1

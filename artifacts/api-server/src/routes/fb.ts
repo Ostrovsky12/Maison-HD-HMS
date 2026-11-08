@@ -726,6 +726,8 @@ router.get("/orders", requireAuth, async (req: any, res) => {
     const orders = await db.select({
       id: fbOrdersTable.id, orderType: fbOrdersTable.orderType, guestName: fbOrdersTable.guestName,
       roomNumber: fbOrdersTable.roomNumber, guestCount: fbOrdersTable.guestCount,
+      tableGroupId: sql`(SELECT t.group_id FROM fb_tables t WHERE t.id=${fbOrdersTable.tableId} AND t.organization_id=${orgId})`,
+      tableGroupName: sql`(SELECT g.name FROM fb_tables t JOIN fb_table_groups g ON g.id=t.group_id AND g.organization_id=t.organization_id WHERE t.id=${fbOrdersTable.tableId} AND t.organization_id=${orgId})`,
       status: fbOrdersTable.status, totalAmount: fbOrdersTable.totalAmount, paidAmount: fbOrdersTable.paidAmount,
       notes: fbOrdersTable.notes, openedAt: fbOrdersTable.openedAt, closedAt: fbOrdersTable.closedAt,
       createdAt: fbOrdersTable.createdAt, tableId: fbOrdersTable.tableId,
@@ -787,7 +789,7 @@ router.get("/orders/:id", requireAuth, async (req: any, res) => {
        ORDER BY oi.created_at ASC`, [orderId]
     );
 
-    res.json({ order, items: itemsRow.rows });
+    res.json({ order, items: itemsRow.rows, posterManaged: await isPosterManagedOrder(orgId, orderId) });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -9,6 +9,7 @@ import Tables from "@/pages/tables";
 import Order from "@/pages/order";
 import MenuPage from "@/pages/menu";
 import NewOrder from "@/pages/new-order";
+import ScanPage from "@/pages/scan";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -34,6 +35,7 @@ function Router() {
     <Switch>
       <Route path="/login"><PublicRoute component={Login} /></Route>
       <Route path="/tables"><ProtectedRoute component={Tables} /></Route>
+      <Route path="/scan"><ProtectedRoute component={ScanPage} /></Route>
       <Route path="/order/:orderId"><ProtectedRoute component={Order} /></Route>
       <Route path="/menu/:orderId"><ProtectedRoute component={MenuPage} /></Route>
       <Route path="/new-order/:tableId"><ProtectedRoute component={NewOrder} /></Route>

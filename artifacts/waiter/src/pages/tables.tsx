@@ -1,8 +1,9 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, RefreshCw, ChefHat, Plus, UtensilsCrossed, ArrowRight, Users, BedDouble, ShoppingBag } from "lucide-react";
+import { LogOut, RefreshCw, ChefHat, Plus, UtensilsCrossed, ArrowRight, Users, BedDouble, ShoppingBag, ScanLine } from "lucide-react";
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   open:       { label: "Відкрите",   color: "text-blue-600 bg-blue-50"   },
@@ -23,10 +24,18 @@ export default function Tables() {
   });
 
   const raw: any[] = Array.isArray(data) ? data : (data?.orders || []);
-  const activeTables = raw.filter(o => o && o.id && o.status !== "billed" && o.status !== "closed" && o.status !== "cancelled");
+  const allActive = raw.filter(o => o && o.id && o.status !== "billed" && o.status !== "closed" && o.status !== "cancelled");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const groupKey = (o: any) => o.tableGroupId != null ? String(o.tableGroupId) : (o.tableNumber != null && o.tableNumber !== "" ? "none" : "other");
+  const groups = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of allActive) { const k = groupKey(o); m.set(k, k === "other" ? "Інше" : (o.tableGroupName || "Без групи")); }
+    return Array.from(m, ([key, name]) => ({ key, name }));
+  }, [raw]);
+  const activeTables = allActive.filter(o => groupFilter === "all" || groupKey(o) === groupFilter);
 
   function describe(o: any) {
-    if (o.tableNumber != null && o.tableNumber !== "") return { badge: `#${o.tableNumber}`, title: `Стіл №${o.tableNumber}${o.tableLocation ? ` · ${o.tableLocation}` : ""}`, icon: null };
+    if (o.tableNumber != null && o.tableNumber !== "") return { badge: `#${o.tableNumber}`, title: `${o.tableGroupName ? `${o.tableGroupName} · ` : ""}№${o.tableNumber}${o.tableLocation ? ` · ${o.tableLocation}` : ""}`, icon: null };
     if (o.roomNumber) return { badge: String(o.roomNumber), title: `Номер ${o.roomNumber}`, icon: BedDouble };
     return { badge: "", title: o.orderType === "takeaway" ? "З собою" : `Замовлення №${o.id}`, icon: ShoppingBag };
   }
@@ -76,6 +85,15 @@ export default function Tables() {
             )}
           </h2>
         </div>
+
+        {groups.length > 1 && (
+          <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-3">
+            {[{ key: "all", name: "Усі" }, ...groups].map(g => (
+              <button key={g.key} onClick={() => setGroupFilter(g.key)} data-testid={`filter-group-${g.key}`}
+                className={`shrink-0 px-3.5 py-1.5 rounded-full text-sm font-semibold ${groupFilter === g.key ? "bg-blue-600 text-white" : "bg-muted text-foreground"}`}>{g.name}</button>
+            ))}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground">
@@ -150,7 +168,14 @@ export default function Tables() {
       </div>
 
       {/* New order FAB */}
-      <div className="fixed bottom-8 right-5">
+      <div className="fixed bottom-8 right-5 flex items-center gap-3">
+        <button
+          onClick={() => setLocation("/scan")}
+          data-testid="button-scan-qr"
+          className="h-14 px-5 rounded-full bg-card border border-border text-blue-700 font-bold shadow-xl flex items-center gap-2 active:scale-95 transition-transform"
+        >
+          <ScanLine className="w-5 h-5" /> Сканувати QR
+        </button>
         <button
           onClick={() => setLocation("/new-order")}
           className="w-16 h-16 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform"

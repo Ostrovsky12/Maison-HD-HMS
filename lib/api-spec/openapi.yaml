@@ -49,6 +49,75 @@ tags:
     description: DOGODA Guest Nature Guide
 
 paths:
+  /fb/public/service-points/{slug}/{id}/bill:
+    get:
+      operationId: getFbServicePointBill
+      tags: [restaurant]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Current service session without guest personal information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FbServicePointBill" }
+        "404": { description: Service point not found }
+        "409": { description: Multiple open bills require reconciliation }
+  /fb/service-points/resolve:
+    post:
+      operationId: resolveFbServicePoint
+      tags: [restaurant]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FbServicePointScan" }
+      responses:
+        "200":
+          description: Authenticated service point and current order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FbServicePointView" }
+        "400": { description: Invalid QR }
+        "404": { description: Service point not found in this organization }
+  /fb/service-points/{id}/open:
+    post:
+      operationId: openFbServicePoint
+      tags: [restaurant]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FbServicePointOpen" }
+      responses:
+        "200":
+          description: Existing or newly opened shared order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FbServicePointOrder" }
+        "404": { description: Service point not found }
+        "409": { description: Service point requires review }
+  /fb/orders/{id}/dispatch-items:
+    post:
+      operationId: dispatchFbOrderItems
+      tags: [restaurant]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FbOrderDispatch" }
+      responses:
+        "200":
+          description: Reviewed staff items released for dispatch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FbOrderDispatchResult" }
+        "409": { description: Stale selection or QR acceptance required }
   /fb/public/guest-orders/{id}/accept:
     patch:
       operationId: acceptGuestOrder
@@ -3078,6 +3147,87 @@ components:
       bearerFormat: JWT
 
   schemas:
+    FbServicePointBill:
+      type: object
+      required: [point, order, paymentAvailable, paymentMessage, items]
+      properties:
+        point: { $ref: "#/components/schemas/FbServicePoint" }
+        order:
+          oneOf:
+            - { $ref: "#/components/schemas/FbServiceBillSummary" }
+            - { type: "null" }
+        paymentAvailable: { type: boolean }
+        paymentMessage: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FbServiceBillItem" }
+    FbServiceBillSummary:
+      type: object
+      required: [id, totalAmount, status]
+      properties:
+        id: { type: integer }
+        totalAmount: { type: number }
+        status: { type: string }
+    FbServiceBillItem:
+      type: object
+      required: [id, name, quantity, total, awaitingAcceptance, released]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        quantity: { type: number }
+        total: { type: number }
+        awaitingAcceptance: { type: boolean }
+        released: { type: boolean }
+    FbServicePointScan:
+      type: object
+      additionalProperties: false
+      required: [qr]
+      properties:
+        qr: { type: string, minLength: 1, maxLength: 2048 }
+    FbServicePoint:
+      type: object
+      required: [id, number, groupId, groupName, location]
+      properties:
+        id: { type: integer }
+        number: { type: string }
+        groupId: { type: [integer, "null"] }
+        groupName: { type: [string, "null"] }
+        location: { type: [string, "null"] }
+    FbServicePointView:
+      type: object
+      required: [point, orderId]
+      properties:
+        point: { $ref: "#/components/schemas/FbServicePoint" }
+        orderId: { type: [integer, "null"] }
+    FbServicePointOrder:
+      type: object
+      required: [orderId, created]
+      properties:
+        orderId: { type: integer }
+        created: { type: boolean }
+    FbServicePointOpen:
+      type: object
+      additionalProperties: false
+      properties:
+        outletId: { type: integer, minimum: 1 }
+    FbOrderDispatch:
+      type: object
+      additionalProperties: false
+      required: [itemIds]
+      properties:
+        itemIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+    FbOrderDispatchResult:
+      type: object
+      required: [releasedCount, posterManaged, message]
+      properties:
+        releasedCount: { type: integer }
+        posterManaged: { type: boolean }
+        message: { type: string }
     GuestOrderConfirmationInput:
       type: object
       required: [itemIds]

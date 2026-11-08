@@ -7,6 +7,7 @@ import {
   Loader2, Info, Star, Leaf, Clock
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { QrServiceBill } from "@/components/qr-service-bill";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "");
 const API_BASE = BASE.replace("/maison-hd", "") + "/api/public";
@@ -94,6 +95,23 @@ export default function QrMenuPage() {
   const [error, setError] = useState("");
   
   const [cart, setCart] = useState<CartItem[]>([]);
+  // Order id of the shared service-point bill observed by this page (undefined = not yet loaded).
+  const billOrderRef = useRef<number | null | undefined>(undefined);
+  const handleBill = useCallback((id: number | null) => {
+    const prev = billOrderRef.current;
+    billOrderRef.current = id;
+    if (prev != null && prev !== id) {
+      setCart([]);
+      setShowCart(false);
+      setSubmitted(false);
+      setOrderId(null);
+      setOrderNumber(null);
+      setServerTotal(null);
+      setGuestName("");
+      setOrderNotes("");
+      toast({ title: "Рахунок закрито або змінено", description: "Кошик очищено. Почніть нове замовлення." });
+    }
+  }, []);
   const [showCart, setShowCart] = useState(false);
   
   const [activeCategory, setActiveCategory] = useState<number | null>(null);
@@ -350,6 +368,18 @@ export default function QrMenuPage() {
     if (!cart.length) return;
     setSubmitting(true);
     try {
+      if (tableId) {
+        const br = await fetch(`${API_BASE.replace(/\/public$/, "")}/fb/public/service-points/${encodeURIComponent(orgSlug)}/${encodeURIComponent(tableId)}/bill`, { cache: "no-store" });
+        if (!br.ok) {
+          toast({ title: "Не вдалося перевірити рахунок", description: `HTTP ${br.status}`, variant: "destructive" });
+          return;
+        }
+        const bd = await br.json();
+        const current: number | null = bd?.order?.id ?? null;
+        const prev = billOrderRef.current;
+        if (prev != null && prev !== current) { handleBill(current); return; }
+        billOrderRef.current = current;
+      }
       const r = await fetch(`${API_BASE}/menu-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -367,6 +397,7 @@ export default function QrMenuPage() {
             modifiers: c.modifiers.map(m => ({ groupId: m.groupId, optionId: m.optionId }))
           })),
           guestPhone: guestPhone || undefined,
+          expectedOrderId: tableId ? (billOrderRef.current ?? null) : undefined,
         }),
       });
       const d = await r.json();
@@ -517,12 +548,17 @@ export default function QrMenuPage() {
            Замовлення передано офіціанту на підтвердження.<br/>Після перевірки його передадуть на приготування.
          </p>
       </div>
+      {orgSlug && tableId && (
+        <div className="w-full max-w-sm mb-6 relative z-10">
+          <QrServiceBill orgSlug={orgSlug} tableId={tableId} onBill={handleBill} />
+        </div>
+      )}
 
       <button
         onClick={() => { setSubmitted(false); setOrderId(null); setOrderNumber(null); setCart([]); }}
         className="w-full max-w-sm h-14 bg-white border border-stone-200 text-[#2D2A26] rounded-full font-medium relative z-10 shadow-sm hover:bg-stone-50 transition-colors"
       >
-        Order More
+        Дозамовити
       </button>
     </div>
   );
@@ -569,6 +605,7 @@ export default function QrMenuPage() {
           </div>
         )}
       </header>
+      {orgSlug && tableId && <QrServiceBill orgSlug={orgSlug} tableId={tableId} onBill={handleBill} />}
 
       {!isSearchActive && popularItems.length > 0 && (
         <section className="py-4 relative z-20">

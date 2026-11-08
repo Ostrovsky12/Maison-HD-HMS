@@ -448,7 +448,7 @@ router.post("/public/guest-orders", orderLimiter, async (req, res) => {
 // Generates a LiqPay checkout URL for the current open FB order at a table.
 // Returns { url } — guest is redirected to LiqPay (supports Apple Pay / Google Pay).
 router.post("/public/liqpay-checkout", paymentLimiter, async (req, res) => {
-  const { tableId, tipPct } = req.body;
+  const { tableId, tipPct, expectedOrderId, expectedTotal } = req.body;
   if (!tableId) return res.status(400).json({ error: "tableId required" });
 
   try {
@@ -468,13 +468,20 @@ router.post("/public/liqpay-checkout", paymentLimiter, async (req, res) => {
 
     // 2. Get current open order
     const { rows: orderRows } = await pool.query(
-      `SELECT id, total_amount, tip_pct FROM fb_orders
-       WHERE table_id=$1 AND status NOT IN ('billed','cancelled')
-       ORDER BY opened_at DESC LIMIT 1`,
-      [tableId],
+      `SELECT fo.id, fo.total_amount, fo.tip_pct FROM fb_orders fo
+       JOIN fb_tables ft ON ft.current_order_id=fo.id AND ft.id=fo.table_id AND ft.organization_id=fo.organization_id
+       WHERE ft.id=$1 AND fo.organization_id=$2 AND ft.is_active=true AND fo.status NOT IN ('billed','cancelled')`,
+      [tableId, orgId],
     );
     if (!orderRows[0]) return res.status(404).json({ error: "No open order for this table" });
     const order = orderRows[0];
+    if (expectedOrderId != null && expectedOrderId !== order.id) {
+      return res.status(409).json({ error: "Рахунок змінився. Оновіть його перед оплатою." });
+    }
+    if (expectedTotal != null && (!Number.isFinite(Number(expectedTotal))
+      || Math.abs(Number(expectedTotal) - Number(order.total_amount)) > 0.005)) {
+      return res.status(409).json({ error: "Сума рахунку змінилася. Перевірте актуальні страви та суму." });
+    }
     if (await hasUnconfirmedGuestItems(orgId, order.id)) {
       return res.status(409).json({ error: "Замовлення очікує підтвердження офіціанта. Оплата поки недоступна." });
     }

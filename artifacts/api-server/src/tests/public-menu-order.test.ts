@@ -98,6 +98,21 @@ describe("POST /api/public/menu-order", () => {
     expect((await request(app).post("/api/public/menu-order").send({ ...basePayload, tableId: 3 })).status).toBe(409);
     expect(tx.calls.some(([q]) => q.includes("INSERT INTO fb_order_items"))).toBe(false);
   });
+  it("rejects a stale guest session rather than appending to the next guests' bill", async () => {
+    const tx = transaction({ item: basicItem, table: { id: 3, number: 1, current_order_id: 92 },
+      order: { id: 92, status: "open", paid_amount: 0 } });
+    vi.mocked(pool.connect).mockResolvedValue(tx.client as any);
+    const result = await request(app).post("/api/public/menu-order").send({ ...basePayload, tableId: 3, expectedOrderId: 91 });
+    expect(result.status).toBe(409);
+    expect(tx.calls.some(([q]) => q.includes("INSERT INTO fb_order_items"))).toBe(false);
+  });
+  it("rejects a newly opened session if the guest expected no open account", async () => {
+    const tx = transaction({ item: basicItem, table: { id: 3, number: 1, current_order_id: 92 },
+      order: { id: 92, status: "open", paid_amount: 0 } });
+    vi.mocked(pool.connect).mockResolvedValue(tx.client as any);
+    expect((await request(app).post("/api/public/menu-order").send({ ...basePayload, tableId: 3, expectedOrderId: null })).status).toBe(409);
+    expect(tx.calls.some(([q]) => q.includes("INSERT INTO fb_order_items"))).toBe(false);
+  });
   it("uses the server price and name, never client values", async () => {
     const tx = transaction({ item: basicItem });
     vi.mocked(pool.connect).mockResolvedValue(tx.client as any);

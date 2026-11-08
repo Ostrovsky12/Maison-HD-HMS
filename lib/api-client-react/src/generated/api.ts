@@ -75,6 +75,13 @@ import type {
   ErrorEnvelope,
   ErrorResponse,
   ExecutePosterMenuImport200,
+  FbOrderDispatch,
+  FbOrderDispatchResult,
+  FbServicePointBill,
+  FbServicePointOpen,
+  FbServicePointOrder,
+  FbServicePointScan,
+  FbServicePointView,
   Forecast,
   GenerateForecastParams,
   GenerateForecastResponse,
@@ -185,6 +192,336 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getGetFbServicePointBillUrl = (slug: string, id: number) => {
+  return `/api/fb/public/service-points/${slug}/${id}/bill`;
+};
+
+export const getFbServicePointBill = async (
+  slug: string,
+  id: number,
+  options?: RequestInit,
+): Promise<FbServicePointBill> => {
+  return customFetch<FbServicePointBill>(
+    getGetFbServicePointBillUrl(slug, id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetFbServicePointBillQueryKey = (slug: string, id: number) => {
+  return [`/api/fb/public/service-points/${slug}/${id}/bill`] as const;
+};
+
+export const getGetFbServicePointBillQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFbServicePointBill>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFbServicePointBill>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFbServicePointBillQueryKey(slug, id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFbServicePointBill>>
+  > = ({ signal }) =>
+    getFbServicePointBill(slug, id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(slug && id),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFbServicePointBill>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFbServicePointBillQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFbServicePointBill>>
+>;
+export type GetFbServicePointBillQueryError = ErrorType<void>;
+
+export function useGetFbServicePointBill<
+  TData = Awaited<ReturnType<typeof getFbServicePointBill>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFbServicePointBill>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFbServicePointBillQueryOptions(slug, id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getResolveFbServicePointUrl = () => {
+  return `/api/fb/service-points/resolve`;
+};
+
+export const resolveFbServicePoint = async (
+  fbServicePointScan: FbServicePointScan,
+  options?: RequestInit,
+): Promise<FbServicePointView> => {
+  return customFetch<FbServicePointView>(getResolveFbServicePointUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(fbServicePointScan),
+  });
+};
+
+export const getResolveFbServicePointMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveFbServicePoint>>,
+    TError,
+    { data: BodyType<FbServicePointScan> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resolveFbServicePoint>>,
+  TError,
+  { data: BodyType<FbServicePointScan> },
+  TContext
+> => {
+  const mutationKey = ["resolveFbServicePoint"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resolveFbServicePoint>>,
+    { data: BodyType<FbServicePointScan> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return resolveFbServicePoint(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResolveFbServicePointMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resolveFbServicePoint>>
+>;
+export type ResolveFbServicePointMutationBody = BodyType<FbServicePointScan>;
+export type ResolveFbServicePointMutationError = ErrorType<void>;
+
+export const useResolveFbServicePoint = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveFbServicePoint>>,
+    TError,
+    { data: BodyType<FbServicePointScan> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resolveFbServicePoint>>,
+  TError,
+  { data: BodyType<FbServicePointScan> },
+  TContext
+> => {
+  return useMutation(getResolveFbServicePointMutationOptions(options));
+};
+
+export const getOpenFbServicePointUrl = (id: number) => {
+  return `/api/fb/service-points/${id}/open`;
+};
+
+export const openFbServicePoint = async (
+  id: number,
+  fbServicePointOpen?: FbServicePointOpen,
+  options?: RequestInit,
+): Promise<FbServicePointOrder> => {
+  return customFetch<FbServicePointOrder>(getOpenFbServicePointUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(fbServicePointOpen),
+  });
+};
+
+export const getOpenFbServicePointMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof openFbServicePoint>>,
+    TError,
+    { id: number; data: BodyType<FbServicePointOpen> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof openFbServicePoint>>,
+  TError,
+  { id: number; data: BodyType<FbServicePointOpen> },
+  TContext
+> => {
+  const mutationKey = ["openFbServicePoint"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof openFbServicePoint>>,
+    { id: number; data: BodyType<FbServicePointOpen> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return openFbServicePoint(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type OpenFbServicePointMutationResult = NonNullable<
+  Awaited<ReturnType<typeof openFbServicePoint>>
+>;
+export type OpenFbServicePointMutationBody = BodyType<FbServicePointOpen>;
+export type OpenFbServicePointMutationError = ErrorType<void>;
+
+export const useOpenFbServicePoint = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof openFbServicePoint>>,
+    TError,
+    { id: number; data: BodyType<FbServicePointOpen> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof openFbServicePoint>>,
+  TError,
+  { id: number; data: BodyType<FbServicePointOpen> },
+  TContext
+> => {
+  return useMutation(getOpenFbServicePointMutationOptions(options));
+};
+
+export const getDispatchFbOrderItemsUrl = (id: number) => {
+  return `/api/fb/orders/${id}/dispatch-items`;
+};
+
+export const dispatchFbOrderItems = async (
+  id: number,
+  fbOrderDispatch: FbOrderDispatch,
+  options?: RequestInit,
+): Promise<FbOrderDispatchResult> => {
+  return customFetch<FbOrderDispatchResult>(getDispatchFbOrderItemsUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(fbOrderDispatch),
+  });
+};
+
+export const getDispatchFbOrderItemsMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dispatchFbOrderItems>>,
+    TError,
+    { id: number; data: BodyType<FbOrderDispatch> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof dispatchFbOrderItems>>,
+  TError,
+  { id: number; data: BodyType<FbOrderDispatch> },
+  TContext
+> => {
+  const mutationKey = ["dispatchFbOrderItems"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof dispatchFbOrderItems>>,
+    { id: number; data: BodyType<FbOrderDispatch> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return dispatchFbOrderItems(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DispatchFbOrderItemsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof dispatchFbOrderItems>>
+>;
+export type DispatchFbOrderItemsMutationBody = BodyType<FbOrderDispatch>;
+export type DispatchFbOrderItemsMutationError = ErrorType<void>;
+
+export const useDispatchFbOrderItems = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dispatchFbOrderItems>>,
+    TError,
+    { id: number; data: BodyType<FbOrderDispatch> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof dispatchFbOrderItems>>,
+  TError,
+  { id: number; data: BodyType<FbOrderDispatch> },
+  TContext
+> => {
+  return useMutation(getDispatchFbOrderItemsMutationOptions(options));
+};
 
 export const getAcceptGuestOrderUrl = (id: number) => {
   return `/api/fb/public/guest-orders/${id}/accept`;

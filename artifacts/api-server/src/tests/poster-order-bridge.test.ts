@@ -7,7 +7,7 @@ import { bridgePlan, assertRemoteUnchanged, dispatchPosterOrder } from "../lib/p
 import { logger } from "../lib/logger.js";
 
 const config = { enabled: true, spotId: 1, tabletId: 2, waiterId: 3, tableMap: { "10": 20 }, productMap: { "100": 200 } };
-const item = { item_id: 100, name: "Soup", price: "50.00", quantity: 2, status: "pending" };
+const item = { item_id: 100, name: "Soup", price: "50.00", quantity: 2, status: "pending", sent_at: "2026-11-08T10:00:00Z" };
 let order: any;
 let items: any[];
 let writes: string[];
@@ -53,6 +53,22 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Poster open-order dispatch", () => {
+  it("does not export a staff draft before explicit dispatch", async () => {
+    delete items[0].sent_at;
+    await dispatchPosterOrder(39, 5);
+    expect(writes).toEqual([]);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("does not export a later staff addition until it is released", async () => {
+    await dispatchPosterOrder(39, 5); writes = [];
+    items.push({ ...item, quantity: 3, sent_at: null });
+    await dispatchPosterOrder(39, 5);
+    expect(writes).toEqual([]);
+    expect(order.poster_sync.quantities["200"]).toBe(2);
+    items[1].sent_at = new Date().toISOString();
+    await dispatchPosterOrder(39, 5);
+    expect(order.poster_sync.quantities["200"]).toBe(5);
+  });
   it("never contacts Poster for a QR basket awaiting waiter approval", async () => {
     order.status = "new_guest";
     items[0].requires_confirmation = true;

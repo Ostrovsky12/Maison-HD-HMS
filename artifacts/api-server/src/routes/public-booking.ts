@@ -1118,6 +1118,11 @@ router.post("/menu-order", async (req, res) => {
       : null;
     if (shared && Number(shared.paid_amount || 0) > 0)
       throw Object.assign(new Error("Рахунок уже оплачується. Зверніться до офіціанта."), { status: 409 });
+    if (Object.prototype.hasOwnProperty.call(req.body, "expectedOrderId")
+      && (req.body.expectedOrderId === null ? !!shared
+        : !Number.isSafeInteger(req.body.expectedOrderId) || req.body.expectedOrderId !== shared?.id)) {
+      throw Object.assign(new Error("Попередній рахунок закрито або змінено. Оновіть меню й перевірте нове замовлення."), { status: 409 });
+    }
     const { rows: orderRows } = shared ? { rows: [shared] } : await client.query(
       `INSERT INTO fb_orders (organization_id, table_id, order_type, guest_name, guest_count, room_number,
         status, total_amount, tip_amount, tip_pct, notes)

@@ -325,7 +325,7 @@ function QrCard({ table, orgSlug, size, showLabel, fgColor, onDownload, onEdit, 
       </div>
       {showLabel && (
         <div className="text-center space-y-1">
-          <div className="font-bold text-base">Стіл {table.number}</div>
+          <div className="font-bold text-base">{table.number}</div>
           {table.location && <div className="text-xs text-muted-foreground">{table.location}</div>}
           <div className="text-xs text-muted-foreground">{table.capacity} місць</div>
           {table.groupName && (
@@ -519,11 +519,12 @@ function QrCodesTab({ orgSlug }: { orgSlug: string }) {
     ctx.drawImage(canvas, pad, pad);
     if (showLabel) {
       ctx.fillStyle = "#1a1a2e"; ctx.font = `bold 16px sans-serif`; ctx.textAlign = "center";
-      ctx.fillText(`Стіл ${table.number}`, out.width / 2, qrSize + pad + 22);
-      if (table.location) { ctx.font = `12px sans-serif`; ctx.fillStyle = "#666"; ctx.fillText(table.location, out.width / 2, qrSize + pad + 40); }
+      ctx.fillText(table.number, out.width / 2, qrSize + pad + 22);
+      const groupLabel = table.groupName || table.location;
+      if (groupLabel) { ctx.font = `12px sans-serif`; ctx.fillStyle = "#666"; ctx.fillText(groupLabel, out.width / 2, qrSize + pad + 40); }
     }
     const link = document.createElement("a");
-    link.download = `qr-table-${table.number}.png`; link.href = out.toDataURL("image/png"); link.click();
+    link.download = `qr-${table.groupName || table.location || "point"}-${table.number}.png`; link.href = out.toDataURL("image/png"); link.click();
   }
 
   const locations = Array.from(new Set(tables.map(t => t.location).filter(Boolean)));
@@ -613,7 +614,7 @@ function QrCodesTab({ orgSlug }: { orgSlug: string }) {
                         <QRCodeCanvas value={buildQrUrl(t.id, orgSlug)} size={48} fgColor={fgColor} bgColor="#fff" level="H" id={`qr-table-${t.id}`} />
                       </div>
                     </td>
-                    <td className="px-3 py-2 font-semibold">Стіл {t.number}</td>
+                    <td className="px-3 py-2 font-semibold">{t.number}</td>
                     <td className="px-3 py-2">
                       {t.groupName
                         ? <GroupBadge icon={t.groupIcon || "📍"} name={t.groupName} color={t.groupColor || "#6b7280"} />

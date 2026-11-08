@@ -7,6 +7,90 @@
  */
 import * as zod from "zod";
 
+export const GetFbServicePointBillParams = zod.object({
+  slug: zod.coerce.string().min(1),
+  id: zod.coerce.number().min(1),
+});
+
+export const GetFbServicePointBillResponse = zod.object({
+  point: zod.object({
+    id: zod.number(),
+    number: zod.string(),
+    groupId: zod.number().nullable(),
+    groupName: zod.string().nullable(),
+    location: zod.string().nullable(),
+  }),
+  order: zod.union([
+    zod.object({
+      id: zod.number(),
+      totalAmount: zod.number(),
+      status: zod.string(),
+    }),
+    zod.null(),
+  ]),
+  paymentAvailable: zod.boolean(),
+  paymentMessage: zod.string(),
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      quantity: zod.number(),
+      total: zod.number(),
+      awaitingAcceptance: zod.boolean(),
+      released: zod.boolean(),
+    }),
+  ),
+});
+
+export const resolveFbServicePointBodyQrMax = 2048;
+
+export const ResolveFbServicePointBody = zod.object({
+  qr: zod.string().min(1).max(resolveFbServicePointBodyQrMax),
+});
+
+export const ResolveFbServicePointResponse = zod.object({
+  point: zod.object({
+    id: zod.number(),
+    number: zod.string(),
+    groupId: zod.number().nullable(),
+    groupName: zod.string().nullable(),
+    location: zod.string().nullable(),
+  }),
+  orderId: zod.number().nullable(),
+});
+
+export const OpenFbServicePointParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const OpenFbServicePointBody = zod.object({
+  outletId: zod.number().min(1).optional(),
+});
+
+export const OpenFbServicePointResponse = zod.object({
+  orderId: zod.number(),
+  created: zod.boolean(),
+});
+
+export const DispatchFbOrderItemsParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const dispatchFbOrderItemsBodyItemIdsMax = 100;
+
+export const DispatchFbOrderItemsBody = zod.object({
+  itemIds: zod
+    .array(zod.number().min(1))
+    .min(1)
+    .max(dispatchFbOrderItemsBodyItemIdsMax),
+});
+
+export const DispatchFbOrderItemsResponse = zod.object({
+  releasedCount: zod.number(),
+  posterManaged: zod.boolean(),
+  message: zod.string(),
+});
+
 export const AcceptGuestOrderParams = zod.object({
   id: zod.coerce.number().min(1),
 });

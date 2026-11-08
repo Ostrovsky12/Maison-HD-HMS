@@ -77,7 +77,9 @@ export function bridgePlan(order: any, items: any[], config: BridgeConfig) {
   const quantities: Record<string, number> = {};
   const prices: Record<string, number> = {};
   const notes: string[] = [];
-  for (const item of items.filter(i => i.status !== "cancelled" && !awaitsWaiterConfirmation(order, i))) {
+  for (const item of items.filter(i => i.status !== "cancelled"
+    && (i.sent_at || (i.requires_confirmation && i.confirmed_at))
+    && !awaitsWaiterConfirmation(order, i))) {
     const productId = config.productMap[String(item.item_id)];
     if (!productId) throw new Error(`Не зіставлено страву «${String(item.name).slice(0, 100)}» з Poster.`);
     const mods = typeof item.modifiers === "string" ? JSON.parse(item.modifiers) : item.modifiers;
