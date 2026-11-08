@@ -11,11 +11,15 @@ The user wants QR menus at tables, houses, and hotel rooms to let guests order a
 
 ## Safe staging and live testing
 
-QR orders require waiter confirmation before reaching the kitchen, including each later guest addition to an already open bill.
+QR orders arrive as new-order notifications on the **cashier station**: the bar tablet running Poster. Staff accept QR orders on that tablet; acceptance then automatically sends kitchen/bar tickets. This is not a requirement to approve QR orders in Maison HD Mobile Waiter first.
 
-**Why:** The user explicitly chose «Після підтвердження офіціантом».
+Mobile Waiter is a separate staff ordering interface. Staff can create orders there or on the cashier station, see existing accepted QR orders and Mobile Waiter orders, and work with the shared orders. In Mobile Waiter, adding dishes and pressing «Відправити встречку» is the direct dispatch action: no second approval on the cashier station is required.
 
-**How to apply:** Approval covers only the item IDs the waiter actually reviewed, never all rows present when the server processes the click. Apply the boundary to both public ordering entry points and every dispatch/accept path; do not treat an open parent bill as approval of future guest additions.
+The cashier station handles opening and closing the cash shift, X reports, and closing receipts.
+
+**Why:** The user explicitly corrected the earlier interpretation and described these two distinct workflows. The earlier «Після підтвердження офіціантом» must not be interpreted as an extra Mobile Waiter approval step for QR or an extra cashier approval for staff dispatch.
+
+**How to apply:** Keep guest QR acceptance on the Poster cashier station and staff dispatch in Mobile Waiter. Neither receipt creation alone nor an open parent bill authorizes dispatch of unreviewed guest additions. Staff dispatch covers only the item IDs actually reviewed. Shared visibility is a product requirement; verify synchronization and physical printing without inventing additional approval steps.
 
 The user reports having only the live Poster account, with no separate test account.
 
@@ -59,11 +63,11 @@ Keep the open-order bridge opt-in, separate from printing and payment/fiscalizat
 
 **How to apply:** Publishing must not activate real order writes. Validate the venue's supported open-bill API and terminal module before enabling, checking the current documentation site, its language variants, and repository examples. Do not infer the cause of an ambiguous provider code solely from a deprecation label. Before substituting `/orders`, prove unpaid/open behavior and how its returned ID maps to the transaction ID used for subsequent additions; do not assume those IDs are interchangeable. POS-platform creation is another documented option, but it navigates the cashier to the new order and does not document explicit table arguments, so it is not proof of headless table-specific automation. Do not claim printing, bidirectional POS edits, or online-payment closure based solely on successful Web API submission.
 
-Do not permit simultaneous editing of a managed bill in Maison HD and on the POS until a terminal-side synchronization mechanism provides stronger coordination.
+Provide the requested shared-bill workflow between Mobile Waiter and the cashier station, but do not enable uncoordinated concurrent writes before synchronization is safe.
 
 **Why:** Poster Web transaction mutations use absolute quantities and expose no compare-and-swap; even a read immediately before writing cannot prevent an independent cashier edit from racing.
 
-**How to apply:** Detect divergence and hold for review rather than overwrite. Preserve uncertain writes for reconciliation, never retry them as new bills, and do not independently fiscalize a linked local bill.
+**How to apply:** Detect divergence and hold for review rather than overwrite. Preserve uncertain writes for reconciliation, never retry them as new bills, and do not independently fiscalize a linked local bill. This safety constraint is not a product rule that orders belong exclusively to one interface.
 
 ## Order creation and terminal printing contracts
 
@@ -85,7 +89,7 @@ The user relayed Poster support's clarification: a receipt can be created with o
 
 **Why:** This resolves the support-level uncertainty about unpaid creation, but does not establish automatic POS acceptance, terminal printing, the exact webhook payload, or ID compatibility for later additions.
 
-**How to apply:** Treat this as a user-provided support statement, not a successful live test. Evaluate online orders as the recommended integration path; preserve the waiter-confirmation boundary and explicitly verify acceptance, linkage to the resulting POS bill, and additions before replacing the existing bridge or enabling live writes.
+**How to apply:** Treat this as a user-provided support statement, not a successful live test. Evaluate online orders as the recommended QR integration path; preserve acceptance on the cashier station and explicitly verify linkage to the resulting POS bill and additions before replacing the existing bridge or enabling live writes. QR automatic acceptance is not required by the user's clarified workflow.
 
 ## Online-order documentation boundaries
 
