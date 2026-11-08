@@ -5,6 +5,12 @@ description: Guest payment methods, online-only tips, configured recipient and f
 
 Guest QR must offer LiqPay checkout or a request to pay cash at the cashier. A cash request is not a completed payment and must not close the bill.
 
+Запит «Розрахунок готівкою» має надходити на касу Poster, як і онлайн-замовлення. Сповіщення лише в Maison HD не виконує цю вимогу.
+
+**Why:** Користувач уточнив: «Розрахунок готівкою - інформація має приходити на касу постер як і онлайн замовлення».
+
+**How to apply:** Deliver the request against the existing shared bill with the service point and amount. Do not create a duplicate online order or mark cash as received to simulate a cashier notification. Report delivery to Poster only after that delivery is confirmed.
+
 Before online payment offer optional tips of 10%, 15%, or 20%, with an explicit no-tip choice. Tips go to the waiter's card configured in the cabinet. Do not include tips in the venue's fiscal sales amount.
 
 Tips are offered only with online payment, not with cash.
