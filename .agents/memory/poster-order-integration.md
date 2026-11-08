@@ -55,7 +55,7 @@ For menu-and-price refreshes, keep ingredients and stock import separate rather 
 
 Keep the open-order bridge opt-in, separate from printing and payment/fiscalization. Do not create production test orders without agreeing a specific test with the user.
 
-**Why:** The user prioritized QR ordering and Mobile Waiter first, and did not authorize unrestricted live test sales. Poster Web API submission does not establish terminal printing. The live documentation marks `transactions.createTransaction` deprecated, whereas its GitHub Markdown omits that label and differs in documented parameters. For the newer `/orders`, English says the method closes the order, but Ukrainian says it creates an order and documents `autoAccept`; the documentation disagreement does not establish either automatic closure or compatibility with the existing shared-bill bridge.
+**Why:** The user prioritized QR ordering and Mobile Waiter first, and did not authorize unrestricted live test sales. Poster Web API submission does not establish terminal printing. The live documentation marks `transactions.createTransaction` deprecated, whereas its GitHub Markdown omits that label and differs in documented parameters. The live English and Ukrainian `/orders` pages now both describe creation (an earlier English closing claim is no longer present); this does not prove compatibility with the existing shared-bill bridge.
 
 **How to apply:** Publishing must not activate real order writes. Validate the venue's supported open-bill API and terminal module before enabling, checking the current documentation site, its language variants, and repository examples. Do not infer the cause of an ambiguous provider code solely from a deprecation label. Before substituting `/orders`, prove unpaid/open behavior and how its returned ID maps to the transaction ID used for subsequent additions; do not assume those IDs are interchangeable. POS-platform creation is another documented option, but it navigates the cashier to the new order and does not document explicit table arguments, so it is not proof of headless table-specific automation. Do not claim printing, bidirectional POS edits, or online-payment closure based solely on successful Web API submission.
 
@@ -86,6 +86,20 @@ The user relayed Poster support's clarification: a receipt can be created with o
 **Why:** This resolves the support-level uncertainty about unpaid creation, but does not establish automatic POS acceptance, terminal printing, the exact webhook payload, or ID compatibility for later additions.
 
 **How to apply:** Treat this as a user-provided support statement, not a successful live test. Evaluate online orders as the recommended integration path; preserve the waiter-confirmation boundary and explicitly verify acceptance, linkage to the resulting POS bill, and additions before replacing the existing bridge or enabling live writes.
+
+## Online-order documentation boundaries
+
+Distinguish `incomingOrders.createIncomingOrder` from `POST /api/orders`: the former documents optional prepayment, a separate incoming-order identity and subsequent `transaction_id`, but no table field or automatic-acceptance parameter. The latter documents `tableId` and `autoAccept`; do not transfer these capabilities between methods. The Ukrainian page identifies `tableId` as a table, whereas the English description incorrectly calls it a register.
+
+**Why:** Treating the two APIs as interchangeable would silently lose house/table routing or promise unattended acceptance unsupported by the chosen API.
+
+**How to apply:** Official sources: https://dev.joinposter.com/en/docs/v3/web/incomingOrders/createIncomingOrder and https://dev.joinposter.com/ua/docs/v3/web/transactions/createOrder . Check the guest-phone/client requirement before changing anonymous table ordering; do not supply fabricated customer data.
+
+Treat an `incoming_order.changed` webhook as a notification to read authoritative status and linkage, not a complete receipt payload. The detailed webhook reference documents acceptance/rejection; the e-commerce guide additionally mentions closure, so verify closure through transaction state rather than relying on that broader guide alone. Webhooks require a developer application; a personal integration token alone does not enable them.
+
+**Why:** The detailed reference only guarantees extra incoming-order `data.type`, and creation can return `transaction_id: null`. Acceptance, closure, and fiscalization are separate outcomes.
+
+**How to apply:** Read the corresponding incoming order after notification; use authenticated bounded polling as a recovery option when appropriate. `dash.getTransaction` with history documents `spot_tablet_id` in history entries, which is a candidate source for the accepting register, not proof of terminal-local print ID mapping. Verify that mapping and runtime availability before additions or printing.
 
 ## Financial data interpretation
 
