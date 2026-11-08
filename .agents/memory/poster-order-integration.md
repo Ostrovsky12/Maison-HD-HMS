@@ -79,6 +79,14 @@ Poster support recommends the documentation section `transactions/createOrder`, 
 
 **How to apply:** Keep command submission separate from confirmed printing in UI and retry logic. Do not report a printed ticket solely from `success: true`, and do not blindly replay after uncertain printer delivery.
 
+## Support clarification on creation and acceptance
+
+The user relayed Poster support's clarification: a receipt can be created with or without payment; the creation response includes its number and ID but not the register, since creation happens at venue level and any register may accept it. Support says the necessary receipt details can be obtained after acceptance via webhook or manual lookup, and recommends online orders for this scenario.
+
+**Why:** This resolves the support-level uncertainty about unpaid creation, but does not establish automatic POS acceptance, terminal printing, the exact webhook payload, or ID compatibility for later additions.
+
+**How to apply:** Treat this as a user-provided support statement, not a successful live test. Evaluate online orders as the recommended integration path; preserve the waiter-confirmation boundary and explicitly verify acceptance, linkage to the resulting POS bill, and additions before replacing the existing bridge or enabling live writes.
+
 ## Financial data interpretation
 
 Determine currency units and the meaning of counters separately for each Poster endpoint; do not apply a universal conversion or equate visitors with receipts.
