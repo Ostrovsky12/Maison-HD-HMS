@@ -7,6 +7,7 @@
 - [Canonical public document links](public-document-links.md) — signed bearer links must use a configured HTTPS origin, never request Host headers
 - [Accommodation availability invariants](accommodation-availability-invariants.md) — every write path must serialize on the same unit lock before checking booking and block overlap
 - [Canonical F&B table QR](canonical-fb-table-qr.md) — table QR codes must resolve the authenticated organization slug and open the Maison HD public menu
+- [Guest QR payment policy](qr-payment-policy.md) — LiqPay or cash request; optional 10/15/20% tips only online, separate from the venue’s fiscal sales.
 - [Hotel TV content integrity](hotel-tv-content-integrity.md) — TV screens use saved per-screen content and honest empty states, never fabricated hotel details or offers
 - [Hotel TV weather integrity](hotel-tv-weather-integrity.md) — weather cache and stale fallbacks stay tenant-scoped; unavailable data is never simulated
 - [Unified PRRO scope](unified-prro-scope.md) — fiscalization is a Maison HD platform service for hotel and F&B operations, not an F&B-only feature
