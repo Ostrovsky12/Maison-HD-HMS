@@ -361,7 +361,7 @@ export default function QrMenuPage() {
 
   const totalItems = cart.reduce((s, c) => s + c.quantity, 0);
   const totalAmount = cart.reduce((s, c) => s + getCartItemPrice(c), 0);
-  const tipAmount = Math.round(totalAmount * tipPct) / 100;
+  const tipAmount = tableId ? 0 : Math.round(totalAmount * tipPct) / 100;
   const grandTotal = totalAmount + tipAmount;
 
   const placeOrder = async () => {
@@ -389,7 +389,7 @@ export default function QrMenuPage() {
           guestName: guestName || (guestGreeting ? guestGreeting : "Гість"),
           guestCount: 1,
           notes: orderNotes || null,
-          tipPct: tipPct || null,
+          tipPct: tableId ? 0 : tipPct || null,
           items: cart.map(c => ({ 
             id: c.item.id, 
             quantity: c.quantity, 
@@ -950,7 +950,7 @@ export default function QrMenuPage() {
                        <input value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full p-3.5 bg-white border border-stone-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#A37346]/20 text-[#2D2A26] placeholder:text-stone-400 text-sm" placeholder="За бажанням" />
                     </div>
                     
-                    <div>
+                    {!tableId && <div>
                       <label className="block text-sm font-medium text-[#2D2A26] mb-2">Додати чайові</label>
                       <div className="grid grid-cols-4 gap-2">
                         {[0, 10, 15, 20].map(pct => (
@@ -967,7 +967,7 @@ export default function QrMenuPage() {
                           </button>
                         ))}
                       </div>
-                    </div>
+                    </div>}
                   </div>
                   
                   <div className="pt-8 border-t border-stone-200 space-y-3 pb-8">

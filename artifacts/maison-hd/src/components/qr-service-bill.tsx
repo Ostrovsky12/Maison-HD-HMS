@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, CreditCard, RefreshCw } from "lucide-react";
+import { Loader2, CreditCard, RefreshCw, Banknote } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const API_ROOT = BASE.replace("/maison-hd", "") + "/api";
@@ -10,6 +10,11 @@ export type ServiceBill = {
   items: { id: number; name: string; quantity: number; total: number; awaitingAcceptance: boolean; released: boolean }[];
   paymentAvailable: boolean;
   paymentMessage: string;
+  cashRequestAvailable?: boolean;
+  cashRequestPending?: boolean;
+  cashRequestDestination?: "maison_hd";
+  tipsAvailable?: boolean;
+  tipsMessage?: string;
 };
 
 const money = (n: number) => `${Number(n || 0).toFixed(2)} ₴`;
@@ -33,6 +38,9 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
+  const [method, setMethod] = useState<"liqpay" | "cash">("liqpay");
+  const [tipPct, setTipPct] = useState(0);
+  const [cashMessage, setCashMessage] = useState<string | null>(null);
   const onBillRef = useRef(onBill);
   onBillRef.current = onBill;
 
@@ -57,20 +65,43 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
     const t = setInterval(load, 10_000);
     return () => clearInterval(t);
   }, [load]);
+  useEffect(() => {
+    setTipPct(0);
+    setPayError(null);
+    setCashMessage(null);
+  }, [bill?.order?.id]);
+
+  const cash = method === "cash";
+  const baseKopecks = Math.round((bill?.order?.totalAmount ?? 0) * 100);
+  const tipKopecks = cash ? 0 : Math.round(baseKopecks * tipPct / 100);
+  const paymentBlocked = cash
+    ? !bill?.cashRequestAvailable || bill?.cashRequestPending || !!cashMessage
+    : !bill?.paymentAvailable || (tipPct > 0 && !bill?.tipsAvailable);
 
   const pay = async () => {
-    if (!bill?.order || !bill.paymentAvailable || paying) return;
+    if (!bill?.order || paymentBlocked || paying) return;
     setPaying(true);
     setPayError(null);
     try {
-      const r = await fetch(`${API_ROOT}/fb/public/liqpay-checkout`, {
+      const endpoint = cash
+        ? `/fb/public/service-points/${encodeURIComponent(orgSlug)}/${encodeURIComponent(tableId)}/cash-request`
+        : "/fb/public/liqpay-checkout";
+      const r = await fetch(`${API_ROOT}${endpoint}`, {
         method: "POST",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: Number(tableId), expectedOrderId: bill.order.id, expectedTotal: bill.order.totalAmount, tipPct: 0 }),
+        body: JSON.stringify(cash
+          ? { expectedOrderId: bill.order.id, expectedTotal: bill.order.totalAmount }
+          : { orgSlug, tableId: Number(tableId), expectedOrderId: bill.order.id, expectedTotal: bill.order.totalAmount, tipPct }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      if (cash) {
+        if (d.ok !== true || d.destination !== "maison_hd") throw new Error("Надсилання запиту не підтверджено.");
+        setCashMessage(d.message);
+        void load();
+        return;
+      }
       if (!isLiqpayUrl(d.url)) throw new Error("Некоректне посилання на оплату");
       window.location.assign(d.url);
     } catch (e) {
@@ -121,18 +152,51 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
               ))}
             </ul>
           )}
+          <fieldset className="mt-3" disabled={paying}>
+            <legend className="text-sm font-medium text-[#2D2A26]">Спосіб розрахунку</legend>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {(["liqpay", "cash"] as const).map(value => (
+                <label key={value} className={`rounded-xl border p-3 text-sm cursor-pointer ${method === value ? "border-[#A37346] bg-stone-50" : "border-stone-100"}`}>
+                  <input type="radio" name={`bill-method-${tableId}`} value={value} checked={method === value}
+                    onChange={() => { setMethod(value); setTipPct(0); setPayError(null); }}
+                    data-testid={`radio-payment-${value}`} className="mr-2 accent-[#A37346]" />
+                  {value === "liqpay" ? "LiqPay" : "Готівкою"}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          {!cash && <fieldset className="mt-3" disabled={paying}>
+            <legend className="text-sm font-medium text-[#2D2A26]">Чайові офіціанту</legend>
+            <div className="grid grid-cols-4 gap-1.5 mt-2">
+              {[0, 10, 15, 20].map(pct => <button key={pct} type="button" aria-pressed={tipPct === pct}
+                onClick={() => { setTipPct(pct); setPayError(null); }} data-testid={`button-tip-${pct}`}
+                className={`rounded-xl py-2.5 text-xs border ${tipPct === pct ? "bg-[#2D2A26] text-white border-[#2D2A26]" : "border-stone-100 text-[#7A756D]"}`}>
+                {pct === 0 ? "Без чайових" : `${pct}%`}
+              </button>)}
+            </div>
+            <p className="mt-2 text-xs text-[#7A756D]">Чайові — окремо від суми страв, лише при онлайн-оплаті.</p>
+            {tipPct > 0 && <div className="mt-2 text-sm space-y-1" data-testid="tip-summary">
+              <div className="flex justify-between"><span>Рахунок закладу</span><span>{money(baseKopecks / 100)}</span></div>
+              <div className="flex justify-between"><span>Чайові {tipPct}%</span><span data-testid="text-tip-amount">{money(tipKopecks / 100)}</span></div>
+              <div className="flex justify-between font-semibold"><span>Разом до оплати</span><span data-testid="text-payment-total">{money((baseKopecks + tipKopecks) / 100)}</span></div>
+            </div>}
+            {tipPct > 0 && !bill.tipsAvailable && <p className="mt-2 text-xs text-amber-800" role="status">{bill.tipsMessage || "Переказ чайових ще не підключений. Кошти не списуватимуться."}</p>}
+          </fieldset>}
+          {cash && <p className="mt-2 text-xs text-[#7A756D]">
+            Запит на касу Maison HD, без чайових. Сповіщення на планшеті Poster ще не підключене. Оплату підтвердить касир після отримання коштів.
+          </p>}
           <button
             onClick={pay}
-            disabled={!bill.paymentAvailable || paying}
+            disabled={!!paymentBlocked || paying}
             className="mt-3 w-full h-11 rounded-full bg-[#2D2A26] text-white text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40"
             data-testid="button-bill-pay"
           >
-            {paying ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-            Оплатити рахунок
+            {paying ? <Loader2 className="w-4 h-4 animate-spin" /> : cash ? <Banknote className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
+            {cash ? (cashMessage || bill.cashRequestPending ? "Запит уже надіслано" : "Розрахуватися готівкою") : "Перейти до LiqPay"}
           </button>
-          {bill.paymentMessage && <p className="mt-2 text-xs text-[#7A756D] text-center" data-testid="text-bill-payment-message">{bill.paymentMessage}</p>}
-          {!bill.paymentAvailable && !bill.paymentMessage && <p className="mt-2 text-xs text-[#7A756D] text-center">Онлайн-оплата зараз недоступна, зверніться до офіціанта.</p>}
-          {payError && <p className="mt-2 text-xs text-red-600 text-center">{payError}</p>}
+          {cashMessage && <p className="mt-2 text-xs text-green-800 text-center" role="status" data-testid="text-cash-request-success">{cashMessage}</p>}
+          {(!cash || !bill.cashRequestAvailable) && bill.paymentMessage && <p className="mt-2 text-xs text-[#7A756D] text-center" data-testid="text-bill-payment-message">{bill.paymentMessage}</p>}
+          {payError && <p className="mt-2 text-xs text-red-600 text-center" role="alert">{payError}</p>}
         </>
       ) : (
         <p className="mt-1 text-xs text-[#7A756D]" data-testid="text-bill-empty">Відкритого рахунку немає. Оберіть страви, щоб почати.</p>

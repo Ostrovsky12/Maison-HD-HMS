@@ -8,11 +8,17 @@
 import type { FbServiceBillItem } from "./fbServiceBillItem";
 import type { FbServiceBillSummary } from "./fbServiceBillSummary";
 import type { FbServicePoint } from "./fbServicePoint";
+import type { FbServicePointBillCashRequestDestination } from "./fbServicePointBillCashRequestDestination";
 
 export interface FbServicePointBill {
   point: FbServicePoint;
   order: FbServiceBillSummary | null;
   paymentAvailable: boolean;
   paymentMessage: string;
+  cashRequestAvailable?: boolean;
+  cashRequestPending?: boolean;
+  cashRequestDestination?: FbServicePointBillCashRequestDestination;
+  tipsAvailable?: boolean;
+  tipsMessage?: string;
   items: FbServiceBillItem[];
 }

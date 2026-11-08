@@ -49,8 +49,8 @@ interface TableNotification {
   id: number;
   table_number: string;
   table_location: string;
-  type: "waiter_call" | "payment_cash" | "payment_terminal";
-  payload: { total?: string; orderId?: number } | null;
+  type: "waiter_call" | "payment_cash" | "payment_terminal" | "payment_review";
+  payload: { total?: string | number; orderId?: number; groupName?: string | null } | null;
   created_at: string;
 }
 interface OrderItem { id: number; name: string; quantity: number; price: string; total_price: string; notes?: string; is_alcohol?: boolean; status?: string; }
@@ -2200,10 +2200,12 @@ export default function FbCashier() {
                       {notifications.map(n => {
                         const isWaiter = n.type === "waiter_call";
                         const isCash = n.type === "payment_cash";
-                        const tableLabel = n.table_location
-                          ? `${n.table_location}${n.table_number ? ` · №${n.table_number}` : ""}`
+                        const isReview = n.type === "payment_review";
+                        const group = n.payload?.groupName || n.table_location;
+                        const tableLabel = group
+                          ? `${group}${n.table_number ? ` · №${n.table_number}` : ""}`
                           : `Стіл №${n.table_number}`;
-                        const total = n.payload?.total ? parseFloat(n.payload.total).toFixed(0) : null;
+                        const total = n.payload?.total != null ? Number(n.payload.total).toFixed(2) : null;
 
                         return (
                           <div key={n.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 animate-pulse-border ${
@@ -2212,19 +2214,22 @@ export default function FbCashier() {
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 ${
                               isWaiter ? "bg-blue-100" : isCash ? "bg-green-100" : "bg-purple-100"
                             }`}>
-                              {isWaiter ? "🛎️" : isCash ? "💵" : "💳"}
+                              {isReview ? "!" : isWaiter ? "🛎️" : isCash ? "💵" : "💳"}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className={`font-bold text-sm ${isWaiter ? "text-blue-800" : isCash ? "text-green-800" : "text-purple-800"}`}>
-                                {isWaiter ? "Виклик офіціанта" : isCash ? "Гість чекає здачу" : "Принесіть термінал"}
+                                {isReview ? "Платіж LiqPay потребує звірки" : isWaiter ? "Виклик офіціанта" : isCash ? "Гість просить розрахунок готівкою" : "Принесіть термінал"}
                               </div>
                               <div className="text-xs text-muted-foreground">
                                 {tableLabel}{total ? ` · ${total} ₴` : ""} · {timeAgo(n.created_at)}
+                                {n.payload?.orderId && <span className="block">Рахунок №{n.payload.orderId}</span>}
+                                {isCash && <span className="block">Це запит, не підтверджена оплата. Без чайових.</span>}
+                                {isReview && <span className="block">Не приймайте повторну оплату без звірки. Чайові автоматично не переказані.</span>}
                               </div>
                             </div>
                             <button onClick={() => dismissNotification(n.id)}
                               className="shrink-0 w-7 h-7 rounded-full bg-white/80 flex items-center justify-center text-muted-foreground hover:bg-white transition-colors"
-                              title="Відхилити">
+                              title="Закрити сповіщення — це не підтвердження оплати">
                               <X className="w-4 h-4" />
                             </button>
                           </div>

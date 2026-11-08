@@ -2817,6 +2817,14 @@ router.get("/notifications", requireAuth, async (req: any, res) => {
       `SELECT id, table_id, table_number, table_location, type, payload, status, created_at
        FROM fb_table_notifications
        WHERE organization_id = $1 AND status = 'pending'
+         AND (type NOT IN ('payment_cash','payment_terminal') OR EXISTS (
+           SELECT 1 FROM fb_orders active_order
+           JOIN fb_tables active_table ON active_table.id=active_order.table_id
+             AND active_table.organization_id=active_order.organization_id
+             AND active_table.current_order_id=active_order.id
+           WHERE active_order.organization_id=$1 AND active_order.id::text=fb_table_notifications.payload->>'orderId'
+             AND active_order.status NOT IN ('billed','cancelled')
+         ))
        ORDER BY created_at DESC
        LIMIT 50`,
       [orgId],

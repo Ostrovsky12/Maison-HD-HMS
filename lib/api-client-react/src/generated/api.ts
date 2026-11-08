@@ -75,6 +75,8 @@ import type {
   ErrorEnvelope,
   ErrorResponse,
   ExecutePosterMenuImport200,
+  FbCashPaymentRequest,
+  FbCashPaymentRequestResult,
   FbOrderDispatch,
   FbOrderDispatchResult,
   FbServicePointBill,
@@ -280,6 +282,91 @@ export function useGetFbServicePointBill<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+export const getRequestFbCashPaymentUrl = (slug: string, id: number) => {
+  return `/api/fb/public/service-points/${slug}/${id}/cash-request`;
+};
+
+export const requestFbCashPayment = async (
+  slug: string,
+  id: number,
+  fbCashPaymentRequest: FbCashPaymentRequest,
+  options?: RequestInit,
+): Promise<FbCashPaymentRequestResult> => {
+  return customFetch<FbCashPaymentRequestResult>(
+    getRequestFbCashPaymentUrl(slug, id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(fbCashPaymentRequest),
+    },
+  );
+};
+
+export const getRequestFbCashPaymentMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestFbCashPayment>>,
+    TError,
+    { slug: string; id: number; data: BodyType<FbCashPaymentRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestFbCashPayment>>,
+  TError,
+  { slug: string; id: number; data: BodyType<FbCashPaymentRequest> },
+  TContext
+> => {
+  const mutationKey = ["requestFbCashPayment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestFbCashPayment>>,
+    { slug: string; id: number; data: BodyType<FbCashPaymentRequest> }
+  > = (props) => {
+    const { slug, id, data } = props ?? {};
+
+    return requestFbCashPayment(slug, id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestFbCashPaymentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestFbCashPayment>>
+>;
+export type RequestFbCashPaymentMutationBody = BodyType<FbCashPaymentRequest>;
+export type RequestFbCashPaymentMutationError = ErrorType<void>;
+
+export const useRequestFbCashPayment = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestFbCashPayment>>,
+    TError,
+    { slug: string; id: number; data: BodyType<FbCashPaymentRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestFbCashPayment>>,
+  TError,
+  { slug: string; id: number; data: BodyType<FbCashPaymentRequest> },
+  TContext
+> => {
+  return useMutation(getRequestFbCashPaymentMutationOptions(options));
+};
 
 export const getResolveFbServicePointUrl = () => {
   return `/api/fb/service-points/resolve`;

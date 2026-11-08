@@ -30,6 +30,11 @@ export const GetFbServicePointBillResponse = zod.object({
   ]),
   paymentAvailable: zod.boolean(),
   paymentMessage: zod.string(),
+  cashRequestAvailable: zod.boolean().optional(),
+  cashRequestPending: zod.boolean().optional(),
+  cashRequestDestination: zod.enum(["maison_hd"]).optional(),
+  tipsAvailable: zod.boolean().optional(),
+  tipsMessage: zod.string().optional(),
   items: zod.array(
     zod.object({
       id: zod.number(),
@@ -40,6 +45,28 @@ export const GetFbServicePointBillResponse = zod.object({
       released: zod.boolean(),
     }),
   ),
+});
+
+export const RequestFbCashPaymentParams = zod.object({
+  slug: zod.coerce.string().min(1),
+  id: zod.coerce.number().min(1),
+});
+
+export const requestFbCashPaymentBodyExpectedTotalExclusiveMin = 0;
+
+export const RequestFbCashPaymentBody = zod.object({
+  expectedOrderId: zod.number().min(1),
+  expectedTotal: zod
+    .number()
+    .gt(requestFbCashPaymentBodyExpectedTotalExclusiveMin),
+});
+
+export const RequestFbCashPaymentResponse = zod.object({
+  ok: zod.boolean(),
+  id: zod.number(),
+  duplicate: zod.boolean(),
+  destination: zod.enum(["maison_hd"]),
+  message: zod.string(),
 });
 
 export const resolveFbServicePointBodyQrMax = 2048;

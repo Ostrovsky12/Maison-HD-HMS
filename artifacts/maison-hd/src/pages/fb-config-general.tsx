@@ -435,7 +435,7 @@ export default function FbConfigGeneral() {
                     <span className="text-xs text-muted-foreground">(AI-кнопка, теги)</span>
                   </div>
                 </div>
-                <Row label="Карта для сервісу" hint="Номер картки офіціанта, яка відображатиметься гостю у QR-меню при виборі чайових. Наприклад: 5168 7573 1234 5678">
+                <Row label="Картка для чайових" hint="Картка офіціанта для онлайн-чайових. Самого номера недостатньо: перекази потребують окремого підключення виплат у платіжного провайдера. При готівковому розрахунку чайові не додаються.">
                   <Input
                     value={branding.service_card||""}
                     onChange={e => setBrand("service_card", e.target.value)}

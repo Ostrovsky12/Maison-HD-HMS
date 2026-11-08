@@ -1,5 +1,9 @@
 import { pool } from "@workspace/db";
 
+// A merchant key or a recipient PAN is not proof of settlement/payout capability.
+// Keep both server and guest UI fail-closed until the durable payment lifecycle exists.
+export const sharedQrPaymentReadiness = Object.freeze({ checkout: false, tipPayout: false });
+
 export class ServicePointError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -62,8 +66,11 @@ export async function readServicePointBill(slug: string, id: number, database: a
   const items = (await database.query(`SELECT id,name,quantity,total_price,requires_confirmation,confirmed_at,sent_at
     FROM fb_order_items WHERE order_id=$1 AND organization_id=$2 AND status<>'cancelled' ORDER BY id`,
   [order.id, org.id])).rows;
+  const cashRequestPending = (await database.query(`SELECT id FROM fb_table_notifications
+    WHERE organization_id=$1 AND table_id=$2 AND type='payment_cash' AND status='pending'
+    AND payload->>'orderId'=$3 LIMIT 1`, [org.id, id, String(order.id)])).rows.length > 0;
   return { ...resolved, orgId: org.id, order: { id: order.id, status: order.status,
-    totalAmount: Number(order.total_amount) }, payable: Number(order.paid_amount || 0) === 0
+    totalAmount: Number(order.total_amount) }, cashRequestPending, payable: Number(order.paid_amount || 0) === 0
       && order.status !== "new_guest" && items.length > 0
       && !items.some((item: any) => item.requires_confirmation && !item.confirmed_at),
     items: items.map((item: any) => ({ id: item.id, name: item.name, quantity: Number(item.quantity),
@@ -136,6 +143,52 @@ export async function releaseStaffItems(orgId: number, orderId: number, ids: num
     [orderId, orgId, reviewed]);
     await client.query("COMMIT");
     return updated.rows.length;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}
+
+/** A cash request never records revenue, fiscalizes or closes a receipt. */
+export async function requestCashPayment(slug: string, id: number,
+  expected: { expectedOrderId: number; expectedTotal: number }, database: any = pool) {
+  const client = await database.connect();
+  try {
+    await client.query("BEGIN");
+    const org = (await client.query("SELECT id FROM organizations WHERE slug=$1", [slug])).rows[0];
+    if (!org) throw new ServicePointError(404, "Заклад не знайдено.");
+    const point = await loadPoint(client, org.id, id, true);
+    const order = await currentOrder(client, org.id, id, true);
+    if (!order || order.id !== expected.expectedOrderId || point.current_order_id !== order.id) {
+      throw new ServicePointError(409, "Рахунок змінився. Оновіть його перед розрахунком.");
+    }
+    const amount = Number(order.total_amount);
+    if (!Number.isFinite(amount) || !Number.isFinite(expected.expectedTotal) || amount <= 0 ||
+      Math.abs(amount - expected.expectedTotal) > 0.005) {
+      throw new ServicePointError(409, "Сума змінилася. Перевірте актуальний рахунок.");
+    }
+    const items = (await client.query(`SELECT id,requires_confirmation,confirmed_at FROM fb_order_items
+      WHERE organization_id=$1 AND order_id=$2 AND status<>'cancelled'`, [org.id, order.id])).rows;
+    if (Number(order.paid_amount || 0) > 0 || order.status === "new_guest" || !items.length ||
+      items.some((item: any) => item.requires_confirmation && !item.confirmed_at)) {
+      throw new ServicePointError(409, "Рахунок уже оплачується або гостьові позиції ще не прийняті.");
+    }
+    const existing = (await client.query(`SELECT id FROM fb_table_notifications
+      WHERE organization_id=$1 AND table_id=$2 AND type='payment_cash' AND status='pending'
+      AND payload->>'orderId'=$3 ORDER BY id DESC LIMIT 1`, [org.id, id, String(order.id)])).rows[0];
+    let notificationId = existing?.id;
+    if (!notificationId) {
+      notificationId = (await client.query(`INSERT INTO fb_table_notifications
+        (organization_id,table_id,table_number,table_location,type,payload,status)
+        VALUES ($1,$2,$3,$4,'payment_cash',$5,'pending') RETURNING id`,
+      [org.id, id, point.number, point.location, JSON.stringify({
+        method: "cash", orderId: order.id, total: amount, tipPct: 0, tipAmount: 0,
+        groupName: point.group_name ?? null, destination: "maison_hd",
+      })])).rows[0].id;
+    }
+    await client.query("COMMIT");
+    return { ok: true, id: notificationId, duplicate: !!existing, destination: "maison_hd" as const,
+      message: "Запит готівкового розрахунку надіслано на касу Maison HD. Очікуйте офіціанта; рахунок ще не оплачено." };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

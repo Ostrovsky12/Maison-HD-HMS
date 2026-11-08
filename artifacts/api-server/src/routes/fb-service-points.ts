@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../lib/auth.js";
 import { canConfirmGuestItems } from "../lib/fb-guest-confirmation.js";
-import { ServicePointError, resolveServicePoint, openServicePoint, releaseStaffItems, readServicePointBill } from "../lib/fb-service-points.js";
+import { ServicePointError, resolveServicePoint, openServicePoint, releaseStaffItems, readServicePointBill, requestCashPayment, sharedQrPaymentReadiness } from "../lib/fb-service-points.js";
 import rateLimit from "express-rate-limit";
 import { isPosterManagedOrder, dispatchPosterOrder } from "../lib/poster-order-bridge.js";
 import {
@@ -9,6 +9,7 @@ import {
   OpenFbServicePointParams, OpenFbServicePointBody, OpenFbServicePointResponse,
   DispatchFbOrderItemsParams, DispatchFbOrderItemsBody, DispatchFbOrderItemsResponse,
   GetFbServicePointBillParams, GetFbServicePointBillResponse,
+  RequestFbCashPaymentParams, RequestFbCashPaymentBody, RequestFbCashPaymentResponse,
 } from "@workspace/api-zod";
 
 const router = Router();
@@ -23,13 +24,28 @@ router.get("/public/service-points/:slug/:id/bill", rateLimit({ windowMs: 60000,
     res.json(GetFbServicePointBillResponse.parse({ point: bill.point, order: bill.order, items: bill.items,
       // Credentials alone do not establish payment settlement/receipt closure.
       // The legacy LiqPay callback handles tips, not this shared-bill lifecycle.
-      paymentAvailable: false,
+      paymentAvailable: sharedQrPaymentReadiness.checkout,
+      cashRequestAvailable: bill.payable,
+      cashRequestPending: bill.cashRequestPending ?? false,
+      cashRequestDestination: "maison_hd",
+      tipsAvailable: sharedQrPaymentReadiness.tipPayout,
+      tipsMessage: "Доступ до виплат на картки ще не підтверджений. Чайові не списуватимуться.",
       paymentMessage: !bill.order ? "Відкритого рахунку немає."
         : managed ? "Рахунок обслуговує Poster. Онлайн-розрахунок через Poster ще не підключений — зверніться до офіціанта."
         : !bill.payable ? "Оплата стане доступною після прийняття гостьових позицій і перевірки рахунку."
         : "Онлайн-розрахунок спільного рахунку ще не підключений. Для оплати зверніться до офіціанта." }));
   } catch (error) { fail(req, res, error); }
 });
+router.post("/public/service-points/:slug/:id/cash-request",
+  rateLimit({ windowMs: 60_000, max: 10, standardHeaders: true, legacyHeaders: false }),
+  async (req: any, res): Promise<void> => {
+    const params = RequestFbCashPaymentParams.safeParse(req.params);
+    const body = RequestFbCashPaymentBody.safeParse(req.body);
+    if (!params.success || !body.success) { res.status(400).json({ error: "Перевірте місце та рахунок." }); return; }
+    try {
+      res.json(RequestFbCashPaymentResponse.parse(await requestCashPayment(params.data.slug, params.data.id, body.data)));
+    } catch (error) { fail(req, res, error); }
+  });
 router.use(["/service-points", "/orders/:id/dispatch-items"], requireAuth, (req: any, res, next) => {
   if (!req.user.organizationId || !canConfirmGuestItems(req.user.role)) {
     res.status(403).json({ error: "Доступно персоналу закладу." }); return;

@@ -3,7 +3,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ resolve: vi.fn(), open: vi.fn(), release: vi.fn(), bill: vi.fn(),
-  managed: vi.fn(), dispatch: vi.fn() }));
+  managed: vi.fn(), dispatch: vi.fn(), cash: vi.fn() }));
 vi.mock("../lib/auth.js", () => ({ requireAuth: (req: any, res: any, next: any) => {
   if (!req.headers.authorization) { res.status(401).json({ error: "Unauthorized" }); return; }
   req.user = { organizationId: 1, role: req.headers.authorization === "Bearer guest" ? "guest" : "waiter" }; next();
@@ -12,6 +12,7 @@ vi.mock("../lib/fb-service-points.js", async importOriginal => ({
   ...await importOriginal<typeof import("../lib/fb-service-points.js")>(),
   resolveServicePoint: fixture.resolve, openServicePoint: fixture.open, releaseStaffItems: fixture.release,
   readServicePointBill: fixture.bill,
+  requestCashPayment: fixture.cash,
 }));
 vi.mock("../lib/poster-order-bridge.js", () => ({
   isPosterManagedOrder: fixture.managed, dispatchPosterOrder: fixture.dispatch,
@@ -41,6 +42,23 @@ describe("service point API boundaries", () => {
     const result = await request(app).post("/api/fb/service-points/resolve").set("Authorization", "Bearer guest")
       .send({ qr: "/qr-menu/dogoda/11" });
     expect(result.status).toBe(403); expect(fixture.resolve).not.toHaveBeenCalled();
+  });
+  it("requires an exact bill snapshot for a public cash request", async () => {
+    const url = "/api/fb/public/service-points/dogoda/11/cash-request";
+    expect((await request(app).post(url).send({})).status).toBe(400);
+    expect(fixture.cash).not.toHaveBeenCalled();
+    fixture.cash.mockResolvedValue({ ok: true, id: 44, duplicate: false, destination: "maison_hd", message: "Каса Maison HD" });
+    const result = await request(app).post(url).send({ expectedOrderId: 10, expectedTotal: 300 });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ id: 44, destination: "maison_hd" });
+    expect(fixture.cash).toHaveBeenCalledWith("dogoda", 11, { expectedOrderId: 10, expectedTotal: 300 });
+  });
+  it("does not offer tips or claim Poster checkout availability just because a bill exists", async () => {
+    fixture.bill.mockResolvedValue({ point, order: { id: 10, status: "open", totalAmount: 300 },
+      items: [], payable: true, orgId: 1, cashRequestPending: true });
+    const result = await request(app).get("/api/fb/public/service-points/dogoda/11/bill");
+    expect(result.body).toMatchObject({ paymentAvailable: false, tipsAvailable: false,
+      cashRequestAvailable: true, cashRequestPending: true, cashRequestDestination: "maison_hd" });
   });
   it("resolves only using the signed-in organization", async () => {
     const result = await request(app).post("/api/fb/service-points/resolve").set("Authorization", "Bearer staff")

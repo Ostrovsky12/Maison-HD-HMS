@@ -5,6 +5,13 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export type FbServicePointBillCashRequestDestination =
+  (typeof FbServicePointBillCashRequestDestination)[keyof typeof FbServicePointBillCashRequestDestination];
+
+export const FbServicePointBillCashRequestDestination = {
+  maison_hd: "maison_hd",
+} as const;
+
 export interface FbServicePoint {
   id: number;
   number: string;
@@ -36,7 +43,34 @@ export interface FbServicePointBill {
   order: FbServiceBillSummary | null;
   paymentAvailable: boolean;
   paymentMessage: string;
+  cashRequestAvailable?: boolean;
+  cashRequestPending?: boolean;
+  cashRequestDestination?: FbServicePointBillCashRequestDestination;
+  tipsAvailable?: boolean;
+  tipsMessage?: string;
   items: FbServiceBillItem[];
+}
+
+export interface FbCashPaymentRequest {
+  /** @minimum 1 */
+  expectedOrderId: number;
+  /** @exclusiveMinimum 0 */
+  expectedTotal: number;
+}
+
+export type FbCashPaymentRequestResultDestination =
+  (typeof FbCashPaymentRequestResultDestination)[keyof typeof FbCashPaymentRequestResultDestination];
+
+export const FbCashPaymentRequestResultDestination = {
+  maison_hd: "maison_hd",
+} as const;
+
+export interface FbCashPaymentRequestResult {
+  ok: boolean;
+  id: number;
+  duplicate: boolean;
+  destination: FbCashPaymentRequestResultDestination;
+  message: string;
 }
 
 export interface FbServicePointScan {

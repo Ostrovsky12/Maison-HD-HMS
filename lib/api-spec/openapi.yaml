@@ -64,6 +64,27 @@ paths:
               schema: { $ref: "#/components/schemas/FbServicePointBill" }
         "404": { description: Service point not found }
         "409": { description: Multiple open bills require reconciliation }
+  /fb/public/service-points/{slug}/{id}/cash-request:
+    post:
+      operationId: requestFbCashPayment
+      tags: [restaurant]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FbCashPaymentRequest" }
+      responses:
+        "200":
+          description: Durable cashier request, not a completed payment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FbCashPaymentRequestResult" }
+        "400": { description: Invalid request }
+        "404": { description: Current bill not found }
+        "409": { description: Bill changed or is not ready for settlement }
   /fb/service-points/resolve:
     post:
       operationId: resolveFbServicePoint
@@ -3158,9 +3179,30 @@ components:
             - { type: "null" }
         paymentAvailable: { type: boolean }
         paymentMessage: { type: string }
+        cashRequestAvailable: { type: boolean }
+        cashRequestPending: { type: boolean }
+        cashRequestDestination: { type: string, enum: [maison_hd] }
+        tipsAvailable: { type: boolean }
+        tipsMessage: { type: string }
         items:
           type: array
           items: { $ref: "#/components/schemas/FbServiceBillItem" }
+    FbCashPaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedOrderId, expectedTotal]
+      properties:
+        expectedOrderId: { type: integer, minimum: 1 }
+        expectedTotal: { type: number, exclusiveMinimum: 0 }
+    FbCashPaymentRequestResult:
+      type: object
+      required: [ok, id, duplicate, destination, message]
+      properties:
+        ok: { type: boolean }
+        id: { type: integer }
+        duplicate: { type: boolean }
+        destination: { type: string, enum: [maison_hd] }
+        message: { type: string }
     FbServiceBillSummary:
       type: object
       required: [id, totalAmount, status]
