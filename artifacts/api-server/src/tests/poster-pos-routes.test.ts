@@ -15,6 +15,15 @@ beforeEach(() => {
   mocks.poll.mockResolvedValue({ notifications: [] }); mocks.ack.mockResolvedValue({ ok: true });
 });
 describe("signed Poster terminal endpoints", () => {
+  it("returns the exact pairing failure for the existing terminal UI", async () => {
+    const error = "Код створено для каси Poster ID 1, а поточна каса має ID 2.";
+    mocks.pair.mockRejectedValueOnce(new PosterPosError(403, error));
+    const response = await request(app).post("/api/poster-pos/pair")
+      .send({ account: session.account, spotId: session.spotId, tabletId: session.tabletId, code: session.token });
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error });
+    expect(response.headers["cache-control"]).toBe("no-store");
+  });
   it("rejects unsigned requests before accessing the inbox", async () => {
     mocks.verify.mockImplementation(() => { throw new PosterPosError(403, "Invalid signature"); });
     expect((await request(app).post("/api/poster-pos/poll").send(session)).status).toBe(403);

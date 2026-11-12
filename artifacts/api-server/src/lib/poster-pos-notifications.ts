@@ -72,10 +72,33 @@ export async function authenticatePos(context: PosContext, token: string, pairin
     FROM organizations WHERE id=$1`, [orgId]);
   const poster = rows[0]?.poster, config = poster?.posNotifications;
   const expected = pairing ? config?.pairingHash : config?.tokenHash;
-  if (!poster?.apiKey || poster.verified !== true || !config?.enabled || !expected || !same(hash, expected)
-    || poster.accountId !== context.account || config.account !== context.account
-    || config.spotId !== context.spotId || config.tabletId !== context.tabletId
-    || (pairing && !(Date.parse(config.pairingExpiresAt) > Date.now()))) {
+  // Never disclose another tenant's configuration until its bearer code is proven.
+  if (!poster?.apiKey || poster.verified !== true || !config?.enabled || !expected || !same(hash, expected)) {
+    throw new PosterPosError(403, pairing
+      ? "Код підключення недійсний або відкликаний. Створіть новий код у кабінеті Maison HD."
+      : "Каса не підключена або доступ відкликано.");
+  }
+  if (pairing) {
+    if (!(Date.parse(config.pairingExpiresAt) > Date.now())) {
+      throw new PosterPosError(403, "Термін дії коду минув. Створіть новий код у кабінеті Maison HD.");
+    }
+    if (poster.accountId !== config.account) {
+      throw new PosterPosError(403, "Підключення Poster змінилося. Створіть новий код у кабінеті Maison HD.");
+    }
+    if (poster.accountId !== context.account) {
+      throw new PosterPosError(403,
+        `Код створено для акаунту Poster «${config.account}», а ця каса працює в «${context.account}». Відкрийте касу потрібного акаунту.`);
+    }
+    if (config.spotId !== context.spotId) {
+      throw new PosterPosError(403,
+        `Код створено для закладу Poster ID ${config.spotId}, а ця каса належить закладу ID ${context.spotId}. Виберіть потрібний заклад у Maison HD і створіть новий код.`);
+    }
+    if (config.tabletId !== context.tabletId) {
+      throw new PosterPosError(403,
+        `Код створено для каси Poster ID ${config.tabletId}, а поточна каса має ID ${context.tabletId}. Виберіть поточну касу в Maison HD і створіть новий код.`);
+    }
+  } else if (poster.accountId !== context.account || config.account !== context.account
+    || config.spotId !== context.spotId || config.tabletId !== context.tabletId) {
     throw new PosterPosError(403, "Каса не підключена або доступ відкликано.");
   }
   if (pairing) {
