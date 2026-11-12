@@ -25,6 +25,30 @@ describe("Poster terminal notification authentication", () => {
     expect(() => verifyPosSignature(path, body, headers(), "", origin, now)).toThrow();
     expect(() => verifyPosSignature(path, body, headers(), secret, "http://app.example", now)).toThrow();
   });
+  it.each([
+    [{}, "missing_headers"],
+    [{ "x-poster-time": "not-a-time", "x-poster-signature": "a".repeat(32) }, "invalid_time"],
+    [{ "x-poster-time": String(now / 1000), "x-poster-signature": "invalid" }, "invalid_signature"],
+    [headers(body, path, String(now / 1000 - 61)), "expired_request"],
+    [headers(body, path, String(now / 1000 + 61)), "expired_request"],
+    [{ ...headers(), "x-poster-signature": "0".repeat(32) }, "signature_mismatch"],
+  ])("classifies a rejected signature without exposing request or secret values: %j", (provided, reason) => {
+    let rejected: unknown;
+    try { verifyPosSignature(path, body, provided, secret, origin, now); } catch (error) { rejected = error; }
+    expect(rejected).toMatchObject({ status: 403, signatureFailure: reason });
+    const message = (rejected as Error).message;
+    expect(message).not.toContain(secret);
+    expect(message).not.toContain(body.token);
+    expect(message).not.toContain(JSON.stringify(body));
+    expect(message).not.toContain("x-poster-signature");
+  });
+  it("still accepts uppercase signatures and rejects a wrong application secret", () => {
+    const signed = headers();
+    expect(() => verifyPosSignature(path, body,
+      { ...signed, "x-poster-signature": signed["x-poster-signature"].toUpperCase() }, secret, origin, now)).not.toThrow();
+    expect(() => verifyPosSignature(path, body, signed, "different-application-secret", origin, now))
+      .toThrow("Підпис Poster не збігається");
+  });
   it("does not use account headers as tenant authorization", async () => {
     const database = { query: vi.fn().mockResolvedValue({ rows: [] }) };
     await expect(authenticatePos(body, body.token, false, database)).rejects.toMatchObject({ status: 403 });

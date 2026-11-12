@@ -1,8 +1,10 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { pool } from "@workspace/db";
 
+export type PosterSignatureFailure =
+  | "missing_headers" | "invalid_time" | "invalid_signature" | "expired_request" | "signature_mismatch";
 export class PosterPosError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public signatureFailure?: PosterSignatureFailure) { super(message); }
 }
 export type PosContext = { account: string; spotId: number; tabletId: number };
 export const digestPosToken = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -38,12 +40,22 @@ export function verifyPosSignature(path: string, body: unknown, headers: Record<
     throw new PosterPosError(503, "Потрібна канонічна HTTPS-адреса.");
   }
   const time = headers["x-poster-time"], sign = headers["x-poster-signature"];
-  if (typeof time !== "string" || !/^\d{10}$/.test(time) || typeof sign !== "string"
-    || !/^[a-f0-9]{32}$/i.test(sign) || Math.abs(now / 1000 - Number(time)) > 60) {
-    throw new PosterPosError(403, "Підпис каси не підтверджено.");
+  if (typeof time !== "string" || typeof sign !== "string" || !time || !sign) {
+    throw new PosterPosError(403, "Poster не передав заголовки підпису запиту. Підключення каси не підтверджено.", "missing_headers");
+  }
+  if (!/^\d{10}$/.test(time)) {
+    throw new PosterPosError(403, "Poster передав некоректний час підпису запиту. Підключення каси не підтверджено.", "invalid_time");
+  }
+  if (!/^[a-f0-9]{32}$/i.test(sign)) {
+    throw new PosterPosError(403, "Poster передав підпис некоректного формату. Підключення каси не підтверджено.", "invalid_signature");
+  }
+  if (Math.abs(now / 1000 - Number(time)) > 60) {
+    throw new PosterPosError(403, "Час підписаного запиту Poster відрізняється від часу сервера більш ніж на 60 секунд. Підключення каси не підтверджено.", "expired_request");
   }
   const expected = createHash("md5").update(`${url.origin}${path}${JSON.stringify(body)}${time}${secret}`).digest("hex");
-  if (!same(expected, sign.toLowerCase())) throw new PosterPosError(403, "Підпис каси не підтверджено.");
+  if (!same(expected, sign.toLowerCase())) {
+    throw new PosterPosError(403, "Підпис Poster не збігається з налаштуваннями Maison HD. Потрібно перевірити застосунок, адресу запиту та спосіб підписання.", "signature_mismatch");
+  }
 }
 
 function orgFromCredential(token: string) {

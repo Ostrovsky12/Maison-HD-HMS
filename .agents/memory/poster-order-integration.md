@@ -113,6 +113,12 @@ Use the developer application's secret only for platform bundle deployment and v
 
 **How to apply:** Reject stale or invalid signatures, use a configured canonical HTTPS origin rather than request Host, authenticate the paired terminal before loading notices, and record delivery only after the SDK confirms display. Uploading a bundle updates installed registers on restart, so obtain explicit approval before uploading; publishing the Maison HD server is a separate user action.
 
+Adding a venue to the developer application's **Розробка** account list only makes the private application available to that venue. The venue must still connect it under **Застосунки → Усі застосунки**. This does not select the browser's active cashier account. The terminal's **Development** mode is different: it loads a local development bundle, not the uploaded one.
+
+**Why:** Setup across the developer test account and the intended venue led to pairing the venue's code on the test account's register. Poster's official account/debug documentation distinguishes these separate installation and loading controls.
+
+**How to apply:** Confirm the venue has connected the existing developer application and that the opened terminal actually belongs to it. Do not create another application, change the tenant's merchant connection, or enable terminal Development mode merely to install an already uploaded private module.
+
 ## Financial data interpretation
 
 Determine currency units and the meaning of counters separately for each Poster endpoint; do not apply a universal conversion or equate visitors with receipts.

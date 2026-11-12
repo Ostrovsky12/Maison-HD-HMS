@@ -14,7 +14,13 @@ router.use((req, res, next) => {
   catch (e) { fail(req, res, e); }
 });
 function fail(req: any, res: any, e: unknown) {
-  if (e instanceof PosterPosError) return res.status(e.status).json({ error: e.message });
+  if (e instanceof PosterPosError) {
+    if (e.signatureFailure) {
+      // An allowlisted category only: never log bodies, credentials or signature values.
+      req.log?.warn({ operation: "poster_pos_signature", reason: e.signatureFailure }, "Poster signature rejected");
+    }
+    return res.status(e.status).json({ error: e.message });
+  }
   req.log?.warn({ operation: "poster_pos" }, "Poster terminal notification unavailable");
   return res.status(503).json({ error: "Зв’язок із касовим модулем не підтверджено." });
 }
