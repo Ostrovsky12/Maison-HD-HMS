@@ -12,7 +12,9 @@ export type ServiceBill = {
   paymentMessage: string;
   cashRequestAvailable?: boolean;
   cashRequestPending?: boolean;
-  cashRequestDestination?: "maison_hd";
+   cashRequestDestination?: "maison_hd" | "poster";
+   cashRequestMessage?: string;
+   cashRequestDelivery?: "none" | "queued" | "delivered";
   tipsAvailable?: boolean;
   tipsMessage?: string;
 };
@@ -50,6 +52,7 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setBill(d);
+       if (!d.cashRequestPending) setCashMessage(null);
       setError(null);
       onBillRef.current?.(d.order?.id ?? null);
     } catch (e) {
@@ -69,7 +72,7 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
     setTipPct(0);
     setPayError(null);
     setCashMessage(null);
-  }, [bill?.order?.id]);
+   }, [bill?.order?.id, bill?.order?.totalAmount]);
 
   const cash = method === "cash";
   const baseKopecks = Math.round((bill?.order?.totalAmount ?? 0) * 100);
@@ -97,7 +100,7 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       if (cash) {
-        if (d.ok !== true || d.destination !== "maison_hd") throw new Error("Надсилання запиту не підтверджено.");
+         if (d.ok !== true || d.destination !== "poster") throw new Error("Надсилання запиту не підтверджено.");
         setCashMessage(d.message);
         void load();
         return;
@@ -183,7 +186,7 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
             {tipPct > 0 && !bill.tipsAvailable && <p className="mt-2 text-xs text-amber-800" role="status">{bill.tipsMessage || "Переказ чайових ще не підключений. Кошти не списуватимуться."}</p>}
           </fieldset>}
           {cash && <p className="mt-2 text-xs text-[#7A756D]">
-            Запит на касу Maison HD, без чайових. Сповіщення на планшеті Poster ще не підключене. Оплату підтвердить касир після отримання коштів.
+             {bill.cashRequestMessage || "Запит на касу Poster без чайових. Оплату підтвердить касир після отримання коштів."}
           </p>}
           <button
             onClick={pay}
@@ -192,10 +195,12 @@ export function QrServiceBill({ orgSlug, tableId, onBill }: {
             data-testid="button-bill-pay"
           >
             {paying ? <Loader2 className="w-4 h-4 animate-spin" /> : cash ? <Banknote className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
-            {cash ? (cashMessage || bill.cashRequestPending ? "Запит уже надіслано" : "Розрахуватися готівкою") : "Перейти до LiqPay"}
+             {cash ? (cashMessage || bill.cashRequestPending
+               ? bill.cashRequestDelivery === "delivered" ? "Сповіщення показано в Poster" : "Очікуємо підтвердження Poster"
+               : "Розрахуватися готівкою") : "Перейти до LiqPay"}
           </button>
-          {cashMessage && <p className="mt-2 text-xs text-green-800 text-center" role="status" data-testid="text-cash-request-success">{cashMessage}</p>}
-          {(!cash || !bill.cashRequestAvailable) && bill.paymentMessage && <p className="mt-2 text-xs text-[#7A756D] text-center" data-testid="text-bill-payment-message">{bill.paymentMessage}</p>}
+           {cashMessage && <p className="mt-2 text-xs text-green-800 text-center" role="status" data-testid="text-cash-request-success">{bill.cashRequestPending ? bill.cashRequestMessage : cashMessage}</p>}
+           {!cash && bill.paymentMessage && <p className="mt-2 text-xs text-[#7A756D] text-center" data-testid="text-bill-payment-message">{bill.paymentMessage}</p>}
           {payError && <p className="mt-2 text-xs text-red-600 text-center" role="alert">{payError}</p>}
         </>
       ) : (

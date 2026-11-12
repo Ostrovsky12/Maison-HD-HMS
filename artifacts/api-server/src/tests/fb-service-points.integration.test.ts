@@ -5,6 +5,7 @@ vi.mock("@workspace/db", () => ({ pool: {} }));
 vi.mock("../lib/encrypt.js", () => ({ decrypt: () => null }));
 import { openServicePoint, resolveServicePoint, releaseStaffItems, readServicePointBill, requestCashPayment } from "../lib/fb-service-points.js";
 import { recordGuestLiqPayResult } from "../lib/fb-liqpay-review.js";
+import { acknowledgePos, authenticatePos, configurePosChannel, digestPosToken, pollPos } from "../lib/poster-pos-notifications.js";
 
 describe.skipIf(process.env.QR_SERVICE_DB_TEST !== "1")("shared service point sessions with PostgreSQL", () => {
   const schema = `test_service_qr_${randomUUID().replaceAll("-", "")}`;
@@ -23,7 +24,7 @@ describe.skipIf(process.env.QR_SERVICE_DB_TEST !== "1")("shared service point se
       const release = client.release.bind(client);
       return { query: client.query.bind(client), release: () => { void client.query("RESET search_path").finally(release); } };
     }, query: sql };
-    await sql(`CREATE TABLE organizations(id int PRIMARY KEY,slug text);
+    await sql(`CREATE TABLE organizations(id int PRIMARY KEY,slug text,enabled_modules jsonb DEFAULT '{}');
       CREATE TABLE fb_table_groups(id int PRIMARY KEY,organization_id int,name text,is_active boolean);
       CREATE TABLE fb_tables(id int PRIMARY KEY,organization_id int,number text,location text,group_id int,
         status text DEFAULT 'free',current_order_id int,is_active boolean DEFAULT true);
@@ -44,11 +45,16 @@ describe.skipIf(process.env.QR_SERVICE_DB_TEST !== "1")("shared service point se
   });
   beforeEach(async () => {
     await sql(`TRUNCATE organizations,fb_table_groups,fb_tables,fb_orders,fb_order_items,fb_outlets,fb_table_notifications,legal_entities RESTART IDENTITY;
-      INSERT INTO organizations VALUES (1,'dogoda'),(2,'other');
+      INSERT INTO organizations(id,slug) VALUES (1,'dogoda'),(2,'other');
       INSERT INTO legal_entities VALUES (1,'fixture-merchant','fixture-signing-key',true,true);
       INSERT INTO fb_table_groups VALUES (1,1,'Будинки',true),(2,1,'Тераса',true),(3,2,'Other',true);
       INSERT INTO fb_tables(id,organization_id,number,location,group_id) VALUES
         (11,1,'1','Будинки',1),(12,1,'1','Тераса',2),(13,2,'1','Other',3);`);
+    await sql(`UPDATE organizations SET enabled_modules=$1::jsonb WHERE id=1`, [JSON.stringify({
+      posterConfig: { accountId: "fixture-account", verified: true, apiKey: "fixture-token",
+        posNotifications: { enabled: true, account: "fixture-account", spotId: 1, tabletId: 2,
+          channelId: "fixture-channel", tokenHash: digestPosToken(`1.${"a".repeat(64)}`), lastSeenAt: new Date().toISOString() } },
+    })]);
   });
   async function readyBill() {
     const { orderId } = await openServicePoint(1, 11, database);
@@ -95,11 +101,68 @@ describe.skipIf(process.env.QR_SERVICE_DB_TEST !== "1")("shared service point se
     const notifications = (await sql("SELECT * FROM fb_table_notifications")).rows;
     expect(notifications).toHaveLength(1);
     expect(notifications[0].payload).toMatchObject({
-      orderId: expected.expectedOrderId, total: 300, tipPct: 0, tipAmount: 0, groupName: "Будинки", destination: "maison_hd",
+      orderId: expected.expectedOrderId, total: 300, tipPct: 0, tipAmount: 0, groupName: "Будинки", destination: "poster",
     });
     const order = (await sql("SELECT * FROM fb_orders WHERE id=$1", [expected.expectedOrderId])).rows[0];
     expect(order.status).toBe("open"); expect(Number(order.paid_amount)).toBe(0);
     expect((await readServicePointBill("dogoda", 11, database)).cashRequestPending).toBe(true);
+  });
+  const posContext = { account: "fixture-account", spotId: 1, tabletId: 2 };
+  const posToken = `1.${"a".repeat(64)}`;
+  it("delivers current cash requests, confirms SDK display once, and never changes financial state", async () => {
+    const expected = await readyBill();
+    const notice = await requestCashPayment("dogoda", 11, expected, database);
+    expect(notice).toMatchObject({ destination: "poster", delivery: "queued" });
+    const inbox = await pollPos(posContext, posToken, database);
+    expect(inbox.notifications).toEqual([{ id: notice.id, orderId: expected.expectedOrderId,
+      point: "Будинки · №1", total: 300, delivered: false }]);
+    expect(await acknowledgePos(posContext, posToken, notice.id, 12345, database)).toEqual({ ok: true });
+    expect(await acknowledgePos(posContext, posToken, notice.id, 12345, database)).toEqual({ ok: true });
+    expect((await pollPos(posContext, posToken, database)).notifications[0].delivered).toBe(true);
+    expect((await readServicePointBill("dogoda", 11, database)).cashRequestDelivery).toBe("delivered");
+    const order = (await sql("SELECT * FROM fb_orders WHERE id=$1", [expected.expectedOrderId])).rows[0];
+    expect(order.status).toBe("open"); expect(Number(order.paid_amount)).toBe(0);
+    expect((await sql("SELECT status FROM fb_table_notifications")).rows[0].status).toBe("pending");
+  });
+  it("does not deliver a stale amount or a closed bill, and allows a fresh request after amount changes", async () => {
+    const expected = await readyBill();
+    const first = await requestCashPayment("dogoda", 11, expected, database);
+    await sql("UPDATE fb_orders SET total_amount=350 WHERE id=$1", [expected.expectedOrderId]);
+    expect((await pollPos(posContext, posToken, database)).notifications).toHaveLength(0);
+    expect((await readServicePointBill("dogoda", 11, database)).cashRequestPending).toBe(false);
+    await expect(acknowledgePos(posContext, posToken, first.id, 10, database)).rejects.toMatchObject({ status: 409 });
+    const fresh = await requestCashPayment("dogoda", 11, { ...expected, expectedTotal: 350 }, database);
+    expect(fresh.id).not.toBe(first.id);
+    expect((await pollPos(posContext, posToken, database)).notifications).toHaveLength(1);
+    await sql("UPDATE fb_orders SET status='billed' WHERE id=$1", [expected.expectedOrderId]);
+    expect((await pollPos(posContext, posToken, database)).notifications).toHaveLength(0);
+  });
+  it("blocks another account, register, credential and disabled channel", async () => {
+    await expect(pollPos({ ...posContext, account: "other" }, posToken, database)).rejects.toMatchObject({ status: 403 });
+    await expect(pollPos({ ...posContext, tabletId: 3 }, posToken, database)).rejects.toMatchObject({ status: 403 });
+    await expect(pollPos(posContext, `2.${"a".repeat(64)}`, database)).rejects.toMatchObject({ status: 403 });
+    await configurePosChannel(1, { enabled: false, spotId: 1, tabletId: 2 }, "fixture-account", database);
+    await expect(pollPos(posContext, posToken, database)).rejects.toMatchObject({ status: 403 });
+    const expected = await readyBill();
+    await expect(requestCashPayment("dogoda", 11, expected, database)).rejects.toMatchObject({ status: 503 });
+  });
+  it("exchanges a pairing code only once under concurrency and revokes old access on reconfiguration", async () => {
+    const channel = await configurePosChannel(1, { enabled: true, spotId: 1, tabletId: 2 }, "fixture-account", database);
+    await expect(pollPos(posContext, posToken, database)).rejects.toMatchObject({ status: 403 });
+    const results = await Promise.allSettled([authenticatePos(posContext, channel.pairingCode!, true, database),
+      authenticatePos(posContext, channel.pairingCode!, true, database)]);
+    expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+    const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<any>;
+    expect((await pollPos(posContext, successful.value.token, database)).notifications).toHaveLength(0);
+    const expected = await readyBill();
+    expect(await requestCashPayment("dogoda", 11, expected, database)).toMatchObject({ destination: "poster" });
+  });
+  it("refuses cash requests when the terminal heartbeat expired", async () => {
+    await sql(`UPDATE organizations SET enabled_modules=jsonb_set(enabled_modules,
+      '{posterConfig,posNotifications,lastSeenAt}','"2000-01-01T00:00:00.000Z"') WHERE id=1`);
+    const expected = await readyBill();
+    await expect(requestCashPayment("dogoda", 11, expected, database)).rejects.toMatchObject({ status: 503 });
+    expect((await sql("SELECT id FROM fb_table_notifications")).rows).toHaveLength(0);
   });
   it("rejects another tenant, stale session and changed totals without notifying the cashier", async () => {
     const expected = await readyBill();

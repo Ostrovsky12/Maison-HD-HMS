@@ -49,6 +49,80 @@ tags:
     description: DOGODA Guest Nature Guide
 
 paths:
+  /poster/pos-notifications:
+    get:
+      operationId: getPosterPosNotifications
+      tags: [integrations]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Cash notification channel status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterPosChannel" }
+    put:
+      operationId: updatePosterPosNotifications
+      tags: [integrations]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterPosChannelInput" }
+      responses:
+        "200":
+          description: Channel configured; pairing code returned once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterPosChannel" }
+  /poster-pos/pair:
+    post:
+      operationId: pairPosterPos
+      tags: [integrations]
+      security: [{ posterSignature: [], posterTime: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterPosPairing" }
+      responses:
+        "200":
+          description: Paired terminal credential
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterPosCredential" }
+  /poster-pos/poll:
+    post:
+      operationId: pollPosterPos
+      tags: [integrations]
+      security: [{ posterSignature: [], posterTime: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterPosSession" }
+      responses:
+        "200":
+          description: Current cash requests; no payment actions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterPosInbox" }
+  /poster-pos/ack:
+    post:
+      operationId: acknowledgePosterPos
+      tags: [integrations]
+      security: [{ posterSignature: [], posterTime: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterPosAcknowledgement" }
+      responses:
+        "200":
+          description: Notification shown by Poster, not paid or read
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterPosAckResult" }
   /fb/public/service-points/{slug}/{id}/bill:
     get:
       operationId: getFbServicePointBill
@@ -3162,12 +3236,95 @@ paths:
 
 components:
   securitySchemes:
+    posterSignature:
+      type: apiKey
+      in: header
+      name: X-Poster-Signature
+      description: Poster MD5 signature over canonical URL, JSON body, timestamp and application secret.
+    posterTime:
+      type: apiKey
+      in: header
+      name: X-Poster-Time
+      description: Unix timestamp within 60 seconds. Tenant-bound pairing credential is additionally required in the body.
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
 
   schemas:
+    PosterPosChannelInput:
+      type: object
+      additionalProperties: false
+      required: [enabled, spotId, tabletId]
+      properties:
+        enabled: { type: boolean }
+        spotId: { type: integer, minimum: 1 }
+        tabletId: { type: integer, minimum: 1 }
+    PosterPosChannel:
+      type: object
+      required: [enabled, online, spotId, tabletId, lastSeenAt]
+      properties:
+        enabled: { type: boolean }
+        online: { type: boolean }
+        spotId: { type: integer }
+        tabletId: { type: integer }
+        lastSeenAt: { type: [string, "null"] }
+        pairingCode: { type: string }
+    PosterPosPairing:
+      type: object
+      additionalProperties: false
+      required: [account, spotId, tabletId, code]
+      properties:
+        account: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,99}$" }
+        spotId: { type: integer, minimum: 1 }
+        tabletId: { type: integer, minimum: 1 }
+        code: { type: string, maxLength: 120 }
+    PosterPosCredential:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+    PosterPosSession:
+      type: object
+      additionalProperties: false
+      required: [account, spotId, tabletId, token]
+      properties:
+        account: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,99}$" }
+        spotId: { type: integer, minimum: 1 }
+        tabletId: { type: integer, minimum: 1 }
+        token: { type: string, maxLength: 120 }
+    PosterPosAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [account, spotId, tabletId, token, id, posterNotificationId]
+      properties:
+        account: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,99}$" }
+        spotId: { type: integer, minimum: 1 }
+        tabletId: { type: integer, minimum: 1 }
+        token: { type: string, maxLength: 120 }
+        id: { type: integer, minimum: 1 }
+        posterNotificationId: { type: integer, minimum: 1 }
+    PosterPosCashNotice:
+      type: object
+      required: [id, orderId, point, total, delivered]
+      properties:
+        id: { type: integer }
+        orderId: { type: integer }
+        point: { type: string }
+        total: { type: number }
+        delivered: { type: boolean }
+    PosterPosInbox:
+      type: object
+      required: [notifications]
+      properties:
+        notifications:
+          type: array
+          items: { $ref: "#/components/schemas/PosterPosCashNotice" }
+    PosterPosAckResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
     FbServicePointBill:
       type: object
       required: [point, order, paymentAvailable, paymentMessage, items]
@@ -3181,7 +3338,9 @@ components:
         paymentMessage: { type: string }
         cashRequestAvailable: { type: boolean }
         cashRequestPending: { type: boolean }
-        cashRequestDestination: { type: string, enum: [maison_hd] }
+        cashRequestDestination: { type: string, enum: [maison_hd, poster] }
+        cashRequestMessage: { type: string }
+        cashRequestDelivery: { type: string, enum: [none, queued, delivered] }
         tipsAvailable: { type: boolean }
         tipsMessage: { type: string }
         items:
@@ -3201,7 +3360,8 @@ components:
         ok: { type: boolean }
         id: { type: integer }
         duplicate: { type: boolean }
-        destination: { type: string, enum: [maison_hd] }
+        destination: { type: string, enum: [maison_hd, poster] }
+        delivery: { type: string, enum: [queued, delivered] }
         message: { type: string }
     FbServiceBillSummary:
       type: object

@@ -154,6 +154,14 @@ import type {
   PosterMenuImportInput,
   PosterOrderBridgeInput,
   PosterOrderBridgeView,
+  PosterPosAckResult,
+  PosterPosAcknowledgement,
+  PosterPosChannel,
+  PosterPosChannelInput,
+  PosterPosCredential,
+  PosterPosInbox,
+  PosterPosPairing,
+  PosterPosSession,
   PreviewPosterMenuImport200,
   PricingPreview,
   Property,
@@ -194,6 +202,397 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getGetPosterPosNotificationsUrl = () => {
+  return `/api/poster/pos-notifications`;
+};
+
+export const getPosterPosNotifications = async (
+  options?: RequestInit,
+): Promise<PosterPosChannel> => {
+  return customFetch<PosterPosChannel>(getGetPosterPosNotificationsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPosterPosNotificationsQueryKey = () => {
+  return [`/api/poster/pos-notifications`] as const;
+};
+
+export const getGetPosterPosNotificationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPosterPosNotifications>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterPosNotifications>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPosterPosNotificationsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPosterPosNotifications>>
+  > = ({ signal }) => getPosterPosNotifications({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterPosNotifications>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPosterPosNotificationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPosterPosNotifications>>
+>;
+export type GetPosterPosNotificationsQueryError = ErrorType<unknown>;
+
+export function useGetPosterPosNotifications<
+  TData = Awaited<ReturnType<typeof getPosterPosNotifications>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPosterPosNotifications>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPosterPosNotificationsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getUpdatePosterPosNotificationsUrl = () => {
+  return `/api/poster/pos-notifications`;
+};
+
+export const updatePosterPosNotifications = async (
+  posterPosChannelInput: PosterPosChannelInput,
+  options?: RequestInit,
+): Promise<PosterPosChannel> => {
+  return customFetch<PosterPosChannel>(getUpdatePosterPosNotificationsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterPosChannelInput),
+  });
+};
+
+export const getUpdatePosterPosNotificationsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePosterPosNotifications>>,
+    TError,
+    { data: BodyType<PosterPosChannelInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePosterPosNotifications>>,
+  TError,
+  { data: BodyType<PosterPosChannelInput> },
+  TContext
+> => {
+  const mutationKey = ["updatePosterPosNotifications"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePosterPosNotifications>>,
+    { data: BodyType<PosterPosChannelInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updatePosterPosNotifications(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePosterPosNotificationsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePosterPosNotifications>>
+>;
+export type UpdatePosterPosNotificationsMutationBody =
+  BodyType<PosterPosChannelInput>;
+export type UpdatePosterPosNotificationsMutationError = ErrorType<unknown>;
+
+export const useUpdatePosterPosNotifications = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePosterPosNotifications>>,
+    TError,
+    { data: BodyType<PosterPosChannelInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePosterPosNotifications>>,
+  TError,
+  { data: BodyType<PosterPosChannelInput> },
+  TContext
+> => {
+  return useMutation(getUpdatePosterPosNotificationsMutationOptions(options));
+};
+
+export const getPairPosterPosUrl = () => {
+  return `/api/poster-pos/pair`;
+};
+
+export const pairPosterPos = async (
+  posterPosPairing: PosterPosPairing,
+  options?: RequestInit,
+): Promise<PosterPosCredential> => {
+  return customFetch<PosterPosCredential>(getPairPosterPosUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterPosPairing),
+  });
+};
+
+export const getPairPosterPosMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pairPosterPos>>,
+    TError,
+    { data: BodyType<PosterPosPairing> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof pairPosterPos>>,
+  TError,
+  { data: BodyType<PosterPosPairing> },
+  TContext
+> => {
+  const mutationKey = ["pairPosterPos"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof pairPosterPos>>,
+    { data: BodyType<PosterPosPairing> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return pairPosterPos(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PairPosterPosMutationResult = NonNullable<
+  Awaited<ReturnType<typeof pairPosterPos>>
+>;
+export type PairPosterPosMutationBody = BodyType<PosterPosPairing>;
+export type PairPosterPosMutationError = ErrorType<unknown>;
+
+export const usePairPosterPos = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pairPosterPos>>,
+    TError,
+    { data: BodyType<PosterPosPairing> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof pairPosterPos>>,
+  TError,
+  { data: BodyType<PosterPosPairing> },
+  TContext
+> => {
+  return useMutation(getPairPosterPosMutationOptions(options));
+};
+
+export const getPollPosterPosUrl = () => {
+  return `/api/poster-pos/poll`;
+};
+
+export const pollPosterPos = async (
+  posterPosSession: PosterPosSession,
+  options?: RequestInit,
+): Promise<PosterPosInbox> => {
+  return customFetch<PosterPosInbox>(getPollPosterPosUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterPosSession),
+  });
+};
+
+export const getPollPosterPosMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pollPosterPos>>,
+    TError,
+    { data: BodyType<PosterPosSession> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof pollPosterPos>>,
+  TError,
+  { data: BodyType<PosterPosSession> },
+  TContext
+> => {
+  const mutationKey = ["pollPosterPos"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof pollPosterPos>>,
+    { data: BodyType<PosterPosSession> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return pollPosterPos(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PollPosterPosMutationResult = NonNullable<
+  Awaited<ReturnType<typeof pollPosterPos>>
+>;
+export type PollPosterPosMutationBody = BodyType<PosterPosSession>;
+export type PollPosterPosMutationError = ErrorType<unknown>;
+
+export const usePollPosterPos = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pollPosterPos>>,
+    TError,
+    { data: BodyType<PosterPosSession> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof pollPosterPos>>,
+  TError,
+  { data: BodyType<PosterPosSession> },
+  TContext
+> => {
+  return useMutation(getPollPosterPosMutationOptions(options));
+};
+
+export const getAcknowledgePosterPosUrl = () => {
+  return `/api/poster-pos/ack`;
+};
+
+export const acknowledgePosterPos = async (
+  posterPosAcknowledgement: PosterPosAcknowledgement,
+  options?: RequestInit,
+): Promise<PosterPosAckResult> => {
+  return customFetch<PosterPosAckResult>(getAcknowledgePosterPosUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterPosAcknowledgement),
+  });
+};
+
+export const getAcknowledgePosterPosMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acknowledgePosterPos>>,
+    TError,
+    { data: BodyType<PosterPosAcknowledgement> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acknowledgePosterPos>>,
+  TError,
+  { data: BodyType<PosterPosAcknowledgement> },
+  TContext
+> => {
+  const mutationKey = ["acknowledgePosterPos"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acknowledgePosterPos>>,
+    { data: BodyType<PosterPosAcknowledgement> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return acknowledgePosterPos(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcknowledgePosterPosMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acknowledgePosterPos>>
+>;
+export type AcknowledgePosterPosMutationBody =
+  BodyType<PosterPosAcknowledgement>;
+export type AcknowledgePosterPosMutationError = ErrorType<unknown>;
+
+export const useAcknowledgePosterPos = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acknowledgePosterPos>>,
+    TError,
+    { data: BodyType<PosterPosAcknowledgement> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof acknowledgePosterPos>>,
+  TError,
+  { data: BodyType<PosterPosAcknowledgement> },
+  TContext
+> => {
+  return useMutation(getAcknowledgePosterPosMutationOptions(options));
+};
 
 export const getGetFbServicePointBillUrl = (slug: string, id: number) => {
   return `/api/fb/public/service-points/${slug}/${id}/bill`;

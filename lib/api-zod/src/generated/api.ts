@@ -7,6 +7,91 @@
  */
 import * as zod from "zod";
 
+export const GetPosterPosNotificationsResponse = zod.object({
+  enabled: zod.boolean(),
+  online: zod.boolean(),
+  spotId: zod.number(),
+  tabletId: zod.number(),
+  lastSeenAt: zod.string().nullable(),
+  pairingCode: zod.string().optional(),
+});
+
+export const UpdatePosterPosNotificationsBody = zod.object({
+  enabled: zod.boolean(),
+  spotId: zod.number().min(1),
+  tabletId: zod.number().min(1),
+});
+
+export const UpdatePosterPosNotificationsResponse = zod.object({
+  enabled: zod.boolean(),
+  online: zod.boolean(),
+  spotId: zod.number(),
+  tabletId: zod.number(),
+  lastSeenAt: zod.string().nullable(),
+  pairingCode: zod.string().optional(),
+});
+
+export const pairPosterPosBodyAccountRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,99}$",
+);
+
+export const pairPosterPosBodyCodeMax = 120;
+
+export const PairPosterPosBody = zod.object({
+  account: zod.string().regex(pairPosterPosBodyAccountRegExp),
+  spotId: zod.number().min(1),
+  tabletId: zod.number().min(1),
+  code: zod.string().max(pairPosterPosBodyCodeMax),
+});
+
+export const PairPosterPosResponse = zod.object({
+  token: zod.string(),
+});
+
+export const pollPosterPosBodyAccountRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,99}$",
+);
+
+export const pollPosterPosBodyTokenMax = 120;
+
+export const PollPosterPosBody = zod.object({
+  account: zod.string().regex(pollPosterPosBodyAccountRegExp),
+  spotId: zod.number().min(1),
+  tabletId: zod.number().min(1),
+  token: zod.string().max(pollPosterPosBodyTokenMax),
+});
+
+export const PollPosterPosResponse = zod.object({
+  notifications: zod.array(
+    zod.object({
+      id: zod.number(),
+      orderId: zod.number(),
+      point: zod.string(),
+      total: zod.number(),
+      delivered: zod.boolean(),
+    }),
+  ),
+});
+
+export const acknowledgePosterPosBodyAccountRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,99}$",
+);
+
+export const acknowledgePosterPosBodyTokenMax = 120;
+
+export const AcknowledgePosterPosBody = zod.object({
+  account: zod.string().regex(acknowledgePosterPosBodyAccountRegExp),
+  spotId: zod.number().min(1),
+  tabletId: zod.number().min(1),
+  token: zod.string().max(acknowledgePosterPosBodyTokenMax),
+  id: zod.number().min(1),
+  posterNotificationId: zod.number().min(1),
+});
+
+export const AcknowledgePosterPosResponse = zod.object({
+  ok: zod.boolean(),
+});
+
 export const GetFbServicePointBillParams = zod.object({
   slug: zod.coerce.string().min(1),
   id: zod.coerce.number().min(1),
@@ -32,7 +117,9 @@ export const GetFbServicePointBillResponse = zod.object({
   paymentMessage: zod.string(),
   cashRequestAvailable: zod.boolean().optional(),
   cashRequestPending: zod.boolean().optional(),
-  cashRequestDestination: zod.enum(["maison_hd"]).optional(),
+  cashRequestDestination: zod.enum(["maison_hd", "poster"]).optional(),
+  cashRequestMessage: zod.string().optional(),
+  cashRequestDelivery: zod.enum(["none", "queued", "delivered"]).optional(),
   tipsAvailable: zod.boolean().optional(),
   tipsMessage: zod.string().optional(),
   items: zod.array(
@@ -65,7 +152,8 @@ export const RequestFbCashPaymentResponse = zod.object({
   ok: zod.boolean(),
   id: zod.number(),
   duplicate: zod.boolean(),
-  destination: zod.enum(["maison_hd"]),
+  destination: zod.enum(["maison_hd", "poster"]),
+  delivery: zod.enum(["queued", "delivered"]).optional(),
   message: zod.string(),
 });
 

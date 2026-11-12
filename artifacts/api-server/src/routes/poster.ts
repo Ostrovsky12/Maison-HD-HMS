@@ -10,6 +10,7 @@ import { eq, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth.js";
 import { parsePosterAnalytics, posterDates } from "../lib/poster-analytics.js";
 import orderBridgeRouter from "./poster-order-bridge.js";
+import posSettingsRouter from "./poster-pos-settings.js";
 
 const router = Router();
 const getOrg = (req: any) => req.user?.organizationId;
@@ -23,6 +24,7 @@ router.use(requireAuth, (req: any, res, next) => {
   next();
 });
 router.use("/order-bridge", orderBridgeRouter);
+router.use("/pos-notifications", posSettingsRouter);
 
 // Helper: get org's Poster config from enabledModules
 async function getPosterConfig(orgId: number): Promise<{ apiKey?: string; accountId?: string; verified?: boolean; lastSync?: string; syncedData?: any } | null> {

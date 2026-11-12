@@ -2824,6 +2824,8 @@ router.get("/notifications", requireAuth, async (req: any, res) => {
              AND active_table.current_order_id=active_order.id
            WHERE active_order.organization_id=$1 AND active_order.id::text=fb_table_notifications.payload->>'orderId'
              AND active_order.status NOT IN ('billed','cancelled')
+             AND coalesce(active_order.paid_amount,0)=0
+             AND active_order.total_amount::numeric=(fb_table_notifications.payload->>'total')::numeric
          ))
        ORDER BY created_at DESC
        LIMIT 50`,

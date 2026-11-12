@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import PosterOrderBridge from "@/components/poster-order-bridge";
+import PosterPosNotifications from "@/components/poster-pos-notifications";
 
 const OTA_CHANNEL_TYPES: Record<string, { label: string; color: string; bg: string }> = {
   booking: { label: "Booking.com", color: "text-blue-700", bg: "bg-blue-100" },
@@ -440,6 +441,7 @@ function PosterTab() {
         <p className="text-sm text-muted-foreground">Звіт ще не отримано. Натисніть «Синхронізувати», щоб завантажити фактичні показники Poster.</p>
       )}
 
+      {status?.connected && <PosterPosNotifications request={posterRequest} />}
       {status?.connected && <PosterOrderBridge request={posterRequest} />}
 
       {/* Revenue Preview */}

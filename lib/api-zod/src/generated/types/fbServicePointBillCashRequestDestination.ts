@@ -11,4 +11,5 @@ export type FbServicePointBillCashRequestDestination =
 
 export const FbServicePointBillCashRequestDestination = {
   maison_hd: "maison_hd",
+  poster: "poster",
 } as const;

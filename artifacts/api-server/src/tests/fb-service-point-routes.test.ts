@@ -47,18 +47,18 @@ describe("service point API boundaries", () => {
     const url = "/api/fb/public/service-points/dogoda/11/cash-request";
     expect((await request(app).post(url).send({})).status).toBe(400);
     expect(fixture.cash).not.toHaveBeenCalled();
-    fixture.cash.mockResolvedValue({ ok: true, id: 44, duplicate: false, destination: "maison_hd", message: "Каса Maison HD" });
+    fixture.cash.mockResolvedValue({ ok: true, id: 44, duplicate: false, destination: "poster", delivery: "queued", message: "Очікуємо Poster" });
     const result = await request(app).post(url).send({ expectedOrderId: 10, expectedTotal: 300 });
     expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ id: 44, destination: "maison_hd" });
+    expect(result.body).toMatchObject({ id: 44, destination: "poster", delivery: "queued" });
     expect(fixture.cash).toHaveBeenCalledWith("dogoda", 11, { expectedOrderId: 10, expectedTotal: 300 });
   });
   it("does not offer tips or claim Poster checkout availability just because a bill exists", async () => {
     fixture.bill.mockResolvedValue({ point, order: { id: 10, status: "open", totalAmount: 300 },
-      items: [], payable: true, orgId: 1, cashRequestPending: true });
+      items: [], payable: true, orgId: 1, cashRequestPending: true, cashChannelOnline: true, cashRequestDelivery: "queued" });
     const result = await request(app).get("/api/fb/public/service-points/dogoda/11/bill");
     expect(result.body).toMatchObject({ paymentAvailable: false, tipsAvailable: false,
-      cashRequestAvailable: true, cashRequestPending: true, cashRequestDestination: "maison_hd" });
+      cashRequestAvailable: true, cashRequestPending: true, cashRequestDestination: "poster", cashRequestDelivery: "queued" });
   });
   it("resolves only using the signed-in organization", async () => {
     const result = await request(app).post("/api/fb/service-points/resolve").set("Authorization", "Bearer staff")

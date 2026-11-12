@@ -50,7 +50,8 @@ interface TableNotification {
   table_number: string;
   table_location: string;
   type: "waiter_call" | "payment_cash" | "payment_terminal" | "payment_review";
-  payload: { total?: string | number; orderId?: number; groupName?: string | null } | null;
+  payload: { total?: string | number; orderId?: number; groupName?: string | null; destination?: string;
+    posterDelivery?: { shownAt?: string } } | null;
   created_at: string;
 }
 interface OrderItem { id: number; name: string; quantity: number; price: string; total_price: string; notes?: string; is_alcohol?: boolean; status?: string; }
@@ -2224,6 +2225,9 @@ export default function FbCashier() {
                                 {tableLabel}{total ? ` · ${total} ₴` : ""} · {timeAgo(n.created_at)}
                                 {n.payload?.orderId && <span className="block">Рахунок №{n.payload.orderId}</span>}
                                 {isCash && <span className="block">Це запит, не підтверджена оплата. Без чайових.</span>}
+                                {isCash && n.payload?.destination === "poster" && <span className="block">
+                                  {n.payload.posterDelivery?.shownAt ? "Poster підтвердив показ сповіщення." : "Очікуємо підтвердження показу на касі Poster."}
+                                </span>}
                                 {isReview && <span className="block">Не приймайте повторну оплату без звірки. Чайові автоматично не переказані.</span>}
                               </div>
                             </div>

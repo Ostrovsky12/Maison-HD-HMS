@@ -25,9 +25,15 @@ router.get("/public/service-points/:slug/:id/bill", rateLimit({ windowMs: 60000,
       // Credentials alone do not establish payment settlement/receipt closure.
       // The legacy LiqPay callback handles tips, not this shared-bill lifecycle.
       paymentAvailable: sharedQrPaymentReadiness.checkout,
-      cashRequestAvailable: bill.payable,
+       cashRequestAvailable: bill.payable && !!bill.cashChannelOnline,
       cashRequestPending: bill.cashRequestPending ?? false,
-      cashRequestDestination: "maison_hd",
+       cashRequestDestination: "poster",
+       cashRequestDelivery: bill.cashRequestDelivery || "none",
+       cashRequestMessage: bill.cashRequestDelivery === "delivered"
+         ? "Poster підтвердив показ сповіщення. Це ще не підтвердження оплати."
+         : bill.cashRequestPending ? "Запит збережено. Очікуємо підтвердження показу на касі Poster."
+         : bill.cashChannelOnline ? "Запит на касу Poster без чайових. Касир підтвердить оплату після отримання коштів."
+         : "Каса Poster зараз не підключена до сповіщень. Зверніться до офіціанта.",
       tipsAvailable: sharedQrPaymentReadiness.tipPayout,
       tipsMessage: "Доступ до виплат на картки ще не підтверджений. Чайові не списуватимуться.",
       paymentMessage: !bill.order ? "Відкритого рахунку немає."

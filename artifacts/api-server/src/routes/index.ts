@@ -59,6 +59,7 @@ import paymentLayerRouter from "./payment-layer.js";
 import superAdminRouter from "./super-admin.js";
 import reportsRouter from "./reports.js";
 import posterRouter from "./poster.js";
+import posterPosRouter from "./poster-pos.js";
 import minibarRouter from "./minibar.js";
 import packagesRouter from "./packages.js";
 import loyaltyRouter from "./loyalty.js";
@@ -92,6 +93,7 @@ import prroRouter from "./prro.js";
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/poster-pos", posterPosRouter);
 router.use("/auth", authRouter);
 router.use("/organizations", organizationsRouter);
 router.use("/properties", propertiesRouter);

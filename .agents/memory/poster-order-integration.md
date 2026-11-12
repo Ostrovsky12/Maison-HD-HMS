@@ -105,6 +105,14 @@ Treat an `incoming_order.changed` webhook as a notification to read authoritativ
 
 **How to apply:** Read the corresponding incoming order after notification; use authenticated bounded polling as a recovery option when appropriate. `dash.getTransaction` with history documents `spot_tablet_id` in history entries, which is a candidate source for the accepting register, not proof of terminal-local print ID mapping. Verify that mapping and runtime availability before additions or printing.
 
+## POS notification authentication boundary
+
+Use the developer application's secret only for platform bundle deployment and verification of `Poster.makeRequest` signatures. Keep tenant merchant API credentials separate. Pair each notification channel to its organization/account/spot/register with a short-lived, one-time code and a separate revocable terminal credential.
+
+**Why:** Poster's documented signature covers the full URL, JSON body and timestamp, but does not bind the account/spot/tablet headers. Those headers alone must not authorize tenant data. Native display confirmation also does not prove that a cashier read a notice or collected payment.
+
+**How to apply:** Reject stale or invalid signatures, use a configured canonical HTTPS origin rather than request Host, authenticate the paired terminal before loading notices, and record delivery only after the SDK confirms display. Uploading a bundle updates installed registers on restart, so obtain explicit approval before uploading; publishing the Maison HD server is a separate user action.
+
 ## Financial data interpretation
 
 Determine currency units and the meaning of counters separately for each Poster endpoint; do not apply a universal conversion or equate visitors with receipts.

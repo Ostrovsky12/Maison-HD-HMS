@@ -11,4 +11,5 @@ export type FbCashPaymentRequestResultDestination =
 
 export const FbCashPaymentRequestResultDestination = {
   maison_hd: "maison_hd",
+  poster: "poster",
 } as const;

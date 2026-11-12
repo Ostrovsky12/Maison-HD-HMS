@@ -5,6 +5,7 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+import type { FbCashPaymentRequestResultDelivery } from "./fbCashPaymentRequestResultDelivery";
 import type { FbCashPaymentRequestResultDestination } from "./fbCashPaymentRequestResultDestination";
 
 export interface FbCashPaymentRequestResult {
@@ -12,5 +13,6 @@ export interface FbCashPaymentRequestResult {
   id: number;
   duplicate: boolean;
   destination: FbCashPaymentRequestResultDestination;
+  delivery?: FbCashPaymentRequestResultDelivery;
   message: string;
 }

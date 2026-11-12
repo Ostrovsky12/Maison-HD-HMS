@@ -1,4 +1,5 @@
 import { pool } from "@workspace/db";
+import { posChannelOnline, readPosChannel } from "./poster-pos-notifications.js";
 
 // A merchant key or a recipient PAN is not proof of settlement/payout capability.
 // Keep both server and guest UI fail-closed until the durable payment lifecycle exists.
@@ -58,19 +59,27 @@ export async function readServicePointBill(slug: string, id: number, database: a
   const org = (await database.query("SELECT id FROM organizations WHERE slug=$1", [slug])).rows[0];
   if (!org) throw new ServicePointError(404, "Заклад не знайдено.");
   const resolved = await resolveServicePoint(org.id, `/qr-menu/${encodeURIComponent(slug)}/${id}`, database);
-  if (!resolved.orderId) return { ...resolved, orgId: org.id, order: null, items: [], payable: false };
+  if (!resolved.orderId) return { ...resolved, orgId: org.id, order: null, items: [], payable: false,
+    cashRequestPending: false, cashRequestDelivery: "none" as const, cashChannelOnline: false };
   const order = (await database.query(`SELECT id,status,total_amount,paid_amount FROM fb_orders
     WHERE id=$1 AND organization_id=$2 AND table_id=$3 AND status NOT IN ('billed','cancelled')`,
   [resolved.orderId, org.id, id])).rows[0];
-  if (!order) return { ...resolved, orgId: org.id, order: null, items: [], payable: false };
+  if (!order) return { ...resolved, orgId: org.id, order: null, items: [], payable: false,
+    cashRequestPending: false, cashRequestDelivery: "none" as const, cashChannelOnline: false };
   const items = (await database.query(`SELECT id,name,quantity,total_price,requires_confirmation,confirmed_at,sent_at
     FROM fb_order_items WHERE order_id=$1 AND organization_id=$2 AND status<>'cancelled' ORDER BY id`,
   [order.id, org.id])).rows;
-  const cashRequestPending = (await database.query(`SELECT id FROM fb_table_notifications
+  const cashRequest = (await database.query(`SELECT id,payload FROM fb_table_notifications
     WHERE organization_id=$1 AND table_id=$2 AND type='payment_cash' AND status='pending'
-    AND payload->>'orderId'=$3 LIMIT 1`, [org.id, id, String(order.id)])).rows.length > 0;
+    AND payload->>'orderId'=$3 AND (payload->>'total')::numeric=$4 ORDER BY id DESC LIMIT 1`,
+  [org.id, id, String(order.id), order.total_amount])).rows[0];
+  const channel = await readPosChannel(org.id, database);
+  const activeRequest = cashRequest?.payload?.destination === "poster"
+    && cashRequest.payload.posterChannelId === channel.channelId ? cashRequest : null;
   return { ...resolved, orgId: org.id, order: { id: order.id, status: order.status,
-    totalAmount: Number(order.total_amount) }, cashRequestPending, payable: Number(order.paid_amount || 0) === 0
+    totalAmount: Number(order.total_amount) }, cashRequestPending: !!activeRequest,
+    cashRequestDelivery: activeRequest ? (activeRequest.payload.posterDelivery ? "delivered" : "queued") : "none",
+    cashChannelOnline: posChannelOnline(channel), payable: Number(order.paid_amount || 0) === 0
       && order.status !== "new_guest" && items.length > 0
       && !items.some((item: any) => item.requires_confirmation && !item.confirmed_at),
     items: items.map((item: any) => ({ id: item.id, name: item.name, quantity: Number(item.quantity),
@@ -173,9 +182,15 @@ export async function requestCashPayment(slug: string, id: number,
       items.some((item: any) => item.requires_confirmation && !item.confirmed_at)) {
       throw new ServicePointError(409, "Рахунок уже оплачується або гостьові позиції ще не прийняті.");
     }
-    const existing = (await client.query(`SELECT id FROM fb_table_notifications
+    const channel = await readPosChannel(org.id, client);
+    if (!posChannelOnline(channel)) {
+      throw new ServicePointError(503, "Каса Poster зараз не підключена до сповіщень. Зверніться до офіціанта.");
+    }
+    const existing = (await client.query(`SELECT id,payload FROM fb_table_notifications
       WHERE organization_id=$1 AND table_id=$2 AND type='payment_cash' AND status='pending'
-      AND payload->>'orderId'=$3 ORDER BY id DESC LIMIT 1`, [org.id, id, String(order.id)])).rows[0];
+      AND payload->>'orderId'=$3 AND (payload->>'total')::numeric=$4
+      AND payload->>'posterChannelId'=$5 ORDER BY id DESC LIMIT 1`,
+    [org.id, id, String(order.id), amount, channel.channelId])).rows[0];
     let notificationId = existing?.id;
     if (!notificationId) {
       notificationId = (await client.query(`INSERT INTO fb_table_notifications
@@ -183,12 +198,15 @@ export async function requestCashPayment(slug: string, id: number,
         VALUES ($1,$2,$3,$4,'payment_cash',$5,'pending') RETURNING id`,
       [org.id, id, point.number, point.location, JSON.stringify({
         method: "cash", orderId: order.id, total: amount, tipPct: 0, tipAmount: 0,
-        groupName: point.group_name ?? null, destination: "maison_hd",
+        groupName: point.group_name ?? null, destination: "poster", posterChannelId: channel.channelId,
       })])).rows[0].id;
     }
     await client.query("COMMIT");
-    return { ok: true, id: notificationId, duplicate: !!existing, destination: "maison_hd" as const,
-      message: "Запит готівкового розрахунку надіслано на касу Maison HD. Очікуйте офіціанта; рахунок ще не оплачено." };
+    const delivered = !!existing?.payload?.posterDelivery;
+    return { ok: true, id: notificationId, duplicate: !!existing, destination: "poster" as const,
+      delivery: delivered ? "delivered" as const : "queued" as const,
+      message: delivered ? "Poster підтвердив показ сповіщення. Очікуйте офіціанта; рахунок ще не оплачено."
+        : "Запит збережено для каси Poster. Очікуємо підтвердження показу; рахунок ще не оплачено." };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

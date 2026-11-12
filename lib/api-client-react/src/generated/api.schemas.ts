@@ -5,11 +5,96 @@
  * HMS - Hotel Management System API
  * OpenAPI spec version: 0.1.0
  */
+export interface PosterPosChannelInput {
+  enabled: boolean;
+  /** @minimum 1 */
+  spotId: number;
+  /** @minimum 1 */
+  tabletId: number;
+}
+
+export interface PosterPosChannel {
+  enabled: boolean;
+  online: boolean;
+  spotId: number;
+  tabletId: number;
+  /** @nullable */
+  lastSeenAt: string | null;
+  pairingCode?: string;
+}
+
+export interface PosterPosPairing {
+  /** @pattern ^[a-z0-9][a-z0-9-]{0,99}$ */
+  account: string;
+  /** @minimum 1 */
+  spotId: number;
+  /** @minimum 1 */
+  tabletId: number;
+  /** @maxLength 120 */
+  code: string;
+}
+
+export interface PosterPosCredential {
+  token: string;
+}
+
+export interface PosterPosSession {
+  /** @pattern ^[a-z0-9][a-z0-9-]{0,99}$ */
+  account: string;
+  /** @minimum 1 */
+  spotId: number;
+  /** @minimum 1 */
+  tabletId: number;
+  /** @maxLength 120 */
+  token: string;
+}
+
+export interface PosterPosAcknowledgement {
+  /** @pattern ^[a-z0-9][a-z0-9-]{0,99}$ */
+  account: string;
+  /** @minimum 1 */
+  spotId: number;
+  /** @minimum 1 */
+  tabletId: number;
+  /** @maxLength 120 */
+  token: string;
+  /** @minimum 1 */
+  id: number;
+  /** @minimum 1 */
+  posterNotificationId: number;
+}
+
+export interface PosterPosCashNotice {
+  id: number;
+  orderId: number;
+  point: string;
+  total: number;
+  delivered: boolean;
+}
+
+export interface PosterPosInbox {
+  notifications: PosterPosCashNotice[];
+}
+
+export interface PosterPosAckResult {
+  ok: boolean;
+}
+
 export type FbServicePointBillCashRequestDestination =
   (typeof FbServicePointBillCashRequestDestination)[keyof typeof FbServicePointBillCashRequestDestination];
 
 export const FbServicePointBillCashRequestDestination = {
   maison_hd: "maison_hd",
+  poster: "poster",
+} as const;
+
+export type FbServicePointBillCashRequestDelivery =
+  (typeof FbServicePointBillCashRequestDelivery)[keyof typeof FbServicePointBillCashRequestDelivery];
+
+export const FbServicePointBillCashRequestDelivery = {
+  none: "none",
+  queued: "queued",
+  delivered: "delivered",
 } as const;
 
 export interface FbServicePoint {
@@ -46,6 +131,8 @@ export interface FbServicePointBill {
   cashRequestAvailable?: boolean;
   cashRequestPending?: boolean;
   cashRequestDestination?: FbServicePointBillCashRequestDestination;
+  cashRequestMessage?: string;
+  cashRequestDelivery?: FbServicePointBillCashRequestDelivery;
   tipsAvailable?: boolean;
   tipsMessage?: string;
   items: FbServiceBillItem[];
@@ -63,6 +150,15 @@ export type FbCashPaymentRequestResultDestination =
 
 export const FbCashPaymentRequestResultDestination = {
   maison_hd: "maison_hd",
+  poster: "poster",
+} as const;
+
+export type FbCashPaymentRequestResultDelivery =
+  (typeof FbCashPaymentRequestResultDelivery)[keyof typeof FbCashPaymentRequestResultDelivery];
+
+export const FbCashPaymentRequestResultDelivery = {
+  queued: "queued",
+  delivered: "delivered",
 } as const;
 
 export interface FbCashPaymentRequestResult {
@@ -70,6 +166,7 @@ export interface FbCashPaymentRequestResult {
   id: number;
   duplicate: boolean;
   destination: FbCashPaymentRequestResultDestination;
+  delivery?: FbCashPaymentRequestResultDelivery;
   message: string;
 }
 
