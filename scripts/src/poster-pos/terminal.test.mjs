@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
-const source = await readFile(new URL("./terminal.js", import.meta.url), "utf8");
+const source = await readFile(new URL("./kitchen.js", import.meta.url), "utf8")
+  + "\n" + await readFile(new URL("./terminal.js", import.meta.url), "utf8");
 const token = `1.${"a".repeat(64)}`;
 const key = "maison-pos-v1:fixture-account:1:2";
 const notice = { id: 10, orderId: 100, point: "Будинки · №1", total: 300, delivered: false };
@@ -23,7 +24,8 @@ function harness({ storage = new Map([[key, token]]), failShow = false, failAck 
     makeRequest(url, options, callback) {
       requests.push({ url, data: options.data });
       if (unauthorized) { callback({ code: 403, result: JSON.stringify({ error: "Revoked" }) }); return; }
-      if (url.endsWith("/poll")) callback({ code: 200, result: JSON.stringify({ notifications: [notice] }) });
+      if (url.endsWith("/kitchen/poll")) callback({ code: 200, result: JSON.stringify({ enabled: false, jobs: [] }) });
+      else if (url.endsWith("/poll")) callback({ code: 200, result: JSON.stringify({ notifications: [notice] }) });
       else if (url.endsWith("/ack")) callback({ code: failAck ? 503 : 200, result: JSON.stringify(failAck ? { error: "Offline" } : { ok: true }) });
     },
   };

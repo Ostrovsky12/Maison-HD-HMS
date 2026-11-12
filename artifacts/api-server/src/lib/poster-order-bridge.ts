@@ -7,6 +7,7 @@ import { awaitsWaiterConfirmation } from "./fb-guest-confirmation.js";
 export type BridgeConfig = {
   enabled: boolean; spotId: number; tabletId: number; waiterId: number;
   tableMap: Record<string, number>; productMap: Record<string, number>; activatedAt?: string;
+  kitchenEnabled?: boolean; kitchenActivatedAt?: string;
 };
 export const emptyBridge: BridgeConfig = { enabled: false, spotId: 0, tabletId: 0, waiterId: 0, tableMap: {}, productMap: {} };
 export type BridgeState = {
@@ -16,6 +17,11 @@ export type BridgeState = {
   quantities?: Record<string, number>; prices?: Record<string, number>; comment?: string;
   pending?: { method: string; at: string; params: Record<string, any> };
   diagnostic?: PosterDiagnostic;
+  kitchen?: {
+    revision: string; status: "claimed" | "submitted" | "already_sent" | "review";
+    attemptId: string; channelId: string; terminalOrderId: number; updatedAt: string;
+    quantities?: Record<string, number>; prices?: Record<string, number>;
+  };
 };
 
 // Never expose provider URLs (they contain the tenant's bearer token).
@@ -140,6 +146,10 @@ export async function dispatchPosterOrder(orgId: number, orderId: number) {
     const order = (await client.query("SELECT * FROM fb_orders WHERE id=$1 AND organization_id=$2", [orderId, orgId])).rows[0];
     if (!order) throw new Error("Замовлення не знайдено.");
     state = order.poster_sync || state;
+    if (state.kitchen && ["claimed", "review"].includes(state.kitchen.status)) {
+      state.message = "Результат відправлення бігунків потребує перевірки на касі. Нові зміни призупинено без повторного друку.";
+      return state;
+    }
     // A persisted in-flight command may already have succeeded remotely.
     if (state.pending || state.status === "review") {
       state.status = "review";

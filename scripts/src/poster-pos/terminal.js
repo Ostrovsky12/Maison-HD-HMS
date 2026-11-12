@@ -11,6 +11,7 @@
   const s = sdk.settings;
   const context = { account: s.accountUrl, spotId: Number(s.spotId), tabletId: Number(s.spotTabletId) };
   const key = `maison-pos-v1:${context.account}:${context.spotId}:${context.tabletId}`;
+  const kitchen = createMaisonKitchen(sdk, request, context, key);
   let token = "", busy = false, notices = [], status = "Введіть код із кабінету Maison HD.";
   const shown = new Map();
   try { token = localStorage.getItem(key) || ""; } catch { /* Session-only pairing is still possible. */ }
@@ -40,7 +41,7 @@
     });
   }
   function render() {
-    root.replaceChildren(el("h2", "Maison HD · Готівковий розрахунок"));
+    root.replaceChildren(el("h2", "Maison HD · Касовий модуль"));
     const state = el("p", status); state.className = "status"; state.setAttribute("role", "status"); root.appendChild(state);
     root.appendChild(el("small", "Сповіщення — не оплата. Отримайте кошти та закрийте наявний рахунок у Poster звичайним способом. Чайових немає."));
     if (!token) {
@@ -62,6 +63,7 @@
       };
       return;
     }
+    if (kitchen.message) root.appendChild(el("p", kitchen.message));
     for (const n of notices) {
       const card = el("article");
       card.append(el("strong", `Готівка · ${n.point}`),
@@ -105,7 +107,10 @@
         token = ""; notices = []; shown.clear();
         try { localStorage.removeItem(key); } catch { /* no persisted credential */ }
       }
-    } finally { busy = false; render(); }
+    } finally {
+      if (token) await kitchen.poll(token);
+      busy = false; render();
+    }
   }
   sdk.interface.showApplicationIconAt({ functions: "Maison HD · Запити на розрахунок", order: "Запити на розрахунок" });
   sdk.on("applicationIconClicked", () => { render(); sdk.interface.popup({ title: "Maison HD", width: 620, height: 560 }); void poll(); });
@@ -113,6 +118,10 @@
     if (notice.title === "Гість просить розрахунок готівкою") {
       render(); sdk.interface.popup({ title: "Maison HD · Розрахунок", width: 620, height: 560 }); void poll();
     }
+    if (notice.title === "Бігунки Maison HD очікують") {
+      render(); sdk.interface.popup({ title: "Maison HD · Бігунки", width: 620, height: 560 });
+    }
   });
+  sdk.on("orderOpen", () => { if (token) void poll(); });
   render(); void poll(); setInterval(() => void poll(), 10000);
 })();

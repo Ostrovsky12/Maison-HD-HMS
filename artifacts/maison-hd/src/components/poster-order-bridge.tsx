@@ -12,6 +12,7 @@ import { AlertCircle, Info, Loader2, RefreshCw, Save, Send } from "lucide-react"
 
 type Config = {
   enabled: boolean; spotId: number; tabletId: number; waiterId: number;
+  kitchenEnabled: boolean;
   tableMap: Record<string, number>; productMap: Record<string, number>;
 };
 type View = {
@@ -19,6 +20,7 @@ type View = {
   localTables: { id: number; name: string }[];
   localItems: { id: number; name: string; price: number }[];
   printSupported: boolean;
+  kitchenTerminalReady?: boolean;
 };
 type Catalog = {
   spots: { spot_id: number; name: string }[];
@@ -28,7 +30,7 @@ type Catalog = {
   tables: { table_id: number; table_name: string; spot_id: number }[];
 };
 
-const EMPTY: Config = { enabled: false, spotId: 0, tabletId: 0, waiterId: 0, tableMap: {}, productMap: {} };
+const EMPTY: Config = { enabled: false, kitchenEnabled: false, spotId: 0, tabletId: 0, waiterId: 0, tableMap: {}, productMap: {} };
 const selCls = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
 
 function cleanMap(m: Record<string, number>) {
@@ -84,7 +86,7 @@ export default function PosterOrderBridge({ request }: { request: (path: string,
     if (v) { setError(v); return; }
     setSaving(true); setError(null); setNotice(null);
     try {
-      const body = { enabled: c.enabled, spotId: Number(c.spotId) || 0, tabletId: Number(c.tabletId) || 0, waiterId: Number(c.waiterId) || 0, tableMap: cleanMap(c.tableMap), productMap: cleanMap(c.productMap) };
+      const body = { enabled: c.enabled, kitchenEnabled: c.enabled && c.kitchenEnabled, spotId: Number(c.spotId) || 0, tabletId: Number(c.tabletId) || 0, waiterId: Number(c.waiterId) || 0, tableMap: cleanMap(c.tableMap), productMap: cleanMap(c.productMap) };
       apply(await request("/poster/order-bridge", { method: "PUT", body: JSON.stringify(body) }));
       setNotice(c.enabled ? "Збережено. Передачу відкритих рахунків у Poster увімкнено." : "Збережено. Передача замовлень вимкнена.");
     } catch (e: any) { setError(e.message || "Не вдалося зберегти налаштування."); }
@@ -92,7 +94,7 @@ export default function PosterOrderBridge({ request }: { request: (path: string,
   };
 
   const onSave = () => {
-    if (cfg.enabled && !view?.config?.enabled) {
+    if ((cfg.enabled && !view?.config?.enabled) || (cfg.kitchenEnabled && !view?.config?.kitchenEnabled)) {
       const v = validate(cfg);
       if (v) { setError(v); return; }
       setConfirmOpen(true);
@@ -139,7 +141,7 @@ export default function PosterOrderBridge({ request }: { request: (path: string,
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Label htmlFor="bridge-enabled" className="text-sm">{cfg.enabled ? "Увімкнено" : "Вимкнено"}</Label>
-            <Switch id="bridge-enabled" checked={cfg.enabled} onCheckedChange={v => setCfg(c => ({ ...c, enabled: v }))} data-testid="switch-bridge-enabled" />
+            <Switch id="bridge-enabled" checked={cfg.enabled} onCheckedChange={v => setCfg(c => ({ ...c, enabled: v, kitchenEnabled: v && c.kitchenEnabled }))} data-testid="switch-bridge-enabled" />
           </div>
         </div>
       </CardHeader>
@@ -147,10 +149,25 @@ export default function PosterOrderBridge({ request }: { request: (path: string,
         <div className="rounded-lg border border-orange-100 bg-orange-50 p-3 text-xs text-orange-800 space-y-1">
           <p className="flex items-center gap-1.5 font-medium text-sm"><Info className="w-4 h-4" />Що робить ця функція</p>
           <p>Створює відкритий рахунок у Poster з позиціями замовлення. Оплата та фіскалізація тут не виконуються — рахунок закривається в Poster.</p>
-          <p>{view.printSupported ? "Друк на кухню підтримується." : "Друк чеків і бігунків на кухню не виконується: для цього потрібен окремий модуль Poster POS на касі."}</p>
+          <p>Бігунки відправляє касовий модуль Poster за налаштуваннями принтерів і підрозділів у Poster. Вебкаса Poster не підтримує фізичний друк бігунків — потрібен встановлений застосунок каси.</p>
           <p>Позиції без зіставлення з товаром Poster не передаються — таке замовлення потрапить на ручну перевірку.</p>
           <p>Одночасне редагування одного рахунку тут і на касі поки не підтримується. Виявлені зміни на касі призупинять передавання. Модифікатори та розбіжності цін не ігноруються.</p>
           <p>Перед увімкненням потрібен узгоджений тест на вашій касі: використовується попередній API відкритих рахунків Poster, підтримку якого слід перевірити.</p>
+        </div>
+
+        <div className="rounded-lg border p-3 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="bridge-kitchen-enabled">Бігунки через касовий модуль Poster</Label>
+            <Switch id="bridge-kitchen-enabled" checked={cfg.kitchenEnabled}
+              disabled={!cfg.enabled || saving}
+              onCheckedChange={v => setCfg(c => ({ ...c, kitchenEnabled: v }))}
+              data-testid="switch-bridge-kitchen-enabled" />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {view.kitchenTerminalReady ? "Оновлений касовий модуль на зв’язку." : "Оновлений касовий модуль ще не підтвердив готовність. Після оновлення каси оновіть стан."}
+          </p>
+          <p className="text-xs text-muted-foreground">Лише нові рахунки після ввімкнення. Відкрийте відповідний рахунок на касі: після точної звірки страв модуль надішле бігунки без додаткового підтвердження. Результат команди не є підтвердженням фізичного друку. Невідомий результат блокує повтор.</p>
+          <Button variant="outline" size="sm" onClick={load} disabled={saving}>Оновити стан</Button>
         </div>
 
         {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-center gap-2"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
@@ -233,9 +250,11 @@ export default function PosterOrderBridge({ request }: { request: (path: string,
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Увімкнути запис у Poster?</AlertDialogTitle>
+            <AlertDialogTitle>Увімкнути передавання в Poster?</AlertDialogTitle>
             <AlertDialogDescription>
-              Нові замовлення будуть створювати реальні відкриті рахунки на касі Poster (заклад {cfg.spotId}, каса {cfg.tabletId}). Оплата, фіскалізація та друк не виконуються автоматично.
+              Нові замовлення будуть створювати реальні відкриті рахунки в Poster (заклад {cfg.spotId}, каса {cfg.tabletId}).
+              {cfg.kitchenEnabled ? " Для нових рахунків касовий модуль також відправлятиме бігунки після відкриття й звірки рахунку на касі. Це може запустити фізичні принтери." : " Друк бігунків вимкнено."}
+              {" "}Оплата та фіскалізація тут не виконуються.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

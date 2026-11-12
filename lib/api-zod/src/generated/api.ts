@@ -73,6 +73,105 @@ export const PollPosterPosResponse = zod.object({
   ),
 });
 
+export const pollPosterKitchenBodyAccountRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,99}$",
+);
+
+export const pollPosterKitchenBodyTokenMax = 120;
+
+export const PollPosterKitchenBody = zod.object({
+  account: zod.string().regex(pollPosterKitchenBodyAccountRegExp),
+  spotId: zod.number().min(1),
+  tabletId: zod.number().min(1),
+  token: zod.string().max(pollPosterKitchenBodyTokenMax),
+});
+
+export const pollPosterKitchenResponseJobsItemRevisionRegExp = new RegExp(
+  "^[a-f0-9]{64}$",
+);
+export const pollPosterKitchenResponseJobsItemQuantitiesMinOne = 0;
+
+export const pollPosterKitchenResponseJobsItemPricesMinOne = 0;
+
+export const PollPosterKitchenResponse = zod.object({
+  enabled: zod.boolean(),
+  jobs: zod.array(
+    zod.object({
+      orderId: zod.number().min(1),
+      remoteOrderId: zod.number().min(1),
+      tableId: zod.number().min(1),
+      revision: zod
+        .string()
+        .regex(pollPosterKitchenResponseJobsItemRevisionRegExp),
+      quantities: zod.record(
+        zod.string(),
+        zod.number().min(pollPosterKitchenResponseJobsItemQuantitiesMinOne),
+      ),
+      prices: zod.record(
+        zod.string(),
+        zod.number().min(pollPosterKitchenResponseJobsItemPricesMinOne),
+      ),
+    }),
+  ),
+});
+
+export const claimPosterKitchenBodyAccountRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,99}$",
+);
+
+export const claimPosterKitchenBodyTokenMax = 120;
+
+export const claimPosterKitchenBodyRevisionRegExp = new RegExp(
+  "^[a-f0-9]{64}$",
+);
+export const claimPosterKitchenBodyTerminalOrderIdMin = 1000000000000;
+export const claimPosterKitchenBodyTerminalOrderIdMax = 9999999999999;
+
+export const ClaimPosterKitchenBody = zod.object({
+  account: zod.string().regex(claimPosterKitchenBodyAccountRegExp),
+  spotId: zod.number().min(1),
+  tabletId: zod.number().min(1),
+  token: zod.string().max(claimPosterKitchenBodyTokenMax),
+  orderId: zod.number().min(1),
+  revision: zod.string().regex(claimPosterKitchenBodyRevisionRegExp),
+  terminalOrderId: zod
+    .number()
+    .min(claimPosterKitchenBodyTerminalOrderIdMin)
+    .max(claimPosterKitchenBodyTerminalOrderIdMax),
+});
+
+export const claimPosterKitchenResponseAttemptIdRegExp = new RegExp(
+  "^[a-f0-9]{64}$",
+);
+
+export const ClaimPosterKitchenResponse = zod.object({
+  attemptId: zod.string().regex(claimPosterKitchenResponseAttemptIdRegExp),
+});
+
+export const recordPosterKitchenResultBodyAccountRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,99}$",
+);
+
+export const recordPosterKitchenResultBodyTokenMax = 120;
+
+export const recordPosterKitchenResultBodyAttemptIdRegExp = new RegExp(
+  "^[a-f0-9]{64}$",
+);
+
+export const RecordPosterKitchenResultBody = zod.object({
+  account: zod.string().regex(recordPosterKitchenResultBodyAccountRegExp),
+  spotId: zod.number().min(1),
+  tabletId: zod.number().min(1),
+  token: zod.string().max(recordPosterKitchenResultBodyTokenMax),
+  orderId: zod.number().min(1),
+  attemptId: zod.string().regex(recordPosterKitchenResultBodyAttemptIdRegExp),
+  outcome: zod.enum(["submitted", "already_sent", "review"]),
+});
+
+export const RecordPosterKitchenResultResponse = zod.object({
+  ok: zod.boolean(),
+});
+
 export const acknowledgePosterPosBodyAccountRegExp = new RegExp(
   "^[a-z0-9][a-z0-9-]{0,99}$",
 );
@@ -2212,8 +2311,10 @@ export const GetPosterOrderBridgeResponse = zod.object({
   localTables: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   localItems: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   printSupported: zod.boolean().optional(),
+  kitchenTerminalReady: zod.boolean().optional(),
 });
 
+export const updatePosterOrderBridgeBodyKitchenEnabledDefault = false;
 export const updatePosterOrderBridgeBodySpotIdMin = 0;
 
 export const updatePosterOrderBridgeBodyTabletIdMin = 0;
@@ -2222,6 +2323,9 @@ export const updatePosterOrderBridgeBodyWaiterIdMin = 0;
 
 export const UpdatePosterOrderBridgeBody = zod.object({
   enabled: zod.boolean(),
+  kitchenEnabled: zod
+    .boolean()
+    .default(updatePosterOrderBridgeBodyKitchenEnabledDefault),
   spotId: zod.number().min(updatePosterOrderBridgeBodySpotIdMin),
   tabletId: zod.number().min(updatePosterOrderBridgeBodyTabletIdMin),
   waiterId: zod.number().min(updatePosterOrderBridgeBodyWaiterIdMin),
@@ -2234,6 +2338,7 @@ export const UpdatePosterOrderBridgeResponse = zod.object({
   localTables: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   localItems: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   printSupported: zod.boolean().optional(),
+  kitchenTerminalReady: zod.boolean().optional(),
 });
 
 export const GetPosterOrderBridgeCatalogResponse = zod.record(
@@ -2307,6 +2412,18 @@ export const GetPosterOrderBridgeOrderResponse = zod.object({
             ),
         })
         .optional(),
+      kitchen: zod
+        .object({
+          status: zod.enum([
+            "waiting",
+            "claimed",
+            "submitted",
+            "already_sent",
+            "review",
+          ]),
+          updatedAt: zod.string().optional(),
+        })
+        .optional(),
     }),
     zod.null(),
   ]),
@@ -2377,6 +2494,18 @@ export const SendPosterOrderBridgeOrderResponse = zod.object({
             .max(
               sendPosterOrderBridgeOrderResponseStateOneDiagnosticRecommendationMax,
             ),
+        })
+        .optional(),
+      kitchen: zod
+        .object({
+          status: zod.enum([
+            "waiting",
+            "claimed",
+            "submitted",
+            "already_sent",
+            "review",
+          ]),
+          updatedAt: zod.string().optional(),
         })
         .optional(),
     }),

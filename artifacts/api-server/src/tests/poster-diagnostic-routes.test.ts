@@ -32,7 +32,7 @@ async function request(path: string, method = "GET") {
 }
 beforeEach(() => {
   vi.clearAllMocks();
-  fixture.query.mockResolvedValue({ rows: [{ id: 49, state }] });
+  fixture.query.mockResolvedValue({ rows: [{ id: 49, data: { id: 49, poster_sync: state } }] });
   fixture.account.mockResolvedValue({ config: { enabled: false } });
   fixture.dispatch.mockResolvedValue(state);
 });

@@ -107,6 +107,51 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PosterPosInbox" }
+  /poster-pos/kitchen/poll:
+    post:
+      operationId: pollPosterKitchen
+      security: [{ posterSignature: [], posterTime: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterPosSession" }
+      responses:
+        "200":
+          description: Reviewed synchronized bills awaiting a terminal kitchen command
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterKitchenInbox" }
+  /poster-pos/kitchen/claim:
+    post:
+      operationId: claimPosterKitchen
+      security: [{ posterSignature: [], posterTime: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterKitchenClaim" }
+      responses:
+        "200":
+          description: Durable single-use permission to submit this exact kitchen command
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterKitchenPermit" }
+  /poster-pos/kitchen/result:
+    post:
+      operationId: recordPosterKitchenResult
+      security: [{ posterSignature: [], posterTime: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PosterKitchenResult" }
+      responses:
+        "200":
+          description: Recorded SDK outcome, never proof of physical printer delivery
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PosterPosAckResult" }
   /poster-pos/ack:
     post:
       operationId: acknowledgePosterPos
@@ -3320,6 +3365,53 @@ components:
         notifications:
           type: array
           items: { $ref: "#/components/schemas/PosterPosCashNotice" }
+    PosterKitchenJob:
+      type: object
+      required: [orderId, remoteOrderId, tableId, revision, quantities, prices]
+      properties:
+        orderId: { type: integer, minimum: 1 }
+        remoteOrderId: { type: integer, minimum: 1 }
+        tableId: { type: integer, minimum: 1 }
+        revision: { type: string, pattern: "^[a-f0-9]{64}$" }
+        quantities: { type: object, additionalProperties: { type: number, minimum: 0 } }
+        prices: { type: object, additionalProperties: { type: number, minimum: 0 } }
+    PosterKitchenInbox:
+      type: object
+      required: [enabled, jobs]
+      properties:
+        enabled: { type: boolean }
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/PosterKitchenJob" }
+    PosterKitchenClaim:
+      type: object
+      additionalProperties: false
+      required: [account, spotId, tabletId, token, orderId, revision, terminalOrderId]
+      properties:
+        account: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,99}$" }
+        spotId: { type: integer, minimum: 1 }
+        tabletId: { type: integer, minimum: 1 }
+        token: { type: string, maxLength: 120 }
+        orderId: { type: integer, minimum: 1 }
+        revision: { type: string, pattern: "^[a-f0-9]{64}$" }
+        terminalOrderId: { type: integer, minimum: 1000000000000, maximum: 9999999999999 }
+    PosterKitchenPermit:
+      type: object
+      required: [attemptId]
+      properties:
+        attemptId: { type: string, pattern: "^[a-f0-9]{64}$" }
+    PosterKitchenResult:
+      type: object
+      additionalProperties: false
+      required: [account, spotId, tabletId, token, orderId, attemptId, outcome]
+      properties:
+        account: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,99}$" }
+        spotId: { type: integer, minimum: 1 }
+        tabletId: { type: integer, minimum: 1 }
+        token: { type: string, maxLength: 120 }
+        orderId: { type: integer, minimum: 1 }
+        attemptId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        outcome: { type: string, enum: [submitted, already_sent, review] }
     PosterPosAckResult:
       type: object
       required: [ok]
@@ -4036,6 +4128,13 @@ components:
         message: { type: string }
         lastSync: { type: string }
         diagnostic: { $ref: "#/components/schemas/PosterDispatchDiagnostic" }
+        kitchen: { $ref: "#/components/schemas/PosterKitchenState" }
+    PosterKitchenState:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [waiting, claimed, submitted, already_sent, review] }
+        updatedAt: { type: string }
     PosterDispatchResponse:
       type: object
       required: [enabled, state, printSupported]
@@ -4051,6 +4150,7 @@ components:
       required: [enabled, spotId, tabletId, waiterId, tableMap, productMap]
       properties:
         enabled: { type: boolean }
+        kitchenEnabled: { type: boolean, default: false }
         spotId: { type: integer, minimum: 0 }
         tabletId: { type: integer, minimum: 0 }
         waiterId: { type: integer, minimum: 0 }
@@ -4063,6 +4163,7 @@ components:
         localTables: { type: array, items: { type: object, additionalProperties: true } }
         localItems: { type: array, items: { type: object, additionalProperties: true } }
         printSupported: { type: boolean }
+        kitchenTerminalReady: { type: boolean }
     TvWeatherInput:
       type: object
       properties:

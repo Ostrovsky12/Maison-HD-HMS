@@ -7,6 +7,7 @@
  */
 import type { PosterDispatchDiagnostic } from "./posterDispatchDiagnostic";
 import type { PosterDispatchStateStatus } from "./posterDispatchStateStatus";
+import type { PosterKitchenState } from "./posterKitchenState";
 
 export interface PosterDispatchState {
   status: PosterDispatchStateStatus;
@@ -14,4 +15,5 @@ export interface PosterDispatchState {
   message?: string;
   lastSync?: string;
   diagnostic?: PosterDispatchDiagnostic;
+  kitchen?: PosterKitchenState;
 }

@@ -83,6 +83,21 @@ Poster support recommends the documentation section `transactions/createOrder`, 
 
 **How to apply:** Keep command submission separate from confirmed printing in UI and retry logic. Do not report a printed ticket solely from `success: true`, and do not blindly replay after uncertain printer delivery.
 
+Use the installed Poster cashier application for physical kitchen/bar ticket
+tests, not the browser cashier. Browser pairing and cash-notice polling can
+succeed without printer support. The documented `orders.getActive()` identifies
+only the selected bill; do not invent an all-open-orders API or infer a terminal
+millisecond ID from a server receipt number.
+
+**Why:** Poster's cashier guide explicitly lists kitchen tickets as unsupported
+in the web version. The order-type reference distinguishes `id` from back-office
+`orderName`; a working connection alone is not readiness for operational printing.
+
+**How to apply:** Keep kitchen dispatch separately opt-in; validate the actual
+native cashier and department printer configuration before promising launch.
+If dispatch requires opening the bill, disclose that limitation rather than
+describing it as unattended dispatch.
+
 ## Support clarification on creation and acceptance
 
 The user relayed Poster support's clarification: a receipt can be created with or without payment; the creation response includes its number and ID but not the register, since creation happens at venue level and any register may accept it. Support says the necessary receipt details can be obtained after acceptance via webhook or manual lookup, and recommends online orders for this scenario.

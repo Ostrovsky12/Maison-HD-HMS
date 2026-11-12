@@ -13,6 +13,13 @@ const META: Record<PosterDispatchState["status"], { label: string; color: string
   review:        { label: "Ручна перевірка",          color: "text-orange-700 bg-orange-50 border-orange-200" },
   closed_remote: { label: "Рахунок закрито в Poster", color: "text-gray-600 bg-gray-100 border-gray-200" },
 };
+const KITCHEN = {
+  waiting: "Бігунки очікують: відкрийте цей рахунок у Poster для звірки й відправлення.",
+  claimed: "Каса отримала завдання бігунків. Якщо статус не змінюється, перевірте касу; автоматичного повтору немає.",
+  submitted: "Poster прийняв команду бігунків. Це не підтвердження фізичного друку — перевірте принтери.",
+  already_sent: "Poster уже позначив страви відправленими. Повторної команди друку не було.",
+  review: "Результат бігунків невідомий. Перевірте касу та принтери; повтор і нові зміни призупинено.",
+};
 
 export default function PosterOrderStatus({ orderId }: { orderId: number }) {
   const qc = useQueryClient();
@@ -66,6 +73,7 @@ export default function PosterOrderStatus({ orderId }: { orderId: number }) {
       {st?.remoteOrderId ? <p className="text-xs mt-1" data-testid="text-poster-bill-id">Рахунок Poster №{st.remoteOrderId}</p> : null}
       {st?.status === "review" && <p className="text-xs mt-1">Можливо, рахунок уже створено. Автоматичний повтор вимкнено, щоб уникнути дубля — зверніться до адміністратора.</p>}
       {st?.message && <p className="text-xs mt-1 opacity-90">{st.message}</p>}
+      {st?.kitchen && <p role="status" className="text-xs mt-2 font-medium" data-testid="poster-kitchen-status">{KITCHEN[st.kitchen.status]}</p>}
       {!data.enabled && <p className="text-xs mt-1">Передавання вимкнено. Нижче збережений результат останньої спроби; оновлення статусу не надсилає замовлення.</p>}
       {st?.diagnostic && (
         <div className="mt-2 border-t border-current/15 pt-2 text-xs space-y-1" data-testid="poster-diagnostic">

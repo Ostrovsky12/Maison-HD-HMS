@@ -10,6 +10,7 @@ import type { PosterOrderBridgeInputTableMap } from "./posterOrderBridgeInputTab
 
 export interface PosterOrderBridgeInput {
   enabled: boolean;
+  kitchenEnabled?: boolean;
   /** @minimum 0 */
   spotId: number;
   /** @minimum 0 */

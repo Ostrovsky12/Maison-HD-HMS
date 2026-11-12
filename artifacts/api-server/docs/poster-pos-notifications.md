@@ -37,7 +37,10 @@ order, modify a Poster bill, collect money, fiscalize, print, or move tips.
   They are NOT sufficient tenant authorization. A one-time, atomic pairing code
   creates a separate credential bound to one organization/account/spot/register.
 - Only credential hashes are stored server-side, under the organization's Poster
-  configuration. A terminal token can only read and acknowledge cash notices.
+  configuration. The paired token reads and acknowledges cash notices. The updated
+  bundle additionally supports opt-in kitchen command claims/results for the same
+  account/location/register; see `poster-order-bridge.md`. It cannot collect money,
+  close or fiscalize bills.
 - Requests are queued durably in the existing table notifications table. They are
   not payments. A live terminal heartbeat (45 seconds) is required for new cash
   requests; failure never silently redirects delivery to Maison HD alone.

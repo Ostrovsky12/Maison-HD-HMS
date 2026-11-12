@@ -14,4 +14,5 @@ export interface PosterOrderBridgeView {
   localTables?: PosterOrderBridgeViewLocalTablesItem[];
   localItems?: PosterOrderBridgeViewLocalItemsItem[];
   printSupported?: boolean;
+  kitchenTerminalReady?: boolean;
 }

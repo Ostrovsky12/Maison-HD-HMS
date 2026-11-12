@@ -8,7 +8,8 @@ if (origin.protocol !== "https:" || origin.username || origin.password || origin
   throw new Error("Supply the verified HTTPS production origin, with no path or credentials.");
 }
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const source = await readFile(new URL("./terminal.js", import.meta.url), "utf8");
+const source = await readFile(new URL("./kitchen.js", import.meta.url), "utf8")
+  + "\n" + await readFile(new URL("./terminal.js", import.meta.url), "utf8");
 const out = path.join(workspace, "generated-artifacts/poster-pos");
 await mkdir(out, { recursive: true });
 await writeFile(path.join(out, "bundle.js"), source.replace("__MAISON_POS_ORIGIN__", origin.origin));

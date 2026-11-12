@@ -76,6 +76,78 @@ export interface PosterPosInbox {
   notifications: PosterPosCashNotice[];
 }
 
+export type PosterKitchenJobQuantities = { [key: string]: number };
+
+export type PosterKitchenJobPrices = { [key: string]: number };
+
+export interface PosterKitchenJob {
+  /** @minimum 1 */
+  orderId: number;
+  /** @minimum 1 */
+  remoteOrderId: number;
+  /** @minimum 1 */
+  tableId: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  revision: string;
+  quantities: PosterKitchenJobQuantities;
+  prices: PosterKitchenJobPrices;
+}
+
+export interface PosterKitchenInbox {
+  enabled: boolean;
+  jobs: PosterKitchenJob[];
+}
+
+export interface PosterKitchenClaim {
+  /** @pattern ^[a-z0-9][a-z0-9-]{0,99}$ */
+  account: string;
+  /** @minimum 1 */
+  spotId: number;
+  /** @minimum 1 */
+  tabletId: number;
+  /** @maxLength 120 */
+  token: string;
+  /** @minimum 1 */
+  orderId: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  revision: string;
+  /**
+   * @minimum 1000000000000
+   * @maximum 9999999999999
+   */
+  terminalOrderId: number;
+}
+
+export interface PosterKitchenPermit {
+  /** @pattern ^[a-f0-9]{64}$ */
+  attemptId: string;
+}
+
+export type PosterKitchenResultOutcome =
+  (typeof PosterKitchenResultOutcome)[keyof typeof PosterKitchenResultOutcome];
+
+export const PosterKitchenResultOutcome = {
+  submitted: "submitted",
+  already_sent: "already_sent",
+  review: "review",
+} as const;
+
+export interface PosterKitchenResult {
+  /** @pattern ^[a-z0-9][a-z0-9-]{0,99}$ */
+  account: string;
+  /** @minimum 1 */
+  spotId: number;
+  /** @minimum 1 */
+  tabletId: number;
+  /** @maxLength 120 */
+  token: string;
+  /** @minimum 1 */
+  orderId: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  attemptId: string;
+  outcome: PosterKitchenResultOutcome;
+}
+
 export interface PosterPosAckResult {
   ok: boolean;
 }
@@ -1128,12 +1200,29 @@ export const PosterDispatchStateStatus = {
   disabled: "disabled",
 } as const;
 
+export type PosterKitchenStateStatus =
+  (typeof PosterKitchenStateStatus)[keyof typeof PosterKitchenStateStatus];
+
+export const PosterKitchenStateStatus = {
+  waiting: "waiting",
+  claimed: "claimed",
+  submitted: "submitted",
+  already_sent: "already_sent",
+  review: "review",
+} as const;
+
+export interface PosterKitchenState {
+  status: PosterKitchenStateStatus;
+  updatedAt?: string;
+}
+
 export interface PosterDispatchState {
   status: PosterDispatchStateStatus;
   remoteOrderId?: number;
   message?: string;
   lastSync?: string;
   diagnostic?: PosterDispatchDiagnostic;
+  kitchen?: PosterKitchenState;
 }
 
 export interface PosterDispatchResponse {
@@ -1148,6 +1237,7 @@ export type PosterOrderBridgeInputProductMap = { [key: string]: number };
 
 export interface PosterOrderBridgeInput {
   enabled: boolean;
+  kitchenEnabled?: boolean;
   /** @minimum 0 */
   spotId: number;
   /** @minimum 0 */
@@ -1169,6 +1259,7 @@ export interface PosterOrderBridgeView {
   localTables?: PosterOrderBridgeViewLocalTablesItem[];
   localItems?: PosterOrderBridgeViewLocalItemsItem[];
   printSupported?: boolean;
+  kitchenTerminalReady?: boolean;
 }
 
 export interface TvWeatherInput {

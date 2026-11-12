@@ -2,6 +2,10 @@ import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ verify: vi.fn(), pair: vi.fn(), poll: vi.fn(), ack: vi.fn(), warn: vi.fn() }));
+const kitchen = vi.hoisted(() => ({ poll: vi.fn(), claim: vi.fn(), result: vi.fn() }));
+vi.mock("../lib/poster-kitchen.js", () => ({
+  pollKitchen: kitchen.poll, claimKitchen: kitchen.claim, recordKitchen: kitchen.result,
+}));
 vi.mock("../lib/poster-pos-notifications.js", () => ({
   verifyPosSignature: mocks.verify, authenticatePos: mocks.pair, pollPos: mocks.poll, acknowledgePos: mocks.ack,
   PosterPosError: class extends Error {
@@ -17,6 +21,8 @@ const session = { account: "hotel", spotId: 1, tabletId: 2, token: `1.${"a".repe
 beforeEach(() => {
   vi.clearAllMocks(); mocks.verify.mockImplementation(() => {});
   mocks.poll.mockResolvedValue({ notifications: [] }); mocks.ack.mockResolvedValue({ ok: true });
+  kitchen.poll.mockResolvedValue({ enabled: false, jobs: [] });
+  kitchen.claim.mockResolvedValue({ attemptId: "b".repeat(64) }); kitchen.result.mockResolvedValue({ ok: true });
 });
 describe("signed Poster terminal endpoints", () => {
   it("returns the exact pairing failure for the existing terminal UI", async () => {
@@ -59,5 +65,21 @@ describe("signed Poster terminal endpoints", () => {
   it("does not return a success response after durable storage fails", async () => {
     mocks.poll.mockRejectedValue(new Error("DB failure"));
     expect((await request(app).post("/api/poster-pos/poll").send(session)).status).toBe(503);
+  });
+  it("requires signatures on kitchen requests before reading or claiming", async () => {
+    mocks.verify.mockImplementation(() => { throw new PosterPosError(403, "Unsigned"); });
+    expect((await request(app).post("/api/poster-pos/kitchen/poll").send(session)).status).toBe(403);
+    expect(kitchen.poll).not.toHaveBeenCalled();
+  });
+  it("validates the terminal ID and attempt result contracts", async () => {
+    expect((await request(app).post("/api/poster-pos/kitchen/claim").send({ ...session, orderId: 1,
+      revision: "a".repeat(64), terminalOrderId: 500 })).status).toBe(400);
+    expect(kitchen.claim).not.toHaveBeenCalled();
+    const claim = await request(app).post("/api/poster-pos/kitchen/claim").send({ ...session, orderId: 1,
+      revision: "a".repeat(64), terminalOrderId: 1794495120000 });
+    expect(claim.body).toEqual({ attemptId: "b".repeat(64) });
+    expect((await request(app).post("/api/poster-pos/kitchen/result").send({ ...session, orderId: 1,
+      attemptId: "b".repeat(64), outcome: "printed" })).status).toBe(400);
+    expect(kitchen.result).not.toHaveBeenCalled();
   });
 });

@@ -151,6 +151,10 @@ import type {
   PayInvoiceRequest,
   Payment,
   PosterDispatchResponse,
+  PosterKitchenClaim,
+  PosterKitchenInbox,
+  PosterKitchenPermit,
+  PosterKitchenResult,
   PosterMenuImportInput,
   PosterOrderBridgeInput,
   PosterOrderBridgeView,
@@ -511,6 +515,247 @@ export const usePollPosterPos = <
   TContext
 > => {
   return useMutation(getPollPosterPosMutationOptions(options));
+};
+
+export const getPollPosterKitchenUrl = () => {
+  return `/api/poster-pos/kitchen/poll`;
+};
+
+export const pollPosterKitchen = async (
+  posterPosSession: PosterPosSession,
+  options?: RequestInit,
+): Promise<PosterKitchenInbox> => {
+  return customFetch<PosterKitchenInbox>(getPollPosterKitchenUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterPosSession),
+  });
+};
+
+export const getPollPosterKitchenMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pollPosterKitchen>>,
+    TError,
+    { data: BodyType<PosterPosSession> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof pollPosterKitchen>>,
+  TError,
+  { data: BodyType<PosterPosSession> },
+  TContext
+> => {
+  const mutationKey = ["pollPosterKitchen"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof pollPosterKitchen>>,
+    { data: BodyType<PosterPosSession> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return pollPosterKitchen(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PollPosterKitchenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof pollPosterKitchen>>
+>;
+export type PollPosterKitchenMutationBody = BodyType<PosterPosSession>;
+export type PollPosterKitchenMutationError = ErrorType<unknown>;
+
+export const usePollPosterKitchen = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pollPosterKitchen>>,
+    TError,
+    { data: BodyType<PosterPosSession> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof pollPosterKitchen>>,
+  TError,
+  { data: BodyType<PosterPosSession> },
+  TContext
+> => {
+  return useMutation(getPollPosterKitchenMutationOptions(options));
+};
+
+export const getClaimPosterKitchenUrl = () => {
+  return `/api/poster-pos/kitchen/claim`;
+};
+
+export const claimPosterKitchen = async (
+  posterKitchenClaim: PosterKitchenClaim,
+  options?: RequestInit,
+): Promise<PosterKitchenPermit> => {
+  return customFetch<PosterKitchenPermit>(getClaimPosterKitchenUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterKitchenClaim),
+  });
+};
+
+export const getClaimPosterKitchenMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof claimPosterKitchen>>,
+    TError,
+    { data: BodyType<PosterKitchenClaim> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof claimPosterKitchen>>,
+  TError,
+  { data: BodyType<PosterKitchenClaim> },
+  TContext
+> => {
+  const mutationKey = ["claimPosterKitchen"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof claimPosterKitchen>>,
+    { data: BodyType<PosterKitchenClaim> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return claimPosterKitchen(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ClaimPosterKitchenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof claimPosterKitchen>>
+>;
+export type ClaimPosterKitchenMutationBody = BodyType<PosterKitchenClaim>;
+export type ClaimPosterKitchenMutationError = ErrorType<unknown>;
+
+export const useClaimPosterKitchen = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof claimPosterKitchen>>,
+    TError,
+    { data: BodyType<PosterKitchenClaim> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof claimPosterKitchen>>,
+  TError,
+  { data: BodyType<PosterKitchenClaim> },
+  TContext
+> => {
+  return useMutation(getClaimPosterKitchenMutationOptions(options));
+};
+
+export const getRecordPosterKitchenResultUrl = () => {
+  return `/api/poster-pos/kitchen/result`;
+};
+
+export const recordPosterKitchenResult = async (
+  posterKitchenResult: PosterKitchenResult,
+  options?: RequestInit,
+): Promise<PosterPosAckResult> => {
+  return customFetch<PosterPosAckResult>(getRecordPosterKitchenResultUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(posterKitchenResult),
+  });
+};
+
+export const getRecordPosterKitchenResultMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordPosterKitchenResult>>,
+    TError,
+    { data: BodyType<PosterKitchenResult> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordPosterKitchenResult>>,
+  TError,
+  { data: BodyType<PosterKitchenResult> },
+  TContext
+> => {
+  const mutationKey = ["recordPosterKitchenResult"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordPosterKitchenResult>>,
+    { data: BodyType<PosterKitchenResult> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return recordPosterKitchenResult(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordPosterKitchenResultMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordPosterKitchenResult>>
+>;
+export type RecordPosterKitchenResultMutationBody =
+  BodyType<PosterKitchenResult>;
+export type RecordPosterKitchenResultMutationError = ErrorType<unknown>;
+
+export const useRecordPosterKitchenResult = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordPosterKitchenResult>>,
+    TError,
+    { data: BodyType<PosterKitchenResult> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordPosterKitchenResult>>,
+  TError,
+  { data: BodyType<PosterKitchenResult> },
+  TContext
+> => {
+  return useMutation(getRecordPosterKitchenResultMutationOptions(options));
 };
 
 export const getAcknowledgePosterPosUrl = () => {
