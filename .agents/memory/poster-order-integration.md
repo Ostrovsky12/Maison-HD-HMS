@@ -119,6 +119,12 @@ Adding a venue to the developer application's **Розробка** account list 
 
 **How to apply:** Confirm the venue has connected the existing developer application and that the opened terminal actually belongs to it. Do not create another application, change the tenant's merchant connection, or enable terminal Development mode merely to install an already uploaded private module.
 
+The browser admin account and the web cashier session can differ even when the cashier is opened from the intended venue's admin panel. Use a private browser window with explicit cashier credentials as a non-destructive isolation check before changing integration settings.
+
+**Why:** The DOGODA admin opened a cashier reporting `maison-hd`; after the private-window login procedure, the user supplied a screenshot showing successful Maison HD polling. This establishes that pairing can work, not the precise browser-storage cause or cash-notice delivery.
+
+**How to apply:** Avoid repeatedly asking the user to leave the admin account, clearing working cashier storage, or rotating application secrets for this symptom. Distinguish successful pairing/polling from an actual guest notice being displayed.
+
 ## Financial data interpretation
 
 Determine currency units and the meaning of counters separately for each Poster endpoint; do not apply a universal conversion or equate visitors with receipts.
